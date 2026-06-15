@@ -1,0 +1,38 @@
+[
+  {
+    "n": "01",
+    "slug": "the-hollow",
+    "dur": "3:58",
+    "start": "2:53",
+    "end": "3:23",
+    "len": 30,
+    "out": "ep1-01-the-hollow-preview.mp3"
+  },
+  {
+    "n": "02",
+    "slug": "dont-look-down",
+    "dur": "4:20",
+    "start": "2:36",
+    "end": "3:06",
+    "len": 30,
+    "out": "ep1-02-dont-look-down-preview.mp3"
+  },
+  {
+    "n": "03",
+    "slug": "complex",
+    "dur": "5:09",
+    "start": "1:20",
+    "end": "1:50",
+    "len": 30,
+    "out": "ep1-03-complex-preview.mp3"
+  },
+  {
+    "n": "04",
+    "slug": "enough",
+    "dur": "4:47",
+    "start": "4:13",
+    "end": "4:43",
+    "len": 30,
+    "out": "ep1-04-enough-preview.mp3"
+  }
+]

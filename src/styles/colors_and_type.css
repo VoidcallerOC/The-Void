@@ -1,0 +1,220 @@
+/* ============================================================
+   VOIDCALLER — colors & type
+   On-chain metalcore. Black, bone, crimson. Engraved + glitched.
+   ============================================================ */
+
+/* ---------- WEBFONTS ---------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,800;1,900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* VOIDCALLER — the official band display typeface. High-contrast Didone
+   serif. Used for every display headline. The hero wordmark image is cut
+   from this same face, so they share one silhouette.                  */
+@font-face {
+  font-family: "Voidcaller";
+  src: url("/fonts/Voidcaller-Regular.ttf?v=2") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   COLOR TOKENS
+   ============================================================ */
+:root {
+  /* Core palette — the only colors that appear in brand work */
+  --vc-void:        #000000;   /* absolute black, page ground   */
+  --vc-abyss:       #0A0A0B;   /* raised surface, cards         */
+  --vc-pit:         #131315;   /* secondary surface             */
+  --vc-ash:         #1F1F22;   /* hairline borders, dividers    */
+  --vc-smoke:       #3A3A3F;   /* muted UI strokes              */
+  --vc-bone:        #F2EDE2;   /* parchment off-white, body fg  */
+  --vc-bone-dim:    #B8B2A4;   /* muted text, captions          */
+  --vc-skull:       #FFFFFF;   /* pure white — sparing, accent  */
+
+  /* Crimson scale — the only chromatic family */
+  --vc-blood:       #B80710;   /* deep arterial, primary brand  */
+  --vc-crimson:     #E10F1F;   /* alert / CTA fill              */
+  --vc-ember:       #FF3D2E;   /* hover / live glow             */
+  --vc-rust:        #5A0E14;   /* low-opacity wash, tinted bg   */
+  --vc-clot:        #2A0408;   /* near-black red, glow ring     */
+
+  /* On-chain accents — for hex, addresses, terminal text only */
+  --vc-glitch-cyan: #4DE3E1;   /* chromatic-aberration cyan ghost */
+
+  /* SEMANTIC TOKENS ---------------------------------------- */
+  --bg:             var(--vc-void);
+  --bg-raised:      var(--vc-abyss);
+  --bg-sunken:      var(--vc-pit);
+  --border:         var(--vc-ash);
+  --border-strong:  var(--vc-smoke);
+  --fg:             var(--vc-bone);
+  --fg-muted:       var(--vc-bone-dim);
+  --fg-loud:        var(--vc-skull);
+  --accent:         var(--vc-crimson);
+  --accent-deep:    var(--vc-blood);
+  --accent-hover:   var(--vc-ember);
+  --danger:         var(--vc-crimson); /* metalcore: danger = brand */
+
+  /* Selection */
+  --selection-bg:   var(--vc-blood);
+  --selection-fg:   var(--vc-skull);
+}
+
+::selection { background: var(--selection-bg); color: var(--selection-fg); }
+
+/* ============================================================
+   TYPE TOKENS
+   ============================================================ */
+:root {
+  /* Families */
+  /* PRIMARY display = Voidcaller — the official band typeface, a high-contrast
+     Didone serif. The hero wordmark image is cut from this same face.
+     The brand has THREE voices: display (Voidcaller serif), industrial
+     (Archivo), terminal (JetBrains Mono).                                */
+  --font-display:  "Voidcaller", "Times New Roman", serif;
+  --font-body:     "Archivo", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono:     "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Sizes — built for impact. Small text is a last resort. */
+  --t-mega:   clamp(72px, 12vw, 200px);  /* @kind font */ /* hero / drop name */
+  --t-h1:     clamp(48px, 6vw, 88px);    /* @kind font */ /* page title */
+  --t-h2:     clamp(36px, 4vw, 56px);    /* @kind font */ /* section header */
+  --t-h3:     28px;                       /* @kind font */ /* card header */
+  --t-h4:     20px;                       /* @kind font */ /* eyebrow / sub */
+  --t-body:   16px;                       /* @kind font */
+  --t-small:  14px;                       /* @kind font */
+  --t-micro:  12px;                       /* @kind font */ /* mono / metadata only */
+
+  /* Line heights — tight for display, generous for body */
+  --lh-display: 0.95;                     /* @kind font */
+  --lh-tight:   1.1;                       /* @kind font */
+  --lh-body:    1.55;                      /* @kind font */
+
+  /* Tracking */
+  --tr-tight:  -0.02em;                    /* @kind font */
+  --tr-normal: 0;                          /* @kind font */
+  --tr-loose:  0.08em;                     /* @kind font */
+  --tr-shout:  0.18em;                     /* @kind font */ /* eyebrows, all-caps labels */
+}
+
+/* ---------- SEMANTIC TYPE CLASSES --------------------------- */
+.vc-mega {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--t-mega);
+  line-height: var(--lh-display);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.vc-ritual {
+  /* Display serif at intimate scale — sacred lines, lyric pulls */
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--t-h1);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tr-normal);
+}
+.vc-h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--t-h1);
+  line-height: var(--lh-display);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.vc-h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--t-h2);
+  line-height: var(--lh-tight);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.vc-h3 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--t-h3);
+  line-height: 1.2;
+  letter-spacing: var(--tr-tight);
+}
+.vc-eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--t-micro);
+  letter-spacing: var(--tr-shout);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.vc-body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  color: var(--fg);
+}
+.vc-body-muted { color: var(--fg-muted); }
+
+.vc-mono {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: var(--t-small);
+  letter-spacing: 0;
+}
+.vc-addr {
+  /* Wallet addresses, tx hashes */
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--t-micro);
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+/* ============================================================
+   SPACING / RADII / ELEVATION
+   ============================================================ */
+:root {
+  /* Spacing — 4px base, used 1–16 */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-7: 32px; --s-8: 40px;
+  --s-9: 48px; --s-10: 64px; --s-11: 96px; --s-12: 128px;
+
+  /* Radii — almost zero. This is metalcore, not SaaS. */
+  --r-0:    0;       /* @kind radius */ /* default — sharp edges */
+  --r-xs:   2px;     /* @kind radius */ /* inputs, small chips */
+  --r-sm:   4px;     /* @kind radius */ /* the maximum for most components */
+  --r-pill: 999px;   /* @kind radius */ /* tokens, status pills (rare) */
+
+  /* Borders */
+  --bw-1: 1px;        /* @kind spacing */
+  --bw-2: 2px;        /* @kind spacing */
+  --bw-thick: 3px;    /* @kind spacing */
+
+  /* Shadows — used mainly as red glow / ritual aura, not depth */
+  --shadow-pit:    0 1px 0 rgba(0,0,0,0.8);
+  --shadow-blood:  0 0 0 1px var(--vc-blood), 0 0 24px -4px rgba(225,15,31,0.55);
+  --shadow-ember:  0 0 32px -4px rgba(255,61,46,0.65);
+  --shadow-skull:  0 0 0 1px var(--vc-skull);
+
+  /* Inner — for inset/pressed feel */
+  --inset-pressed: inset 0 1px 0 rgba(0,0,0,0.5), inset 0 0 0 1px var(--vc-ash);
+
+  /* Motion */
+  --ease-blade: cubic-bezier(0.6, 0, 0.2, 1);   /* @kind other */ /* sharp, decisive */
+  --ease-drag:  cubic-bezier(0.4, 0.0, 0.2, 1); /* @kind other */ /* default UI */
+  --d-fast:     120ms;                          /* @kind other */
+  --d-base:     220ms;                          /* @kind other */
+  --d-slow:     400ms;                          /* @kind other */
+}
+
+/* ============================================================
+   GLOBAL BASE (opt-in by adding class="vc" to <body> or wrapper)
+   ============================================================ */
+.vc {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

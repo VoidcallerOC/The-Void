@@ -1,0 +1,145 @@
+@import "./styles/colors_and_type.css";
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--vc-void);
+  color: var(--vc-bone);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+
+::selection { background: var(--vc-blood); color: #fff; }
+
+/* Padding for bottom sticky player so footer isn't covered */
+body { padding-bottom: 72px; }
+
+@keyframes vc-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--vc-ember); }
+  50% { opacity: 0.6; box-shadow: 0 0 16px var(--vc-ember); }
+}
+@keyframes vc-bleed {
+  0%, 100% { opacity: 0.4; transform: translateY(-12%); }
+  50% { opacity: 0.8; transform: translateY(8%); }
+}
+@keyframes vc-shift-a {
+  0%, 18%, 40%, 62%, 84%, 100% { transform: translate(-4px, 0); opacity: 0.95; clip-path: none; }
+  19% { transform: translate(-11px, 1px); opacity: 1; clip-path: inset(12% 0 60% 0); }
+  21% { transform: translate(-4px, 0); clip-path: none; }
+  41% { transform: translate(-8px, -2px); opacity: 1; clip-path: inset(55% 0 18% 0); }
+  43% { transform: translate(-4px, 0); clip-path: none; }
+  63% { transform: translate(-13px, 1px); opacity: 1; clip-path: inset(34% 0 40% 0); }
+  65% { transform: translate(-4px, 0); clip-path: none; }
+}
+@keyframes vc-shift-b {
+  0%, 18%, 40%, 62%, 84%, 100% { transform: translate(4px, 0); opacity: 0.85; clip-path: none; }
+  19% { transform: translate(11px, -1px); opacity: 1; clip-path: inset(12% 0 60% 0); }
+  21% { transform: translate(4px, 0); clip-path: none; }
+  41% { transform: translate(9px, 2px); opacity: 1; clip-path: inset(55% 0 18% 0); }
+  43% { transform: translate(4px, 0); clip-path: none; }
+  63% { transform: translate(13px, -1px); opacity: 1; clip-path: inset(34% 0 40% 0); }
+  65% { transform: translate(4px, 0); clip-path: none; }
+}
+/* Larger-amplitude variant for the hero wordmark (much wider than text titles) */
+@keyframes vc-wordmark-a {
+  0%, 16%, 38%, 60%, 82%, 100% { transform: translate(-7px, 0); opacity: 0.95; clip-path: none; }
+  17% { transform: translate(-26px, 3px); opacity: 1; clip-path: inset(10% 0 62% 0); }
+  19% { transform: translate(-7px, 0); clip-path: none; }
+  39% { transform: translate(-18px, -4px); opacity: 1; clip-path: inset(54% 0 20% 0); }
+  41% { transform: translate(-7px, 0); clip-path: none; }
+  61% { transform: translate(-32px, 2px); opacity: 1; clip-path: inset(32% 0 42% 0); }
+  63% { transform: translate(-7px, 0); clip-path: none; }
+}
+@keyframes vc-wordmark-b {
+  0%, 16%, 38%, 60%, 82%, 100% { transform: translate(7px, 0); opacity: 0.85; clip-path: none; }
+  17% { transform: translate(26px, -3px); opacity: 1; clip-path: inset(10% 0 62% 0); }
+  19% { transform: translate(7px, 0); clip-path: none; }
+  39% { transform: translate(20px, 4px); opacity: 1; clip-path: inset(54% 0 20% 0); }
+  41% { transform: translate(7px, 0); clip-path: none; }
+  61% { transform: translate(32px, -2px); opacity: 1; clip-path: inset(32% 0 42% 0); }
+  63% { transform: translate(7px, 0); clip-path: none; }
+}
+@keyframes vc-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes vc-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* One-shot RGB-split flicker for primary CTA hover — a transmission cut-in */
+@keyframes vc-rgb-flicker {
+  0%   { text-shadow: none; }
+  45%  { text-shadow: -2px 0 var(--vc-crimson), 2px 0 var(--vc-glitch-cyan); }
+  60%  { text-shadow: 1px 0 var(--vc-crimson), -1px 0 var(--vc-glitch-cyan); }
+  100% { text-shadow: none; }
+}
+
+/* ============================================================
+   NAV LINKS (router)
+   ============================================================ */
+.vc-navlink {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--vc-bone-dim);
+  text-decoration: none;
+  transition: color 120ms;
+}
+.vc-navlink:hover {
+  color: var(--vc-crimson);
+  text-decoration: underline;
+  text-decoration-color: var(--vc-crimson);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+.vc-navlink.active { color: var(--vc-bone); }
+.vc-navlink-mobile { letter-spacing: 0.18em; }
+
+/* Reliquary: reveal the play overlay on hover over an owned relic's art */
+.vc-relic-art:hover .vc-relic-playbtn { opacity: 1 !important; }
+
+/* ============================================================
+   RESPONSIVE OVERRIDES
+   ============================================================ */
+@media (max-width: 768px) {
+  .vc-nav-links,
+  .vc-chain-badge,
+  .vc-nav-cta {
+    display: none !important;
+  }
+  .vc-nav-burger { display: inline-flex !important; }
+  .vc-grid-2col {
+    grid-template-columns: 1fr !important;
+  }
+  .vc-footer-grid {
+    grid-template-columns: 1fr !important;
+    gap: 32px !important;
+  }
+  .vc-footer-bottom {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .vc-section-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 16px !important;
+  }
+  .vc-sticky-seek,
+  .vc-sticky-time {
+    display: none !important;
+  }
+  .vc-sticky-player {
+    gap: 12px !important;
+  }
+  /* Hero content is taller than the viewport on phones, so vertical centering
+     pins its top under the fixed nav and clips the eyebrow. Top-align with
+     nav clearance instead and let the page scroll. */
+  .vc-hero {
+    align-items: flex-start !important;
+    padding-top: 96px !important;
+    padding-bottom: 48px !important;
+  }
+}
