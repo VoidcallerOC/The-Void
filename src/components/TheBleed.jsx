@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { VC_DATA } from "../data.js";
-import { Eyebrow, Btn, TrackArt } from "./Atoms.jsx";
+import { Eyebrow, Btn, TrackArt, PlayerBtn } from "./Atoms.jsx";
 import { Glitch } from "./Overlays.jsx";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
@@ -220,35 +220,5 @@ export function TheBleed() {
         </div>
       </div>
     </section>
-  );
-}
-
-export function PlayerBtn({ children, primary, onClick }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={(e) => { setHover(false); e.currentTarget.style.transform = "translateY(0)"; }}
-      onMouseDown={(e) => { e.currentTarget.style.transform = "translateY(1px)"; }}
-      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
-      style={{
-        width: 48,
-        height: 48,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: primary ? "var(--vc-crimson)" : "transparent",
-        border: `1px solid ${primary ? "var(--vc-crimson)" : "var(--vc-ash)"}`,
-        color: primary ? "#fff" : "var(--vc-bone)",
-        fontFamily: "var(--font-mono)",
-        fontSize: primary ? 16 : 14,
-        cursor: "pointer",
-        boxShadow: primary && hover ? "0 0 32px -4px rgba(255,61,46,0.7)" : "none",
-        transition: "all 120ms",
-      }}
-    >
-      {children}
-    </button>
   );
 }
