@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Send, Play, Pause } from "lucide-react";
-import { Eyebrow, Btn } from "./Atoms.jsx";
+import { Eyebrow } from "./Atoms.jsx";
 import { Glitch } from "./Overlays.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
-import { useWallet } from "../lib/WalletContext.jsx";
+import { useWallet } from "../lib/wallet-context.js";
 import { fetchAllMetadata, ipfsToHttp, CHAINS } from "../lib/web3.js";
 import { useAudio } from "../lib/audio.js";
 import { VC_DATA } from "../data.js";
