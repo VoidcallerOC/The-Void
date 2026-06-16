@@ -67,6 +67,8 @@ function ReleaseCard({ r }) {
         <img
           src={r.art}
           alt=""
+          loading="lazy"
+          decoding="async"
           style={{
             width: "100%",
             height: "100%",

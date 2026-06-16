@@ -1,7 +1,6 @@
 import { VC_DATA } from "../data.js";
 import { useAudio, fmt } from "../lib/audio.js";
-import { PlayerBtn } from "./TheBleed.jsx";
-import { TrackArt } from "./Atoms.jsx";
+import { PlayerBtn, TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
 // ---------------- Bottom audio bar (sticky) ----------------
