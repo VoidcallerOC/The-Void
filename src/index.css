@@ -134,6 +134,13 @@ body { padding-bottom: 72px; }
   .vc-sticky-player {
     gap: 12px !important;
   }
+  /* With the seek bar hidden, let the track meta absorb the slack so the
+     title ellipsis-truncates instead of pushing the transport controls off
+     the right edge of the screen. */
+  .vc-sticky-meta {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
   /* Hero content is taller than the viewport on phones, so vertical centering
      pins its top under the fixed nav and clips the eyebrow. Top-align with
      nav clearance instead and let the page scroll. */
