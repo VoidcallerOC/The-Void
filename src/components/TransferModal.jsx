@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Btn } from "./Atoms.jsx";
-import { useWallet } from "../lib/WalletContext.jsx";
+import { useWallet } from "../lib/wallet-context.js";
 import { CHAINS, ipfsToHttp, encodeTransfer, isValidAddress, switchChain, waitForReceipt } from "../lib/web3.js";
 
 // Send a relic to another address (ERC-1155 safeTransferFrom).
