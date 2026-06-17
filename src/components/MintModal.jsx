@@ -2,15 +2,16 @@ import { VC_DATA } from "../data.js";
 import { Eyebrow } from "./Atoms.jsx";
 import { Glitch } from "./Overlays.jsx";
 import { X, ExternalLink } from "lucide-react";
+import { useDialog } from "../lib/useDialog.js";
 
 // ---------------- Relic Modal (marketplace chooser) ----------------
 // The self-titled EP is already minted; this modal sends people to OpenSea / Joepegs
 // rather than running a fake mint flow.
 export function MintModal({ open, onClose }) {
+  const dialogRef = useDialog(open, onClose);
   if (!open) return null;
   return (
     <div
-      role="dialog"
       style={{
         position: "fixed",
         inset: 0,
@@ -25,6 +26,11 @@ export function MintModal({ open, onClose }) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Claim a Voidcaller relic"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
 import { Nav } from "./Nav.jsx";
@@ -6,6 +6,30 @@ import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { MintModal } from "./MintModal.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
+
+// Minimal in-theme placeholder shown while a lazily-loaded section chunk
+// is fetched. Sized to the viewport so the footer doesn't jump up.
+function SectionFallback() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        minHeight: "60vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        letterSpacing: "0.3em",
+        textTransform: "uppercase",
+        color: "var(--vc-bone-dim)",
+        opacity: 0.5,
+      }}
+    >
+      †
+    </div>
+  );
+}
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -29,7 +53,9 @@ export function Layout() {
       {/* Each route fills the viewport so short pages don't expose the footer
           on load — content centers vertically; taller pages just grow. */}
       <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <Outlet context={{ onMint }} />
+        <Suspense fallback={<SectionFallback />}>
+          <Outlet context={{ onMint }} />
+        </Suspense>
       </main>
       <Footer />
       <StickyPlayer />
