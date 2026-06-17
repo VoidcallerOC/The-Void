@@ -1,16 +1,25 @@
 // ===========================================================================
 // VOIDCALLER — on-chain layer
 // Dependency-free web3: raw provider.request() + hand-rolled ABI encoding.
-// Ported from the original dev's app.js, stripped to ownership + transfer
-// (the cross-chain bridge is intentionally left out for now).
+// Ported from the original dev's app.js — ownership, transfer, and the
+// Avalanche ICM cross-chain bridge between C-Chain and The Grotto.
 // ===========================================================================
 
 export const CONTRACTS = {
   // Voidcaller ERC-1155 on Avalanche C-Chain (the released self-titled EP).
   voidcaller: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
   // Wrapped relics live here on The Grotto (the bridge remote also IS the
-  // ERC-1155 on Grotto). Read-only here — we only check balances.
+  // ERC-1155 on Grotto). Read-only for balances; also the bridge-back target.
   grottoRelics: "0x0d6Fa9968aa57295217737379c44eBbc1130B1Fa",
+  // ICM relay infrastructure on C-Chain.
+  relayer: "0x9c1d2140bad125bacf4a0dff1efa94265056988e",
+  registry: "0xE329B5Ff445E4976821FdCa99D6897EC43891A6c",
+  teleporter: "0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf",
+  // Cross-chain bridge endpoints.
+  // bridgeSource: VoidcallerNFTBridge on C-Chain (locks relics, emits ICM msg).
+  bridgeSource: "0x68539f95FB2758327A9C7EdEDa1002b0F3Ec8992",
+  // bridgeRemote: VoidcallerNFTRemote on Grotto — also the ERC-1155 on Grotto.
+  bridgeRemote: "0x0d6Fa9968aa57295217737379c44eBbc1130B1Fa",
 };
 
 export const CHAINS = {
@@ -24,6 +33,7 @@ export const CHAINS = {
     explorer: "https://snowtrace.io",
     token: "AVAX",
     contract: CONTRACTS.voidcaller,
+    blockchainIdHex: "0x0427d4b22a2a78bcddd456742caf91b56badbff985ee19aef14573e7343fd652",
   },
   grotto: {
     key: "grotto",
@@ -35,6 +45,7 @@ export const CHAINS = {
     explorer: "",
     token: "HERESY",
     contract: CONTRACTS.grottoRelics,
+    blockchainIdHex: "0x4d17dde28b48d8261d0e157ff214900e6575600325f02d6efb416eebdbde4ba9",
   },
 };
 
@@ -48,6 +59,15 @@ const IPFS_BASE_CID = "bafybeigft5uayq6i6ada64mc33if7yxs74kfes7pxa3a7umjr2s6njdx
 const SEL = {
   balanceOf: "0x00fdd58e", // balanceOf(address,uint256)
   safeTransferFrom: "0xf242432a", // safeTransferFrom(address,address,uint256,uint256,bytes)
+  setApprovalForAll: "0xa22cb465", // setApprovalForAll(address,bool)
+};
+
+// Bridge contract selectors
+const BRIDGE_SEL = {
+  // VoidcallerNFTBridge (C-Chain): bridgeTokens(uint256[],uint256[],address)
+  bridgeTokens: "0xb33fecbf",
+  // VoidcallerNFTRemote (Grotto): bridgeBack(uint256[],uint256[],address)
+  bridgeBack: "0xf7c65f85",
 };
 
 // Hardcoded metadata so the reliquary still renders if IPFS is unreachable.
@@ -209,4 +229,91 @@ export function shortAddr(addr) {
 
 export function isValidAddress(addr) {
   return /^0x[a-fA-F0-9]{40}$/.test(addr);
+}
+
+// ---------- Bridge ----------
+// approve(bridgeSource, true) on the C-Chain ERC-1155 — required once before
+// the first lock-and-send so the bridge contract can pull the relic.
+export function encodeBridgeApproval() {
+  return SEL.setApprovalForAll + padAddr(CONTRACTS.bridgeSource) + padUint(1);
+}
+
+// Shared ABI encoding for fn(uint256[] tokenIds, uint256[] amounts, address recipient).
+// Layout: offset_tokenIds | offset_amounts | recipient | tokenIds_len | ...tokenIds | amounts_len | ...amounts
+function encodeBridgeArgs(tokenIds, amounts, recipient) {
+  const tokenIdsOffset = 3 * 32; // head is 3 slots: two offsets + recipient
+  const amountsOffset = tokenIdsOffset + 32 + tokenIds.length * 32;
+
+  let data = padUint(tokenIdsOffset) + padUint(amountsOffset) + padAddr(recipient);
+  data += padUint(tokenIds.length);
+  for (const id of tokenIds) data += padUint(id);
+  data += padUint(amounts.length);
+  for (const amt of amounts) data += padUint(amt);
+  return data;
+}
+
+// bridgeTokens(uint256[],uint256[],address) on the C-Chain bridge — locks
+// relics and emits the ICM message that mints their wrapped form on Grotto.
+export function encodeBridgeTokens(tokenIds, recipient) {
+  const amounts = tokenIds.map(() => 1);
+  return BRIDGE_SEL.bridgeTokens + encodeBridgeArgs(tokenIds, amounts, recipient);
+}
+
+// bridgeBack(uint256[],uint256[],address) on the Grotto remote — burns the
+// wrapped relics and emits the ICM message that unlocks them on C-Chain.
+export function encodeBridgeBack(tokenIds, recipient) {
+  const amounts = tokenIds.map(() => 1);
+  return BRIDGE_SEL.bridgeBack + encodeBridgeArgs(tokenIds, amounts, recipient);
+}
+
+// direction is "cchain-to-grotto" or "grotto-to-cchain".
+export function bridgeRoute(direction) {
+  return direction === "cchain-to-grotto"
+    ? { from: CHAINS.cchain, to: CHAINS.grotto }
+    : { from: CHAINS.grotto, to: CHAINS.cchain };
+}
+
+// Runs the full bridge flow for the selected relics and reports progress via
+// onStep(stepIndex, status) where status is "active" | "done" | "error".
+// Resolves once the lock/burn transaction (and approval, if needed) confirm
+// on the source chain — the ICM relay to the destination happens off-chain
+// and is reported as a final informational step.
+export async function executeBridge({ provider, account, direction, tokenIds, onStep }) {
+  if (!provider) throw new Error("No wallet connected.");
+  if (!tokenIds.length) throw new Error("No relics selected.");
+
+  const { from, to } = bridgeRoute(direction);
+  const isOutbound = direction === "cchain-to-grotto";
+  let step = 0;
+
+  const send = async (to_, data) => {
+    const txHash = await provider.request({
+      method: "eth_sendTransaction",
+      params: [{ from: account, to: to_, data }],
+    });
+    const receipt = await waitForReceipt(provider, txHash);
+    if (receipt.status === "0x0") throw new Error("Transaction reverted on-chain.");
+    return receipt;
+  };
+
+  if (isOutbound) {
+    onStep(step, "active");
+    await send(CONTRACTS.voidcaller, encodeBridgeApproval());
+    onStep(step, "done");
+    step += 1;
+
+    onStep(step, "active");
+    await send(CONTRACTS.bridgeSource, encodeBridgeTokens(tokenIds, account));
+    onStep(step, "done");
+  } else {
+    onStep(step, "active");
+    await send(CONTRACTS.bridgeRemote, encodeBridgeBack(tokenIds, account));
+    onStep(step, "done");
+  }
+  step += 1;
+
+  // ICM relay step is informational only — the receiving chain mints/unlocks
+  // once Avalanche's Teleporter relays the message, typically within ~15s.
+  onStep(step, "active");
+  return { from, to };
 }

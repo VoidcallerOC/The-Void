@@ -11,6 +11,7 @@ const TheBleed = lazy(() => import("./components/TheBleed.jsx").then((m) => ({ d
 const Choir = lazy(() => import("./components/Choir.jsx").then((m) => ({ default: m.Choir })));
 const Covenant = lazy(() => import("./components/Covenant.jsx").then((m) => ({ default: m.Covenant })));
 const Reliquary = lazy(() => import("./components/Reliquary.jsx").then((m) => ({ default: m.Reliquary })));
+const Bridge = lazy(() => import("./components/Bridge.jsx").then((m) => ({ default: m.Bridge })));
 
 // Thin page wrappers — pull onMint from the Layout's Outlet context where needed.
 function HomePage() {
@@ -32,6 +33,9 @@ function CovenantPage() {
 function ReliquaryPage() {
   return <Reliquary />;
 }
+function BridgePage() {
+  return <Bridge />;
+}
 
 export default function App() {
   return (
@@ -43,6 +47,7 @@ export default function App() {
           <Route path="the-bleed" element={<BleedPage />} />
           <Route path="choir" element={<ChoirPage />} />
           <Route path="reliquary" element={<ReliquaryPage />} />
+          <Route path="bridge" element={<BridgePage />} />
           {VOID_LIVE && <Route path="covenant" element={<CovenantPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
