@@ -1,4 +1,16 @@
-import { useRef } from "react";
+import { useState } from "react";
+
+// Random chromatic-aberration timing, computed once per mount. A useState lazy
+// initializer runs exactly once (not on every render), so the impurity is
+// contained and the value is stable — readable during render without a ref.
+function useGlitchTiming() {
+  const [timing] = useState(() => {
+    const dur = (2.67 + Math.random() * 2.4).toFixed(2); // 2.67s – 5.07s
+    const delay = (-Math.random() * dur).toFixed(2); // start mid-cycle
+    return { dur, delay };
+  });
+  return timing;
+}
 
 // ---------------- Texture overlays ----------------
 export function Grain({ opacity = 0.06 }) {
@@ -39,14 +51,7 @@ export function Scanlines() {
 // ghost layers of a single instance share timing so the R/C split stays coherent.
 export function Glitch({ children, size = 80, weight = 900, italic, style }) {
   const sz = typeof size === "number" ? size + "px" : size;
-  // computed once per mount, stable across re-renders
-  const timing = useRef(null);
-  if (timing.current === null) {
-    const dur = (2.67 + Math.random() * 2.4).toFixed(2);  // 2.67s – 5.07s (1/3 slower)
-    const delay = (-Math.random() * dur).toFixed(2);       // start mid-cycle
-    timing.current = { dur, delay };
-  }
-  const { dur, delay } = timing.current;
+  const { dur, delay } = useGlitchTiming();
   const base = {
     fontFamily: "var(--font-display)",
     fontWeight: weight,
@@ -95,13 +100,7 @@ export function Glitch({ children, size = 80, weight = 900, italic, style }) {
 export function WordmarkGlitch() {
   const src = "/assets/voidcaller_wordmark.png";
   // independent random timing, same model as <Glitch>
-  const timing = useRef(null);
-  if (timing.current === null) {
-    const dur = (2.67 + Math.random() * 2.4).toFixed(2);
-    const delay = (-Math.random() * dur).toFixed(2);
-    timing.current = { dur, delay };
-  }
-  const { dur, delay } = timing.current;
+  const { dur, delay } = useGlitchTiming();
   const layer = (filter, x, blend, op, anim) => ({
     position: "absolute",
     inset: 0,

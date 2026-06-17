@@ -10,14 +10,15 @@ import { useAudio, fmt } from "../lib/audio.js";
 // ---------------- The Bleed (player + tracklist) ----------------
 export function TheBleed() {
   const audio = useAudio();
-  // Ensure The Bleed section uses the Tunnel Vision queue when first viewed
+  // Ensure The Bleed section uses the Tunnel Vision queue when first viewed.
+  // `audio` is a stable module singleton, so this effectively runs once.
   useEffect(() => {
     if (audio.queueId !== "tunnel-vision") {
       // user explicitly chose another queue elsewhere; don't override
     } else if (!audio.queue) {
       audio.setQueue(VC_DATA.tracklist, "tunnel-vision");
     }
-  }, []);
+  }, [audio]);
   const queue = audio.queue || VC_DATA.tracklist;
   const idx = audio.idx;
   const cur = queue[idx] || queue[0];

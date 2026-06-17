@@ -1,11 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { checkOwnership } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
-
-const WalletCtx = createContext(null);
-export function useWallet() {
-  return useContext(WalletCtx);
-}
+import { WalletCtx } from "./wallet-context.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
 const LEGACY_RDNS = {
