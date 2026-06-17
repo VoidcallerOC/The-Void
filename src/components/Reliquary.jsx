@@ -108,6 +108,7 @@ export function Reliquary() {
                   src={ipfsToHttp(relic.image)}
                   alt={relic.name}
                   loading="lazy"
+                  decoding="async"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: owned ? "none" : "grayscale(1) brightness(0.5)", transition: "filter 200ms" }}
                 />
                 <div style={{ position: "absolute", top: 10, left: 10 }}>
