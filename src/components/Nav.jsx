@@ -10,6 +10,7 @@ const LINKS = [
   ["CHRONICLE", "/chronicle"],
   ["THE BLEED", "/the-bleed"],
   ["RELIQUARY", "/reliquary"],
+  ["BRIDGE", "/bridge"],
   ["CHOIR", "/choir"],
   ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
 ];

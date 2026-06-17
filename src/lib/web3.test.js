@@ -6,6 +6,11 @@ import {
   encodeTransfer,
   waitForReceipt,
   isOwned,
+  encodeBridgeApproval,
+  encodeBridgeTokens,
+  encodeBridgeBack,
+  bridgeRoute,
+  CONTRACTS,
 } from "./web3.js";
 
 describe("isValidAddress", () => {
@@ -70,6 +75,63 @@ describe("isOwned", () => {
   });
   it("is false for nullish ownership", () => {
     expect(isOwned(null, 1)).toBe(false);
+  });
+});
+
+describe("encodeBridgeApproval", () => {
+  it("starts with the setApprovalForAll selector and approves the bridge source", () => {
+    const data = encodeBridgeApproval();
+    expect(data.startsWith("0xa22cb465")).toBe(true);
+    const body = data.slice(10);
+    const words = body.match(/.{1,64}/g);
+    expect(words).toHaveLength(2);
+    expect(words[0].endsWith(CONTRACTS.bridgeSource.toLowerCase().replace("0x", ""))).toBe(true);
+    expect(BigInt("0x" + words[1])).toBe(1n);
+  });
+});
+
+describe("encodeBridgeTokens", () => {
+  const recipient = "0x2222222222222222222222222222222222222222";
+  const data = encodeBridgeTokens([1, 2], recipient);
+
+  it("starts with the bridgeTokens selector", () => {
+    expect(data.startsWith("0xb33fecbf")).toBe(true);
+  });
+
+  it("encodes offsets, recipient, token ids, and amounts", () => {
+    const body = data.slice(10);
+    const words = body.match(/.{1,64}/g);
+    // tokenIdsOffset, amountsOffset, recipient, tokenIds.length, id0, id1, amounts.length, amt0, amt1
+    expect(words).toHaveLength(9);
+    expect(BigInt("0x" + words[0])).toBe(96n); // tokenIdsOffset = 3 * 32
+    expect(BigInt("0x" + words[1])).toBe(192n); // amountsOffset = 96 + 32 + 2*32
+    expect(words[2].endsWith(recipient.toLowerCase().replace("0x", ""))).toBe(true);
+    expect(BigInt("0x" + words[3])).toBe(2n);
+    expect(BigInt("0x" + words[4])).toBe(1n);
+    expect(BigInt("0x" + words[5])).toBe(2n);
+    expect(BigInt("0x" + words[6])).toBe(2n);
+    expect(BigInt("0x" + words[7])).toBe(1n);
+    expect(BigInt("0x" + words[8])).toBe(1n);
+  });
+});
+
+describe("encodeBridgeBack", () => {
+  it("starts with the bridgeBack selector", () => {
+    const data = encodeBridgeBack([3], "0x1111111111111111111111111111111111111111");
+    expect(data.startsWith("0xf7c65f85")).toBe(true);
+  });
+});
+
+describe("bridgeRoute", () => {
+  it("routes cchain-to-grotto from C-Chain to The Grotto", () => {
+    const { from, to } = bridgeRoute("cchain-to-grotto");
+    expect(from.key).toBe("cchain");
+    expect(to.key).toBe("grotto");
+  });
+  it("routes grotto-to-cchain from The Grotto to C-Chain", () => {
+    const { from, to } = bridgeRoute("grotto-to-cchain");
+    expect(from.key).toBe("grotto");
+    expect(to.key).toBe("cchain");
   });
 });
 
