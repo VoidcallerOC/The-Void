@@ -4,6 +4,20 @@ import { PlayerBtn } from "./TheBleed.jsx";
 import { TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
+function Mark({ children, on }) {
+  return (
+    <span style={{
+      fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em",
+      color: on ? "#fff" : "var(--vc-crimson)",
+      background: on ? "var(--vc-blood)" : "transparent",
+      border: `1px solid ${on ? "var(--vc-blood)" : "var(--vc-crimson)"}`,
+      padding: "1px 5px", flexShrink: 0,
+    }}>
+      {children}
+    </span>
+  );
+}
+
 // ---------------- Bottom audio bar (sticky) ----------------
 export function StickyPlayer() {
   const audio = useAudio();
@@ -11,9 +25,9 @@ export function StickyPlayer() {
   const cur = queue[audio.idx] || queue[0];
   const dur = audio.el?.duration || 0;
   const preview = audio.isPreview(cur);
+  const bearer = audio.isBearer(cur);
   const t = audio.el?.currentTime || 0;
   const frac = dur ? t / dur : 0;
-  // Pick eyebrow label from queueId
   const label = audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION";
   const art = cur?.art || (audio.queueId === "self-titled" ? "/assets/voidcaller_art_4.png" : VC_DATA.featuredEP.art);
   const onSeek = (e) => {
@@ -46,12 +60,14 @@ export function StickyPlayer() {
         </span>
         <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 8 }}>
           {cur.title}
-          {preview && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em", color: "var(--vc-crimson)", border: "1px solid var(--vc-crimson)", padding: "1px 5px", flexShrink: 0 }}>
-              PREVIEW
-            </span>
-          )}
+          {preview && <Mark>FRAGMENT</Mark>}
+          {bearer && <Mark on>BEARER</Mark>}
         </span>
+        {preview && audio.queueId === "self-titled" && (
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em", color: "var(--vc-bone-dim)" }}>
+            The rest is for the bearer.
+          </span>
+        )}
       </div>
       <div
         className="vc-sticky-seek"

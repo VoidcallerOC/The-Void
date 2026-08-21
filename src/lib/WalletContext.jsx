@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
-import { checkOwnership } from "./web3.js";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { checkOwnership, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
 
 const WalletCtx = createContext(null);
@@ -30,6 +30,8 @@ export function WalletProvider({ children }) {
   const [owned, setOwned] = useState({ cchain: new Set(), grotto: new Set() });
   const [loadingOwnership, setLoadingOwnership] = useState(false);
   const providerRef = useRef(null);
+
+  const identity = useMemo(() => choirIdentity(owned), [owned]);
 
   // --- wallet detection (EIP-6963 + legacy) ---
   useEffect(() => {
@@ -73,7 +75,7 @@ export function WalletProvider({ children }) {
   }, []);
 
   // Push owned token ids into the audio singleton so released-EP playback
-  // unlocks full tracks for bearers (and re-locks on disconnect).
+  // unlocks the full EP for any Chapter I bearer (and re-locks on disconnect).
   useEffect(() => {
     const ids = [...(owned.cchain || []), ...(owned.grotto || [])];
     VC_AUDIO.setOwnership(ids);
@@ -154,6 +156,7 @@ export function WalletProvider({ children }) {
     account,
     chainId,
     owned,
+    identity,
     loadingOwnership,
     connected: !!account,
     provider: providerRef.current,

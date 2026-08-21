@@ -1,10 +1,15 @@
 import { VC_DATA } from "../data.js";
 import { Eyebrow, Btn } from "./Atoms.jsx";
+import { WalletButton } from "./WalletButton.jsx";
+import { useWallet } from "../lib/WalletContext.jsx";
 
 const DISCORD = VC_DATA.socials.find((s) => s.name === "Discord").href;
 
 // ---------------- Manifesto / Choir ----------------
 export function Choir() {
+  const w = useWallet();
+  const marks = w.identity?.marks || [];
+
   return (
     <section
       id="choir"
@@ -69,11 +74,34 @@ export function Choir() {
             </div>
           ))}
         </div>
-        <p style={{ fontFamily: "var(--font-body)", fontSize: 16, lineHeight: 1.65, color: "var(--vc-bone-dim)", maxWidth: 520, margin: 0 }}>
-          The choir is not an audience. It is the record of everyone who answered the call —
-          written on-chain, carried forward into the next bleed.
-        </p>
+
+        {w.connected ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <p style={{ fontFamily: "var(--font-body)", fontSize: 16, lineHeight: 1.65, color: "var(--vc-bone-dim)", maxWidth: 520, margin: 0 }}>
+              {marks.length
+                ? "The chain knows you."
+                : "Connected. No relic on this wallet — the fragment is all that plays."}
+            </p>
+            {marks.length > 0 && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {marks.map((m) => (
+                  <span key={m} style={{
+                    fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.16em",
+                    color: "#fff", background: "var(--vc-blood)", padding: "6px 10px",
+                  }}>{m}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 16, lineHeight: 1.65, color: "var(--vc-bone-dim)", maxWidth: 520, margin: 0 }}>
+            The choir is not an audience. It is the record of everyone who answered the call —
+            written on-chain, carried forward into the next bleed.
+          </p>
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
+          <WalletButton />
           <Btn onClick={() => window.open(DISCORD, "_blank", "noopener")}>ANSWER THE CALL →</Btn>
           <div style={{ display: "flex", gap: 18 }}>
             {VC_DATA.socials.map((s) => (
