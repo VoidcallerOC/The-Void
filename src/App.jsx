@@ -37,6 +37,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="chronicle" element={<ChroniclePage />} />
+          <Route path="the-call" element={<BleedPage />} />
           <Route path="the-bleed" element={<BleedPage />} />
           <Route path="choir" element={<ChoirPage />} />
           <Route path="reliquary" element={<ReliquaryPage />} />
