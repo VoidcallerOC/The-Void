@@ -1,9 +1,16 @@
 import { VC_DATA } from "../data.js";
 import { Eyebrow, Btn, Tag } from "./Atoms.jsx";
 import { WordmarkGlitch } from "./Overlays.jsx";
+import { useAudio } from "../lib/audio.js";
 
 // ---------------- Hero ----------------
 export function Hero({ onMint }) {
+  const audio = useAudio();
+  const hearEP = () => {
+    audio.setQueue(VC_DATA.firstEPTracks, "self-titled");
+    audio.play(0);
+  };
+
   return (
     <section
       id="top"
@@ -17,8 +24,6 @@ export function Hero({ onMint }) {
         padding: "0 clamp(20px, 6vw, 64px)",
       }}
     >
-      {/* full-bleed key art — zoomed past cover so the tower fills and the
-          art's dark side-edges crop off-screen */}
       <div
         style={{
           position: "absolute",
@@ -31,7 +36,6 @@ export function Hero({ onMint }) {
           filter: "contrast(1.06) saturate(0.95)",
         }}
       />
-      {/* gradient overlay for legibility */}
       <div
         style={{
           position: "absolute",
@@ -40,7 +44,6 @@ export function Hero({ onMint }) {
             "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.45) 40%, rgba(0,0,0,0.85) 100%)",
         }}
       />
-      {/* vignette — intentional edge darkness so the frame reads as designed */}
       <div
         style={{
           position: "absolute",
@@ -49,7 +52,6 @@ export function Hero({ onMint }) {
             "radial-gradient(ellipse 90% 80% at 50% 42%, transparent 35%, rgba(0,0,0,0.55) 100%)",
         }}
       />
-      {/* crimson drip down the right gutter */}
       <div
         style={{
           position: "absolute",
@@ -71,14 +73,14 @@ export function Hero({ onMint }) {
         <WordmarkGlitch />
         <div style={{ marginTop: -8 }}>
           <span style={{
-    display: "inline-block",
-    fontFamily: "var(--font-display)",
-    fontWeight: 400,
-    fontSize: "clamp(40px, 9vw, 64px)",
-    lineHeight: 1,
-    letterSpacing: "0",
-    textTransform: "uppercase",
-  }}>VOIDCALLER · I</span>
+            display: "inline-block",
+            fontFamily: "var(--font-display)",
+            fontWeight: 400,
+            fontSize: "clamp(28px, 6vw, 42px)",
+            lineHeight: 1,
+            letterSpacing: "0",
+            textTransform: "uppercase",
+          }}>Four tracks · one relic · forged on Avalanche</span>
         </div>
         <p
           style={{
@@ -90,11 +92,25 @@ export function Hero({ onMint }) {
             margin: 0,
           }}
         >
-          The first call. The first relic. Self-titled EP forged on Avalanche.<br />
-          Trading now on OpenSea and Joepegs. The chain remembers.
+          The first call. The first relic. Trading now on OpenSea and Joepegs — the chain remembers.
+        </p>
+        <p
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            letterSpacing: "0.08em",
+            lineHeight: 1.6,
+            color: "var(--vc-bone-dim)",
+            maxWidth: 560,
+            margin: 0,
+            textTransform: "uppercase",
+          }}
+        >
+          One Chapter I relic unlocks the entire EP. Without it you hear fragments.
         </p>
         <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-          <Btn onClick={onMint}>ENTER THE VOID</Btn>
+          <Btn onClick={onMint}>Claim the relic</Btn>
+          <Btn kind="ghost" onClick={hearEP}>Hear the EP</Btn>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
           {VC_DATA.heroStats.map(([v, k]) => (
