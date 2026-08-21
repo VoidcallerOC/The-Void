@@ -5,7 +5,7 @@ import { Glitch } from "./Overlays.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
 import { useWallet } from "../lib/WalletContext.jsx";
-import { fetchAllMetadata, ipfsToHttp, CHAINS } from "../lib/web3.js";
+import { fetchAllMetadata, ipfsToHttp, CHAINS, FALLBACK_METADATA } from "../lib/web3.js";
 import { useAudio } from "../lib/audio.js";
 import { VC_DATA } from "../data.js";
 
@@ -18,7 +18,7 @@ const TABS = [["cchain", "C-CHAIN"], ["grotto", "THE GROTTO"]];
 export function Reliquary() {
   const w = useWallet();
   const audio = useAudio();
-  const [meta, setMeta] = useState([]);
+  const [meta, setMeta] = useState(FALLBACK_METADATA);
   const [tab, setTab] = useState("cchain");
   const [transfer, setTransfer] = useState(null); // { relic, chainKey }
   const marks = w.identity?.marks || [];
@@ -83,7 +83,6 @@ export function Reliquary() {
         </div>
       </div>
 
-      {/* chain tabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--vc-ash)", marginBottom: "clamp(28px, 5vw, 44px)" }}>
         {TABS.map(([key, label]) => (
           <button
@@ -102,7 +101,6 @@ export function Reliquary() {
         ))}
       </div>
 
-      {/* grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "clamp(16px, 2.5vw, 24px)" }}>
         {meta.map((relic) => {
           const owned = w.connected && ownedSet.has(relic.tokenId);
@@ -192,8 +190,8 @@ export function Reliquary() {
 
       {!w.connected && (
         <div style={{ textAlign: "center", marginTop: "clamp(40px, 7vw, 72px)" }}>
-          <p style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--vc-bone-dim)", marginBottom: 20 }}>
-            Connect your wallet to reveal the relics you carry.
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--vc-bone-dim)", marginBottom: 12, maxWidth: 440, marginLeft: "auto", marginRight: "auto" }}>
+            The four Chapter I relics are shown locked until you connect. Any one of them unlocks the full EP.
           </p>
           <WalletButton />
         </div>
