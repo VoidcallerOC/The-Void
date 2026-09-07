@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Send, Play, Pause } from "lucide-react";
-import { Eyebrow, Btn } from "./Atoms.jsx";
+import { Eyebrow } from "./Atoms.jsx";
 import { Glitch } from "./Overlays.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
@@ -21,10 +21,8 @@ export function Reliquary() {
   const [meta, setMeta] = useState(FALLBACK_METADATA);
   const [tab, setTab] = useState("cchain");
   const [transfer, setTransfer] = useState(null); // { relic, chainKey }
-  const marks = w.identity?.marks || [];
 
   // Play (or toggle) the released track tied to this relic.
-  // Any Chapter I relic unlocks the full EP in the player.
   const playRelic = (tokenId) => {
     const idx = trackIndexForToken(tokenId);
     if (idx < 0) return;
@@ -44,7 +42,6 @@ export function Reliquary() {
 
   const ownedSet = w.owned[tab] || new Set();
   const ownedCount = (w.owned.cchain?.size || 0) + (w.owned.grotto?.size || 0);
-  const canHearEP = !!w.identity?.witness;
 
   return (
     <section style={{ maxWidth: 1100, margin: "0 auto", padding: "clamp(96px, 14vw, 160px) clamp(20px, 5vw, 48px) clamp(120px, 16vw, 200px)" }}>
@@ -55,18 +52,8 @@ export function Reliquary() {
             <Glitch size="clamp(48px, 9vw, 92px)" weight={400} style={{ letterSpacing: 0, lineHeight: 0.92 }}>YOUR RELICS</Glitch>
           </h1>
           <p style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--vc-bone-dim)", maxWidth: 440, marginTop: 18, lineHeight: 1.6 }}>
-            Every relic is read straight from the chain. One Chapter I relic unlocks the full EP. Own the relic, own the song.
+            Every relic is read straight from the chain. Connect to reveal what you carry — own the relic, own the full track.
           </p>
-          {w.connected && marks.length > 0 && (
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              {marks.map((m) => (
-                <span key={m} style={{
-                  fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.16em",
-                  color: "#fff", background: "var(--vc-blood)", padding: "4px 8px",
-                }}>{m}</span>
-              ))}
-            </div>
-          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
           <WalletButton />
@@ -75,14 +62,10 @@ export function Reliquary() {
               {w.loadingOwnership ? "READING THE CHAIN…" : `${ownedCount} RELIC${ownedCount === 1 ? "" : "S"} BORNE`}
             </span>
           )}
-          {canHearEP && (
-            <Btn kind="ghost" onClick={() => { audio.setQueue(VC_DATA.firstEPTracks, "self-titled"); audio.play(0); }}>
-              HEAR THE EP
-            </Btn>
-          )}
         </div>
       </div>
 
+      {/* chain tabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--vc-ash)", marginBottom: "clamp(28px, 5vw, 44px)" }}>
         {TABS.map(([key, label]) => (
           <button
@@ -101,10 +84,11 @@ export function Reliquary() {
         ))}
       </div>
 
+      {/* grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "clamp(16px, 2.5vw, 24px)" }}>
         {meta.map((relic) => {
           const owned = w.connected && ownedSet.has(relic.tokenId);
-          const playable = canHearEP && trackIndexForToken(relic.tokenId) >= 0;
+          const playable = owned && trackIndexForToken(relic.tokenId) >= 0;
           const playing = playable && isPlayingRelic(relic.tokenId);
           return (
             <div
@@ -124,9 +108,10 @@ export function Reliquary() {
                   src={ipfsToHttp(relic.image)}
                   alt={relic.name}
                   loading="lazy"
+                  decoding="async"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: owned ? "none" : "grayscale(1) brightness(0.5)", transition: "filter 200ms" }}
                 />
-                <div style={{ position: "absolute", top: 10, left: 10, display: "flex", gap: 6 }}>
+                <div style={{ position: "absolute", top: 10, left: 10 }}>
                   <span style={{
                     fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase",
                     padding: "4px 8px", background: owned ? "var(--vc-blood)" : "rgba(0,0,0,0.7)",
@@ -134,12 +119,6 @@ export function Reliquary() {
                   }}>
                     {owned ? "BORNE" : w.connected ? "NOT OWNED" : "LOCKED"}
                   </span>
-                  {tab === "grotto" && owned && (
-                    <span style={{
-                      fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase",
-                      padding: "4px 8px", background: "transparent", color: "var(--vc-crimson)", border: "1px solid var(--vc-crimson)",
-                    }}>CROSSED</span>
-                  )}
                 </div>
                 {playable && (
                   <div
@@ -190,8 +169,8 @@ export function Reliquary() {
 
       {!w.connected && (
         <div style={{ textAlign: "center", marginTop: "clamp(40px, 7vw, 72px)" }}>
-          <p style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--vc-bone-dim)", marginBottom: 12, maxWidth: 440, marginLeft: "auto", marginRight: "auto" }}>
-            The four Chapter I relics are shown locked until you connect. Any one of them unlocks the full EP.
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 15, color: "var(--vc-bone-dim)", marginBottom: 20 }}>
+            Connect your wallet to reveal the relics you carry.
           </p>
           <WalletButton />
         </div>

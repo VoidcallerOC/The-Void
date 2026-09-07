@@ -201,6 +201,25 @@ export async function switchChain(provider, chainKey) {
   }
 }
 
+// ---------- Transaction receipt ----------
+// Poll eth_getTransactionReceipt via an EIP-1193 provider until the tx is
+// mined or we time out. Resolves with the receipt (status "0x1" = success,
+// "0x0" = reverted); throws if no receipt appears before the deadline.
+export async function waitForReceipt(provider, txHash, { timeoutMs = 120000, intervalMs = 3000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    });
+    if (receipt) return receipt;
+    if (Date.now() + intervalMs >= deadline) {
+      throw new Error("Timed out waiting for confirmation.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 // ---------- Transfer ----------
 // safeTransferFrom(from, to, id, 1, "") on the chain's ERC-1155.
 export function encodeTransfer(from, to, tokenId) {
