@@ -1,11 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { checkOwnership, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
-
-const WalletCtx = createContext(null);
-export function useWallet() {
-  return useContext(WalletCtx);
-}
+import { WalletCtx } from "./wallet-context.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
 const LEGACY_RDNS = {
@@ -29,7 +25,7 @@ export function WalletProvider({ children }) {
   const [chainId, setChainId] = useState(null);
   const [owned, setOwned] = useState({ cchain: new Set(), grotto: new Set() });
   const [loadingOwnership, setLoadingOwnership] = useState(false);
-  const providerRef = useRef(null);
+  const [provider, setProvider] = useState(null);
 
   const identity = useMemo(() => choirIdentity(owned), [owned]);
 
@@ -94,7 +90,7 @@ export function WalletProvider({ children }) {
   }, [account]);
 
   const wireProvider = useCallback((provider) => {
-    providerRef.current = provider;
+    setProvider(provider);
     provider.on?.("accountsChanged", (accts) => {
       if (!accts || accts.length === 0) {
         setAccount(null);
@@ -108,7 +104,7 @@ export function WalletProvider({ children }) {
   }, [refreshOwnership]);
 
   const connect = useCallback(async (provider) => {
-    const p = provider || providerRef.current || window.ethereum;
+    const p = provider || window.ethereum;
     if (!p) return { error: "No wallet detected. Install MetaMask or Core." };
     try {
       const accts = await p.request({ method: "eth_requestAccounts" });
@@ -128,7 +124,7 @@ export function WalletProvider({ children }) {
     setAccount(null);
     setChainId(null);
     setOwned({ cchain: new Set(), grotto: new Set() });
-    providerRef.current = null;
+    setProvider(null);
   }, []);
 
   // restore an already-authorized session on load
@@ -159,8 +155,8 @@ export function WalletProvider({ children }) {
     identity,
     loadingOwnership,
     connected: !!account,
-    provider: providerRef.current,
-    getProvider: () => providerRef.current || window.ethereum,
+    provider,
+    getProvider: () => provider || window.ethereum,
     connect,
     disconnect,
     refreshOwnership,

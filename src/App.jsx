@@ -14,8 +14,7 @@ function HomePage() {
   return <Hero onMint={onMint} />;
 }
 function ChroniclePage() {
-  const { onMint } = useOutletContext();
-  return <Chronicle onMint={onMint} />;
+  return <Chronicle />;
 }
 function BleedPage() {
   return <TheBleed />;

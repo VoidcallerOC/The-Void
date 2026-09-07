@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { Btn } from "./Atoms.jsx";
@@ -17,16 +17,11 @@ const LINKS = [
 export function Nav({ onMint }) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
-
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  // close the mobile menu on navigation
-  useEffect(() => { setMenuOpen(false); }, [location.pathname]);
-
   const solid = scrolled || menuOpen;
 
   return (
@@ -111,6 +106,7 @@ export function Nav({ onMint }) {
               to={path}
               end={path === "/"}
               className="vc-navlink vc-navlink-mobile"
+              onClick={() => setMenuOpen(false)}
               style={{ padding: "14px 0", borderBottom: "1px solid var(--vc-ash)", fontSize: 15 }}
             >
               {label}

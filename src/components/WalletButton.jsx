@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Wallet, LogOut } from "lucide-react";
-import { useWallet } from "../lib/WalletContext.jsx";
+import { useWallet } from "../lib/wallet-context.js";
 import { shortAddr } from "../lib/web3.js";
 
 // Brand-styled connect button + wallet picker dropdown for the Nav.
