@@ -6,7 +6,7 @@ import { Play, Pause } from "lucide-react";
 import { useAudio } from "../lib/audio.js";
 
 // ---------------- Chronicle ----------------
-export function Chronicle({ onMint }) {
+export function Chronicle() {
   return (
     <section
       id="chronicle"
@@ -26,14 +26,14 @@ export function Chronicle({ onMint }) {
 
       <div className="vc-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, maxWidth: 960 }}>
         {VC_DATA.releases.map((r) => (
-          <ReleaseCard key={r.id} r={r} onMint={onMint} />
+          <ReleaseCard key={r.id} r={r} />
         ))}
       </div>
     </section>
   );
 }
 
-function ReleaseCard({ r, onMint }) {
+function ReleaseCard({ r }) {
   const live = r.status === "LIVE" || r.live;
   const minted = r.status === "MINTED";
   const forthcoming = r.status === "FORTHCOMING";
@@ -67,6 +67,8 @@ function ReleaseCard({ r, onMint }) {
         <img
           src={r.art}
           alt=""
+          loading="lazy"
+          decoding="async"
           style={{
             width: "100%",
             height: "100%",

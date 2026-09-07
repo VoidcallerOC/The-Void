@@ -1,7 +1,6 @@
 import { VC_DATA } from "../data.js";
 import { useAudio, fmt } from "../lib/audio.js";
-import { PlayerBtn } from "./TheBleed.jsx";
-import { TrackArt } from "./Atoms.jsx";
+import { PlayerBtn, TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
 function Mark({ children, on }) {
@@ -28,6 +27,7 @@ export function StickyPlayer() {
   const bearer = audio.isBearer(cur);
   const t = audio.el?.currentTime || 0;
   const frac = dur ? t / dur : 0;
+  // Pick eyebrow label from queueId
   const label = audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION";
   const art = cur?.art || (audio.queueId === "self-titled" ? "/assets/voidcaller_art_4.png" : VC_DATA.featuredEP.art);
   const onSeek = (e) => {
@@ -54,20 +54,21 @@ export function StickyPlayer() {
       }}
     >
       <TrackArt art={art} vid={cur?.artVid} style={{ width: 44, height: 44, objectFit: "cover", filter: "contrast(1.1)", flexShrink: 0, display: "block" }} />
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)" }}>
+      <div className="vc-sticky-meta" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {label}
         </span>
-        <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 8 }}>
-          {cur.title}
-          {preview && <Mark>FRAGMENT</Mark>}
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+            {cur.title}
+          </span>
+          {preview && (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em", color: "var(--vc-crimson)", border: "1px solid var(--vc-crimson)", padding: "1px 5px", flexShrink: 0 }}>
+              PREVIEW
+            </span>
+          )}
           {bearer && <Mark on>BEARER</Mark>}
         </span>
-        {preview && audio.queueId === "self-titled" && (
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em", color: "var(--vc-bone-dim)" }}>
-            The rest is for the bearer.
-          </span>
-        )}
       </div>
       <div
         className="vc-sticky-seek"
