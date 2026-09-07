@@ -3,6 +3,20 @@ import { useAudio, fmt } from "../lib/audio.js";
 import { PlayerBtn, TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
+function Mark({ children, on }) {
+  return (
+    <span style={{
+      fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em",
+      color: on ? "#fff" : "var(--vc-crimson)",
+      background: on ? "var(--vc-blood)" : "transparent",
+      border: `1px solid ${on ? "var(--vc-blood)" : "var(--vc-crimson)"}`,
+      padding: "1px 5px", flexShrink: 0,
+    }}>
+      {children}
+    </span>
+  );
+}
+
 // ---------------- Bottom audio bar (sticky) ----------------
 export function StickyPlayer() {
   const audio = useAudio();
@@ -10,6 +24,7 @@ export function StickyPlayer() {
   const cur = queue[audio.idx] || queue[0];
   const dur = audio.el?.duration || 0;
   const preview = audio.isPreview(cur);
+  const bearer = audio.isBearer(cur);
   const t = audio.el?.currentTime || 0;
   const frac = dur ? t / dur : 0;
   // Pick eyebrow label from queueId
@@ -52,6 +67,7 @@ export function StickyPlayer() {
               PREVIEW
             </span>
           )}
+          {bearer && <Mark on>BEARER</Mark>}
         </span>
       </div>
       <div

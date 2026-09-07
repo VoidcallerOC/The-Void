@@ -63,7 +63,7 @@ export const VC_DATA = {
       date: "MINTED",
       art: "/assets/voidcaller_art_4.png",
       bleed: "Self-titled EP · on-chain on Avalanche",
-      tagline: "The first call. The first relic. Live on Avalanche, trading on OpenSea and Joepegs.",
+      tagline: "The first call. The first relic. One relic unlocks the full EP. Trading on OpenSea and Joepegs — the chain remembers.",
       status: "MINTED",
       mint: "—",
       forged: "—",
@@ -79,7 +79,7 @@ export const VC_DATA = {
       date: "FORTHCOMING",
       art: "/assets/voidcaller_art_6.png",
       bleed: "Tunnel Vision EP · forthcoming",
-      tagline: "The choir grows. The next bleed: six tracks, one tunnel.",
+      tagline: "Six artifacts. One tunnel. Fragments for the world. The rest for the bearer.",
       status: "FORTHCOMING",
       mint: "TBA",
       forged: "0",
@@ -87,9 +87,8 @@ export const VC_DATA = {
     },
   ],
   // ============ THE SELF-TITLED EP (released / minted) ============
-  // Full tracks are owner-gated. `tokenId` ties each track to its on-chain relic
-  // (ERC-1155 ids 0–3). Non-owners hear `previewSrc` (30s clip); bearers hear the
-  // full `src`. Gating is resolved in lib/audio.js against the connected wallet.
+  // Full tracks are owner-gated. Any Chapter I token (ids 0–3) unlocks the
+  // entire EP. Non-owners hear `previewSrc` (30s clip); bearers hear `src`.
   firstEPTracks: [
     { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, src: "/assets/audio/ep1-01-the-hollow.mp3",     previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
     { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, src: "/assets/audio/ep1-02-dont-look-down.mp3", previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
@@ -97,8 +96,7 @@ export const VC_DATA = {
     { n: "04", title: "Enough",           time: "4:46", tokenId: 0, src: "/assets/audio/ep1-04-starlight.mp3",      previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
   ],
   // ============ TUNNEL VISION (upcoming) ============
-  // Unreleased EP — playback is a ~30s "best part" preview clip per track.
-  // `time` is the real song length; `preview: true` marks clip-only playback.
+  // Unreleased EP — playback is a ~30s fragment per track until mint.
   tracklist: [
     { n: "01", title: "Warning Signs",   time: "3:38", preview: true, src: "/assets/audio-preview/ep2-01-warning-signs-preview.mp3",   art: "/assets/track-art/ep2-warning-signs.png",   artVid: "/assets/track-art-vid/ep2-warning-signs" },
     { n: "02", title: "Pathway",         time: "3:28", preview: true, src: "/assets/audio-preview/ep2-02-pathway-preview.mp3",         art: "/assets/track-art/ep2-pathway.png",         artVid: "/assets/track-art-vid/ep2-pathway" },
@@ -107,28 +105,23 @@ export const VC_DATA = {
     { n: "05", title: "The Noise",       time: "3:29", preview: true, src: "/assets/audio-preview/ep2-05-the-noise-preview.mp3",       art: "/assets/track-art/ep2-the-noise.png",       artVid: "/assets/track-art-vid/ep2-the-noise" },
     { n: "06", title: "Lessons Learned", time: "3:51", preview: true, src: "/assets/audio-preview/ep2-06-lessons-learned-preview.mp3", art: "/assets/track-art/ep2-lessons-learned.png", artVid: "/assets/track-art-vid/ep2-lessons-learned" },
   ],
-  // The Bleed section showcases the upcoming Tunnel Vision EP — playable previews.
   featuredEP: {
     id: "II",
     title: "TUNNEL VISION",
     subtitle: "Chapter II · Forthcoming",
     art: "/assets/voidcaller_art_6.png",
-    pullquote: "Six tracks. One tunnel. The choir grows.",
-    body: "Streamed off-chain, forged on-chain. Bearers of the relic will carry the masters and unlock the stems for live remix nights in the choir.",
+    pullquote: "Six artifacts. One tunnel. The wait was the point.",
+    body: "Fragments play for everyone. The masters live with the bearer. Chapter I is already on-chain — one relic unlocks that entire EP.",
   },
   manifesto: [
-    "We are not a band. We are a broadcast.",
-    "Every relic is a record of the bleed.",
+    "We are not a stream. We are a record.",
+    "Own the relic, own the song.",
     "The chain remembers what the world forgets.",
   ],
-  // What holding a relic unlocks — real NFT utility, shown on The Bleed.
-  // STEMS / REMIX RIGHTS pulled for now (no stems for the first releases yet).
   unlocks: [
-    ["FULL TRACKS", "Own the relic, own the song. Bearers stream every track end to end — the unmarked hear only a fragment."],
-    ["CHOIR ACCESS", "The inner gathering. Live remix nights, first listens, and the rooms where the next chapter is forged first."],
+    ["FULL TRACKS", "One Chapter I relic unlocks the entire self-titled EP. The unmarked hear only a fragment."],
+    ["CHOIR ACCESS", "Witness. Choir. Crossed. Marks read from the chain — no new token, no points."],
   ],
-  // Per-track lyric pulls for The Bleed now-playing display. Drop in one real
-  // standout line from each Tunnel Vision track (keep it short). Empty = hidden.
   lyrics: {
     "01": "Searching for the light in the dark",
     "02": "For the light we left behind",

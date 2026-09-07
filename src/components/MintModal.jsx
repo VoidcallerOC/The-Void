@@ -66,7 +66,7 @@ export function MintModal({ open, onClose }) {
             <Glitch size="clamp(32px, 9vw, 44px)" weight={400} style={{ letterSpacing: 0, lineHeight: 1 }}>VOIDCALLER · I</Glitch>
           </div>
           <p style={{ margin: 0, color: "var(--vc-bone-dim)", fontSize: 14, lineHeight: 1.6 }}>
-            The self-titled EP is forged. Relics live on Avalanche and trade on the marketplaces below. Bring your wallet, claim a relic.
+            The self-titled EP is already forged. Buy a relic on OpenSea or Joepegs. One Chapter I relic unlocks every track — fragments play for everyone else.
           </p>
 
           <div

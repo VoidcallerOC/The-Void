@@ -26,6 +26,7 @@ export function TheBleed() {
   const t = audio.el?.currentTime || 0;
   const frac = dur ? t / dur : 0;
   const featured = VC_DATA.featuredEP;
+  const fragment = audio.isPreview(cur);
   const onSeek = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const f = (e.clientX - rect.left) / rect.width;
@@ -77,7 +78,7 @@ export function TheBleed() {
           <div style={{ marginTop: 32 }}>
             <Btn onClick={() => window.open(DISCORD, "_blank", "noopener")}>ANSWER THE CALL →</Btn>
             <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.06em", color: "var(--vc-bone-dim)", marginTop: 12, marginBottom: 0 }}>
-              The choir gathers before the relic is forged. Bearers are marked first.
+              Thirty seconds for the world. The rest for the bearer.
             </p>
           </div>
         </div>
@@ -96,7 +97,7 @@ export function TheBleed() {
               style={{ width: 84, height: 84, objectFit: "cover", filter: "contrast(1.05)", transition: "opacity 220ms", display: "block" }}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
-              <Eyebrow red>NOW BLEEDING · {cur.n}{cur.preview ? " · PREVIEW" : ""}</Eyebrow>
+              <Eyebrow red>NOW BLEEDING · {cur.n}{fragment ? " · FRAGMENT" : ""}</Eyebrow>
               <div style={{ marginTop: 2 }}>
                 <span style={{
                   display: "inline-block",
@@ -140,7 +141,7 @@ export function TheBleed() {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", marginBottom: 16 }}>
             <span>{fmt(t)}</span>
-            <span>{cur.preview && dur ? fmt(dur) : cur.time}</span>
+            <span>{fragment && dur ? fmt(dur) : cur.time}</span>
           </div>
 
           <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 24 }}>
@@ -157,6 +158,7 @@ export function TheBleed() {
           <div style={{ display: "flex", flexDirection: "column", gap: 0, marginTop: 8 }}>
             {queue.map((trk, i) => {
               const active = i === idx;
+              const gated = audio.isPreview(trk);
               return (
                 <div
                   key={trk.n}
@@ -183,6 +185,7 @@ export function TheBleed() {
                   </span>
                   <span style={{ fontFamily: "var(--font-body)", fontWeight: active ? 700 : 500, fontSize: 14, color: active ? "var(--vc-bone)" : "var(--vc-bone-dim)" }}>
                     {trk.title}
+                    {gated && <span style={{ marginLeft: 8, fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.14em", color: "var(--vc-crimson)" }}>FRAGMENT</span>}
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>
                     {trk.time}

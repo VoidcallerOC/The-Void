@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { checkOwnership } from "./web3.js";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { checkOwnership, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 
@@ -25,11 +25,13 @@ export function WalletProvider({ children }) {
   const [chainId, setChainId] = useState(null);
   const [owned, setOwned] = useState({ cchain: new Set(), grotto: new Set() });
   const [loadingOwnership, setLoadingOwnership] = useState(false);
+  const [provider, setProvider] = useState(null);
   const providerRef = useRef(null);
   // Track the live listeners so we can detach them on disconnect / re-wire,
   // otherwise reconnecting stacks duplicate handlers and chainChanged keeps
   // firing after the user has disconnected.
   const listenersRef = useRef(null);
+  const identity = useMemo(() => choirIdentity(owned), [owned]);
 
   // --- wallet detection (EIP-6963 + legacy) ---
   useEffect(() => {
@@ -106,6 +108,7 @@ export function WalletProvider({ children }) {
     // second connect doesn't double up handlers.
     unwireProvider();
     providerRef.current = provider;
+    setProvider(provider);
 
     const onAccountsChanged = (accts) => {
       if (!accts || accts.length === 0) {
@@ -146,6 +149,7 @@ export function WalletProvider({ children }) {
     setChainId(null);
     setOwned({ cchain: new Set(), grotto: new Set() });
     providerRef.current = null;
+    setProvider(null);
   }, [unwireProvider]);
 
   // restore an already-authorized session on load
@@ -176,8 +180,10 @@ export function WalletProvider({ children }) {
     account,
     chainId,
     owned,
+    identity,
     loadingOwnership,
     connected: !!account,
+    provider,
     getProvider: () => providerRef.current || window.ethereum,
     connect,
     disconnect,

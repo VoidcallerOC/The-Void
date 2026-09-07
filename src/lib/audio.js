@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { VC_DATA } from "../data.js";
+import { RELIC_TOKEN_IDS } from "./web3.js";
 
 // Shared audio state lives in a module-level singleton so the StickyPlayer
 // can mirror it without React lifting state up the tree.
@@ -11,34 +12,51 @@ export const VC_AUDIO = {
   queue: null,
   queueId: "tunnel-vision",
   listeners: new Set(),
-  // Released-EP token ids the connected wallet owns. Set by WalletContext.
+  // Released-EP token ids the connected wallet owns (C-Chain or Grotto).
   owned: new Set(),
 
-  // A released track is "gated" (preview-only) when it has a tokenId + a
-  // previewSrc and the connected wallet does NOT own that relic.
+  holdsChapterI() {
+    return RELIC_TOKEN_IDS.some((id) => this.owned.has(id));
+  },
+
+  // A released Chapter I track is gated unless the wallet holds ANY Chapter I relic.
+  // Unreleased / fragment-only tracks (preview: true, no token) stay fragments.
   isGated(t) {
-    return !!(t && t.tokenId != null && t.previewSrc && !this.owned.has(t.tokenId));
+    if (!t) return false;
+    if (t.tokenId != null && RELIC_TOKEN_IDS.includes(t.tokenId)) {
+      return !!(t.previewSrc && !this.holdsChapterI());
+    }
+    // Preview-only tracks remain fragments, but are not ownership-gated.
+    return !!(t.previewSrc && t.tokenId != null && !this.owned.has(t.tokenId));
   },
   // Resolved source for a track, honoring ownership gating.
   srcFor(t) {
-    return this.isGated(t) ? t.previewSrc : t.src;
+    return this.isGated(t) ? (t.previewSrc || t.src) : t.src;
   },
-  // Is the currently-loaded track playing a 30s preview? (gated release OR an
-  // inherently preview-only unreleased track).
+  // Currently loaded source is a fragment (gated release OR unreleased clip).
   isPreview(t) {
     return !!(t && (t.preview || this.isGated(t)));
+  },
+  isBearer(t) {
+    return !!(t && t.tokenId != null && !this.isGated(t));
   },
   // Called by WalletContext whenever ownership changes. Upgrades/downgrades the
   // currently-loaded released track in place if its gating status flipped.
   setOwnership(tokenIds) {
     this.owned = new Set(tokenIds || []);
     const t = this.queue && this.queue[this.idx];
-    if (this.el && t && t.previewSrc) {
+    if (this.el && t && (t.previewSrc || t.src)) {
       const want = this.srcFor(t);
-      if (!this.el.src.endsWith(want.split("/").pop())) {
+      const current = this.el.getAttribute("src") || this.el.src || "";
+      if (!current.endsWith(want.split("/").pop())) {
         const wasPlaying = !this.el.paused;
+        const time = this.el.currentTime || 0;
         this.el.src = want;
-        if (wasPlaying) this.el.play().catch(() => {});
+        const resume = () => {
+          try { this.el.currentTime = Math.min(time, this.el.duration || time); } catch { /* ignore */ }
+          if (wasPlaying) this.el.play().catch(() => {});
+        };
+        this.el.addEventListener("loadedmetadata", resume, { once: true });
       }
     }
     this.notify();
@@ -77,7 +95,8 @@ export const VC_AUDIO = {
     if (!t) return;
     this.idx = i;
     const src = this.srcFor(t);
-    if (!a.src.endsWith(src.split("/").pop())) {
+    const current = a.getAttribute("src") || a.src || "";
+    if (!current.endsWith(src.split("/").pop())) {
       a.src = src;
     }
   },

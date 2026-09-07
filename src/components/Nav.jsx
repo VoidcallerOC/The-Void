@@ -6,9 +6,8 @@ import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 
 const LINKS = [
-  ["RELICS", "/"],
   ["CHRONICLE", "/chronicle"],
-  ["THE BLEED", "/the-bleed"],
+  ["THE CALL", "/the-call"],
   ["RELIQUARY", "/reliquary"],
   ["CHOIR", "/choir"],
   ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
