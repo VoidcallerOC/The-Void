@@ -5,7 +5,7 @@ import { Glitch } from "./Overlays.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import { fetchAllMetadata, ipfsToHttp, CHAINS } from "../lib/web3.js";
+import { fetchAllMetadata, ipfsToHttp, CHAINS, FALLBACK_METADATA } from "../lib/web3.js";
 import { useAudio } from "../lib/audio.js";
 import { VC_DATA } from "../data.js";
 
@@ -18,7 +18,7 @@ const TABS = [["cchain", "C-CHAIN"], ["grotto", "THE GROTTO"]];
 export function Reliquary() {
   const w = useWallet();
   const audio = useAudio();
-  const [meta, setMeta] = useState([]);
+  const [meta, setMeta] = useState(FALLBACK_METADATA);
   const [tab, setTab] = useState("cchain");
   const [transfer, setTransfer] = useState(null); // { relic, chainKey }
 

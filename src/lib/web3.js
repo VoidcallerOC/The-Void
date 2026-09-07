@@ -39,6 +39,7 @@ export const CHAINS = {
 };
 
 // Released collection lives at token ids 0–3 on C-Chain.
+// Any one of these is a Chapter I relic and unlocks the full EP.
 export const RELIC_TOKEN_IDS = [0, 1, 2, 3];
 
 const IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/";
@@ -141,9 +142,40 @@ export async function checkOwnership(account) {
   return owned;
 }
 
+export function ownedIds(owned) {
+  return new Set([...(owned?.cchain || []), ...(owned?.grotto || [])]);
+}
+
 export function isOwned(owned, tokenId) {
   if (!owned) return false;
   return owned.cchain.has(tokenId) || owned.grotto.has(tokenId);
+}
+
+export function holdsChapterI(owned) {
+  return RELIC_TOKEN_IDS.some((id) => isOwned(owned, id));
+}
+
+// Computed marks. No new token — the relics are the identity.
+export function choirIdentity(owned) {
+  const ids = ownedIds(owned);
+  const chapterICount = RELIC_TOKEN_IDS.filter((id) => ids.has(id)).length;
+  const witness = chapterICount > 0;
+  const choir = chapterICount === RELIC_TOKEN_IDS.length;
+  const crossed = (owned?.grotto?.size || 0) > 0;
+  const marks = [
+    witness && "WITNESS",
+    choir && "CHOIR",
+    crossed && "CROSSED",
+  ].filter(Boolean);
+  return {
+    witness,
+    bearer: witness,
+    choir,
+    crossed,
+    firstCall: false,
+    chapterICount,
+    marks,
+  };
 }
 
 // ---------- Chain switching ----------
