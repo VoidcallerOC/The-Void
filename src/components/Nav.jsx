@@ -24,8 +24,14 @@ export function Nav({ onMint }) {
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  // close the mobile menu on navigation
-  useEffect(() => { setMenuOpen(false); }, [location.pathname]);
+
+  // Close the mobile menu on navigation. Derived during render (not in an
+  // effect) so it happens before paint without an extra render pass.
+  const [prevPath, setPrevPath] = useState(location.pathname);
+  if (location.pathname !== prevPath) {
+    setPrevPath(location.pathname);
+    setMenuOpen(false);
+  }
 
   const solid = scrolled || menuOpen;
 

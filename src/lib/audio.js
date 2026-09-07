@@ -26,7 +26,7 @@ export const VC_AUDIO = {
     if (t.tokenId != null && RELIC_TOKEN_IDS.includes(t.tokenId)) {
       return !!(t.previewSrc && !this.holdsChapterI());
     }
-    if (t.preview) return true;
+    // Preview-only tracks remain fragments, but are not ownership-gated.
     return !!(t.previewSrc && t.tokenId != null && !this.owned.has(t.tokenId));
   },
   // Resolved source for a track, honoring ownership gating.

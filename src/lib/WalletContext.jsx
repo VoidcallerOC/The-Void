@@ -1,11 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { checkOwnership, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
-
-const WalletCtx = createContext(null);
-export function useWallet() {
-  return useContext(WalletCtx);
-}
+import { WalletCtx } from "./wallet-context.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
 const LEGACY_RDNS = {
@@ -29,8 +25,12 @@ export function WalletProvider({ children }) {
   const [chainId, setChainId] = useState(null);
   const [owned, setOwned] = useState({ cchain: new Set(), grotto: new Set() });
   const [loadingOwnership, setLoadingOwnership] = useState(false);
+  const [provider, setProvider] = useState(null);
   const providerRef = useRef(null);
-
+  // Track the live listeners so we can detach them on disconnect / re-wire,
+  // otherwise reconnecting stacks duplicate handlers and chainChanged keeps
+  // firing after the user has disconnected.
+  const listenersRef = useRef(null);
   const identity = useMemo(() => choirIdentity(owned), [owned]);
 
   // --- wallet detection (EIP-6963 + legacy) ---
@@ -75,7 +75,7 @@ export function WalletProvider({ children }) {
   }, []);
 
   // Push owned token ids into the audio singleton so released-EP playback
-  // unlocks the full EP for any Chapter I bearer (and re-locks on disconnect).
+  // unlocks full tracks for bearers (and re-locks on disconnect).
   useEffect(() => {
     const ids = [...(owned.cchain || []), ...(owned.grotto || [])];
     VC_AUDIO.setOwnership(ids);
@@ -93,9 +93,24 @@ export function WalletProvider({ children }) {
     }
   }, [account]);
 
+  // Detach whatever listeners we last attached (if any) from their provider.
+  const unwireProvider = useCallback(() => {
+    const live = listenersRef.current;
+    if (live) {
+      live.provider.removeListener?.("accountsChanged", live.onAccountsChanged);
+      live.provider.removeListener?.("chainChanged", live.onChainChanged);
+      listenersRef.current = null;
+    }
+  }, []);
+
   const wireProvider = useCallback((provider) => {
+    // Drop any previously-wired listeners before attaching new ones so a
+    // second connect doesn't double up handlers.
+    unwireProvider();
     providerRef.current = provider;
-    provider.on?.("accountsChanged", (accts) => {
+    setProvider(provider);
+
+    const onAccountsChanged = (accts) => {
       if (!accts || accts.length === 0) {
         setAccount(null);
         setOwned({ cchain: new Set(), grotto: new Set() });
@@ -103,9 +118,13 @@ export function WalletProvider({ children }) {
         setAccount(accts[0]);
         refreshOwnership(accts[0]);
       }
-    });
-    provider.on?.("chainChanged", (cid) => setChainId(parseInt(cid, 16)));
-  }, [refreshOwnership]);
+    };
+    const onChainChanged = (cid) => setChainId(parseInt(cid, 16));
+
+    provider.on?.("accountsChanged", onAccountsChanged);
+    provider.on?.("chainChanged", onChainChanged);
+    listenersRef.current = { provider, onAccountsChanged, onChainChanged };
+  }, [refreshOwnership, unwireProvider]);
 
   const connect = useCallback(async (provider) => {
     const p = provider || providerRef.current || window.ethereum;
@@ -125,11 +144,13 @@ export function WalletProvider({ children }) {
   }, [wireProvider, refreshOwnership]);
 
   const disconnect = useCallback(() => {
+    unwireProvider();
     setAccount(null);
     setChainId(null);
     setOwned({ cchain: new Set(), grotto: new Set() });
     providerRef.current = null;
-  }, []);
+    setProvider(null);
+  }, [unwireProvider]);
 
   // restore an already-authorized session on load
   useEffect(() => {
@@ -151,6 +172,9 @@ export function WalletProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Detach provider listeners if the provider tree unmounts.
+  useEffect(() => unwireProvider, [unwireProvider]);
+
   const value = {
     wallets,
     account,
@@ -159,7 +183,7 @@ export function WalletProvider({ children }) {
     identity,
     loadingOwnership,
     connected: !!account,
-    provider: providerRef.current,
+    provider,
     getProvider: () => providerRef.current || window.ethereum,
     connect,
     disconnect,

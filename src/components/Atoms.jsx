@@ -1,7 +1,9 @@
+import { useState } from "react";
+
 // Animated track art — looping muted video with the still PNG as poster/fallback.
 // Falls back to a plain <img> when no video is available.
 export function TrackArt({ art, vid, style }) {
-  if (!vid) return <img src={art} alt="" style={style} />;
+  if (!vid) return <img src={art} alt="" loading="lazy" decoding="async" style={style} />;
   return (
     <video
       key={vid}
@@ -10,7 +12,7 @@ export function TrackArt({ art, vid, style }) {
       muted
       playsInline
       poster={art}
-      preload="auto"
+      preload="metadata"
       style={style}
     >
       <source src={vid + ".webm"} type="video/webm" />
@@ -101,6 +103,37 @@ export function Btn({ kind = "primary", children, onClick, style, disabled }) {
         Object.assign(e.currentTarget.style, base, variants[kind]);
         e.currentTarget.style.transform = "translateY(0)";
         e.currentTarget.style.animation = "none";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Square transport button used by the sticky player and The Bleed.
+export function PlayerBtn({ children, primary, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={(e) => { setHover(false); e.currentTarget.style.transform = "translateY(0)"; }}
+      onMouseDown={(e) => { e.currentTarget.style.transform = "translateY(1px)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+      style={{
+        width: 48,
+        height: 48,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: primary ? "var(--vc-crimson)" : "transparent",
+        border: `1px solid ${primary ? "var(--vc-crimson)" : "var(--vc-ash)"}`,
+        color: primary ? "#fff" : "var(--vc-bone)",
+        fontFamily: "var(--font-mono)",
+        fontSize: primary ? 16 : 14,
+        cursor: "pointer",
+        boxShadow: primary && hover ? "0 0 32px -4px rgba(255,61,46,0.7)" : "none",
+        transition: "all 120ms",
       }}
     >
       {children}
