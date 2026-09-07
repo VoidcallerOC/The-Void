@@ -2,7 +2,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { Btn } from "./Atoms.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import { CHAINS, ipfsToHttp, encodeTransfer, isValidAddress, switchChain } from "../lib/web3.js";
+import { useDialog } from "../lib/useDialog.js";
+import { CHAINS, ipfsToHttp, encodeTransfer, isValidAddress, switchChain, waitForReceipt } from "../lib/web3.js";
 
 // Send a relic to another address (ERC-1155 safeTransferFrom).
 export function TransferModal({ open, relic, chainKey, onClose }) {
@@ -10,6 +11,7 @@ export function TransferModal({ open, relic, chainKey, onClose }) {
   const [to, setTo] = useState("");
   const [status, setStatus] = useState(null); // {msg, kind}
   const [busy, setBusy] = useState(false);
+  const dialogRef = useDialog(open && !!relic, onClose);
 
   if (!open || !relic) return null;
   const chain = CHAINS[chainKey] || CHAINS.cchain;
@@ -30,12 +32,19 @@ export function TransferModal({ open, relic, chainKey, onClose }) {
       }
       setStatus({ msg: "Confirm in your wallet…", kind: "" });
       const data = encodeTransfer(w.account, recipient, relic.tokenId);
-      await provider.request({
+      const txHash = await provider.request({
         method: "eth_sendTransaction",
         params: [{ from: w.account, to: chain.contract, data }],
       });
-      setStatus({ msg: "Sent. Waiting for confirmation…", kind: "success" });
-      setTimeout(() => { w.refreshOwnership(); onClose(); }, 8000);
+      setStatus({ msg: "Sent. Waiting for confirmation…", kind: "" });
+      const receipt = await waitForReceipt(provider, txHash);
+      if (receipt.status === "0x0") {
+        setStatus({ msg: "Transfer reverted on-chain.", kind: "error" });
+        return;
+      }
+      setStatus({ msg: "Relic sent. Confirmed on-chain.", kind: "success" });
+      w.refreshOwnership();
+      setTimeout(onClose, 2500);
     } catch (err) {
       setStatus({ msg: "Transfer failed: " + (err?.message?.slice(0, 80) || "rejected"), kind: "error" });
     } finally {
@@ -52,8 +61,15 @@ export function TransferModal({ open, relic, chainKey, onClose }) {
         display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
       }}
     >
-      <div style={{ width: "min(440px, 100%)", background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", padding: "clamp(24px, 5vw, 36px)", position: "relative" }}>
-        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "transparent", border: "none", color: "var(--vc-bone-dim)", cursor: "pointer" }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Send relic ${relic.name}`}
+        tabIndex={-1}
+        style={{ width: "min(440px, 100%)", background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", padding: "clamp(24px, 5vw, 36px)", position: "relative" }}
+      >
+        <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 16, right: 16, background: "transparent", border: "none", color: "var(--vc-bone-dim)", cursor: "pointer" }}>
           <X size={20} strokeWidth={1.75} />
         </button>
 
