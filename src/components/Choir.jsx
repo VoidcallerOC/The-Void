@@ -1,7 +1,7 @@
 import { VC_DATA } from "../data.js";
 import { Eyebrow, Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
-import { useWallet } from "../lib/WalletContext.jsx";
+import { useWallet } from "../lib/wallet-context.js";
 
 const DISCORD = VC_DATA.socials.find((s) => s.name === "Discord").href;
 

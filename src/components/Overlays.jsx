@@ -1,4 +1,12 @@
-import { useRef } from "react";
+import { useId } from "react";
+
+function timingFor(id) {
+  const seed = [...id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const phase = (seed * 37) % 1000 / 1000;
+  const dur = (2.67 + ((seed * 17) % 240) / 100).toFixed(2);
+  const delay = (-phase * Number(dur)).toFixed(2);
+  return { dur, delay };
+}
 
 // ---------------- Texture overlays ----------------
 export function Grain({ opacity = 0.06 }) {
@@ -39,14 +47,7 @@ export function Scanlines() {
 // ghost layers of a single instance share timing so the R/C split stays coherent.
 export function Glitch({ children, size = 80, weight = 900, italic, style }) {
   const sz = typeof size === "number" ? size + "px" : size;
-  // computed once per mount, stable across re-renders
-  const timing = useRef(null);
-  if (timing.current === null) {
-    const dur = (2.67 + Math.random() * 2.4).toFixed(2);  // 2.67s – 5.07s (1/3 slower)
-    const delay = (-Math.random() * dur).toFixed(2);       // start mid-cycle
-    timing.current = { dur, delay };
-  }
-  const { dur, delay } = timing.current;
+  const { dur, delay } = timingFor(useId());
   const base = {
     fontFamily: "var(--font-display)",
     fontWeight: weight,
@@ -95,13 +96,7 @@ export function Glitch({ children, size = 80, weight = 900, italic, style }) {
 export function WordmarkGlitch() {
   const src = "/assets/voidcaller_wordmark.png";
   // independent random timing, same model as <Glitch>
-  const timing = useRef(null);
-  if (timing.current === null) {
-    const dur = (2.67 + Math.random() * 2.4).toFixed(2);
-    const delay = (-Math.random() * dur).toFixed(2);
-    timing.current = { dur, delay };
-  }
-  const { dur, delay } = timing.current;
+  const { dur, delay } = timingFor(useId());
   const layer = (filter, x, blend, op, anim) => ({
     position: "absolute",
     inset: 0,

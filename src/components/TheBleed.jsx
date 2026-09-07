@@ -17,7 +17,7 @@ export function TheBleed() {
     } else if (!audio.queue) {
       audio.setQueue(VC_DATA.tracklist, "tunnel-vision");
     }
-  }, []);
+  }, [audio]);
   const queue = audio.queue || VC_DATA.tracklist;
   const idx = audio.idx;
   const cur = queue[idx] || queue[0];
