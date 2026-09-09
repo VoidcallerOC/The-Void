@@ -1,3 +1,5 @@
+import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken } from "./domain/models.js";
+
 // Static data for the Voidcaller site.
 // Reflects the actual project: a self-titled EP collection minted on Avalanche.
 //   OpenSea:  https://opensea.io/collection/voidcaller-avalanche
@@ -130,4 +132,70 @@ export const VC_DATA = {
     "05": "Either live with meaning, or stay lost within the noise",
     "06": "Look at me now — am I a man or just a let down",
   },
+};
+
+// Platform-facing records. Voidcaller is the first catalog, not a special case
+// in the UI or Web3 layers.
+const voidcallerArtist = createArtist({
+  id: "voidcaller",
+  name: "Voidcaller",
+  handle: "VoidcallerOC",
+  bio: "A music-native project where records become relics and ownership unlocks the full experience.",
+  avatar: "/assets/voidcaller_art_4.png",
+  banner: "/assets/voidcaller_art_6.png",
+  socials: VC_DATA.socials,
+  verified: true,
+});
+
+const voidcallerRelease = createRelease({
+  id: "voidcaller-self-titled",
+  artistId: "voidcaller",
+  title: "VOIDCALLER",
+  subtitle: "Self-titled EP",
+  description: "The first call. The first relic. One relic unlocks the full EP.",
+  story: VC_DATA.releases[0].tagline,
+  status: "minted",
+  artwork: "/assets/voidcaller_art_4.png",
+  experiences: ["voidcaller-full-ep"],
+  tracks: VC_DATA.firstEPTracks.map(({ n, title, time }) => ({ n, title, time })),
+});
+
+const voidcallerEdition = createEdition({
+  id: "voidcaller-chapter-i",
+  releaseId: "voidcaller-self-titled",
+  title: "Chapter I · The Relic",
+  description: "The ERC-1155 edition for the self-titled EP.",
+  includes: ["Full self-titled EP", "Collector reliquary access", "Token-gated music experiences"],
+  tokenIds: [0, 1, 2, 3],
+  contractId: "voidcaller-avalanche",
+  contractAddress: VC_DATA.contract,
+  chainId: 43114,
+  chain: "AVALANCHE",
+  supply: "1,620",
+  status: "minted",
+  experienceIds: ["voidcaller-full-ep"],
+});
+
+const voidcallerExperience = createExperience({
+  id: "voidcaller-full-ep",
+  title: "The Full Record",
+  description: "One Chapter I relic unlocks the entire self-titled EP.",
+  requirements: [{ type: "erc1155-balance", contract: VC_DATA.contract, tokenIds: [0, 1, 2, 3] }],
+  media: { type: "audio", releaseId: "voidcaller-self-titled" },
+});
+
+export const VOIDCALLER_CATALOG = createCatalog({
+  artists: [voidcallerArtist],
+  releases: [voidcallerRelease],
+  editions: [voidcallerEdition],
+  tokens: voidcallerEdition.tokenIds.map((tokenId) => createToken({ id: `voidcaller-token-${tokenId}`, editionId: voidcallerEdition.id, tokenId, name: `Voidcaller Relic #${tokenId}` })),
+  collections: [createCollection({ id: "voidcaller-collection", name: "Voidcaller Reliquary", artistIds: [voidcallerArtist.id], releaseIds: [voidcallerRelease.id], editionIds: [voidcallerEdition.id], description: "The first artist collection on the music-native platform." })],
+  experiences: [voidcallerExperience],
+});
+
+export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions"];
+export const DISCOVERY = {
+  featured: [voidcallerRelease.id],
+  artists: [voidcallerArtist.id],
+  "limited-editions": [voidcallerEdition.id],
 };
