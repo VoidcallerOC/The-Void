@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { checkOwnership, checkCollectionOwnership, choirIdentity } from "./web3.js";
+import { checkOwnership, checkCollectionOwnership, checkOwnershipRecords, checkCollectionOwnershipRecords, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 
@@ -19,11 +19,12 @@ const LEGACY_NAMES = {
   isAvalanche: "Core",
 };
 
-export function WalletProvider({ children, collectionConfig = null, ownershipReader = checkOwnership }) {
+export function WalletProvider({ children, collectionConfig = null, ownershipReader = checkOwnership, ownershipRecordsReader = checkOwnershipRecords }) {
   const [wallets, setWallets] = useState([]); // detected providers
   const [account, setAccount] = useState(null);
   const [chainId, setChainId] = useState(null);
   const [owned, setOwned] = useState({ cchain: new Set(), grotto: new Set() });
+  const [ownershipRecords, setOwnershipRecords] = useState([]);
   const [loadingOwnership, setLoadingOwnership] = useState(false);
   const [provider, setProvider] = useState(null);
   const providerRef = useRef(null);
@@ -83,15 +84,17 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
 
   const refreshOwnership = useCallback(async (addr) => {
     const target = addr || account;
-    if (!target) { setOwned({ cchain: new Set(), grotto: new Set() }); return; }
+    if (!target) { setOwned({ cchain: new Set(), grotto: new Set() }); setOwnershipRecords([]); return; }
     setLoadingOwnership(true);
     try {
       const result = await (collectionConfig ? checkCollectionOwnership(target, collectionConfig) : ownershipReader(target));
+      const records = await (collectionConfig ? checkCollectionOwnershipRecords(target, collectionConfig) : ownershipRecordsReader(target));
       setOwned(result);
+      setOwnershipRecords(records);
     } finally {
       setLoadingOwnership(false);
     }
-  }, [account, collectionConfig, ownershipReader]);
+  }, [account, collectionConfig, ownershipReader, ownershipRecordsReader]);
 
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
@@ -114,6 +117,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       if (!accts || accts.length === 0) {
         setAccount(null);
         setOwned({ cchain: new Set(), grotto: new Set() });
+        setOwnershipRecords([]);
       } else {
         setAccount(accts[0]);
         refreshOwnership(accts[0]);
@@ -148,6 +152,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     setAccount(null);
     setChainId(null);
     setOwned({ cchain: new Set(), grotto: new Set() });
+    setOwnershipRecords([]);
     providerRef.current = null;
     setProvider(null);
   }, [unwireProvider]);
@@ -180,6 +185,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     account,
     chainId,
     owned,
+    ownershipRecords,
     identity,
     loadingOwnership,
     connected: !!account,

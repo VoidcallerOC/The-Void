@@ -56,6 +56,22 @@ export async function checkCollectionOwnership(account, { chains = CHAINS, token
   return owned;
 }
 export const checkOwnership = (account, options = {}) => checkCollectionOwnership(account, { chains: CHAINS, tokenIds: RELIC_TOKEN_IDS, ...options });
+export async function checkCollectionOwnershipRecords(account, { chains = CHAINS, tokenIds = RELIC_TOKEN_IDS, contracts = null, rpc = rpcCall } = {}) {
+  if (!account) return [];
+  const records = [];
+  await Promise.all(Object.entries(chains).map(async ([key, chain]) => {
+    const contract = contracts?.[key] || chain.contract;
+    await Promise.all(tokenIds.map(async (id) => {
+      try {
+        const result = await rpc(chain.rpc, contract, SEL.balanceOf + padAddr(account) + padUint(id));
+        const amount = decodeUint(result.slice(2));
+        if (amount > 0n) records.push({ wallet: account.toLowerCase(), contract: contract.toLowerCase(), tokenId: String(id), amount: Number(amount), chain: { key, id: chain.id, name: chain.name }, updatedAt: Date.now() });
+      } catch { /* an unavailable chain is non-fatal */ }
+    }));
+  }));
+  return records;
+}
+export const checkOwnershipRecords = (account, options = {}) => checkCollectionOwnershipRecords(account, { chains: CHAINS, tokenIds: RELIC_TOKEN_IDS, ...options });
 export function ownedIds(owned) { return new Set(Object.values(owned || {}).flatMap((ids) => [...(ids || [])])); }
 export function isOwned(owned, tokenId) { return ownedIds(owned).has(tokenId); }
 export function holdsChapterI(owned) { return RELIC_TOKEN_IDS.some((id) => isOwned(owned, id)); }

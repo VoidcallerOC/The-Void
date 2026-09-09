@@ -5,111 +5,58 @@ import { useWallet } from "../lib/wallet-context.js";
 import { useDialog } from "../lib/useDialog.js";
 import { CHAINS, ipfsToHttp, encodeTransfer, isValidAddress, switchChain, waitForReceipt } from "../lib/web3.js";
 
-// Send a relic to another address (ERC-1155 safeTransferFrom).
 export function TransferModal({ open, relic, chainKey, onClose }) {
   const w = useWallet();
   const [to, setTo] = useState("");
-  const [status, setStatus] = useState(null); // {msg, kind}
+  const [amount, setAmount] = useState(String(relic?.amount || 1));
+  const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const dialogRef = useDialog(open && !!relic, onClose);
 
   if (!open || !relic) return null;
   const chain = CHAINS[chainKey] || CHAINS.cchain;
+  const contract = relic.contract || chain.contract;
+  const maxAmount = Number(relic.amount || 1);
 
   const submit = async () => {
     const recipient = to.trim();
+    const quantity = Number(amount);
     if (!isValidAddress(recipient)) { setStatus({ msg: "Enter a valid 0x address.", kind: "error" }); return; }
     if (recipient.toLowerCase() === w.account?.toLowerCase()) { setStatus({ msg: "Cannot send to yourself.", kind: "error" }); return; }
-
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > maxAmount) { setStatus({ msg: `Quantity must be between 1 and ${maxAmount}.`, kind: "error" }); return; }
     const provider = w.getProvider();
     if (!provider) { setStatus({ msg: "No wallet connected.", kind: "error" }); return; }
-
     setBusy(true);
     try {
-      if (w.chainId !== chain.id) {
-        setStatus({ msg: `Switch to ${chain.name}…`, kind: "" });
-        await switchChain(provider, chain.key);
-      }
+      if (w.chainId !== chain.id) { setStatus({ msg: `Switch to ${chain.name}…`, kind: "" }); await switchChain(provider, chain.key); }
       setStatus({ msg: "Confirm in your wallet…", kind: "" });
-      const data = encodeTransfer(w.account, recipient, relic.tokenId);
-      const txHash = await provider.request({
-        method: "eth_sendTransaction",
-        params: [{ from: w.account, to: chain.contract, data }],
-      });
+      const data = encodeTransfer(w.account, recipient, relic.tokenId, quantity);
+      const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: w.account, to: contract, data }] });
       setStatus({ msg: "Sent. Waiting for confirmation…", kind: "" });
       const receipt = await waitForReceipt(provider, txHash);
-      if (receipt.status === "0x0") {
-        setStatus({ msg: "Transfer reverted on-chain.", kind: "error" });
-        return;
-      }
+      if (receipt.status === "0x0") { setStatus({ msg: "Transfer reverted on-chain.", kind: "error" }); return; }
       setStatus({ msg: "Relic sent. Confirmed on-chain.", kind: "success" });
       w.refreshOwnership();
       setTimeout(onClose, 2500);
-    } catch (err) {
-      setStatus({ msg: "Transfer failed: " + (err?.message?.slice(0, 80) || "rejected"), kind: "error" });
-    } finally {
-      setBusy(false);
-    }
+    } catch (err) { setStatus({ msg: "Transfer failed: " + (err?.message?.slice(0, 80) || "rejected"), kind: "error" }); }
+    finally { setBusy(false); }
   };
 
   return (
-    <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Send relic ${relic.name}`}
-        tabIndex={-1}
-        style={{ width: "min(440px, 100%)", background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", padding: "clamp(24px, 5vw, 36px)", position: "relative" }}
-      >
-        <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 16, right: 16, background: "transparent", border: "none", color: "var(--vc-bone-dim)", cursor: "pointer" }}>
-          <X size={20} strokeWidth={1.75} />
-        </button>
-
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", marginBottom: 20 }}>
-          SEND RELIC
-        </div>
-
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Send ${relic.name}`} tabIndex={-1} style={{ width: "min(440px, 100%)", background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", padding: "clamp(24px, 5vw, 36px)", position: "relative" }}>
+        <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 16, right: 16, background: "transparent", border: "none", color: "var(--vc-bone-dim)", cursor: "pointer" }}><X size={20} strokeWidth={1.75} /></button>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", marginBottom: 20 }}>SEND ASSET</div>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-          <img src={ipfsToHttp(relic.image)} alt="" style={{ width: 64, height: 64, objectFit: "cover", border: "1px solid var(--vc-ash)", flexShrink: 0 }} />
-          <div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, textTransform: "uppercase", lineHeight: 1 }}>{relic.name}</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", marginTop: 6 }}>TOKEN #{relic.tokenId} · {chain.short}</div>
-          </div>
+          {relic.image && <img src={ipfsToHttp(relic.image)} alt="" style={{ width: 64, height: 64, objectFit: "cover", border: "1px solid var(--vc-ash)", flexShrink: 0 }} />}
+          <div><div style={{ fontFamily: "var(--font-display)", fontSize: 22, textTransform: "uppercase", lineHeight: 1 }}>{relic.name}</div><div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", marginTop: 6 }}>TOKEN #{relic.tokenId} · {chain.short} · {maxAmount} OWNED</div></div>
         </div>
-
-        <label style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--vc-bone-dim)", display: "block", marginBottom: 8 }}>
-          RECIPIENT ADDRESS
-        </label>
-        <input
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          placeholder="0x…"
-          spellCheck={false}
-          autoComplete="off"
-          style={{
-            width: "100%", boxSizing: "border-box", background: "var(--vc-void)",
-            border: "1px solid var(--vc-ash)", color: "var(--vc-bone)",
-            fontFamily: "var(--font-mono)", fontSize: 13, padding: "12px 14px", marginBottom: 18,
-          }}
-        />
-
-        {status && (
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 16, color: status.kind === "error" ? "var(--vc-ember)" : status.kind === "success" ? "var(--vc-bone)" : "var(--vc-bone-dim)" }}>
-            {status.msg}
-          </div>
-        )}
-
-        <Btn onClick={busy ? undefined : submit} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>
-          {busy ? "SENDING…" : "CONFIRM TRANSFER"}
-        </Btn>
+        <label style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--vc-bone-dim)", display: "block", marginBottom: 8 }}>RECIPIENT ADDRESS</label>
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x…" spellCheck={false} autoComplete="off" style={{ width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 13, padding: "12px 14px", marginBottom: 14 }} />
+        <label style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--vc-bone-dim)", display: "block", marginBottom: 8 }}>QUANTITY</label>
+        <input type="number" min="1" max={maxAmount} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 13, padding: "12px 14px", marginBottom: 18 }} />
+        {status && <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 16, color: status.kind === "error" ? "var(--vc-ember)" : status.kind === "success" ? "var(--vc-bone)" : "var(--vc-bone-dim)" }}>{status.msg}</div>}
+        <Btn onClick={busy ? undefined : submit} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "SENDING…" : "CONFIRM TRANSFER"}</Btn>
       </div>
     </div>
   );
