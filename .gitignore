@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Protected masters are deployment assets, never static web or repository content.
+private-media/

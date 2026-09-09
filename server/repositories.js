@@ -12,8 +12,10 @@ import {
   walletAddress,
 } from "./validation.js";
 
-const APPLICATION_STATUSES = ["DRAFT", "PUBLISHED", "ARCHIVED"];
-const LISTING_STATUSES = ["ACTIVE", "SOLD", "CANCELLED", "EXPIRED", "REORGED"];
+const APPLICATION_STATUSES = ["DRAFT", "REVIEW", "PUBLISHED", "ARCHIVED"];
+const LISTING_STATUSES = ["PENDING", "ACTIVE", "SOLD", "CANCELLED", "EXPIRED", "INVALID", "REORGED"];
+const PURCHASE_STATUSES = ["PENDING", "SUBMITTED", "CONFIRMED", "FINALIZED", "RECONCILED", "FAILED", "REORGED"];
+const TRANSACTION_STATUSES = ["PENDING", "SUBMITTED", "MINED", "CONFIRMED", "FINALIZED", "RECONCILED", "FAILED", "REPLACED", "REORGED"];
 const REDEMPTION_STATES = ["AVAILABLE", "RESERVED", "REDEEMED", "CANCELLED"];
 
 function normalizeDbError(error, message) {
@@ -40,6 +42,12 @@ export class PersistenceRepository {
   async saveArtistProfile({ artistId, bio = null, websiteUrl = null, socialLinks = {}, metadata = {} }) {
     const values = [requiredText(artistId, "artistProfile.artistId"), optionalText(bio, "artistProfile.bio", { max: 10000 }), optionalText(websiteUrl, "artistProfile.websiteUrl"), normalizeJson(socialLinks), normalizeJson(metadata)];
     const { rows } = await this.db.query(`INSERT INTO artist_profiles (artist_id, bio, website_url, social_links, profile_metadata) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (artist_id) DO UPDATE SET bio=EXCLUDED.bio, website_url=EXCLUDED.website_url, social_links=EXCLUDED.social_links, profile_metadata=EXCLUDED.profile_metadata, updated_at=now() RETURNING *`, values);
+    return rows[0];
+  }
+
+  async assignArtistOwner({ artistId, wallet, role = "OWNER" }) {
+    const values = [requiredText(artistId, "artistOwner.artistId"), walletAddress(wallet, "artistOwner.wallet"), enumValue(role, "artistOwner.role", ["OWNER", "MANAGER"])];
+    const { rows } = await this.db.query(`INSERT INTO artist_owners (artist_id, owner_wallet, role) VALUES ($1,$2,$3) ON CONFLICT (artist_id, owner_wallet) DO UPDATE SET role=EXCLUDED.role, updated_at=now() RETURNING *`, values);
     return rows[0];
   }
 
@@ -114,7 +122,7 @@ export class PersistenceRepository {
   }
 
   async recordPurchase({ listingUuid, transactionId = null, chainId: rawChainId, transactionHash, settlementLogIndex, buyerWallet, sellerWallet, tokenContractAddress, tokenId, quantity, salePriceWei, platformFeeWei = "0", royaltyWei = "0", blockNumber, blockHash, status = "PENDING" }) {
-    const values = [listingUuid, transactionId, chainId(rawChainId), requiredText(transactionHash, "purchase.transactionHash", { max: 128 }).toLowerCase(), Number(settlementLogIndex), walletAddress(buyerWallet, "purchase.buyerWallet"), walletAddress(sellerWallet, "purchase.sellerWallet"), requiredText(tokenContractAddress, "purchase.tokenContractAddress", { max: 128 }).toLowerCase(), nonNegativeBigInt(tokenId, "purchase.tokenId"), positiveBigInt(quantity, "purchase.quantity"), positiveBigInt(salePriceWei, "purchase.salePriceWei"), nonNegativeBigInt(platformFeeWei, "purchase.platformFeeWei"), nonNegativeBigInt(royaltyWei, "purchase.royaltyWei"), nonNegativeBigInt(blockNumber, "purchase.blockNumber"), requiredText(blockHash, "purchase.blockHash", { max: 128 }).toLowerCase(), enumValue(status, "purchase.status", ["PENDING", "CONFIRMED", "FINALIZED", "REORGED"])]
+    const values = [listingUuid, transactionId, chainId(rawChainId), requiredText(transactionHash, "purchase.transactionHash", { max: 128 }).toLowerCase(), Number(settlementLogIndex), walletAddress(buyerWallet, "purchase.buyerWallet"), walletAddress(sellerWallet, "purchase.sellerWallet"), requiredText(tokenContractAddress, "purchase.tokenContractAddress", { max: 128 }).toLowerCase(), nonNegativeBigInt(tokenId, "purchase.tokenId"), positiveBigInt(quantity, "purchase.quantity"), positiveBigInt(salePriceWei, "purchase.salePriceWei"), nonNegativeBigInt(platformFeeWei, "purchase.platformFeeWei"), nonNegativeBigInt(royaltyWei, "purchase.royaltyWei"), nonNegativeBigInt(blockNumber, "purchase.blockNumber"), requiredText(blockHash, "purchase.blockHash", { max: 128 }).toLowerCase(), enumValue(status, "purchase.status", PURCHASE_STATUSES)]
     if (!Number.isInteger(values[4]) || values[4] < 0) throw new PersistenceValidationError("purchase.settlementLogIndex must be a non-negative integer.", "purchase.settlementLogIndex");
     try {
       const { rows } = await this.db.query(`INSERT INTO purchases (listing_id, transaction_id, chain_id, transaction_hash, settlement_log_index, buyer_wallet, seller_wallet, token_contract_address, token_id, quantity, sale_price_wei, platform_fee_wei, royalty_wei, block_number, block_hash, status, finalized_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,CASE WHEN $16='FINALIZED' THEN now() ELSE NULL END) ON CONFLICT (chain_id, transaction_hash, settlement_log_index) DO UPDATE SET status=EXCLUDED.status, finalized_at=EXCLUDED.finalized_at RETURNING *`, values);
@@ -123,27 +131,55 @@ export class PersistenceRepository {
   }
 
   async upsertTransaction({ chainId: rawChainId, transactionHash, fromWallet = null, toAddress = null, transactionType, status = "SUBMITTED", blockNumber = null, blockHash = null, nonce = null, valueWei = null }) {
-    const values = [chainId(rawChainId), requiredText(transactionHash, "transaction.transactionHash", { max: 128 }).toLowerCase(), fromWallet ? walletAddress(fromWallet, "transaction.fromWallet") : null, optionalText(toAddress, "transaction.toAddress", { max: 128 })?.toLowerCase() || null, enumValue(transactionType, "transaction.transactionType", ["LISTING_CREATE", "LISTING_CANCEL", "PURCHASE", "TRANSFER", "OTHER"]), enumValue(status, "transaction.status", ["SUBMITTED", "MINED", "CONFIRMED", "FINALIZED", "FAILED", "REPLACED", "REORGED"]), blockNumber === null ? null : nonNegativeBigInt(blockNumber, "transaction.blockNumber"), blockHash ? requiredText(blockHash, "transaction.blockHash", { max: 128 }).toLowerCase() : null, nonce === null ? null : nonNegativeBigInt(nonce, "transaction.nonce"), valueWei === null ? null : nonNegativeBigInt(valueWei, "transaction.valueWei")];
-    const { rows } = await this.db.query(`INSERT INTO transactions (chain_id, transaction_hash, from_wallet, to_address, transaction_type, status, block_number, block_hash, nonce, value_wei, mined_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CASE WHEN $6 IN ('MINED','CONFIRMED','FINALIZED') THEN now() ELSE NULL END,now()) ON CONFLICT (chain_id, transaction_hash) DO UPDATE SET status=EXCLUDED.status, block_number=EXCLUDED.block_number, block_hash=EXCLUDED.block_hash, mined_at=COALESCE(transactions.mined_at, EXCLUDED.mined_at), finalized_at=CASE WHEN EXCLUDED.status='FINALIZED' THEN now() ELSE transactions.finalized_at END, updated_at=now() RETURNING *`, values);
+    const values = [chainId(rawChainId), requiredText(transactionHash, "transaction.transactionHash", { max: 128 }).toLowerCase(), fromWallet ? walletAddress(fromWallet, "transaction.fromWallet") : null, optionalText(toAddress, "transaction.toAddress", { max: 128 })?.toLowerCase() || null, enumValue(transactionType, "transaction.transactionType", ["LISTING_CREATE", "LISTING_CANCEL", "PURCHASE", "TRANSFER", "OTHER"]), enumValue(status, "transaction.status", TRANSACTION_STATUSES), blockNumber === null ? null : nonNegativeBigInt(blockNumber, "transaction.blockNumber"), blockHash ? requiredText(blockHash, "transaction.blockHash", { max: 128 }).toLowerCase() : null, nonce === null ? null : nonNegativeBigInt(nonce, "transaction.nonce"), valueWei === null ? null : nonNegativeBigInt(valueWei, "transaction.valueWei")];
+    const { rows } = await this.db.query(`INSERT INTO transactions (chain_id, transaction_hash, from_wallet, to_address, transaction_type, status, block_number, block_hash, nonce, value_wei, mined_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CASE WHEN $6 IN ('MINED','CONFIRMED','FINALIZED','RECONCILED') THEN now() ELSE NULL END,now()) ON CONFLICT (chain_id, transaction_hash) DO UPDATE SET from_wallet=COALESCE(transactions.from_wallet, EXCLUDED.from_wallet), to_address=COALESCE(transactions.to_address, EXCLUDED.to_address), status=CASE WHEN transactions.status IN ('CONFIRMED','FINALIZED','RECONCILED','FAILED','REORGED') AND EXCLUDED.status IN ('PENDING','SUBMITTED','MINED') THEN transactions.status ELSE EXCLUDED.status END, block_number=COALESCE(EXCLUDED.block_number, transactions.block_number), block_hash=COALESCE(EXCLUDED.block_hash, transactions.block_hash), value_wei=COALESCE(EXCLUDED.value_wei, transactions.value_wei), mined_at=COALESCE(transactions.mined_at, EXCLUDED.mined_at), finalized_at=CASE WHEN EXCLUDED.status IN ('FINALIZED','RECONCILED') THEN now() ELSE transactions.finalized_at END, updated_at=now() RETURNING *`, values);
     return rows[0];
   }
 
-  async createNonce({ nonceHash, wallet, purpose, issuedAt, expiresAt, requestId = null }) {
-    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), requiredText(purpose, "nonce.purpose"), issuedAt, expiresAt, optionalText(requestId, "nonce.requestId", { max: 256 })];
-    const { rows } = await this.db.query(`INSERT INTO auth_nonces (nonce_hash, wallet_address, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, values);
+  async createNonce({ nonceHash, wallet, chainId: rawChainId, domain, uri, purpose, issuedAt, expiresAt, requestId = null }) {
+    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose"), issuedAt, expiresAt, optionalText(requestId, "nonce.requestId", { max: 256 })];
+    const { rows } = await this.db.query(`INSERT INTO auth_nonces (nonce_hash, wallet_address, chain_id, domain, uri, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, values);
     return rows[0];
   }
 
-  async consumeNonce({ nonceHash, wallet, purpose }) {
-    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), requiredText(purpose, "nonce.purpose")];
-    const { rows } = await this.db.query(`UPDATE auth_nonces SET consumed_at=now() WHERE nonce_hash=$1 AND wallet_address=$2 AND purpose=$3 AND consumed_at IS NULL AND expires_at > now() RETURNING *`, values);
+  async getNonce({ nonceHash }) {
+    const { rows } = await this.db.query(`SELECT nonce_hash, wallet_address, chain_id, domain, uri, purpose, issued_at, expires_at, consumed_at FROM auth_nonces WHERE nonce_hash=$1 LIMIT 1`, [requiredText(nonceHash, "nonce.nonceHash", { max: 256 })]);
+    return rows[0] || null;
+  }
+
+  async consumeNonce({ nonceHash, wallet, chainId: rawChainId, domain, uri, purpose }) {
+    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose")];
+    const { rows } = await this.db.query(`UPDATE auth_nonces SET consumed_at=now() WHERE nonce_hash=$1 AND wallet_address=$2 AND chain_id=$3 AND domain=$4 AND uri=$5 AND purpose=$6 AND consumed_at IS NULL AND expires_at > now() RETURNING *`, values);
     if (!rows[0]) throw new PersistenceConflictError("Nonce is missing, expired, or already consumed.");
     return rows[0];
+  }
+
+  async createAuthSession({ sessionHash, wallet, chainId: rawChainId, purpose, issuedAt, expiresAt, requestId = null }) {
+    const values = [requiredText(sessionHash, "session.sessionHash", { max: 256 }), walletAddress(wallet, "session.wallet"), chainId(rawChainId, "session.chainId"), requiredText(purpose, "session.purpose", { max: 64 }), issuedAt, expiresAt, optionalText(requestId, "session.requestId", { max: 256 })];
+    const { rows } = await this.db.query(`INSERT INTO auth_sessions (session_hash, wallet_address, chain_id, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, values);
+    return rows[0];
+  }
+
+  async getActiveAuthSession({ sessionHash }) {
+    const { rows } = await this.db.query(`SELECT session_hash, wallet_address, chain_id, purpose, issued_at, expires_at FROM auth_sessions WHERE session_hash=$1 AND revoked_at IS NULL AND expires_at > now() LIMIT 1`, [requiredText(sessionHash, "session.sessionHash", { max: 256 })]);
+    return rows[0] || null;
   }
 
   async createGrant({ grantId, experienceId, wallet, mediaType, challengeNonceHash = null, issuedAt, expiresAt, ownershipChainId = null, ownershipWatermark = null, metadata = {} }) {
     const values = [requiredText(grantId, "grant.grantId", { max: 256 }), requiredText(experienceId, "grant.experienceId"), walletAddress(wallet), requiredText(mediaType, "grant.mediaType"), challengeNonceHash, issuedAt, expiresAt, ownershipChainId === null ? null : chainId(ownershipChainId), ownershipWatermark, normalizeJson(metadata)];
     const { rows } = await this.db.query(`INSERT INTO experience_grants (grant_id, experience_id, wallet_address, media_type, challenge_nonce_hash, issued_at, expires_at, ownership_chain_id, ownership_watermark, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, values);
+    return rows[0];
+  }
+
+  async getMediaGrant({ grantId, includeInactive = false }) {
+    const { rows } = await this.db.query(`SELECT * FROM experience_grants WHERE grant_id=$1 ${includeInactive ? "" : "AND revoked_at IS NULL AND expires_at > now()"} LIMIT 1`, [requiredText(grantId, "grant.grantId", { max: 256 })]);
+    return rows[0] || null;
+  }
+
+  async revokeMediaGrant({ grantId, wallet, reason = "wallet_requested" }) {
+    const values = [requiredText(grantId, "grant.grantId", { max: 256 }), walletAddress(wallet, "grant.wallet"), optionalText(reason, "grant.reason", { max: 2000 }) || "wallet_requested"];
+    const { rows } = await this.db.query(`UPDATE experience_grants SET revoked_at=now(), metadata=metadata || jsonb_build_object('revocationReason',$3) WHERE grant_id=$1 AND wallet_address=$2 AND revoked_at IS NULL RETURNING *`, values);
+    if (!rows[0]) throw new PersistenceConflictError("Grant is missing, already revoked, or belongs to another wallet.");
     return rows[0];
   }
 

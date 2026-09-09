@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { checkOwnership, checkCollectionOwnership, checkOwnershipRecords, checkCollectionOwnershipRecords, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
+import { authenticateWallet, authorizationHeaders } from "./wallet-auth.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
 const LEGACY_RDNS = {
@@ -27,6 +28,9 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
   const [ownershipRecords, setOwnershipRecords] = useState([]);
   const [loadingOwnership, setLoadingOwnership] = useState(false);
   const [provider, setProvider] = useState(null);
+  const [authSession, setAuthSession] = useState(null);
+  const [authenticationError, setAuthenticationError] = useState(null);
+  const [authenticating, setAuthenticating] = useState(false);
   const providerRef = useRef(null);
   // Track the live listeners so we can detach them on disconnect / re-wire,
   // otherwise reconnecting stacks duplicate handlers and chainChanged keeps
@@ -96,6 +100,33 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     }
   }, [account, collectionConfig, ownershipReader, ownershipRecordsReader]);
 
+  const clearAuthentication = useCallback(() => {
+    void VC_AUDIO.revokeMediaGrants();
+    VC_AUDIO.setMediaAuthorization();
+    setAuthSession(null);
+    setAuthenticationError(null);
+    setAuthenticating(false);
+  }, []);
+
+  const authenticate = useCallback(async ({ targetProvider = providerRef.current, wallet = account, selectedChainId = chainId } = {}) => {
+    if (!targetProvider || !wallet || !Number.isInteger(selectedChainId)) return { error: "Connect a wallet and select an Avalanche network first." };
+    setAuthenticating(true);
+    setAuthenticationError(null);
+    try {
+      const session = await authenticateWallet({ provider: targetProvider, wallet, chainId: selectedChainId });
+      setAuthSession(session);
+      VC_AUDIO.setMediaAuthorization({ wallet, authHeaders: authorizationHeaders(session) });
+      return { ok: true, session };
+    } catch (error) {
+      setAuthSession(null);
+      const message = error?.message || "Wallet authentication failed.";
+      setAuthenticationError(message);
+      return { error: message, code: error?.code || "AUTH_REQUEST_FAILED" };
+    } finally {
+      setAuthenticating(false);
+    }
+  }, [account, chainId]);
+
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
     const live = listenersRef.current;
@@ -115,20 +146,25 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
 
     const onAccountsChanged = (accts) => {
       if (!accts || accts.length === 0) {
+        clearAuthentication();
         setAccount(null);
         setOwned({ cchain: new Set(), grotto: new Set() });
         setOwnershipRecords([]);
       } else {
+        clearAuthentication();
         setAccount(accts[0]);
         refreshOwnership(accts[0]);
       }
     };
-    const onChainChanged = (cid) => setChainId(parseInt(cid, 16));
+    const onChainChanged = (cid) => {
+      clearAuthentication();
+      setChainId(parseInt(cid, 16));
+    };
 
     provider.on?.("accountsChanged", onAccountsChanged);
     provider.on?.("chainChanged", onChainChanged);
     listenersRef.current = { provider, onAccountsChanged, onChainChanged };
-  }, [refreshOwnership, unwireProvider]);
+  }, [clearAuthentication, refreshOwnership, unwireProvider]);
 
   const connect = useCallback(async (provider) => {
     const p = provider || providerRef.current || window.ethereum;
@@ -138,24 +174,26 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       if (!accts || !accts.length) return { error: "No accounts returned." };
       const cid = await p.request({ method: "eth_chainId" });
       setAccount(accts[0]);
-      setChainId(parseInt(cid, 16));
+      const selectedChainId = parseInt(cid, 16);
+      setChainId(selectedChainId);
       wireProvider(p);
       refreshOwnership(accts[0]);
-      return { ok: true };
+      return authenticate({ targetProvider: p, wallet: accts[0], selectedChainId });
     } catch {
       return { error: "Connection rejected." };
     }
-  }, [wireProvider, refreshOwnership]);
+  }, [wireProvider, refreshOwnership, authenticate]);
 
   const disconnect = useCallback(() => {
     unwireProvider();
+    clearAuthentication();
     setAccount(null);
     setChainId(null);
     setOwned({ cchain: new Set(), grotto: new Set() });
     setOwnershipRecords([]);
     providerRef.current = null;
     setProvider(null);
-  }, [unwireProvider]);
+  }, [clearAuthentication, unwireProvider]);
 
   // restore an already-authorized session on load
   useEffect(() => {
@@ -189,9 +227,15 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     identity,
     loadingOwnership,
     connected: !!account,
+    authenticated: !!authSession,
+    authenticating,
+    authenticationError,
+    authSession,
+    authHeaders: authorizationHeaders(authSession),
     provider,
     getProvider: () => providerRef.current || window.ethereum,
     connect,
+    authenticate,
     disconnect,
     refreshOwnership,
   };

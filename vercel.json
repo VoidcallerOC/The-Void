@@ -1,4 +1,8 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [
+    { "src": "/assets/audio(?:/.*)?", "status": 404 }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ],
