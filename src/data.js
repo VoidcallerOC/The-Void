@@ -1,4 +1,4 @@
-import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken } from "./domain/models.js";
+import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "./domain/models.js";
 
 // Static data for the Voidcaller site.
 // Reflects the actual project: a self-titled EP collection minted on Avalanche.
@@ -178,10 +178,11 @@ const voidcallerEdition = createEdition({
 
 const voidcallerExperience = createExperience({
   id: "voidcaller-full-ep",
+  experienceType: EXPERIENCE_TYPES.AUDIO,
   title: "The Full Record",
   description: "One Chapter I relic unlocks the entire self-titled EP.",
   requirements: [{ type: "erc1155-balance", contract: VC_DATA.contract, tokenIds: [0, 1, 2, 3] }],
-  media: { type: "audio", releaseId: "voidcaller-self-titled" },
+  media: { type: "audio", releaseId: "voidcaller-self-titled", protected: true, previewAvailable: true },
 });
 
 export const VOIDCALLER_CATALOG = createCatalog({
