@@ -9,10 +9,13 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:migrate": "node server/migrate.js",
+    "start:api": "node server/index.js"
   },
   "dependencies": {
     "lucide-react": "^1.18.0",
+    "pg": "^8.23.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.17.0"
