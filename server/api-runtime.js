@@ -30,9 +30,9 @@ export function createRateLimiter({ limit = 60, windowMs = 60_000, now = () => D
   };
 }
 
-export function requireWalletAuth(authenticator, request) {
+export async function requireWalletAuth(authenticator, request) {
   if (typeof authenticator !== "function") throw new ApiError(501, "AUTH_NOT_CONFIGURED", "Wallet authentication is not configured.");
-  const identity = authenticator(request);
+  const identity = await authenticator(request);
   if (!identity?.wallet) throw new ApiError(401, "UNAUTHORIZED", "A verified wallet signature is required.");
   return { ...identity, wallet: identity.wallet.toLowerCase() };
 }

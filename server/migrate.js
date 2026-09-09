@@ -13,6 +13,15 @@ export async function listMigrations(directory = migrationsDirectory) {
   return (await readdir(directory)).filter((file) => /^\d+_.+\.sql$/.test(file)).sort();
 }
 
+export function migrationBody(sql, name = "migration") {
+  const source = String(sql || "");
+  const withoutBegin = source.replace(/^\s*BEGIN\s*;\s*/i, "");
+  const body = withoutBegin.replace(/\s*COMMIT\s*;\s*$/i, "");
+  if (body === source || !body.trim()) throw new Error(`Migration must contain one outer BEGIN/COMMIT transaction: ${name}`);
+  if (/\b(?:BEGIN|COMMIT|ROLLBACK)\b/i.test(body)) throw new Error(`Migration contains nested transaction control: ${name}`);
+  return body;
+}
+
 export async function migrate({ pool = null, config = loadServerConfig(), directory = migrationsDirectory } = {}) {
   const ownPool = pool || createDatabasePool(config);
   const client = await ownPool.connect();
@@ -22,6 +31,7 @@ export async function migrate({ pool = null, config = loadServerConfig(), direct
     for (const name of await listMigrations(directory)) {
       const sql = await readFile(join(directory, name), "utf8");
       const checksum = createHash("sha256").update(sql).digest("hex");
+      const body = migrationBody(sql, name);
       const existing = await client.query("SELECT checksum FROM schema_migrations WHERE name=$1", [name]);
       if (existing.rows[0]) {
         if (existing.rows[0].checksum !== checksum) throw new Error(`Migration checksum changed after application: ${name}`);
@@ -29,7 +39,7 @@ export async function migrate({ pool = null, config = loadServerConfig(), direct
       }
       await client.query("BEGIN");
       try {
-        await client.query(sql);
+        await client.query(body);
         await client.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1,$2)", [name, checksum]);
         await client.query("COMMIT");
       } catch (error) {

@@ -89,13 +89,13 @@ export const VC_DATA = {
     },
   ],
   // ============ THE SELF-TITLED EP (released / minted) ============
-  // Full tracks are owner-gated. Any Chapter I token (ids 0–3) unlocks the
-  // entire EP. Non-owners hear `previewSrc` (30s clip); bearers hear `src`.
+  // Full tracks are server-gated. The catalog contains public previews only;
+  // bearer playback obtains a short-lived opaque grant from the media API.
   firstEPTracks: [
-    { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, src: "/assets/audio/ep1-01-the-hollow.mp3",     previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
-    { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, src: "/assets/audio/ep1-02-dont-look-down.mp3", previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
-    { n: "03", title: "Complex",          time: "5:08", tokenId: 3, src: "/assets/audio/ep1-03-shattered.mp3",      previewSrc: "/assets/audio-preview/ep1-03-complex-preview.mp3",        art: "/assets/track-art/ep1-complex.png",        artVid: "/assets/track-art-vid/ep1-complex" },
-    { n: "04", title: "Enough",           time: "4:46", tokenId: 0, src: "/assets/audio/ep1-04-starlight.mp3",      previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
+    { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
+    { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
+    { n: "03", title: "Complex",          time: "5:08", tokenId: 3, previewSrc: "/assets/audio-preview/ep1-03-complex-preview.mp3",        protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-complex.png",        artVid: "/assets/track-art-vid/ep1-complex" },
+    { n: "04", title: "Enough",           time: "4:46", tokenId: 0, previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
   ],
   // ============ TUNNEL VISION (upcoming) ============
   // Unreleased EP — playback is a ~30s fragment per track until mint.
