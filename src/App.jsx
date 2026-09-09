@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useOutletContext } from "react-
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
+import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 
 // Hero is the above-the-fold landing — keep it eager. The rest of the
 // sections are split into their own chunks and loaded on navigation.
@@ -39,6 +40,13 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
+          <Route path="discover" element={<DiscoverPage />} />
+          <Route path="artists" element={<ArtistsPage />} />
+          <Route path="artist/:artist" element={<ArtistPage />} />
+          <Route path="release/:release" element={<ReleasePage />} />
+          <Route path="edition/:edition" element={<EditionPage />} />
+          <Route path="collection" element={<CollectionPage />} />
+          <Route path="collectors" element={<CollectorsPage />} />
           <Route path="chronicle" element={<ChroniclePage />} />
           <Route path="the-call" element={<BleedPage />} />
           <Route path="the-bleed" element={<BleedPage />} />

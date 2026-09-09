@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { checkOwnership, choirIdentity } from "./web3.js";
+import { checkOwnership, checkCollectionOwnership, choirIdentity } from "./web3.js";
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 
@@ -19,7 +19,7 @@ const LEGACY_NAMES = {
   isAvalanche: "Core",
 };
 
-export function WalletProvider({ children }) {
+export function WalletProvider({ children, collectionConfig = null, ownershipReader = checkOwnership }) {
   const [wallets, setWallets] = useState([]); // detected providers
   const [account, setAccount] = useState(null);
   const [chainId, setChainId] = useState(null);
@@ -86,12 +86,12 @@ export function WalletProvider({ children }) {
     if (!target) { setOwned({ cchain: new Set(), grotto: new Set() }); return; }
     setLoadingOwnership(true);
     try {
-      const result = await checkOwnership(target);
+      const result = await (collectionConfig ? checkCollectionOwnership(target, collectionConfig) : ownershipReader(target));
       setOwned(result);
     } finally {
       setLoadingOwnership(false);
     }
-  }, [account]);
+  }, [account, collectionConfig, ownershipReader]);
 
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
