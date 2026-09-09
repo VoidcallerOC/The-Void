@@ -3,7 +3,7 @@ import { isValidAddress, switchChain, waitForReceipt } from "./web3.js";
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED" });
 export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", CONFIRMED: "CONFIRMED", FAILED: "FAILED", REJECTED: "REJECTED", EXPIRED: "EXPIRED" });
 export const MARKETPLACE_CONFIG = Object.freeze({ address: "", feeBps: 0, currency: "native", enabled: false });
-const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
+const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0x4f2c5a5e", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
 const LISTING_CREATED_TOPIC = "0x554519707eb9698fba7b6c6299f6150020147337a27abcf083732c531e423ca2";
 const LISTING_SOLD_TOPIC = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");

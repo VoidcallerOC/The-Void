@@ -36,7 +36,7 @@ describe("marketplace ABI, receipt verification, and lifecycle", () => {
   it("encodes approval, listing, and quantity-aware purchase calls", () => {
     expect(encodeApproval(contract).startsWith("0xa22cb465")).toBe(true);
     expect(encodeCreateListing({ contract, seller, tokenId: 1, amount: 2, price: "100", expiresAt: 0 }).match(/.{1,64}/g)).toHaveLength(7);
-    expect(encodeBuy(7, 3).startsWith("0xd6febde8")).toBe(true);
+    expect(encodeBuy(7, 3).startsWith("0x4f2c5a5e")).toBe(true);
     expect(encodeBuy(7, 3).match(/.{1,64}/g)).toHaveLength(3);
   });
   it("verifies buyer, seller, token, quantity, and total payment from settlement", () => {
