@@ -22,6 +22,8 @@ npm run build    # production build to dist/
 npm run preview  # preview the production build
 npm run lint     # eslint (zero-tolerance; enforced in CI)
 npm test         # vitest unit tests
+npm run db:validate # validates migration inventory and transaction structure
+npm run db:migrate  # applies migrations; requires a configured PostgreSQL service
 ```
 
 CI (`.github/workflows/ci.yml`) runs **lint + test + build** on every PR and
@@ -34,28 +36,33 @@ on pushes to `main`. All three are required to pass.
 | Routing / shell | `src/App.jsx`, `src/components/Layout.jsx` | Persistent Nav / Footer / sticky player; route sections are `React.lazy`-split behind a Suspense boundary. |
 | Wallet | `src/lib/WalletContext.jsx`, `src/lib/wallet-context.js` | EIP-6963 + legacy detection, ownership reads, listener lifecycle. The context object + `useWallet` hook live in their own module for fast-refresh. |
 | On-chain | `src/lib/web3.js` | Contracts/chains, `balanceOf` ownership, `safeTransferFrom`, receipt polling, IPFS helpers. |
-| Audio | `src/lib/audio.js` | Module-singleton player mirrored into React via `useAudio()`; resolves preview-vs-full source per track ownership. |
+| Audio | `src/lib/audio.js` | Module-singleton player mirrored into React via `useAudio()`; plays public previews by default and resolves bearer media only through an opaque API grant. |
 | Content | `src/data.js` | Releases, tracklists, presale terms. The `$VOID` presale section is hidden behind the `VOID_LIVE` flag. |
 
 ## Deployment
 
-Deployed on Vercel. `vercel.json` rewrites all paths to `index.html` (SPA) and
-sets long-lived immutable `Cache-Control` on `/assets` and `/fonts`.
+`vercel.json` supports the static SPA deployment by rewriting site routes to
+`index.html` and setting immutable `Cache-Control` on `/assets` and `/fonts`.
+It does **not** deploy `server/index.js` or `server/indexer-worker.js`. The
+production API, PostgreSQL database, persistent indexer, private object store,
+and signer service must be deployed separately before the platform can operate
+as an authenticated marketplace or media service. See
+[`LAUNCH-GATE.md`](./LAUNCH-GATE.md) for the verified scope and exact remaining
+deployment actions.
 
-## Known limitation — audio gating is client-side only
+## Protected media architecture
 
-Released-EP tracks are meant to be **owner-gated**: bearers of the relic hear
-the full song, everyone else hears a 30-second preview. That gating is resolved
-**entirely in the browser** (`src/lib/audio.js`) against the connected wallet's
-on-chain balances.
+All full-duration masters are no longer public static assets. The only public
+audio files are the 27–30 second preview clips under
+`public/assets/audio-preview/`. The player requests `POST /api/media/grants`
+only after wallet authentication. The server then verifies current confirmed
+ownership and the published experience entitlement before creating an opaque,
+wallet-bound, short-lived grant. The player receives `/api/media/<grant-id>`
+rather than a master filename.
 
-The full-length audio files are served as **public static assets** under
-`public/assets/audio/`. Anyone can therefore download a full track by hitting
-its URL directly, without owning the relic — the gate is a UX convenience, not
-an access control.
-
-Making the gate real requires serving full audio from behind an
-ownership-verifying endpoint (a serverless function that checks a signed wallet
-message + on-chain balance, then streams the file or returns a short-lived
-signed URL) and removing the full tracks from the public directory. This is
-intentionally deferred; preview clips and all other functionality work as-is.
+The gateway validates grant expiry and revocation before it opens private
+storage. Development can use a filesystem root outside `public/`. Production
+requires the provider-neutral object-storage signer configuration documented in
+`.env.example`; the signer must return a short-lived HTTPS URL from an approved
+host. No production object store or signing service is configured by this
+repository alone.

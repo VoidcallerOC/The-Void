@@ -80,6 +80,41 @@ describe("durable index synchronization", () => {
     expect(store.calls.reorgs).toHaveLength(1);
   });
 
+  it("rewinds from a divergent persisted checkpoint on restart and replays the replacement canonical block", async () => {
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const checkpoints = new Map([[`43114:${address}`, { chain_id: 43114, contract_address: address, nextBlock: 4, last_processed_block: 3, last_processed_hash: "0xold3" }]]);
+    const blocks = new Map([["43114:2", { block_hash: "0xcanonical2" }], ["43114:3", { block_hash: "0xold3" }]]);
+    const store = storeDouble({ checkpoints, blocks });
+    store.handleReorg = async (value) => { store.calls.reorgs.push(value); blocks.delete("43114:3"); };
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(3),
+      getLogs: vi.fn().mockResolvedValue([singleLog({ blockNumber: 3, tx: "0xreplacement3" })]),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number, number === 2 ? "0xcanonical2" : "0xreplacement3"))),
+    };
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [{ chainId: 43114, address, contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }] });
+    await expect(indexer.syncAll()).resolves.toHaveLength(1);
+    expect(store.calls.reorgs).toEqual([expect.objectContaining({ chainId: 43114, fromBlock: 3, replacementHash: "0xreplacement3" })]);
+    expect(store.calls.applied).toContainEqual(expect.objectContaining({ blockNumber: 3, transactionHash: "0xreplacement3" }));
+  });
+
+  it("does not advance a checkpoint across a missing block gap", async () => {
+    const store = storeDouble();
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(2), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => number === 2 ? Promise.resolve(null) : Promise.resolve(block(number))) };
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, retryOptions: { retries: 0 }, configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }] });
+    await expect(indexer.syncAll()).rejects.toThrow();
+    expect((await store.getCheckpoint({ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).nextBlock).toBe(2);
+  });
+
+  it("persists failure state when the checkpoint database write fails", async () => {
+    const store = storeDouble();
+    store.setCheckpoint = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(1), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn().mockResolvedValue(block(1)) };
+    const logger = { error: vi.fn() };
+    const indexer = new BlockchainIndexer({ rpc, store, logger, confirmations: 0, configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }] });
+    await expect(indexer.syncAll()).rejects.toThrow("database unavailable");
+    expect(logger.error).toHaveBeenCalledWith("indexer.failure.persistence.failed", expect.objectContaining({ originalError: "database unavailable" }));
+  });
+
   it("records malformed events without stopping the synchronization loop", async () => {
     const store = storeDouble();
     const malformed = { ...singleLog(), topics: [singleTopic], data: "0x01" };

@@ -16,19 +16,20 @@ export function WalletButton({ compact }) {
   }, []);
 
   const onClick = async () => {
-    if (w.connected) { w.disconnect(); return; }
+    if (w.connected && w.authenticated) { w.disconnect(); return; }
+    if (w.connected) { await w.authenticate(); return; }
     if (w.wallets.length === 1) { await w.connect(w.wallets[0].provider); return; }
     if (w.wallets.length === 0) { await w.connect(); return; } // legacy window.ethereum
     setOpen((v) => !v);
   };
 
-  const label = w.connected ? shortAddr(w.account) : "CONNECT";
+  const label = w.authenticating ? "AUTHENTICATING" : w.connected ? (w.authenticated ? shortAddr(w.account) : "AUTH REQUIRED") : "CONNECT";
 
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={onClick}
-        title={w.connected ? w.account : "Connect wallet"}
+        title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : "Connect wallet"}
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 500,
@@ -51,7 +52,7 @@ export function WalletButton({ compact }) {
         onMouseLeave={(e) => { if (!w.connected) { e.currentTarget.style.borderColor = "var(--vc-smoke)"; e.currentTarget.style.color = "var(--vc-bone-dim)"; } }}
       >
         {w.connected
-          ? <LogOut size={14} strokeWidth={1.75} />
+          ? w.authenticated ? <LogOut size={14} strokeWidth={1.75} /> : <Wallet size={14} strokeWidth={1.75} />
           : <Wallet size={14} strokeWidth={1.75} />}
         {label}
       </button>
