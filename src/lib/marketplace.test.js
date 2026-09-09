@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LISTING_STATUS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, requiredPayment, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
+import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
 
 const seller = "0x1111111111111111111111111111111111111111";
 const buyer = "0x3333333333333333333333333333333333333333";
@@ -36,8 +36,13 @@ describe("marketplace ABI, receipt verification, and lifecycle", () => {
   it("encodes approval, listing, and quantity-aware purchase calls", () => {
     expect(encodeApproval(contract).startsWith("0xa22cb465")).toBe(true);
     expect(encodeCreateListing({ contract, seller, tokenId: 1, amount: 2, price: "100", expiresAt: 0 }).match(/.{1,64}/g)).toHaveLength(7);
-    expect(encodeBuy(7, 3).startsWith("0x4f2c5a5e")).toBe(true);
+    expect(MARKETPLACE_SELECTORS.buy).toBe("0xd6febde8");
+    expect(encodeBuy(7, 3).startsWith("0xd6febde8")).toBe(true);
     expect(encodeBuy(7, 3).match(/.{1,64}/g)).toHaveLength(3);
+  });
+  it("uses the deployed contract event topic for listing IDs", () => {
+    expect(LISTING_CREATED_TOPIC).toBe("0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19");
+    expect(listingIdFromReceipt({ logs: [{ topics: [LISTING_CREATED_TOPIC, `0x${word(7)}`] }] })).toBe("7");
   });
   it("verifies buyer, seller, token, quantity, and total payment from settlement", () => {
     const listing = active();
