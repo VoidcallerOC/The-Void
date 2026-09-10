@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:validate": "node server/validate-db.js",
     "db:migrate": "node server/migrate.js",
-    "start:api": "node server/index.js"
+    "start:api": "node server/index.js",
+    "start:indexer": "node server/indexer-worker.js"
   },
   "dependencies": {
     "lucide-react": "^1.18.0",
