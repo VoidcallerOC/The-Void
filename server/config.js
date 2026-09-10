@@ -15,15 +15,22 @@ function parseContracts(value, { production = false } = {}) {
   return parsed.map((contract, index) => { if (!/^0x[a-fA-F0-9]{40}$/.test(String(contract.address || ""))) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].address is invalid.`); if (!Number.isInteger(Number(contract.startBlock)) || Number(contract.startBlock) < 0) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].startBlock is invalid.`); return Object.freeze({ ...contract, address: contract.address.toLowerCase(), startBlock: Number(contract.startBlock) }); });
 }
 
+function parseMarketplace(env) {
+  const rawAddress = String(env.MARKETPLACE_ADDRESS || "").trim();
+  const rawChainId = String(env.MARKETPLACE_CHAIN_ID || "").trim();
+  if (!rawAddress && !rawChainId) return Object.freeze({ address: null, chainId: null, enabled: false, status: "not_configured" });
+  if (!/^0x[a-fA-F0-9]{40}$/.test(rawAddress)) throw new ConfigurationError("MARKETPLACE_ADDRESS must be a valid EVM address when marketplace functionality is configured.");
+  const chainId = Number(rawChainId);
+  if (!Number.isInteger(chainId) || chainId !== 43113) throw new ConfigurationError("Fuji marketplace configuration requires MARKETPLACE_CHAIN_ID=43113.");
+  return Object.freeze({ address: rawAddress.toLowerCase(), chainId, enabled: true, status: "configured" });
+}
+
 export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {
   const databaseUrl = String(env.DATABASE_URL || "").trim();
   if (!databaseUrl && !allowMissingDatabase) throw new ConfigurationError("DATABASE_URL is required for the persistence layer.");
   const appEnvironment = String(env.NODE_ENV || "development");
   const production = appEnvironment === "production";
-  const marketplaceAddress = String(env.MARKETPLACE_ADDRESS || "").trim().toLowerCase();
-  const marketplaceChainId = Number(env.MARKETPLACE_CHAIN_ID || 0);
-  const marketplaceEnabled = /^0x[a-f0-9]{40}$/.test(marketplaceAddress) && Number.isInteger(marketplaceChainId) && marketplaceChainId > 0;
-  if (production && !marketplaceEnabled) throw new ConfigurationError("MARKETPLACE_ADDRESS and MARKETPLACE_CHAIN_ID are required in production.");
+  const marketplace = parseMarketplace(env);
   const indexerRpcUrl = requiredUrl(env, "INDEXER_RPC_URL", { production });
   const indexerChainId = Number(env.INDEXER_CHAIN_ID || 0);
   if (indexerRpcUrl && indexerChainId !== 43113) throw new ConfigurationError("Fuji staging requires INDEXER_CHAIN_ID=43113.");
@@ -42,7 +49,7 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
     authDomain,
     authUri,
     allowedOrigins,
-    marketplace: Object.freeze({ address: marketplaceEnabled ? marketplaceAddress : null, chainId: marketplaceEnabled ? marketplaceChainId : null, enabled: marketplaceEnabled }),
+    marketplace,
     indexer: Object.freeze({ rpcUrl: indexerRpcUrl, chainId: indexerChainId || null, confirmations: Math.max(0, positiveInteger(env.INDEXER_CONFIRMATIONS, 12)), pollIntervalMs: Math.max(1000, positiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15000)), contracts: parseContracts(env.INDEXER_CONTRACTS_JSON, { production }) }),
   });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { BlockchainIndexer, decodeTransferLog, retry } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
+import { createIndexerWorker } from "./indexer-worker.js";
 
 const singleTopic = "0xsingle";
 const batchTopic = "0xbatch";
@@ -41,6 +42,27 @@ describe("ERC-1155 event decoding", () => {
     const data = `0x${word(64)}${word(160)}${word(2)}${word(7)}${word(8)}${word(2)}${word(3)}${word(4)}`;
     const result = decodeTransferLog({ ...singleLog({}), topics: [batchTopic, addrTopic(alice), addrTopic(alice), addrTopic(bob)], data }, { chainId: 43114, blockTimestamp: new Date(), eventTopics: { TransferBatch: batchTopic } });
     expect(result.map((item) => [item.tokenId, item.amount])).toEqual([["7", "3"], ["8", "4"]]);
+  });
+});
+
+describe("Fuji worker startup", () => {
+  it("initializes deterministically with marketplace functionality disabled", () => {
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const worker = createIndexerWorker({
+      config: {
+        marketplace: { enabled: false, address: null, chainId: null },
+        databaseUrl: "postgres://staging",
+        databaseSsl: false,
+        poolMax: 1,
+        poolIdleTimeoutMs: 1000,
+        poolConnectionTimeoutMs: 1000,
+        indexer: { rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc", chainId: 43113, confirmations: 12, pollIntervalMs: 15000, contracts: [{ address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1 }] },
+      },
+      pool: { query: vi.fn(), end: vi.fn() },
+      logger,
+    });
+    expect(worker).toHaveProperty("syncOnce");
+    expect(logger.info).toHaveBeenCalledWith("indexer.marketplace", { status: "not_configured", address: null, chainId: null });
   });
 });
 

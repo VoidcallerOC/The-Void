@@ -22,6 +22,17 @@ describe("persistence configuration", () => {
     expect(config.indexer.contracts[0].startBlock).toBe(10);
     expect(() => loadServerConfig({ DATABASE_URL: "postgres://staging", NODE_ENV: "production", PUBLIC_APP_URL: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", API_ALLOWED_ORIGINS: "https://staging.example.com", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43114", MARKETPLACE_ADDRESS: "0x2222222222222222222222222222222222222222", MARKETPLACE_CHAIN_ID: "43113" })).toThrow(/43113/);
   });
+
+  it("allows production Fuji API configuration before marketplace deployment", () => {
+    const config = loadServerConfig({ DATABASE_URL: "postgres://staging", NODE_ENV: "production", PUBLIC_APP_URL: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", API_ALLOWED_ORIGINS: "https://staging.example.com", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43113", INDEXER_CONTRACTS_JSON: '[{"address":"0x1111111111111111111111111111111111111111","contractType":"ERC1155","startBlock":10}]' });
+    expect(config.marketplace).toMatchObject({ enabled: false, status: "not_configured", address: null, chainId: null });
+  });
+
+  it("keeps configured marketplace validation strict", () => {
+    const base = { DATABASE_URL: "postgres://staging", NODE_ENV: "production", PUBLIC_APP_URL: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", API_ALLOWED_ORIGINS: "https://staging.example.com", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43113", INDEXER_CONTRACTS_JSON: '[{"address":"0x1111111111111111111111111111111111111111","contractType":"MARKETPLACE","startBlock":10}]' };
+    expect(() => loadServerConfig({ ...base, MARKETPLACE_ADDRESS: "not-an-address", MARKETPLACE_CHAIN_ID: "43113" })).toThrow(/MARKETPLACE_ADDRESS/);
+    expect(() => loadServerConfig({ ...base, MARKETPLACE_ADDRESS: "0x2222222222222222222222222222222222222222", MARKETPLACE_CHAIN_ID: "43114" })).toThrow(/43113/);
+  });
 });
 
 describe("transaction handling", () => {
