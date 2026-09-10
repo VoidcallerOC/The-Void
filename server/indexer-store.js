@@ -44,6 +44,40 @@ export class IndexerStore {
     return rows[0] || null;
   }
 
+  async applyMarketplaceEvent(event) {
+    const { chainId, contractAddress, transactionHash, logIndex, blockNumber, blockHash, eventType } = event;
+    if (!event.marketplaceContractId) {
+      await this.recordIndexerError({ chainId, contractAddress, blockNumber, transactionHash, logIndex, errorType: "MARKETPLACE_CONFIG", message: "Marketplace contract UUID is required for durable projection." });
+      return { projected: false, reconciliationRequired: true };
+    }
+    return withTransaction(this.db, async (client) => {
+      if (eventType === "ListingCreated") {
+        if (!event.tokenContractId) throw new Error("Marketplace token contract UUID is required for listing projection.");
+        const result = await client.query(`INSERT INTO listings (chain_id, marketplace_contract_id, listing_id, seller_wallet, token_contract_id, token_id, amount, remaining_amount, price_wei, expires_at, status, created_tx_hash, created_block_number, created_block_hash, created_log_index) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,CASE WHEN $9=0 THEN NULL ELSE to_timestamp($9) END,'ACTIVE',$10,$11,$12,$13) ON CONFLICT (chain_id, marketplace_contract_id, listing_id) DO UPDATE SET remaining_amount=EXCLUDED.remaining_amount, status='ACTIVE', updated_at=now() RETURNING *`, [chainId, event.marketplaceContractId, event.listingId, event.seller, event.tokenContractId, event.tokenId, event.amount, event.priceWei, event.expiresAt, transactionHash, blockNumber, blockHash, logIndex]);
+        await client.query(`INSERT INTO listing_status_history (listing_id, status, transaction_hash, block_number, block_hash, log_index) VALUES ($1,'ACTIVE',$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [result.rows[0].id, transactionHash, blockNumber, blockHash, logIndex]);
+        return { projected: true, listing: result.rows[0] };
+      }
+      const listingResult = await client.query("SELECT * FROM listings WHERE chain_id=$1 AND marketplace_contract_id=$2 AND listing_id=$3 FOR UPDATE", [chainId, event.marketplaceContractId, event.listingId]);
+      const listing = listingResult.rows[0];
+      if (!listing) return { projected: false, reconciliationRequired: true };
+      if (eventType === "ListingCancelled" || eventType === "ListingExpired") {
+        const status = eventType === "ListingCancelled" ? "CANCELLED" : "EXPIRED";
+        await client.query("UPDATE listings SET status=$2, updated_at=now() WHERE id=$1", [listing.id, status]);
+        await client.query("INSERT INTO listing_status_history (listing_id,status,transaction_hash,block_number,block_hash,log_index) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING", [listing.id, status, transactionHash, blockNumber, blockHash, logIndex]);
+        return { projected: true, status };
+      }
+      if (eventType === "ListingSold") {
+        const nextRemaining = BigInt(listing.remaining_amount) - BigInt(event.quantity);
+        if (nextRemaining < 0n) throw new Error("Marketplace sale exceeds indexed listing quantity; reconciliation is required.");
+        const status = nextRemaining === 0n ? "SOLD" : "ACTIVE";
+        await client.query("UPDATE listings SET remaining_amount=$2, status=$3, updated_at=now() WHERE id=$1", [listing.id, nextRemaining.toString(), status]);
+        await client.query(`INSERT INTO purchases (listing_id, chain_id, transaction_hash, settlement_log_index, buyer_wallet, seller_wallet, token_contract_address, token_id, quantity, sale_price_wei, platform_fee_wei, royalty_wei, block_number, block_hash, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'CONFIRMED') ON CONFLICT (chain_id, transaction_hash, settlement_log_index) DO NOTHING`, [listing.id, chainId, transactionHash, logIndex, event.buyer, event.seller, event.tokenContract, event.tokenId, event.quantity, event.salePriceWei, event.platformFeeWei, event.royaltyWei, blockNumber, blockHash]);
+        return { projected: true, status, remainingAmount: nextRemaining.toString() };
+      }
+      return { projected: true, status: "IGNORED" };
+    });
+  }
+
   async applyTransfer({ chainId, contractAddress, transactionHash, blockNumber, blockHash, logIndex, eventType, from, to, tokenId, amount, blockTimestamp, raw = {} }) {
     return withTransaction(this.db, async (client) => {
       const inserted = await client.query(`INSERT INTO transfers (chain_id, contract_address, token_id, from_wallet, to_wallet, amount, transaction_hash, block_number, block_hash, log_index, event_type, event_data, block_timestamp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (chain_id, transaction_hash, log_index) DO NOTHING RETURNING *`, [chainId, lower(contractAddress), tokenId, lower(from), lower(to), amount, lower(transactionHash), blockNumber, lower(blockHash), logIndex, eventType, raw, blockTimestamp]);
