@@ -11,8 +11,11 @@ async function readJson(request) {
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new (class extends Error { constructor() { super("Request body must be valid JSON."); this.code = "INVALID_JSON"; } })(); }
 }
 
-function send(response, status, body) {
-  response.writeHead(status, JSON_HEADERS);
+function send(response, status, body, request = null) {
+  const headers = { ...JSON_HEADERS };
+  const origin = request?.headers?.origin;
+  if (origin && request.allowedOrigins?.includes(origin)) { headers["access-control-allow-origin"] = origin; headers.vary = "origin"; }
+  response.writeHead(status, headers);
   response.end(JSON.stringify(body));
 }
 
@@ -28,7 +31,12 @@ export function createApiHandler({ service, logger = console } = {}) {
     const base = parts[0] === "api" ? parts.slice(1) : parts;
     const apiRequest = { requestId, method, path: url.pathname, headers: request.headers, ip: request.socket?.remoteAddress, rateLimitKey: request.headers["x-forwarded-for"] || request.socket?.remoteAddress || "anonymous" };
     try {
-      if (method === "GET" && base.length === 1 && base[0] === "health") return send(response, 200, { data: { ok: true, service: "voidcaller-api" }, requestId });
+      apiRequest.allowedOrigins = service.allowedOrigins || [];
+      if (method === "GET" && base.length === 1 && base[0] === "health") return send(response, 200, { data: { ok: true, service: "voidcaller-api" }, requestId }, apiRequest);
+      if (method === "GET" && base.length === 2 && base[0] === "health" && base[1] === "ready") {
+        const readiness = typeof service.readiness === "function" ? await service.readiness() : { ok: false, status: "not_ready", error: "Readiness checker is not configured." };
+        return send(response, readiness.ok ? 200 : 503, { data: readiness, requestId }, apiRequest);
+      }
       let data;
       if (method === "GET" && base[0] === "artists" && base.length === 1) data = await service.listArtists({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "artists" && base.length === 2) data = await service.getArtist({ idOrSlug: base[1] });
@@ -51,13 +59,13 @@ export function createApiHandler({ service, logger = console } = {}) {
         else if (method === "POST" && base.join("/") === "experiences/redeem") data = await service.redeemExperience({ request: apiRequest, input: body });
         else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
       }
-      return send(response, 200, { data, requestId });
+      return send(response, 200, { data, requestId }, apiRequest);
     } catch (error) {
       const normalized = apiErrorFrom(error);
       if (error?.code === "INVALID_JSON") normalized.status = 400, normalized.code = "INVALID_JSON", normalized.message = error.message;
       if (error?.code === "NOT_FOUND") normalized.status = 404, normalized.code = "NOT_FOUND", normalized.message = error.message;
       logger.error?.("api.http.error", { requestId, path: url.pathname, method, code: normalized.code });
-      return send(response, normalized.status, errorResponse(normalized, requestId));
+      return send(response, normalized.status, errorResponse(normalized, requestId), apiRequest);
     }
   };
 }

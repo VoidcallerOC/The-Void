@@ -58,6 +58,7 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
     error InsufficientApproval();
     error InsufficientQuantity();
     error FeeTooHigh();
+    error RoyaltyTooHigh();
     error TransferFailed();
     error Reentrancy();
 
@@ -111,7 +112,7 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
         if (listing.amount == 0) listing.status = Status.SOLD;
         uint256 platformFee = (salePrice * platformFeeBps) / BPS_DENOMINATOR;
         (address royaltyReceiver, uint256 royaltyAmount) = _royalty(listing.tokenContract, listing.tokenId, salePrice);
-        if (royaltyAmount > salePrice - platformFee) royaltyAmount = 0;
+        if (royaltyAmount > salePrice - platformFee) revert RoyaltyTooHigh();
         uint256 sellerProceeds = salePrice - platformFee - royaltyAmount;
 
         IERC1155Marketplace(listing.tokenContract).safeTransferFrom(listing.seller, msg.sender, listing.tokenId, quantity, "");
@@ -146,4 +147,8 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
 
     function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) { return this.onERC1155Received.selector; }
     function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata) external pure returns (bytes4) { return this.onERC1155BatchReceived.selector; }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7 || interfaceId == type(IERC1155ReceiverMarketplace).interfaceId;
+    }
 }

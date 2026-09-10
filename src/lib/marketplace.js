@@ -1,8 +1,21 @@
 import { isValidAddress, switchChain, waitForReceipt } from "./web3.js";
 
-export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED" });
-export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", CONFIRMED: "CONFIRMED", FAILED: "FAILED", REJECTED: "REJECTED", EXPIRED: "EXPIRED" });
-export const MARKETPLACE_CONFIG = Object.freeze({ address: "", feeBps: 0, currency: "native", enabled: false });
+export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
+export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", OBSERVED: "OBSERVED", CONFIRMED: "CONFIRMED", FINALIZED: "FINALIZED", FAILED: "FAILED", REJECTED: "REJECTED", REVERTED: "REVERTED", REPLACED: "REPLACED", STALE: "STALE", RECONCILIATION_REQUIRED: "RECONCILIATION_REQUIRED", EXPIRED: "EXPIRED" });
+export const TRANSACTION_STATE = Object.freeze({ SUBMITTED: "SUBMITTED", PENDING: "PENDING", OBSERVED: "OBSERVED", CONFIRMED: "CONFIRMED", FINALIZED: "FINALIZED", FAILED: "FAILED", REVERTED: "REVERTED", REPLACED: "REPLACED", STALE: "STALE", RECONCILIATION_REQUIRED: "RECONCILIATION_REQUIRED" });
+
+const env = typeof import.meta !== "undefined" ? (import.meta.env || {}) : {};
+const configuredAddress = String(env.VITE_MARKETPLACE_ADDRESS || "").trim();
+const configuredChainId = Number(env.VITE_MARKETPLACE_CHAIN_ID || 0);
+export const MARKETPLACE_CONFIG = Object.freeze({
+  address: isValidAddress(configuredAddress) ? configuredAddress : "",
+  chainId: Number.isInteger(configuredChainId) && configuredChainId > 0 ? configuredChainId : 0,
+  feeBps: String(env.VITE_MARKETPLACE_FEE_BPS || ""),
+  currency: "native",
+  apiBaseUrl: String(env.VITE_MARKETPLACE_API_BASE_URL || "/api").replace(/\/$/, ""),
+  enabled: isValidAddress(configuredAddress) && Number.isInteger(configuredChainId) && configuredChainId > 0,
+});
+
 const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
 const LISTING_CREATED_TOPIC = "0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19";
 const LISTING_SOLD_TOPIC = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
@@ -30,52 +43,17 @@ export function encodeApproval(marketplace, approved = true) { return SELECTORS.
 export function encodeApprovalCheck(owner, marketplace) { return SELECTORS.approved + addressWord(owner) + addressWord(marketplace); }
 export function requiredPayment(listing, quantity = listing?.amount) { if (!listing || !/^[0-9]+$/.test(String(listing.price)) || !Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return null; return (BigInt(listing.price) * BigInt(quantity)).toString(); }
 
+export async function fetchListings({ signal, filters = {} } = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== "")); const response = await fetch(`${MARKETPLACE_CONFIG.apiBaseUrl}/listings?${query}`, { signal }); if (!response.ok) throw new Error("Marketplace listings could not be loaded."); const payload = await response.json(); return payload.data || []; }
 export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) { if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] }); return waitForReceipt(provider, txHash); }
 export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) { const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 }); if (error) throw new Error(error); if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] }); return waitForReceipt(provider, txHash); }
 export function listingIdFromReceipt(receipt) { const log = receipt?.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_CREATED_TOPIC); return log?.topics?.[1] ? BigInt(log.topics[1]).toString() : null; }
 export async function submitCancel({ provider, owner, marketplace, listingId }) { const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCancelListing(listingId) }] }); return waitForReceipt(provider, txHash); }
+export async function readListing({ provider, marketplace, listingId }) { const result = await provider.request({ method: "eth_call", params: [{ to: marketplace, data: SELECTORS.getListing + word(listingId) }, "latest"] }); const words = result.replace(/^0x/, "").match(/.{64}/g) || []; if (words.length < 9) throw new Error("Marketplace returned an invalid listing."); const tokenContract = decodeAddress(words[2]); return { listingId: decodeUint(words[0]).toString(), seller: decodeAddress(words[1]), tokenContract, contract: tokenContract, tokenId: decodeUint(words[3]).toString(), amount: decodeUint(words[4]).toString(), price: decodeUint(words[5]).toString(), createdAt: Number(decodeUint(words[6])), expiresAt: Number(decodeUint(words[7])), status: [LISTING_STATUS.ACTIVE, LISTING_STATUS.SOLD, LISTING_STATUS.CANCELLED, LISTING_STATUS.EXPIRED][Number(decodeUint(words[8]))] || "UNKNOWN" }; }
+export function validatePurchase({ listing, buyer, quantity = listing?.amount, now = Math.floor(Date.now() / 1000) }) { if (!listing || listing.status !== LISTING_STATUS.ACTIVE) return "This listing is no longer active."; if (listing.expiresAt && now > listing.expiresAt) return "This listing has expired."; if (!isValidAddress(buyer)) return "Connect a valid buyer wallet."; if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return "Purchase quantity must be a positive integer."; if (BigInt(quantity) > BigInt(listing.amount)) return "The requested quantity is not available."; if (!/^[0-9]+$/.test(String(listing.price)) || BigInt(listing.price) <= 0n) return "The listing has an invalid price."; return null; }
+export function verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity = listing.amount }) { if (!receipt || receipt.status !== "0x1") throw new Error("Purchase transaction did not succeed."); if (receipt.to && receipt.to.toLowerCase() !== marketplace.toLowerCase()) throw new Error("Receipt target did not match the marketplace."); const log = receipt.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_SOLD_TOPIC); if (!log) throw new Error("Purchase receipt did not contain a marketplace settlement event."); const data = log.data.replace(/^0x/, "").match(/.{64}/g) || []; if (log.topics.length < 4 || data.length < 4) throw new Error("Settlement event was incomplete."); const actual = { listingId: BigInt(log.topics[1]).toString(), buyer: decodeAddress(log.topics[2]), seller: decodeAddress(log.topics[3]), tokenContract: decodeAddress(data[0]), tokenId: decodeUint(data[1]).toString(), amount: decodeUint(data[2]).toString(), price: decodeUint(data[3]).toString() }; const expected = { listingId: String(listing.listingId), buyer, seller: listing.seller, tokenContract: listing.tokenContract || listing.contract, tokenId: String(listing.tokenId), amount: String(quantity), price: requiredPayment(listing, quantity) }; for (const [key, value] of Object.entries(expected)) { const normalized = typeof value === "string" && value.startsWith("0x") ? value.toLowerCase() : String(value); if (String(actual[key]).toLowerCase() !== normalized) throw new Error(`Settlement verification failed for ${key}.`); } return actual; }
+export async function submitPurchase({ provider, buyer, marketplace, listing, quantity = listing.amount, chain, chainId, onState = () => {} }) { const validationError = validatePurchase({ listing, buyer, quantity }); if (validationError) throw Object.assign(new Error(validationError), { code: listing?.expiresAt && Math.floor(Date.now() / 1000) > listing.expiresAt ? "EXPIRED" : "INVALID_LISTING" }); if (chainId !== chain.id) await switchChain(provider, chain.key); const payment = requiredPayment(listing, quantity); onState(PURCHASE_STATE.WALLET_CONFIRMATION); let txHash; try { txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: buyer, to: marketplace, data: encodeBuy(listing.listingId, quantity), value: `0x${BigInt(payment).toString(16)}` }] }); } catch (error) { onState(error?.code === 4001 ? PURCHASE_STATE.REJECTED : PURCHASE_STATE.FAILED); throw error; } onState(PURCHASE_STATE.SUBMITTED); onState(PURCHASE_STATE.PENDING); const receipt = await waitForReceipt(provider, txHash); const settlement = verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity }); onState(PURCHASE_STATE.OBSERVED); onState(PURCHASE_STATE.CONFIRMED); return { txHash, receipt, settlement, quantity, payment }; }
 
-export async function readListing({ provider, marketplace, listingId }) {
-  const result = await provider.request({ method: "eth_call", params: [{ to: marketplace, data: SELECTORS.getListing + word(listingId) }, "latest"] });
-  const words = result.replace(/^0x/, "").match(/.{64}/g) || [];
-  if (words.length < 9) throw new Error("Marketplace returned an invalid listing.");
-  const tokenContract = decodeAddress(words[2]);
-  return { listingId: decodeUint(words[0]).toString(), seller: decodeAddress(words[1]), tokenContract, contract: tokenContract, tokenId: decodeUint(words[3]).toString(), amount: decodeUint(words[4]).toString(), price: decodeUint(words[5]).toString(), createdAt: Number(decodeUint(words[6])), expiresAt: Number(decodeUint(words[7])), status: [LISTING_STATUS.ACTIVE, LISTING_STATUS.SOLD, LISTING_STATUS.CANCELLED, LISTING_STATUS.EXPIRED][Number(decodeUint(words[8]))] || "UNKNOWN" };
-}
-export function validatePurchase({ listing, buyer, quantity = listing?.amount, now = Math.floor(Date.now() / 1000) }) {
-  if (!listing || listing.status !== LISTING_STATUS.ACTIVE) return "This listing is no longer active.";
-  if (listing.expiresAt && now > listing.expiresAt) return "This listing has expired.";
-  if (!isValidAddress(buyer)) return "Connect a valid buyer wallet.";
-  if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return "Purchase quantity must be a positive integer.";
-  if (BigInt(quantity) > BigInt(listing.amount)) return "The requested quantity is not available.";
-  if (!/^[0-9]+$/.test(String(listing.price)) || BigInt(listing.price) <= 0n) return "The listing has an invalid price.";
-  return null;
-}
-export function verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity = listing.amount }) {
-  if (!receipt || receipt.status !== "0x1") throw new Error("Purchase transaction did not succeed.");
-  if (receipt.to && receipt.to.toLowerCase() !== marketplace.toLowerCase()) throw new Error("Receipt target did not match the marketplace.");
-  const log = receipt.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_SOLD_TOPIC);
-  if (!log) throw new Error("Purchase receipt did not contain a marketplace settlement event.");
-  const data = log.data.replace(/^0x/, "").match(/.{64}/g) || [];
-  if (log.topics.length < 4 || data.length < 4) throw new Error("Settlement event was incomplete.");
-  const actual = { listingId: BigInt(log.topics[1]).toString(), buyer: decodeAddress(log.topics[2]), seller: decodeAddress(log.topics[3]), tokenContract: decodeAddress(data[0]), tokenId: decodeUint(data[1]).toString(), amount: decodeUint(data[2]).toString(), price: decodeUint(data[3]).toString() };
-  const expected = { listingId: String(listing.listingId), buyer, seller: listing.seller, tokenContract: listing.tokenContract || listing.contract, tokenId: String(listing.tokenId), amount: String(quantity), price: requiredPayment(listing, quantity) };
-  for (const [key, value] of Object.entries(expected)) { const normalized = typeof value === "string" && value.startsWith("0x") ? value.toLowerCase() : String(value); if (String(actual[key]).toLowerCase() !== normalized) throw new Error(`Settlement verification failed for ${key}.`); }
-  return actual;
-}
-export async function submitPurchase({ provider, buyer, marketplace, listing, quantity = listing.amount, chain, chainId, onState = () => {} }) {
-  const validationError = validatePurchase({ listing, buyer, quantity });
-  if (validationError) throw Object.assign(new Error(validationError), { code: listing?.expiresAt && Math.floor(Date.now() / 1000) > listing.expiresAt ? "EXPIRED" : "INVALID_LISTING" });
-  if (chainId !== chain.id) await switchChain(provider, chain.key);
-  const payment = requiredPayment(listing, quantity);
-  onState(PURCHASE_STATE.WALLET_CONFIRMATION);
-  let txHash;
-  try { txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: buyer, to: marketplace, data: encodeBuy(listing.listingId, quantity), value: `0x${BigInt(payment).toString(16)}` }] }); } catch (error) { onState(error?.code === 4001 ? PURCHASE_STATE.REJECTED : PURCHASE_STATE.FAILED); throw error; }
-  onState(PURCHASE_STATE.SUBMITTED); onState(PURCHASE_STATE.PENDING);
-  const receipt = await waitForReceipt(provider, txHash);
-  const settlement = verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity });
-  onState(PURCHASE_STATE.CONFIRMED);
-  return { txHash, receipt, settlement, quantity, payment };
-}
-export function transitionListing(listing, nextStatus) { if (!listing || !Object.values(LISTING_STATUS).includes(nextStatus)) throw new Error("Invalid listing state."); const allowed = { ACTIVE: ["SOLD", "CANCELLED", "EXPIRED"], SOLD: [], CANCELLED: [], EXPIRED: [] }; if (!allowed[listing.status].includes(nextStatus)) throw new Error(`Cannot transition ${listing.status} to ${nextStatus}.`); return { ...listing, status: nextStatus }; }
+export function transitionListing(listing, nextStatus) { if (!listing || !Object.values(LISTING_STATUS).includes(nextStatus)) throw new Error("Invalid listing state."); const allowed = { ACTIVE: ["SOLD", "CANCELLED", "EXPIRED", "REORGED"], SOLD: [], CANCELLED: [], EXPIRED: [], REORGED: [] }; if (!allowed[listing.status].includes(nextStatus)) throw new Error(`Cannot transition ${listing.status} to ${nextStatus}.`); return { ...listing, status: nextStatus }; }
+const TERMINAL_TRANSACTION_STATES = new Set([TRANSACTION_STATE.FAILED, TRANSACTION_STATE.REVERTED, TRANSACTION_STATE.REPLACED, TRANSACTION_STATE.STALE, TRANSACTION_STATE.RECONCILIATION_REQUIRED, TRANSACTION_STATE.FINALIZED]);
+export function transitionTransaction(transaction, nextState) { if (!transaction || !Object.values(TRANSACTION_STATE).includes(nextState)) throw new Error("Invalid transaction state."); if (transaction.state === nextState) return transaction; if (TERMINAL_TRANSACTION_STATES.has(transaction.state)) throw new Error(`Cannot transition terminal transaction ${transaction.state}.`); const allowed = { SUBMITTED: ["PENDING", "FAILED", "REVERTED", "REPLACED", "STALE"], PENDING: ["OBSERVED", "FAILED", "REVERTED", "REPLACED", "STALE", "RECONCILIATION_REQUIRED"], OBSERVED: ["CONFIRMED", "FAILED", "REVERTED", "REPLACED", "RECONCILIATION_REQUIRED"], CONFIRMED: ["FINALIZED", "RECONCILIATION_REQUIRED"], FINALIZED: [], FAILED: [], REVERTED: [], REPLACED: [], STALE: [], RECONCILIATION_REQUIRED: [] }; if (!allowed[transaction.state]?.includes(nextState)) throw new Error(`Cannot transition ${transaction.state} to ${nextState}.`); return { ...transaction, state: nextState }; }
 export { SELECTORS as MARKETPLACE_SELECTORS, LISTING_CREATED_TOPIC, LISTING_SOLD_TOPIC };
