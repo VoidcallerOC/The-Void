@@ -20,7 +20,7 @@
     "pg": "^8.23.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^7.17.0"
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -34,6 +34,14 @@
     "globals": "^17.6.0",
     "opentype.js": "^2.0.0",
     "vite": "^8.0.12",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@vitest/mocker": "^4.1.11",
+    "baseline-browser-mapping": "^2.11.0",
+    "brace-expansion": "^5.0.9",
+    "browserslist": "^4.28.7",
+    "nanoid": "^3.3.18",
+    "postcss": "^8.5.23"
   }
 }
