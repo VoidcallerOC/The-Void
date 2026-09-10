@@ -7,9 +7,9 @@ export class ConfigurationError extends Error {
 function positiveInteger(value, fallback) { const parsed = Number(value ?? fallback); return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback; }
 function requiredUrl(env, key, { production = false } = {}) { const value = String(env[key] || "").trim(); if (!value && !production) return null; try { return new URL(value).toString().replace(/\/$/, ""); } catch { throw new ConfigurationError(`${key} must be a valid URL.`); } }
 function listValue(value) { return String(value || "").split(",").map((item) => item.trim()).filter(Boolean); }
-function parseContracts(value, { production = false } = {}) {
+function parseContracts(value, { production = false, required = production } = {}) {
   const raw = String(value || "").trim();
-  if (!raw) { if (production) throw new ConfigurationError("INDEXER_CONTRACTS_JSON is required in production."); return []; }
+  if (!raw) { if (required) throw new ConfigurationError("INDEXER_CONTRACTS_JSON is required for the indexer worker."); return []; }
   let parsed; try { parsed = JSON.parse(raw); } catch { throw new ConfigurationError("INDEXER_CONTRACTS_JSON must be valid JSON."); }
   if (!Array.isArray(parsed) || parsed.length === 0) throw new ConfigurationError("INDEXER_CONTRACTS_JSON must be a non-empty array.");
   return parsed.map((contract, index) => { if (!/^0x[a-fA-F0-9]{40}$/.test(String(contract.address || ""))) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].address is invalid.`); if (!Number.isInteger(Number(contract.startBlock)) || Number(contract.startBlock) < 0) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].startBlock is invalid.`); return Object.freeze({ ...contract, address: contract.address.toLowerCase(), startBlock: Number(contract.startBlock) }); });
@@ -25,7 +25,7 @@ function parseMarketplace(env) {
   return Object.freeze({ address: rawAddress.toLowerCase(), chainId, enabled: true, status: "configured" });
 }
 
-export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {
+export function loadServerConfig(env = process.env, { allowMissingDatabase = false, requireIndexerContracts = false } = {}) {
   const databaseUrl = String(env.DATABASE_URL || "").trim();
   if (!databaseUrl && !allowMissingDatabase) throw new ConfigurationError("DATABASE_URL is required for the persistence layer.");
   const appEnvironment = String(env.NODE_ENV || "development");
@@ -50,6 +50,6 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
     authUri,
     allowedOrigins,
     marketplace,
-    indexer: Object.freeze({ rpcUrl: indexerRpcUrl, chainId: indexerChainId || null, confirmations: Math.max(0, positiveInteger(env.INDEXER_CONFIRMATIONS, 12)), pollIntervalMs: Math.max(1000, positiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15000)), contracts: parseContracts(env.INDEXER_CONTRACTS_JSON, { production }) }),
+    indexer: Object.freeze({ rpcUrl: indexerRpcUrl, chainId: indexerChainId || null, confirmations: Math.max(0, positiveInteger(env.INDEXER_CONFIRMATIONS, 12)), pollIntervalMs: Math.max(1000, positiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15000)), contracts: parseContracts(env.INDEXER_CONTRACTS_JSON, { production, required: requireIndexerContracts }) }),
   });
 }
