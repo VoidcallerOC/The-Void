@@ -7,6 +7,7 @@ import { createJsonRpcClient } from "./indexer-rpc.js";
 
 export function createIndexerWorker({ config = loadServerConfig(), pool = null, logger = console, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   if (!config.indexer.rpcUrl || config.indexer.chainId !== 43113 || config.indexer.contracts.length === 0) throw new Error("Fuji indexer requires INDEXER_RPC_URL, INDEXER_CHAIN_ID=43113, and INDEXER_CONTRACTS_JSON.");
+  logger.info?.("indexer.marketplace", { status: config.marketplace?.enabled ? "configured" : "not_configured", address: config.marketplace?.address || null, chainId: config.marketplace?.chainId || null });
   const ownPool = pool || createDatabasePool(config);
   const rpc = createJsonRpcClient({ url: config.indexer.rpcUrl });
   const store = createIndexerStore(ownPool);

@@ -4,6 +4,7 @@ import { createApiHandler } from "./api-http.js";
 import { ApiError } from "./api-errors.js";
 import { createRateLimiter } from "./api-runtime.js";
 import { ApiService } from "./api-service.js";
+import { createReadinessChecker } from "./readiness.js";
 
 const wallet = "0xd1b4367dd9f235f9ee61878019d66e31511e98ee";
 const seller = "0x1111111111111111111111111111111111111111";
@@ -32,6 +33,17 @@ describe("HTTP API boundary", () => {
     await handler(requestDouble({ method: "POST", url: "/api/listings", body: "not-json" }), response);
     expect(response.status).toBe(400);
     expect(JSON.parse(response.body).error.code).toBe("INVALID_JSON");
+  });
+
+  it("reports an unconfigured marketplace in readiness without crashing", async () => {
+    const pool = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ ok: 1 }] })
+      .mockResolvedValueOnce({ rows: [{ name: "001_initial_persistence.sql" }] })
+      .mockResolvedValueOnce({ rows: [{ finalized_block: null, last_processed_block: null, updated_at: null }] }) };
+    const readiness = createReadinessChecker({ pool, config: { marketplace: { enabled: false }, indexer: { rpcUrl: null, chainId: null, pollIntervalMs: 15000 } } });
+    const result = await readiness();
+    expect(result.marketplace).toMatchObject({ configured: false, status: "not_configured" });
+    expect(result.ok).toBe(false);
   });
 });
 

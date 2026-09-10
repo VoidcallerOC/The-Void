@@ -8,6 +8,9 @@ export function createReadinessChecker({ pool, config, rpc = null, now = () => D
     if (database.ok) {
       try { await pool.query("SELECT name FROM schema_migrations ORDER BY name LIMIT 1"); database.migrations = { ok: true }; } catch (error) { database.migrations = { ok: false, error: error.message }; database.ok = false; }
     }
+    const marketplace = config?.marketplace?.enabled
+      ? { configured: true, status: "configured", address: config.marketplace.address, chainId: config.marketplace.chainId }
+      : { configured: false, status: "not_configured", address: null, chainId: null };
     let indexer = { ok: false, configured: Boolean(config?.indexer?.rpcUrl && config?.indexer?.chainId), chainId: config?.indexer?.chainId || null, latestBlock: null, finalizedBlock: null, checkpoint: null, lag: null, error: null };
     if (indexer.configured && rpcClient) {
       try {
@@ -21,6 +24,6 @@ export function createReadinessChecker({ pool, config, rpc = null, now = () => D
       } catch (error) { indexer = { ...indexer, error: error.message }; }
     }
     const ok = database.ok && indexer.ok && !indexer.stale;
-    return { ok, status: ok ? "ready" : "not_ready", database, rpc: { ok: indexer.error === null && indexer.configured, chainId: indexer.chainId, latestBlock: indexer.latestBlock, error: indexer.error }, indexer };
+    return { ok, status: ok ? "ready" : "not_ready", database, marketplace, rpc: { ok: indexer.error === null && indexer.configured, chainId: indexer.chainId, latestBlock: indexer.latestBlock, error: indexer.error }, indexer };
   };
 }
