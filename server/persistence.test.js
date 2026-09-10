@@ -12,8 +12,15 @@ describe("persistence configuration", () => {
   });
 
   it("normalizes and validates wallet addresses", () => {
-    expect(walletAddress("0xD1B4367Dd9F235f9Ee61878019D66e31511e98Ee")).toBe("0xd1b4367dd9f235f9ee61878019d66e31511e98ee");
+    expect(walletAddress("0xD1b4367Dd9F235f9Ee61878019D66e31511e98Ee")).toBe("0xd1b4367dd9f235f9ee61878019d66e31511e98ee");
     expect(() => walletAddress("not-an-address")).toThrow(PersistenceValidationError);
+  });
+
+  it("validates the isolated Fuji staging configuration", () => {
+    const config = loadServerConfig({ DATABASE_URL: "postgres://staging", NODE_ENV: "production", PUBLIC_APP_URL: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", API_ALLOWED_ORIGINS: "https://staging.example.com", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43113", INDEXER_CONTRACTS_JSON: '[{"address":"0x1111111111111111111111111111111111111111","contractType":"MARKETPLACE","startBlock":10}]', MARKETPLACE_ADDRESS: "0x2222222222222222222222222222222222222222", MARKETPLACE_CHAIN_ID: "43113" });
+    expect(config.indexer.chainId).toBe(43113);
+    expect(config.indexer.contracts[0].startBlock).toBe(10);
+    expect(() => loadServerConfig({ DATABASE_URL: "postgres://staging", NODE_ENV: "production", PUBLIC_APP_URL: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", API_ALLOWED_ORIGINS: "https://staging.example.com", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43114", MARKETPLACE_ADDRESS: "0x2222222222222222222222222222222222222222", MARKETPLACE_CHAIN_ID: "43113" })).toThrow(/43113/);
   });
 });
 
@@ -54,6 +61,6 @@ describe("repository contracts", () => {
 
 describe("migration inventory", () => {
   it("discovers numbered SQL migrations in deterministic order", async () => {
-    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql"]);
+    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql", "004_marketplace_commerce.sql"]);
   });
 });
