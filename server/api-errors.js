@@ -13,6 +13,7 @@ export function apiErrorFrom(error) {
   if (error?.code === "VALIDATION_ERROR") return new ApiError(400, error.code, error.message, error.field ? { field: error.field } : null);
   if (error?.code === "CONFLICT") return new ApiError(409, error.code, error.message);
   if (error?.code === "23503") return new ApiError(409, "REFERENCE_CONFLICT", "The requested record references missing or invalid data.");
+  if (error?.status && error?.code) return new ApiError(error.status, error.code, error.message);
   return new ApiError(500, "INTERNAL_ERROR", "The request could not be completed.");
 }
 
