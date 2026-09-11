@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/api/health/ready", "destination": "/api/ready" },
+    { "source": "/api/:path*", "destination": "/api/gateway" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [
