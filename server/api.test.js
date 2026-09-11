@@ -45,6 +45,46 @@ describe("HTTP API boundary", () => {
     expect(result.marketplace).toMatchObject({ configured: false, status: "not_configured" });
     expect(result.ok).toBe(false);
   });
+
+  it("serves JSON health without a database", async () => {
+    const { createApiServer } = await import("./index.js");
+    const { loadServerConfig } = await import("./config.js");
+    const config = loadServerConfig({
+      NODE_ENV: "development",
+      PUBLIC_APP_URL: "https://the-void-alpha.vercel.app",
+      API_ALLOWED_ORIGINS: "https://the-void-alpha.vercel.app",
+    }, { allowMissingDatabase: true });
+    const { handler } = createApiServer({ config, logger: { info() {}, error() {}, warn() {} } });
+    const health = responseDouble();
+    await handler(requestDouble({ url: "/api/health" }), health);
+    expect(health.status).toBe(200);
+    expect(JSON.parse(health.body).data).toMatchObject({ ok: true, service: "voidcaller-api" });
+    const ready = responseDouble();
+    await handler(requestDouble({ url: "/api/health/ready" }), ready);
+    expect(ready.status).toBe(503);
+    const payload = JSON.parse(ready.body);
+    expect(payload.data.status).toBe("not_ready");
+    expect(payload.data.database.ok).toBe(false);
+    const listings = responseDouble();
+    await handler(requestDouble({ url: "/api/listings" }), listings);
+    expect(listings.status).toBe(503);
+    expect(JSON.parse(listings.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
+  });
+
+  it("skips indexer ticks until database and contracts are configured", async () => {
+    const { createVercelHandler } = await import("./vercel-handler.js");
+    const handler = createVercelHandler({
+      env: {
+        NODE_ENV: "production",
+        PUBLIC_APP_URL: "https://the-void-alpha.vercel.app",
+      },
+      logger: { info() {}, error() {}, warn() {} },
+    });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/indexer/tick" }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toMatchObject({ skipped: true, reason: "database_not_configured" });
+  });
 });
 
 describe("API service trust boundaries", () => {
