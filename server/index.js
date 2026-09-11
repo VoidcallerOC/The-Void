@@ -9,13 +9,16 @@ import { ApiService } from "./api-service.js";
 import { createReadinessChecker } from "./readiness.js";
 
 export function createApiServer({ config = loadServerConfig(), db = null, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, logger = createStructuredLogger() } = {}) {
-  const pool = db || createDatabasePool(config);
-  const repository = createPersistenceRepository(pool);
-  const service = new ApiService({ db: pool, repository, authenticator, ownershipVerifier, blockchainVerifier, rateLimiter: createRateLimiter(), logger });
+  const pool = db || (config.databaseUrl ? createDatabasePool(config) : null);
+  const repository = pool ? createPersistenceRepository(pool) : null;
+  const service = pool
+    ? new ApiService({ db: pool, repository, authenticator, ownershipVerifier, blockchainVerifier, rateLimiter: createRateLimiter(), logger })
+    : { persistenceConfigured: false };
   service.allowedOrigins = config.allowedOrigins;
   service.readiness = createReadinessChecker({ pool, config });
-  const server = createServer(createApiHandler({ service, logger }));
-  return { server, pool, service };
+  const handler = createApiHandler({ service, logger });
+  const server = createServer(handler);
+  return { server, pool, service, handler, config };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
