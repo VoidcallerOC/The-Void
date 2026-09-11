@@ -26,7 +26,7 @@ export function forceVercelPath(request, pathname) {
 }
 
 export function resolveVercelApiPath(request) {
-  let pathname = "/";
+  let pathname;
   try {
     pathname = new URL(request.url || "/", "http://localhost").pathname;
   } catch {
