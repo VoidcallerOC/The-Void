@@ -7,6 +7,49 @@ import { applyFujiRuntimeDefaults } from "./fuji-defaults.js";
 
 let boot = null;
 
+const GATEWAY_PATHS = new Set(["/api/gateway", "/api/[...path]", "/api/ready", "/api/index"]);
+
+function header(request, name) {
+  const headers = request.headers || {};
+  return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()];
+}
+
+export function forceVercelPath(request, pathname) {
+  try {
+    const url = new URL(request.url || pathname, "http://localhost");
+    url.pathname = pathname;
+    request.url = `${url.pathname}${url.search}`;
+  } catch {
+    request.url = pathname;
+  }
+  return request;
+}
+
+export function resolveVercelApiPath(request) {
+  let pathname = "/";
+  try {
+    pathname = new URL(request.url || "/", "http://localhost").pathname;
+  } catch {
+    pathname = String(request.url || "/").split("?")[0] || "/";
+  }
+
+  const forwarded = header(request, "x-forwarded-uri") || header(request, "x-invoke-path");
+  if (typeof forwarded === "string") {
+    const forwardedPath = forwarded.split("?")[0];
+    if (forwardedPath.startsWith("/api/") && !GATEWAY_PATHS.has(forwardedPath)) return forwardedPath;
+  }
+
+  if (pathname.startsWith("/api/") && !GATEWAY_PATHS.has(pathname)) return pathname;
+
+  const splat = request.query?.path ?? request.query?.["...path"];
+  if (splat != null && splat !== "") {
+    const rest = Array.isArray(splat) ? splat.filter(Boolean).join("/") : String(splat).replace(/^\//, "");
+    return `/api/${rest}`.replace(/\/{2,}/g, "/");
+  }
+
+  return pathname;
+}
+
 function pathOf(request) {
   try { return new URL(request.url || "/", "http://localhost").pathname; } catch { return request.url || "/"; }
 }
@@ -33,6 +76,7 @@ export function createVercelHandler({ env = process.env, logger = console } = {}
   }
 
   return async function handle(request, response) {
+    forceVercelPath(request, resolveVercelApiPath(request));
     const pathname = pathOf(request);
     const indexerTick = pathname === "/api/indexer/tick" || pathname === "/indexer/tick";
     try {
