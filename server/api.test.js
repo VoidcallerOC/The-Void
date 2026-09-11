@@ -13,8 +13,8 @@ function responseDouble() {
   return { headers: null, status: null, body: "", writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; } };
 }
 
-function requestDouble({ method = "GET", url = "/api/health", body = "", headers = {} } = {}) {
-  return { method, url, headers, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(body); } };
+function requestDouble({ method = "GET", url = "/api/health", body = "", headers = {}, query } = {}) {
+  return { method, url, headers, query, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(body); } };
 }
 
 describe("HTTP API boundary", () => {
@@ -83,7 +83,32 @@ describe("HTTP API boundary", () => {
     const response = responseDouble();
     await handler(requestDouble({ url: "/api/indexer/tick" }), response);
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body).data).toMatchObject({ skipped: true, reason: "database_not_configured" });
+    const payload = JSON.parse(response.body);
+    expect(payload.data).toMatchObject({ skipped: true, reason: "database_not_configured" });
+  });
+
+  it("recovers nested API paths after Vercel rewrites to the gateway", async () => {
+    const { createVercelHandler, resolveVercelApiPath, forceVercelPath } = await import("./vercel-handler.js");
+    expect(resolveVercelApiPath(requestDouble({ url: "/api/gateway", query: { path: "health/ready" } }))).toBe("/api/health/ready");
+    expect(resolveVercelApiPath(requestDouble({ url: "/api/gateway", query: { path: ["artists", "voidcaller"] } }))).toBe("/api/artists/voidcaller");
+    expect(resolveVercelApiPath(requestDouble({ url: "/api/health" }))).toBe("/api/health");
+    expect(forceVercelPath(requestDouble({ url: "/api/ready?x=1" }), "/api/health/ready").url).toBe("/api/health/ready?x=1");
+
+    const handler = createVercelHandler({
+      env: {
+        NODE_ENV: "production",
+        PUBLIC_APP_URL: "https://the-void-alpha.vercel.app",
+      },
+      logger: { info() {}, error() {}, warn() {} },
+    });
+    const ready = responseDouble();
+    await handler(requestDouble({ url: "/api/gateway", query: { path: "health/ready" } }), ready);
+    expect(ready.status).toBe(503);
+    expect(JSON.parse(ready.body).data.status).toBe("not_ready");
+    const tick = responseDouble();
+    await handler(requestDouble({ url: "/api/gateway", query: { path: "indexer/tick" } }), tick);
+    expect(tick.status).toBe(200);
+    expect(JSON.parse(tick.body).data.reason).toBe("database_not_configured");
   });
 });
 
