@@ -18,13 +18,14 @@ function corsHeaders(request) {
     headers["access-control-allow-origin"] = origin;
     headers["access-control-allow-methods"] = "GET,POST,OPTIONS";
     headers["access-control-allow-headers"] = "content-type,authorization,x-request-id";
+    headers["access-control-allow-credentials"] = "true";
     headers.vary = "origin";
   }
   return headers;
 }
 
-function send(response, status, body, request = null) {
-  response.writeHead(status, corsHeaders(request));
+function send(response, status, body, request = null, extraHeaders = {}) {
+  response.writeHead(status, { ...corsHeaders(request), ...extraHeaders });
   response.end(JSON.stringify(body));
 }
 
@@ -58,7 +59,20 @@ export function createApiHandler({ service, logger = console } = {}) {
         return send(response, readiness.ok ? 200 : 503, { data: readiness, requestId }, apiRequest);
       }
       let data;
-      if (method === "GET" && base[0] === "artists" && base.length === 1) data = await requirePersistence(service, "listArtists")({ ...Object.fromEntries(url.searchParams), requestId });
+      if (method === "GET" && base.join("/") === "auth/session") {
+        const identity = await service.walletAuth?.authenticate(apiRequest);
+        if (!identity) throw Object.assign(new Error("No authenticated wallet session."), { code: "UNAUTHORIZED", status: 401 });
+        data = identity;
+      } else if ((method === "GET" || method === "POST") && base.join("/") === "auth/challenge") {
+        const input = method === "GET" ? Object.fromEntries(url.searchParams) : await readJson(request);
+        if (!service.walletAuth) throw Object.assign(new Error("Wallet authentication is not configured."), { code: "AUTH_NOT_CONFIGURED", status: 501 });
+        data = await service.walletAuth.issueChallenge({ ...input, request: apiRequest, requestId });
+      } else if (method === "POST" && base.join("/") === "auth/verify") {
+        const body = await readJson(request);
+        if (!service.walletAuth) throw Object.assign(new Error("Wallet authentication is not configured."), { code: "AUTH_NOT_CONFIGURED", status: 501 });
+        data = await service.walletAuth.verify({ ...body, request: apiRequest, requestId });
+        return send(response, 200, { data: { wallet: data.wallet, chainId: data.chainId, expiresAt: data.expiresAt } , requestId }, apiRequest, { "set-cookie": service.walletAuth.sessionCookie(data.token, data.expiresAt) });
+      } else if (method === "GET" && base[0] === "artists" && base.length === 1) data = await requirePersistence(service, "listArtists")({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "artists" && base.length === 2) data = await requirePersistence(service, "getArtist")({ idOrSlug: base[1] });
       else if (method === "GET" && base[0] === "releases" && base.length === 1) data = await requirePersistence(service, "listReleases")({ ...Object.fromEntries(url.searchParams) });
       else if (method === "GET" && base[0] === "releases" && base.length === 2) data = await requirePersistence(service, "getRelease")({ idOrSlug: base[1] });

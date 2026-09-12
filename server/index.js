@@ -7,15 +7,18 @@ import { createDatabasePool } from "./db.js";
 import { createPersistenceRepository } from "./repositories.js";
 import { ApiService } from "./api-service.js";
 import { createReadinessChecker } from "./readiness.js";
+import { createWalletAuthenticator } from "./wallet-auth.js";
 
 export function createApiServer({ config = loadServerConfig(), db = null, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, logger = createStructuredLogger() } = {}) {
   const pool = db || (config.databaseUrl ? createDatabasePool(config) : null);
   const repository = pool ? createPersistenceRepository(pool) : null;
+  const walletAuth = pool ? createWalletAuthenticator({ db: pool, config }) : null;
   const service = pool
-    ? new ApiService({ db: pool, repository, authenticator, ownershipVerifier, blockchainVerifier, rateLimiter: createRateLimiter(), logger })
+    ? new ApiService({ db: pool, repository, authenticator: authenticator || walletAuth?.authenticate, walletAuth, ownershipVerifier, blockchainVerifier, rateLimiter: createRateLimiter(), logger })
     : { persistenceConfigured: false };
   service.allowedOrigins = config.allowedOrigins;
   service.readiness = createReadinessChecker({ pool, config });
+  service.walletAuth = walletAuth;
   const handler = createApiHandler({ service, logger });
   const server = createServer(handler);
   return { server, pool, service, handler, config };
