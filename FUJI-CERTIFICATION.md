@@ -1,108 +1,79 @@
-# The-Void Fuji Certification
+# The-Void Fuji Staging Certification
 
-**Date:** 2026-09-10  
-**Branch:** `main`  
-**Final status:** **FUJI NOT CERTIFIED**
+**Date:** 2026-09-12
+**Repository:** `VoidcallerOC/The-Void`
+**Branch:** `main`
+**Decision:** **FUJI NOT CERTIFIED**
 
-## Evidence policy
+This report separates repository/runtime evidence from deployment evidence. No contract addresses, transaction hashes, credentials, database records, Render status, or checkpoints were invented.
 
-This certification uses **PASS** only for observed live evidence or completed validation commands. Unit tests and source inspection are not substitutes for live Fuji, Render, Supabase, contract, wallet, media, or persistence tests.
+## Certification matrix
 
-## Final verification matrix
-
-| Requirement | Status | Actual evidence |
+| Area | Status | Evidence and limits |
 |---|---|---|
-| Vercel frontend | **PASS** | Existing Vercel frontend deployment is known to be reachable from prior live checks. |
-| Render API | **FAIL** | No live Render API URL or successful JSON `/api/health` response was available. Render workspace access remains unauthorized/no stored token. |
-| Render persistent indexer | **FAIL** | No live worker logs, startup evidence, checkpoint, restart, or deployment state was available. |
-| Supabase PostgreSQL | **FAIL** | No dedicated Supabase `DATABASE_URL` is configured. `npm run db:validate` fails: `DATABASE_URL is required for the persistence layer.` |
-| Supabase private Storage | **FAIL** | No Supabase project, private bucket, credentials, or private-object request was available. |
-| Fuji RPC | **PASS** | `eth_chainId` returned `0xa869` (`43113`); `eth_blockNumber` returned `0x379ae66`. |
-| Fuji ERC-1155 | **FAIL** | No deployable ERC-1155 source, deployment address, transaction, bytecode, or explorer verification exists. |
-| Fuji MusicMarketplace | **FAIL** | No deployment address, transaction, bytecode, fee/royalty deployment record, or explorer verification exists. |
-| Artist authentication | **FAIL** | No live API/auth endpoint or controlled artist wallet was available. |
-| Artist profile/release/edition/experience/publish | **FAIL** | No live authenticated API/database flow was executed. |
-| Token mint/distribution | **FAIL** | No ERC-1155 contract or real Fuji transaction exists. |
-| Collector authentication | **FAIL** | No live API/auth endpoint or controlled collector wallet was available. |
-| Collector ownership | **FAIL** | No real token ownership transaction, indexer checkpoint, or canonical database/API projection was verified. |
-| Gated experience access | **FAIL** | No live API, ownership verifier, or entitlement flow was available. |
-| Private media access | **FAIL** | No private Supabase bucket, server-side storage adapter, signer, or playback endpoint was available. |
-| Anonymous media rejection | **FAIL** | No private object existed against which anonymous access could be tested. |
-| Unauthorized media rejection | **FAIL** | No live protected-media endpoint or unauthorized wallet test was available. |
-| Authorized playback | **FAIL** | No controlled owner wallet, grant, private object, or playback endpoint was available. |
-| Marketplace listing | **FAIL** | No deployed marketplace/token contract or seller wallet was available. |
-| `ListingCreated` indexing | **FAIL** | No live marketplace event or indexer was available. |
-| API listing discovery | **FAIL** | No live API/database listing projection was available. |
-| Purchase and settlement | **FAIL** | No buyer wallet, contract, transaction, settlement, fee, or royalty evidence was available. |
-| `ListingSold` indexing | **FAIL** | No live event or worker evidence was available. |
-| Database purchase/ownership projections | **FAIL** | No database connection or applied migrations were available. |
-| Cancellation | **FAIL** | No live listing existed to cancel. |
-| Transfer | **FAIL** | No ERC-1155 contract or Owner A/Owner B wallets were available. |
-| API restart | **FAIL** | No deployed API was available to restart. |
-| Indexer restart | **FAIL** | No deployed worker was available to restart. |
-| Checkpoint persistence | **FAIL** | No live checkpoint store or checkpoint value was observed. |
-| Duplicate-event handling | **FAIL** | No live event stream or persisted indexer state was available. |
-| Failed transaction handling | **FAIL** | No live marketplace transaction path was available. |
-| Authentication failure | **FAIL** | No live authenticator/session endpoint was available. |
-| Forged media grant | **FAIL** | No live media endpoint was available. |
-| Expired media grant | **FAIL** | No live media endpoint was available. |
-| Database persistence | **FAIL** | No database connection; `npm run db:validate` exited 1. |
-| Private Supabase object access | **FAIL** | No Supabase project or object credentials were available for an actual request. |
-| Reconciliation | **FAIL** | No live projections or canonical contract state were available. |
-| Reorg recovery | **FAIL** | No live worker/checkpoint/contract state was available. |
+| API | **YELLOW** | Local `createApiServer` probe returned valid JSON and HTTP 200 for `GET /api/health`. The dependency-aware readiness endpoint correctly returned HTTP 503 because no database was configured. A deployed Fuji API endpoint was not available for live verification. |
+| Database | **RED** | The code, migrations, and database wiring are present, but no dedicated Fuji PostgreSQL/Supabase `DATABASE_URL` was available. Migrations, table existence, persistence writes, and API/worker database access could not be executed. |
+| Indexer | **YELLOW** | `createIndexerWorker` validates Fuji RPC configuration and chain ID `43113`; local worker construction succeeded with a test pool. Retry, checkpoint, duplicate-event, reorg, and reconciliation behavior are covered by the repository test suite. No live worker process or Render worker logs were available. |
+| RPC | **GREEN** | Live `https://api.avax-test.network/ext/bc/C/rpc` responded successfully. `eth_chainId` returned `0xa869` (`43113`), and `eth_blockNumber` returned `0x37a1905`; both values are recorded exactly as returned. |
+| Checkpointing | **YELLOW** | Checkpoint persistence, restart/resume, duplicate handling, failure marking, and reorg foundations are verified in code and tests. No live database checkpoint or restart cycle could be observed without the Fuji database. |
+| Vercel API routing | **YELLOW** | `vercel.json` contains routes for `/api/health`, `/api/health/ready`, `/api/indexer/tick`, and nested `/api/*` paths. Local handler tests passed. A deployed Vercel routing request was not executed in this run. |
+| Render runtime | **RED** | `render.yaml` defines separate `the-void-api-fuji` web and `the-void-indexer-fuji` worker services, both configured for Fuji RPC and chain ID `43113`. No authenticated Render deployment, service health, worker logs, or restart evidence was available. |
 
-## Required software checks
+> The RPC block result is retained as the exact JSON-RPC response value `0x37a1905`; it is not treated as a fabricated transaction or deployment record.
+
+## Verified in code
+
+The repository contains the following verified implementation foundations:
+
+- `render.yaml` defines separate API and indexer worker services, dedicated Fuji RPC configuration, chain ID `43113`, and secret-managed database/configuration values.
+- `server/config.js` enforces Fuji chain separation and validates production configuration requirements.
+- `server/index.js` creates the API runtime, persistence pool, readiness checker, and authentication service.
+- `server/indexer-worker.js` requires Fuji RPC configuration, chain ID `43113`, and non-empty indexer contract configuration before startup.
+- `server/indexer.js` persists per-block checkpoints, retries RPC work, records malformed/duplicate events, marks failed checkpoints, and detects canonical block changes.
+- `server/indexer-reconcile.js` compares indexed ownership against finalized blockchain state and records mismatches.
+- `vercel.json` routes health, readiness, nested API paths, and the scheduled indexer tick.
+- The local probe returned HTTP 200 for `/api/health`, HTTP 503 for `/api/health/ready` with an explicit missing-database diagnosis, and successfully validated Fuji worker configuration.
+
+## Verified in deployment
+
+- Public Fuji RPC connectivity and chain identity were verified directly.
+
+No other deployment evidence was available from the repository tooling in this run. In particular, there was no live Render API URL, Render worker log, Supabase connection, migration result, database checkpoint, Vercel deployment request, or end-to-end Fuji transaction.
+
+## Not verifiable from GitHub/repository tooling
+
+The following require deployment credentials or live infrastructure and therefore remain unverified:
+
+- Applying migrations to the dedicated Fuji database.
+- Confirming required tables and migration checksums in Fuji PostgreSQL/Supabase.
+- API persistence reads/writes against Fuji PostgreSQL.
+- Indexer startup, polling, checkpoint persistence, restart recovery, and duplicate suppression against the live database.
+- Render web service and worker health, logs, restarts, and continuous operation.
+- Deployed Vercel health/readiness/indexer-tick requests.
+- Contract deployment, event indexing, ownership reconciliation, marketplace settlement, or wallet-based end-to-end flows.
+
+## Software validation
 
 | Command | Result |
 |---|---|
-| `npm test` | **PASS** — 10 test files and 65 tests passed. |
+| `npm test` | **PASS** — 11 test files, 77 tests passed |
 | `npm run lint` | **PASS** |
 | `npm run build` | **PASS** |
-| `npm run db:validate` | **FAIL** — `DATABASE_URL is required for the persistence layer.` |
-| `npm audit` | **PASS** — 0 vulnerabilities. |
+| `node scripts/fuji-runtime-probe.mjs` | **PASS** for local health/worker configuration probe; readiness correctly reports `503 not_ready` without a database |
+| Live Fuji `eth_chainId` | **PASS** — `0xa869` (`43113`) |
+| Live Fuji `eth_blockNumber` | **PASS** — `0x37a1905` |
+| Database migration/validation | **NOT RUN** — no Fuji `DATABASE_URL` was available |
 
-## Architecture checks
+## Remaining blockers
 
-The current `render.yaml` contains only the Render API and background worker. It has no Render PostgreSQL `databases` resource or `fromDatabase` wiring. No Cloudflare R2 configuration was found. Both services expect a Render-managed `DATABASE_URL` secret for the dedicated Supabase PostgreSQL database.
-
-The repository still contains full-length MP3 files under `public/assets/audio/`. Because no private Supabase Storage bucket or server-side media gateway is connected, the full-length masters are not certified private.
-
-No credentials, private keys, service-role keys, deployment addresses, transaction hashes, block numbers, events, checkpoints, or wallet results were fabricated.
-
-## Blockers
-
-### P0 — Live Render API and worker unavailable
-
-- **Evidence:** No authorized Render workspace or live API/worker evidence; connector reported unauthorized/no stored token.
-- **Required fix:** Authorize Render and deploy `the-void-api-fuji` and `the-void-indexer-fuji` from the current Blueprint.
-- **Verification:** External JSON `/api/health`, dependency-aware `/api/health/ready`, worker logs, restart, and checkpoint evidence.
-
-### P0 — Dedicated Supabase PostgreSQL unavailable
-
-- **Evidence:** No `DATABASE_URL`; `npm run db:validate` failed.
-- **Required fix:** Create the dedicated The-Void Fuji Supabase project and configure its PostgreSQL URL in Render for both services.
-- **Verification:** Run migrations and validation; verify schema, checksums, persistence, API access, worker access, and restart recovery.
-
-### P0 — Fuji contracts unavailable
-
-- **Evidence:** Repository contains only `MusicMarketplace.sol`; no ERC-1155 implementation or deployment artifacts exist.
-- **Required fix:** Provide/review the ERC-1155 contract, deploy both contracts with a funded Fuji wallet, and independently verify them.
-- **Verification:** Record real addresses/transactions/blocks/bytecode, then execute real token and marketplace transactions.
-
-### P0 — Private media backend unavailable
-
-- **Evidence:** No Supabase Storage project/bucket/credentials or server-side storage endpoint; full masters remain in public assets.
-- **Required fix:** Create a private Supabase bucket, remove masters from public deployment, and connect the server-side short-lived grant/storage path.
-- **Verification:** Test anonymous, unauthenticated, unauthorized, forged, expired, revoked, and authorized playback requests.
-
-### P0 — Controlled-wallet end-to-end test unavailable
-
-- **Evidence:** No live API, contracts, database, indexer, media backend, or controlled Fuji wallets were available.
-- **Required fix:** Supply artist, collector/buyer, and unauthorized Fuji test wallets and execute the full acceptance suite.
-- **Verification:** Trace real transactions/events through indexer, Supabase, API projections, ownership, marketplace settlement, transfer, reconciliation, and recovery.
+1. Provide the dedicated Fuji PostgreSQL/Supabase connection string to both Render services and apply the repository migrations.
+2. Configure a real `INDEXER_CONTRACTS_JSON` value containing deployed Fuji contract addresses and start blocks; no addresses are present in this report because none were supplied or verified.
+3. Deploy or connect the Render API and worker, then capture `/api/health`, `/api/health/ready`, worker startup, RPC polling, checkpoint, restart, and failure-recovery evidence.
+4. Execute deployed Vercel routing checks for `/api/health`, `/api/health/ready`, and `/api/indexer/tick`.
+5. Do not mark Fuji certified until database persistence and continuous worker operation have been observed against the intended Fuji infrastructure.
 
 ## Final decision
 
 # FUJI NOT CERTIFIED
 
-Only Fuji RPC reachability and local software checks passed. The real API, worker, Supabase PostgreSQL, private Storage, contracts, wallets, database persistence, indexer, marketplace, ownership, media, reconciliation, and recovery systems were not live and therefore were not certified.
+The Fuji RPC and repository-level runtime foundations are healthy, and all local tests/lint/build checks pass. Certification remains blocked by the unavailable dedicated database and unavailable live Render/Vercel deployment evidence.
