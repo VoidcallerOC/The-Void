@@ -29,6 +29,13 @@ function send(response, status, body, request = null, extraHeaders = {}) {
   response.end(JSON.stringify(body));
 }
 
+function sendMedia(response, media, request = null) {
+  const range = media.range;
+  const headers = { ...corsHeaders(request), "content-type": media.contentType, "cache-control": "private, no-store", "accept-ranges": "bytes", "content-length": String(media.contentLength), "x-content-type-options": "nosniff" };
+  if (range) { headers["content-range"] = `bytes ${range.start}-${range.end}/${media.size}`; response.writeHead(206, headers); } else response.writeHead(200, headers);
+  media.stream.pipe(response);
+}
+
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
 function requirePersistence(service, name) {
@@ -72,6 +79,22 @@ export function createApiHandler({ service, logger = console } = {}) {
         if (!service.walletAuth) throw Object.assign(new Error("Wallet authentication is not configured."), { code: "AUTH_NOT_CONFIGURED", status: 501 });
         data = await service.walletAuth.verify({ ...body, request: apiRequest, requestId });
         return send(response, 200, { data: { wallet: data.wallet, chainId: data.chainId, expiresAt: data.expiresAt } , requestId }, apiRequest, { "set-cookie": service.walletAuth.sessionCookie(data.token, data.expiresAt) });
+      } else if (method === "POST" && base.join("/") === "media/grants") {
+        const body = await readJson(request);
+        if (!service.media) throw Object.assign(new Error("Protected media is not configured."), { code: "MEDIA_NOT_CONFIGURED", status: 503 });
+        data = await service.media.issueGrant({ ...body, request: apiRequest, requestId });
+      } else if (method === "POST" && base.join("/") === "media/grants/revoke") {
+        const body = await readJson(request);
+        if (!service.media) throw Object.assign(new Error("Protected media is not configured."), { code: "MEDIA_NOT_CONFIGURED", status: 503 });
+        data = await service.media.revoke({ ...body, request: apiRequest, requestId });
+      } else if (method === "GET" && base.length >= 3 && base[0] === "media" && base[1] === "stream") {
+        if (!service.media) throw Object.assign(new Error("Protected media is not configured."), { code: "MEDIA_NOT_CONFIGURED", status: 503 });
+        const mediaKey = base.slice(2).join("/");
+        const streamed = await service.media.stream({ mediaKey, request: apiRequest, requestId });
+        const range = streamed.size ? (await import("./media-storage.js")).parseByteRange(request.headers.range, streamed.size) : null;
+        if (request.headers.range && !range) return send(response, 416, { error: { code: "INVALID_RANGE", message: "Requested media range is not satisfiable." }, requestId }, apiRequest, { "content-range": `bytes */${streamed.size}` });
+        const contentLength = range ? range.end - range.start + 1 : streamed.size;
+        return sendMedia(response, { ...streamed, range, contentLength, stream: range ? service.media.storage.stream(mediaKey, { start: range.start, end: range.end }) : streamed.stream }, apiRequest);
       } else if (method === "GET" && base[0] === "artists" && base.length === 1) data = await requirePersistence(service, "listArtists")({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "artists" && base.length === 2) data = await requirePersistence(service, "getArtist")({ idOrSlug: base[1] });
       else if (method === "GET" && base[0] === "releases" && base.length === 1) data = await requirePersistence(service, "listReleases")({ ...Object.fromEntries(url.searchParams) });
@@ -99,6 +122,7 @@ export function createApiHandler({ service, logger = console } = {}) {
       if (error?.code === "INVALID_JSON") normalized.status = 400, normalized.code = "INVALID_JSON", normalized.message = error.message;
       if (error?.code === "NOT_FOUND") normalized.status = 404, normalized.code = "NOT_FOUND", normalized.message = error.message;
       if (error?.code === "DATABASE_NOT_CONFIGURED") normalized.status = 503, normalized.code = "DATABASE_NOT_CONFIGURED", normalized.message = error.message;
+      if (error?.code === "MEDIA_NOT_CONFIGURED") normalized.status = 503, normalized.code = "MEDIA_NOT_CONFIGURED", normalized.message = error.message;
       logger.error?.("api.http.error", { requestId, path: url.pathname, method, code: normalized.code });
       return send(response, normalized.status, errorResponse(normalized, requestId), apiRequest);
     }

@@ -51,6 +51,10 @@ services:
         sync: false
       - key: MARKETPLACE_CHAIN_ID
         value: "43113"
+      - key: PRIVATE_MEDIA_ROOT
+        sync: false
+      - key: MEDIA_STORAGE_MODE
+        value: filesystem
 
   - type: worker
     name: the-void-indexer-fuji
@@ -89,3 +93,7 @@ services:
         sync: false
       - key: MARKETPLACE_CHAIN_ID
         value: "43113"
+      - key: PRIVATE_MEDIA_ROOT
+        sync: false
+      - key: MEDIA_STORAGE_MODE
+        value: filesystem

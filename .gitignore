@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Protected masters are deployed through private storage/mounted media, never GitHub.
+private-media/audio/*.mp3
+private-media/audio/*.wav
+private-media/audio/*.flac
+private-media/audio/*.m4a
+private-media/video/*
