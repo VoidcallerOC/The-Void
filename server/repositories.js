@@ -172,6 +172,12 @@ export class PersistenceRepository {
     return rows[0];
   }
 
+  async revokeMediaGrant({ grantId, wallet }) {
+    const values = [requiredText(grantId, "grant.grantId", { max: 256 }), walletAddress(wallet)];
+    const { rows } = await this.db.query(`UPDATE experience_grants SET revoked_at=now() WHERE grant_id=$1 AND wallet_address=$2 AND revoked_at IS NULL RETURNING *`, values);
+    return rows[0] || null;
+  }
+
   async inTransaction(callback) { return withTransaction(this.db, (client) => callback(new PersistenceRepository(client))); }
 }
 

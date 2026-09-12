@@ -44,7 +44,7 @@ export function issueMediaGrant({ challenge, signature, wallet, experience, gran
   if (!challenge || challenge.wallet !== wallet?.toLowerCase() || challenge.experienceId !== experience?.id) throw new Error("Challenge does not match the request");
   if (typeof verifySignature !== "function" || !verifySignature({ challenge, signature, wallet })) throw new Error("Invalid wallet signature");
   if (typeof ownsExperience !== "function" || !ownsExperience({ wallet, experience })) throw new Error("Current ownership could not be verified");
-  const grant = createAuthorizationGrant({ wallet, experienceId: experience.id, grantId, mediaType: experience.media?.type?.toUpperCase() || "AUDIO", issuedAt: now });
+  const grant = createAuthorizationGrant({ wallet, experienceId: experience.id, grantId, chainId: experience.media?.chainId || 43114, mediaType: experience.media?.type?.toUpperCase() || "AUDIO", issuedAt: now });
   return { grant, audit: createDownloadAudit({ action: "grant_issued", wallet, experienceId: experience.id, grantId }) };
 }
 

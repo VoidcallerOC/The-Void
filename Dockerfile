@@ -9,6 +9,7 @@ WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package*.json ./
 COPY server ./server
+COPY private-media ./private-media
 COPY contracts ./contracts
 COPY .env.example ./
 USER node
