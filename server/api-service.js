@@ -21,11 +21,12 @@ function offsetValue(value) {
 function mapRow(row) { return row || null; }
 
 export class ApiService {
-  constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, rateLimiter = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator = null, walletAuth = null, ownershipVerifier = null, blockchainVerifier = null, rateLimiter = null, logger = console } = {}) {
     if (!db?.query || !repository) throw new TypeError("ApiService requires a database executor and persistence repository.");
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
+    this.walletAuth = walletAuth;
     this.ownershipVerifier = ownershipVerifier;
     this.blockchainVerifier = blockchainVerifier;
     this.rateLimiter = rateLimiter;
@@ -101,7 +102,7 @@ export class ApiService {
   }
 
   async getCollector({ wallet, request = {} }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, wallet, "wallet");
     const address = walletAddress(wallet);
     const { rows } = await this.db.query(`SELECT c.*, COALESCE(jsonb_agg(DISTINCT jsonb_build_object('chainId', o.chain_id, 'contractAddress', o.contract_address, 'tokenId', o.token_id, 'amount', o.amount, 'updatedAt', o.updated_at)) FILTER (WHERE o.wallet_address IS NOT NULL), '[]'::jsonb) AS ownership FROM collectors c LEFT JOIN ownership_snapshots o ON o.wallet_address=c.wallet_address AND o.amount > 0 WHERE c.wallet_address=$1 GROUP BY c.wallet_address`, [address]);
@@ -109,7 +110,7 @@ export class ApiService {
   }
 
   async collectionActivity({ wallet, limit, offset, request = {} }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, wallet, "wallet");
     const address = walletAddress(wallet);
     const { rows } = await this.db.query(`SELECT * FROM (SELECT 'TRANSFER' AS activity_type, transaction_hash, block_number, block_timestamp AS occurred_at, contract_address, token_id, amount, from_wallet, to_wallet FROM transfers WHERE (from_wallet=$1 OR to_wallet=$1) AND is_canonical=true UNION ALL SELECT 'PURCHASE' AS activity_type, p.transaction_hash, p.block_number, p.created_at AS occurred_at, p.token_contract_address AS contract_address, p.token_id, p.quantity AS amount, p.seller_wallet AS from_wallet, p.buyer_wallet AS to_wallet FROM purchases p WHERE p.buyer_wallet=$1 AND p.status <> 'REORGED') activity ORDER BY occurred_at DESC LIMIT $2 OFFSET $3`, [address, limitValue(limit), offsetValue(offset)]);
@@ -117,7 +118,7 @@ export class ApiService {
   }
 
   async createListing({ request, input }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, input.sellerWallet, "sellerWallet");
     const txHash = requiredText(input.transactionHash, "transactionHash", { max: 128 }).toLowerCase();
     const rawChainId = chainId(input.chainId);
@@ -127,14 +128,14 @@ export class ApiService {
   }
 
   async cancelListing({ request, input }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, input.sellerWallet, "sellerWallet");
     const transaction = await this.repository.upsertTransaction({ chainId: chainId(input.chainId), transactionHash: requiredText(input.transactionHash, "transactionHash", { max: 128 }).toLowerCase(), fromWallet: identity.wallet, toAddress: input.marketplaceAddress, transactionType: "LISTING_CANCEL", status: "SUBMITTED" });
     return { state: "PENDING", transaction, message: "Cancellation is pending blockchain event confirmation." };
   }
 
   async createPurchaseIntent({ request, input }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, input.buyerWallet, "buyerWallet");
     const key = requiredText(input.idempotencyKey, "idempotencyKey", { max: 256 });
     const listingId = requiredText(input.listingId, "listingId");
@@ -151,7 +152,7 @@ export class ApiService {
   }
 
   async verifyPurchase({ request, input }) {
-    const identity = requireWalletAuth(this.authenticator, request);
+    const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, input.buyerWallet, "buyerWallet");
     if (typeof this.blockchainVerifier !== "function") throw new ApiError(501, "BLOCKCHAIN_VERIFIER_NOT_CONFIGURED", "Purchase verification is not configured.");
     const verification = await this.blockchainVerifier({ transactionHash: requiredText(input.transactionHash, "transactionHash", { max: 128 }).toLowerCase(), chainId: chainId(input.chainId), marketplaceAddress: input.marketplaceAddress });

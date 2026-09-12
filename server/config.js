@@ -36,6 +36,8 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   if (indexerRpcUrl && indexerChainId !== 43113) throw new ConfigurationError("Fuji staging requires INDEXER_CHAIN_ID=43113.");
   const authDomain = requiredUrl(env, "AUTH_DOMAIN", { production });
   const authUri = requiredUrl(env, "AUTH_URI", { production });
+  const authChainId = Number(env.AUTH_CHAIN_ID || (production ? 43114 : 43113));
+  if (![43113, 43114].includes(authChainId)) throw new ConfigurationError("AUTH_CHAIN_ID must be Avalanche Fuji (43113) or Avalanche C-Chain (43114).");
   const allowedOrigins = listValue(env.API_ALLOWED_ORIGINS);
   if (production && allowedOrigins.length === 0) throw new ConfigurationError("API_ALLOWED_ORIGINS is required in production.");
   return Object.freeze({
@@ -48,6 +50,7 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
     publicAppUrl: requiredUrl(env, "PUBLIC_APP_URL", { production }) || "http://localhost:5173",
     authDomain,
     authUri,
+    authChainId,
     allowedOrigins,
     marketplace,
     indexer: Object.freeze({ rpcUrl: indexerRpcUrl, chainId: indexerChainId || null, confirmations: Math.max(0, positiveInteger(env.INDEXER_CONFIRMATIONS, 12)), pollIntervalMs: Math.max(1000, positiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15000)), contracts: parseContracts(env.INDEXER_CONTRACTS_JSON, { production, required: requireIndexerContracts }) }),

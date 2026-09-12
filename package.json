@@ -16,6 +16,7 @@
     "start:indexer": "node server/indexer-worker.js"
   },
   "dependencies": {
+    "ethers": "^6.17.0",
     "lucide-react": "^1.18.0",
     "pg": "^8.23.0",
     "react": "^19.2.6",

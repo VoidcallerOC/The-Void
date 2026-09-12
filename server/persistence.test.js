@@ -72,6 +72,6 @@ describe("repository contracts", () => {
 
 describe("migration inventory", () => {
   it("discovers numbered SQL migrations in deterministic order", async () => {
-    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql", "004_marketplace_commerce.sql"]);
+    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql", "004_marketplace_commerce.sql", "005_wallet_auth.sql"]);
   });
 });

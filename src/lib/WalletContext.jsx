@@ -27,6 +27,9 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
   const [ownershipRecords, setOwnershipRecords] = useState([]);
   const [loadingOwnership, setLoadingOwnership] = useState(false);
   const [provider, setProvider] = useState(null);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const expectedChainId = Number(import.meta.env.VITE_AUTH_CHAIN_ID || 43113);
   const providerRef = useRef(null);
   // Track the live listeners so we can detach them on disconnect / re-wire,
   // otherwise reconnecting stacks duplicate handlers and chainChanged keeps
@@ -96,6 +99,22 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     }
   }, [account, collectionConfig, ownershipReader, ownershipRecordsReader]);
 
+  const invalidateAuth = useCallback(() => { setAuthenticated(false); setAuthError(null); }, []);
+
+  const authenticate = useCallback(async (p, address, cid) => {
+    if (cid !== expectedChainId) return { error: `Switch to the ${expectedChainId === 43114 ? "Avalanche C-Chain" : "Avalanche Fuji"} network.` };
+    try {
+      const challengeResponse = await fetch(`/api/auth/challenge?wallet=${encodeURIComponent(address)}&purpose=wallet-login`, { credentials: "include" });
+      const challengePayload = await challengeResponse.json();
+      if (!challengeResponse.ok) throw new Error(challengePayload.error?.message || "Challenge request failed.");
+      const signature = await p.request({ method: "personal_sign", params: [challengePayload.data.message, address] });
+      const verifyResponse = await fetch("/api/auth/verify", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ wallet: address, signature, nonce: challengePayload.data.nonce, purpose: "wallet-login" }) });
+      const verifyPayload = await verifyResponse.json();
+      if (!verifyResponse.ok) throw new Error(verifyPayload.error?.message || "Signature verification failed.");
+      setAuthenticated(true); setAuthError(null); return { ok: true };
+    } catch (error) { const message = error?.message || "Wallet authentication failed."; setAuthenticated(false); setAuthError(message); return { error: message }; }
+  }, [expectedChainId]);
+
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
     const live = listenersRef.current;
@@ -116,19 +135,21 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     const onAccountsChanged = (accts) => {
       if (!accts || accts.length === 0) {
         setAccount(null);
+        invalidateAuth();
         setOwned({ cchain: new Set(), grotto: new Set() });
         setOwnershipRecords([]);
       } else {
+        invalidateAuth();
         setAccount(accts[0]);
         refreshOwnership(accts[0]);
       }
     };
-    const onChainChanged = (cid) => setChainId(parseInt(cid, 16));
+    const onChainChanged = (cid) => { setChainId(parseInt(cid, 16)); invalidateAuth(); };
 
     provider.on?.("accountsChanged", onAccountsChanged);
     provider.on?.("chainChanged", onChainChanged);
     listenersRef.current = { provider, onAccountsChanged, onChainChanged };
-  }, [refreshOwnership, unwireProvider]);
+  }, [invalidateAuth, refreshOwnership, unwireProvider]);
 
   const connect = useCallback(async (provider) => {
     const p = provider || providerRef.current || window.ethereum;
@@ -141,21 +162,22 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       setChainId(parseInt(cid, 16));
       wireProvider(p);
       refreshOwnership(accts[0]);
-      return { ok: true };
+      return authenticate(p, accts[0], parseInt(cid, 16));
     } catch {
       return { error: "Connection rejected." };
     }
-  }, [wireProvider, refreshOwnership]);
+  }, [authenticate, wireProvider, refreshOwnership]);
 
   const disconnect = useCallback(() => {
     unwireProvider();
     setAccount(null);
     setChainId(null);
+    invalidateAuth();
     setOwned({ cchain: new Set(), grotto: new Set() });
     setOwnershipRecords([]);
     providerRef.current = null;
     setProvider(null);
-  }, [unwireProvider]);
+  }, [invalidateAuth, unwireProvider]);
 
   // restore an already-authorized session on load
   useEffect(() => {
@@ -166,9 +188,14 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
         if (accts && accts.length) {
           const cid = await window.ethereum.request({ method: "eth_chainId" });
           setAccount(accts[0]);
-          setChainId(parseInt(cid, 16));
+          const numericChainId = parseInt(cid, 16);
+          setChainId(numericChainId);
           wireProvider(window.ethereum);
           refreshOwnership(accts[0]);
+          if (numericChainId === expectedChainId) {
+            const session = await fetch("/api/auth/session", { credentials: "include" });
+            setAuthenticated(session.ok);
+          }
         }
       } catch {
         // not connected — expected
@@ -189,6 +216,8 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     identity,
     loadingOwnership,
     connected: !!account,
+    authenticated,
+    authError,
     provider,
     getProvider: () => providerRef.current || window.ethereum,
     connect,
