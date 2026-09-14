@@ -67,9 +67,8 @@ Live schema does not match the intended result of 001_initial_persistence.sql; n
 No database changes were made. Do not hand-patch the schema with pasted SQL and do not insert rows into `schema_migrations` manually. Decide with the report in hand:
 
 - objects missing entirely → the database holds a partial 001; restore or rebuild the database and run `npm run db:migrate` on an empty database;
-- objects that differ → the live schema drifted from the repository; reconcile the drift deliberately in a new migration, or rebuild.
-
-`--allow-extra-objects` (`node server/baseline.js --allow-extra-objects`) relaxes only the "unexpected object" check, for a database that legitimately carries extra columns/indexes on baseline tables. Missing and differing objects still fail.
+- objects that differ → the live schema drifted from the repository; reconcile the drift deliberately in a new migration, or rebuild;
+- unexpected objects on a baseline table → investigate where they came from before touching migration history. There is no override flag: baselining a database that carries objects migration 001 does not create is refused.
 
 ## Local verification
 

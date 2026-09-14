@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createDatabasePool, checkDatabaseHealth } from "./db.js";
 import { loadServerConfig } from "./config.js";
 import { listMigrations } from "./migrate.js";
-import { requiredExtensions } from "./baseline.js";
+import { formatReport, requiredExtensions, verifyAgainstShadowSchema } from "./baseline.js";
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "migrations");
 
@@ -24,6 +24,17 @@ async function inspectSchemaObjects(pool, tables, extensions) {
   return { tables: tables.length, extensions, verifiedTables: tables };
 }
 
+async function verifySchemaMatchesMigrations(pool, sqls) {
+  const client = await pool.connect();
+  try {
+    const report = await verifyAgainstShadowSchema(client, sqls);
+    if (!report.compatible) throw new Error(`Database schema does not match the intended result of the migrations:\n${formatReport(report)}`);
+    return report;
+  } finally {
+    client.release();
+  }
+}
+
 export async function validateDatabase({ pool = null, config = loadServerConfig(), directory = migrationsDirectory } = {}) {
   const ownPool = pool || createDatabasePool(config);
   try {
@@ -35,8 +46,10 @@ export async function validateDatabase({ pool = null, config = loadServerConfig(
     const expected = [];
     const tables = new Set();
     const extensions = new Set();
+    const sqls = [];
     for (const name of migrations) {
       const sql = await readFile(join(directory, name), "utf8");
+      sqls.push(sql);
       const checksum = createHash("sha256").update(sql).digest("hex");
       for (const table of declaredTables(sql)) tables.add(table);
       for (const extension of requiredExtensions(sql)) extensions.add(extension);
@@ -47,7 +60,8 @@ export async function validateDatabase({ pool = null, config = loadServerConfig(
     const unknown = applied.filter((row) => !expected.some((item) => item.name === row.name));
     if (unknown.length) throw new Error(`Database contains unknown migrations: ${unknown.map((row) => row.name).join(", ")}`);
     const schema = await inspectSchemaObjects(ownPool, [...tables], [...extensions]);
-    return { ok: true, health, schema, migrations: expected.map((item) => ({ ...item, appliedAt: byName.get(item.name).applied_at })) };
+    await verifySchemaMatchesMigrations(ownPool, sqls);
+    return { ok: true, health, schema: { ...schema, exactMatch: true }, migrations: expected.map((item) => ({ ...item, appliedAt: byName.get(item.name).applied_at })) };
   } finally { if (!pool) await ownPool.end(); }
 }
 
