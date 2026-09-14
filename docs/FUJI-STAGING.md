@@ -40,6 +40,7 @@ On first request with `DATABASE_URL` present, the function applies SQL migration
 2. Copy the URI from **Project Settings → Database → Connection string → URI**. Enable SSL.
 3. In Vercel project `the-void` → Settings → Environment Variables, paste it as `DATABASE_URL` for Production and Preview. Also set `DATABASE_SSL=true`.
 4. Redeploy. First `/api/*` request migrates automatically. On Render, run `npm run db:migrate` then `npm run db:validate`.
+   - If `db:migrate` fails with `relation "artists" already exists` while `db:validate` reports `Migration is not applied: 001_initial_persistence.sql`, the database holds the 001 schema without a migration record. Follow [DB-RECOVERY-RUNBOOK.md](./DB-RECOVERY-RUNBOOK.md): `npm run db:baseline`, then `npm run db:migrate`, then `npm run db:validate`.
 5. Confirm `GET /api/health/ready` JSON includes `database.ok: true` (indexer may still be not-ready until contracts exist).
 
 ## Contract and indexer procedure
