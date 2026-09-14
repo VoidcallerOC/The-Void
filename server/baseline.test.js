@@ -71,6 +71,16 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
       expect(validation.ok).toBe(true);
       expect(validation.migrations).toHaveLength(6);
       expect(validation.schema.verifiedTables).toContain("artists");
+      expect(validation.schema.exactMatch).toBe(true);
+    } finally { await pool.end(); }
+  }, 120000);
+
+  it("fails validation when the live schema drifts from migrations 001 through 006", async () => {
+    const { pool, config } = await scratchDatabase();
+    try {
+      await migrate({ pool, config });
+      await pool.query("ALTER TABLE artists ADD COLUMN legacy_note text");
+      await expect(validateDatabase({ pool, config })).rejects.toThrow(/unexpected column: artists.legacy_note/);
     } finally { await pool.end(); }
   }, 120000);
 

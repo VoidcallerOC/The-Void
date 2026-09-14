@@ -74,7 +74,7 @@ async function readSchema(client, schema, normalizeSchemas) {
 
 function describeColumn(column) { return `${column.type}${column.notNull ? " NOT NULL" : ""}${column.default ? ` DEFAULT ${column.default}` : ""}`; }
 
-export function compareSchemas(expected, actual, { allowExtraObjects = false } = {}) {
+export function compareSchemas(expected, actual) {
   const missing = [];
   const differing = [];
   const extra = [];
@@ -98,10 +98,10 @@ export function compareSchemas(expected, actual, { allowExtraObjects = false } =
   for (const [key, column] of actual.columns) if (relevantTables.has(column.table) && !expected.columns.has(key)) extra.push({ kind: "column", name: key, actual: describeColumn(column) });
   for (const [key, constraint] of actual.constraints) if (relevantTables.has(constraint.table) && !expected.constraints.has(key)) extra.push({ kind: "constraint", name: key, actual: constraint.definition });
   for (const [key, index] of actual.indexes) if (relevantTables.has(index.table) && !expected.indexes.has(key)) extra.push({ kind: "index", name: key, actual: index.definition });
-  return { missing, differing, extra, compatible: missing.length === 0 && differing.length === 0 && (allowExtraObjects || extra.length === 0) };
+  return { missing, differing, extra, compatible: missing.length === 0 && differing.length === 0 && extra.length === 0 };
 }
 
-function formatReport(report) {
+export function formatReport(report) {
   const lines = [];
   for (const item of report.missing) lines.push(`missing ${item.kind}: ${item.name}${item.expected ? ` (expected ${item.expected})` : ""}`);
   for (const item of report.differing) lines.push(`differing ${item.kind}: ${item.name}\n    expected: ${item.expected}\n    actual:   ${item.actual}`);
@@ -114,30 +114,33 @@ async function extensionSchema(client, extension) {
   return result.rows[0] ? result.rows[0].schema : null;
 }
 
-async function verifyAgainstShadowSchema(client, sql, { allowExtraObjects }) {
+export async function verifyAgainstShadowSchema(client, sqls) {
+  const statements = Array.isArray(sqls) ? sqls : [sqls];
   const shadow = `void_baseline_shadow_${randomBytes(6).toString("hex")}`;
   const extensionSchemas = [];
-  for (const extension of requiredExtensions(sql)) {
-    const schema = await extensionSchema(client, extension);
-    if (!schema) throw new BaselineMismatchError(`Required extension is not installed: ${extension}`, { missing: [{ kind: "extension", name: extension }], differing: [], extra: [], compatible: false });
-    if (!extensionSchemas.includes(schema)) extensionSchemas.push(schema);
+  for (const sql of statements) {
+    for (const extension of requiredExtensions(sql)) {
+      const schema = await extensionSchema(client, extension);
+      if (!schema) throw new BaselineMismatchError(`Required extension is not installed: ${extension}`, { missing: [{ kind: "extension", name: extension }], differing: [], extra: [], compatible: false });
+      if (!extensionSchemas.includes(schema)) extensionSchemas.push(schema);
+    }
   }
   await client.query("BEGIN");
   try {
     await client.query(`CREATE SCHEMA ${quoteIdentifier(shadow)}`);
     const searchPath = [quoteIdentifier(shadow), "public", ...extensionSchemas.filter((schema) => schema !== "public").map(quoteIdentifier)].join(", ");
     await client.query(`SET LOCAL search_path TO ${searchPath}`);
-    await client.query(stripTransactionControl(sql));
+    for (const sql of statements) await client.query(stripTransactionControl(sql));
     const normalizeSchemas = [shadow, "public", ...extensionSchemas];
     const expected = await readSchema(client, shadow, normalizeSchemas);
     const actual = await readSchema(client, "public", normalizeSchemas);
-    return compareSchemas(expected, actual, { allowExtraObjects });
+    return compareSchemas(expected, actual);
   } finally {
     await client.query("ROLLBACK");
   }
 }
 
-export async function baselineDatabase({ pool = null, config = loadServerConfig(), directory = migrationsDirectory, name = baselineMigrationName, expectedChecksum = baselineMigrationChecksum, allowExtraObjects = false, dryRun = false } = {}) {
+export async function baselineDatabase({ pool = null, config = loadServerConfig(), directory = migrationsDirectory, name = baselineMigrationName, expectedChecksum = baselineMigrationChecksum, dryRun = false } = {}) {
   const ownPool = pool || createDatabasePool(config);
   const client = await ownPool.connect();
   try {
@@ -156,7 +159,7 @@ export async function baselineDatabase({ pool = null, config = loadServerConfig(
       return { baselined: false, reason: "already-recorded", name, checksum, applied: records.map((row) => row.name) };
     }
     if (records.length) throw new BaselineMismatchError(`Database records migrations (${records.map((row) => row.name).join(", ")}) but not ${name}. This is not a baselining case; resolve the migration history manually.`, { missing: [{ kind: "migration-record", name }], differing: [], extra: records.map((row) => ({ kind: "migration-record", name: row.name, actual: row.checksum })), compatible: false });
-    const report = await verifyAgainstShadowSchema(client, sql, { allowExtraObjects });
+    const report = await verifyAgainstShadowSchema(client, sql);
     if (!report.compatible) throw new BaselineMismatchError(`Live schema does not match the intended result of ${name}; no changes were made.\n${formatReport(report)}`, report);
     if (dryRun) return { baselined: false, reason: "dry-run", name, checksum, report, applied: records.map((row) => row.name) };
     await client.query("BEGIN");
@@ -182,8 +185,7 @@ export async function pendingMigrationsAfterBaseline({ directory = migrationsDir
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const dryRun = process.argv.includes("--check");
-  const allowExtraObjects = process.argv.includes("--allow-extra-objects");
-  baselineDatabase({ dryRun, allowExtraObjects })
+  baselineDatabase({ dryRun })
     .then((result) => console.log(JSON.stringify({ ...result, report: undefined })))
     .catch((error) => { console.error(error.message); process.exitCode = 1; });
 }
