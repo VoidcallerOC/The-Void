@@ -7,7 +7,7 @@ import { loadServerConfig } from "./config.js";
 import { advisoryLockKey, listMigrations, migrationsDirectory } from "./migrate.js";
 
 export const baselineMigrationName = "001_initial_persistence.sql";
-export const baselineMigrationChecksum = "3a34827e1253e19d26a05cd054f25c46acb046bc8b556dd8aa2320cb29ac9475";
+export const baselineMigrationChecksum = "e5752fdbef11bd0389c33aab64acc8f2d994914dc7c35f0fd33e0b961786bf1a";
 
 const schemaMigrationsDdl = "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())";
 
@@ -21,9 +21,11 @@ export class BaselineMismatchError extends Error {
 
 function quoteIdentifier(name) { return `"${String(name).replace(/"/g, '""')}"`; }
 
+export function normalizedChecksum(sql) { return createHash("sha256").update(sql.replace(/\r\n/g, "\n")).digest("hex"); }
+
 export function stripTransactionControl(sql) {
   if (/^\s*(ROLLBACK|SAVEPOINT)\b/im.test(sql)) throw new Error("Baseline verification cannot replay SQL containing ROLLBACK or SAVEPOINT statements.");
-  return sql.replace(/^[ \t]*(BEGIN|COMMIT|END)[ \t]*;[ \t]*$/gim, "").trim();
+  return sql.replace(/^[ \t]*(BEGIN|COMMIT|END)[ \t]*;[ \t\r]*$/gim, "").trim();
 }
 
 export function requiredExtensions(sql) {
@@ -142,8 +144,9 @@ export async function baselineDatabase({ pool = null, config = loadServerConfig(
     await client.query("SELECT pg_advisory_lock($1)", [advisoryLockKey]);
     const sql = await readFile(join(directory, name), "utf8");
     const checksum = createHash("sha256").update(sql).digest("hex");
-    if (expectedChecksum && checksum !== expectedChecksum) {
-      throw new BaselineMismatchError(`Baseline migration checksum does not match the pinned baseline checksum for ${name}. Expected ${expectedChecksum}, computed ${checksum}. Baselining an edited migration is refused.`, { missing: [], differing: [{ kind: "checksum", name, expected: expectedChecksum, actual: checksum }], extra: [], compatible: false });
+    const pinnedChecksum = normalizedChecksum(sql);
+    if (expectedChecksum && pinnedChecksum !== expectedChecksum) {
+      throw new BaselineMismatchError(`Baseline migration checksum does not match the pinned baseline checksum for ${name}. Expected ${expectedChecksum}, computed ${pinnedChecksum}. Baselining an edited migration is refused.`, { missing: [], differing: [{ kind: "checksum", name, expected: expectedChecksum, actual: pinnedChecksum }], extra: [], compatible: false });
     }
     const migrationsTable = (await client.query("SELECT to_regclass('public.schema_migrations') AS table")).rows[0].table;
     const records = migrationsTable ? (await client.query("SELECT name, checksum FROM schema_migrations ORDER BY name")).rows : [];

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, readdir, writeFile, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +8,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadServerConfig } from "./config.js";
 import { migrate, migrationsDirectory } from "./migrate.js";
-import { baselineDatabase, baselineMigrationChecksum, baselineMigrationName, requiredExtensions, stripTransactionControl } from "./baseline.js";
+import { baselineDatabase, baselineMigrationChecksum, baselineMigrationName, normalizedChecksum, requiredExtensions, stripTransactionControl } from "./baseline.js";
 import { validateDatabase } from "./validate-db.js";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "";
@@ -17,11 +17,13 @@ const localMigrations = join(dirname(fileURLToPath(import.meta.url)), "migration
 describe("baseline inputs", () => {
   it("keeps the pinned baseline checksum in sync with the migration file", async () => {
     const sql = await readFile(join(migrationsDirectory, baselineMigrationName), "utf8");
-    expect(createHash("sha256").update(sql).digest("hex")).toBe(baselineMigrationChecksum);
+    expect(normalizedChecksum(sql)).toBe(baselineMigrationChecksum);
+    expect(normalizedChecksum(sql.replace(/\r?\n/g, "\r\n"))).toBe(baselineMigrationChecksum);
   });
 
   it("strips outer transaction control and refuses partial transaction statements", () => {
     expect(stripTransactionControl("BEGIN;\nCREATE TABLE a (id text);\nCOMMIT;")).toBe("CREATE TABLE a (id text);");
+    expect(stripTransactionControl("BEGIN;\r\nCREATE TABLE a (id text);\r\nCOMMIT;\r\n")).toBe("CREATE TABLE a (id text);");
     expect(() => stripTransactionControl("BEGIN;\nROLLBACK;")).toThrow(/ROLLBACK/);
   });
 
@@ -180,6 +182,7 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
       expect(result).toMatchObject({ baselined: false, reason: "dry-run" });
       expect(result.report.compatible).toBe(true);
       expect(await appliedMigrationNames(pool)).toBeNull();
+      expect((await pool.query("SELECT nspname FROM pg_namespace WHERE nspname LIKE 'void_baseline_shadow%'")).rowCount).toBe(0);
     } finally { await pool.end(); }
   }, 120000);
 });

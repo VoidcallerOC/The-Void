@@ -19,7 +19,7 @@ The database already contains the schema created by `001_initial_persistence.sql
 `npm run db:baseline` records `001_initial_persistence.sql` as applied **only** when the live schema is proven to be exactly what that migration produces. It is fail-closed:
 
 - takes the same advisory lock (`481562901`) as `npm run db:migrate`, so it cannot race a deploy-time migration;
-- refuses unless the SHA-256 of `server/migrations/001_initial_persistence.sql` matches the checksum pinned in `server/baseline.js`;
+- refuses unless the SHA-256 of `server/migrations/001_initial_persistence.sql` (line endings normalized to LF, so the pin holds on any checkout) matches the checksum pinned in `server/baseline.js`;
 - replays migration 001 into a throwaway shadow schema inside a transaction that is **always rolled back**, then compares the live `public` schema against it: tables, columns, types, nullability, defaults, primary keys, unique constraints, foreign keys, check constraints, indexes (including partial indexes), and required extensions (`pgcrypto`);
 - on any missing, differing, or unexpected object it prints a mismatch report, exits non-zero, and writes nothing;
 - records only `001_initial_persistence.sql`; migrations 002–006 are never marked as applied;
