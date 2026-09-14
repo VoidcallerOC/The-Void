@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "db:validate": "node server/validate-db.js",
     "db:migrate": "node server/migrate.js",
+    "db:baseline": "node server/baseline.js",
+    "db:baseline:check": "node server/baseline.js --check",
     "start:api": "node server/index.js",
     "start:indexer": "node server/indexer-worker.js"
   },
