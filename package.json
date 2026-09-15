@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "db:validate": "node server/validate-db.js",
     "db:migrate": "node server/migrate.js",
-    "start:api": "node server/index.js",
+    "start:api": "npm run db:migrate && node server/index.js",
     "start:indexer": "node server/indexer-worker.js"
   },
   "dependencies": {
