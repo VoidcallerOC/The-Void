@@ -1,5 +1,6 @@
 import { checkDatabaseHealth } from "./db.js";
 import { createJsonRpcClient } from "./indexer-rpc.js";
+import { validateDatabase } from "./validate-db.js";
 
 export function createReadinessChecker({ pool, config, rpc = null, now = () => Date.now() } = {}) {
   const rpcClient = rpc || (config?.indexer?.rpcUrl ? createJsonRpcClient({ url: config.indexer.rpcUrl }) : null);
@@ -8,7 +9,13 @@ export function createReadinessChecker({ pool, config, rpc = null, now = () => D
     if (pool) {
       database = await checkDatabaseHealth(pool);
       if (database.ok) {
-        try { await pool.query("SELECT name FROM schema_migrations ORDER BY name LIMIT 1"); database.migrations = { ok: true }; } catch (error) { database.migrations = { ok: false, error: error.message }; database.ok = false; }
+        try {
+          const validation = await validateDatabase({ pool, config });
+          database.migrations = { ok: true, migrations: validation.migrations };
+        } catch (error) {
+          database.migrations = { ok: false, error: error.message };
+          database.ok = false;
+        }
       }
     }
     const marketplace = config?.marketplace?.enabled

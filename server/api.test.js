@@ -46,6 +46,17 @@ describe("HTTP API boundary", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("does not report migrations ready from a partial schema_migrations ledger", async () => {
+    const pool = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ ok: 1 }] })
+      .mockResolvedValueOnce({ rows: [{ name: "001_initial_persistence.sql", checksum: "incorrect" }] }) };
+    const readiness = createReadinessChecker({ pool, config: { marketplace: { enabled: false }, indexer: { rpcUrl: null, chainId: null, pollIntervalMs: 15000 } } });
+    const result = await readiness();
+    expect(result.database.ok).toBe(false);
+    expect(result.database.migrations).toMatchObject({ ok: false });
+    expect(result.ok).toBe(false);
+  });
+
   it("serves JSON health without a database", async () => {
     const { createApiServer } = await import("./index.js");
     const { loadServerConfig } = await import("./config.js");
