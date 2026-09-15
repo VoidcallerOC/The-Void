@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE artists (
+CREATE TABLE IF NOT EXISTS artists (
   id text PRIMARY KEY,
   slug text NOT NULL UNIQUE,
   display_name text NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE artists (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE artist_profiles (
+CREATE TABLE IF NOT EXISTS artist_profiles (
   artist_id text PRIMARY KEY REFERENCES artists(id) ON DELETE CASCADE,
   bio text,
   website_url text,
@@ -22,7 +22,7 @@ CREATE TABLE artist_profiles (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE releases (
+CREATE TABLE IF NOT EXISTS releases (
   id text PRIMARY KEY,
   artist_id text NOT NULL REFERENCES artists(id),
   slug text NOT NULL,
@@ -35,9 +35,9 @@ CREATE TABLE releases (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (artist_id, slug)
 );
-CREATE INDEX releases_discovery_idx ON releases (status, published_at DESC);
+CREATE INDEX IF NOT EXISTS releases_discovery_idx ON releases (status, published_at DESC);
 
-CREATE TABLE contracts (
+CREATE TABLE IF NOT EXISTS contracts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   chain_id bigint NOT NULL,
   chain_key text NOT NULL,
@@ -53,9 +53,9 @@ CREATE TABLE contracts (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (chain_id, address)
 );
-CREATE INDEX contracts_type_idx ON contracts (contract_type, chain_id);
+CREATE INDEX IF NOT EXISTS contracts_type_idx ON contracts (contract_type, chain_id);
 
-CREATE TABLE editions (
+CREATE TABLE IF NOT EXISTS editions (
   id text PRIMARY KEY,
   release_id text NOT NULL REFERENCES releases(id),
   contract_id uuid REFERENCES contracts(id),
@@ -68,9 +68,9 @@ CREATE TABLE editions (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX editions_release_idx ON editions (release_id, status);
+CREATE INDEX IF NOT EXISTS editions_release_idx ON editions (release_id, status);
 
-CREATE TABLE tokens (
+CREATE TABLE IF NOT EXISTS tokens (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   edition_id text NOT NULL REFERENCES editions(id) ON DELETE CASCADE,
   contract_id uuid NOT NULL REFERENCES contracts(id),
@@ -83,9 +83,9 @@ CREATE TABLE tokens (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (contract_id, token_id)
 );
-CREATE INDEX tokens_edition_idx ON tokens (edition_id, token_id);
+CREATE INDEX IF NOT EXISTS tokens_edition_idx ON tokens (edition_id, token_id);
 
-CREATE TABLE experiences (
+CREATE TABLE IF NOT EXISTS experiences (
   id text PRIMARY KEY,
   artist_id text REFERENCES artists(id),
   release_id text REFERENCES releases(id),
@@ -100,16 +100,16 @@ CREATE TABLE experiences (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX experiences_discovery_idx ON experiences (status, release_id, edition_id);
+CREATE INDEX IF NOT EXISTS experiences_discovery_idx ON experiences (status, release_id, edition_id);
 
-CREATE TABLE collectors (
+CREATE TABLE IF NOT EXISTS collectors (
   wallet_address text PRIMARY KEY,
   first_seen_at timestamptz NOT NULL DEFAULT now(),
   last_seen_at timestamptz NOT NULL DEFAULT now(),
   application_metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE chain_blocks (
+CREATE TABLE IF NOT EXISTS chain_blocks (
   chain_id bigint NOT NULL,
   block_number bigint NOT NULL,
   block_hash text NOT NULL,
@@ -121,9 +121,9 @@ CREATE TABLE chain_blocks (
   PRIMARY KEY (chain_id, block_number),
   UNIQUE (chain_id, block_hash)
 );
-CREATE INDEX chain_blocks_cursor_idx ON chain_blocks (chain_id, is_canonical, block_number DESC);
+CREATE INDEX IF NOT EXISTS chain_blocks_cursor_idx ON chain_blocks (chain_id, is_canonical, block_number DESC);
 
-CREATE TABLE transfers (
+CREATE TABLE IF NOT EXISTS transfers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   chain_id bigint NOT NULL,
   contract_address text NOT NULL,
@@ -142,11 +142,11 @@ CREATE TABLE transfers (
   indexed_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (chain_id, transaction_hash, log_index)
 );
-CREATE INDEX transfers_wallet_idx ON transfers (chain_id, from_wallet, block_number DESC);
-CREATE INDEX transfers_recipient_idx ON transfers (chain_id, to_wallet, block_number DESC);
-CREATE INDEX transfers_asset_idx ON transfers (chain_id, contract_address, token_id, block_number DESC);
+CREATE INDEX IF NOT EXISTS transfers_wallet_idx ON transfers (chain_id, from_wallet, block_number DESC);
+CREATE INDEX IF NOT EXISTS transfers_recipient_idx ON transfers (chain_id, to_wallet, block_number DESC);
+CREATE INDEX IF NOT EXISTS transfers_asset_idx ON transfers (chain_id, contract_address, token_id, block_number DESC);
 
-CREATE TABLE ownership_snapshots (
+CREATE TABLE IF NOT EXISTS ownership_snapshots (
   chain_id bigint NOT NULL,
   contract_address text NOT NULL,
   token_id numeric(78,0) NOT NULL,
@@ -158,10 +158,10 @@ CREATE TABLE ownership_snapshots (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (chain_id, contract_address, token_id, wallet_address)
 );
-CREATE INDEX ownership_wallet_idx ON ownership_snapshots (wallet_address, chain_id, updated_at DESC);
-CREATE INDEX ownership_asset_idx ON ownership_snapshots (chain_id, contract_address, token_id, amount DESC);
+CREATE INDEX IF NOT EXISTS ownership_wallet_idx ON ownership_snapshots (wallet_address, chain_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS ownership_asset_idx ON ownership_snapshots (chain_id, contract_address, token_id, amount DESC);
 
-CREATE TABLE transactions (
+CREATE TABLE IF NOT EXISTS transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   chain_id bigint NOT NULL,
   transaction_hash text NOT NULL,
@@ -179,9 +179,9 @@ CREATE TABLE transactions (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (chain_id, transaction_hash)
 );
-CREATE INDEX transactions_status_idx ON transactions (chain_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS transactions_status_idx ON transactions (chain_id, status, updated_at DESC);
 
-CREATE TABLE listings (
+CREATE TABLE IF NOT EXISTS listings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   chain_id bigint NOT NULL,
   marketplace_contract_id uuid NOT NULL REFERENCES contracts(id),
@@ -205,11 +205,11 @@ CREATE TABLE listings (
   UNIQUE (chain_id, marketplace_contract_id, listing_id),
   CHECK (remaining_amount <= amount)
 );
-CREATE INDEX listings_discovery_idx ON listings (status, expires_at, created_at DESC);
-CREATE INDEX listings_asset_idx ON listings (token_contract_id, token_id, status, price_wei);
-CREATE INDEX listings_seller_idx ON listings (seller_wallet, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS listings_discovery_idx ON listings (status, expires_at, created_at DESC);
+CREATE INDEX IF NOT EXISTS listings_asset_idx ON listings (token_contract_id, token_id, status, price_wei);
+CREATE INDEX IF NOT EXISTS listings_seller_idx ON listings (seller_wallet, status, updated_at DESC);
 
-CREATE TABLE listing_status_history (
+CREATE TABLE IF NOT EXISTS listing_status_history (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   listing_id uuid NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
   status text NOT NULL CHECK (status IN ('ACTIVE', 'SOLD', 'CANCELLED', 'EXPIRED', 'REORGED')),
@@ -221,7 +221,7 @@ CREATE TABLE listing_status_history (
   UNIQUE (listing_id, transaction_hash, log_index)
 );
 
-CREATE TABLE purchases (
+CREATE TABLE IF NOT EXISTS purchases (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   listing_id uuid NOT NULL REFERENCES listings(id),
   transaction_id uuid REFERENCES transactions(id),
@@ -243,10 +243,10 @@ CREATE TABLE purchases (
   finalized_at timestamptz,
   UNIQUE (chain_id, transaction_hash, settlement_log_index)
 );
-CREATE INDEX purchases_buyer_idx ON purchases (buyer_wallet, created_at DESC);
-CREATE INDEX purchases_listing_idx ON purchases (listing_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS purchases_buyer_idx ON purchases (buyer_wallet, created_at DESC);
+CREATE INDEX IF NOT EXISTS purchases_listing_idx ON purchases (listing_id, created_at DESC);
 
-CREATE TABLE experience_grants (
+CREATE TABLE IF NOT EXISTS experience_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   grant_id text NOT NULL UNIQUE,
   experience_id text NOT NULL REFERENCES experiences(id),
@@ -261,9 +261,9 @@ CREATE TABLE experience_grants (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   CHECK (expires_at > issued_at)
 );
-CREATE INDEX grants_wallet_expiry_idx ON experience_grants (wallet_address, expires_at DESC);
+CREATE INDEX IF NOT EXISTS grants_wallet_expiry_idx ON experience_grants (wallet_address, expires_at DESC);
 
-CREATE TABLE redemptions (
+CREATE TABLE IF NOT EXISTS redemptions (
   id text PRIMARY KEY,
   experience_id text NOT NULL REFERENCES experiences(id),
   wallet_address text NOT NULL,
@@ -275,10 +275,10 @@ CREATE TABLE redemptions (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX redemptions_wallet_idx ON redemptions (wallet_address, state, updated_at DESC);
-CREATE UNIQUE INDEX redemptions_active_experience_wallet_idx ON redemptions (experience_id, wallet_address) WHERE state IN ('AVAILABLE', 'RESERVED', 'REDEEMED');
+CREATE INDEX IF NOT EXISTS redemptions_wallet_idx ON redemptions (wallet_address, state, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS redemptions_active_experience_wallet_idx ON redemptions (experience_id, wallet_address) WHERE state IN ('AVAILABLE', 'RESERVED', 'REDEEMED');
 
-CREATE TABLE audit_events (
+CREATE TABLE IF NOT EXISTS audit_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   event_type text NOT NULL,
   actor_wallet text,
@@ -290,10 +290,10 @@ CREATE TABLE audit_events (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX audit_subject_idx ON audit_events (subject_type, subject_id, created_at DESC);
-CREATE INDEX audit_actor_idx ON audit_events (actor_wallet, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_subject_idx ON audit_events (subject_type, subject_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_actor_idx ON audit_events (actor_wallet, created_at DESC);
 
-CREATE TABLE media_authorizations (
+CREATE TABLE IF NOT EXISTS media_authorizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   grant_id uuid NOT NULL REFERENCES experience_grants(id) ON DELETE CASCADE,
   wallet_address text NOT NULL,
@@ -306,10 +306,10 @@ CREATE TABLE media_authorizations (
   reason text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX media_auth_wallet_idx ON media_authorizations (wallet_address, created_at DESC);
-CREATE INDEX media_auth_grant_idx ON media_authorizations (grant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS media_auth_wallet_idx ON media_authorizations (wallet_address, created_at DESC);
+CREATE INDEX IF NOT EXISTS media_auth_grant_idx ON media_authorizations (grant_id, created_at DESC);
 
-CREATE TABLE auth_nonces (
+CREATE TABLE IF NOT EXISTS auth_nonces (
   nonce_hash text PRIMARY KEY,
   wallet_address text NOT NULL,
   purpose text NOT NULL,
@@ -319,6 +319,6 @@ CREATE TABLE auth_nonces (
   request_id text,
   UNIQUE (wallet_address, purpose, nonce_hash)
 );
-CREATE INDEX auth_nonces_expiry_idx ON auth_nonces (expires_at) WHERE consumed_at IS NULL;
+CREATE INDEX IF NOT EXISTS auth_nonces_expiry_idx ON auth_nonces (expires_at) WHERE consumed_at IS NULL;
 
 COMMIT;
