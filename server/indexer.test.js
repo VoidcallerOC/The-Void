@@ -77,6 +77,20 @@ describe("durable index synchronization", () => {
     expect(store.events.size).toBe(2);
   });
 
+  it("advances empty ranges without fetching every block and fetches each event block once", async () => {
+    const store = storeDouble();
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(9), getLogs: vi.fn().mockResolvedValue([
+      singleLog({ blockNumber: 5, tx: "0xtx5a" }),
+      singleLog({ blockNumber: 5, tx: "0xtx5b", logIndex: 1 }),
+    ]), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, chunkSize: 10, configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 0, eventTopics: { TransferSingle: singleTopic } }] });
+    const [result] = await indexer.syncAll();
+    expect(result.processedBlocks).toBe(10);
+    expect(rpc.getBlock).toHaveBeenCalledTimes(2);
+    expect((await store.getCheckpoint({ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).lastProcessedBlock).toBe(9);
+    expect(store.transfers).toHaveLength(2);
+  });
+
   it("resumes from the last checkpoint after interruption", async () => {
     const store = storeDouble();
     let failed = true;
