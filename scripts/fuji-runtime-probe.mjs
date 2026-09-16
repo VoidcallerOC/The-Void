@@ -17,7 +17,7 @@ for (const path of ["/api/health", "/api/health/ready"]) {
   const payload = JSON.parse(response.body);
   console.log(JSON.stringify({ path, status: response.status, payload }));
 }
-const workerConfig = loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://redacted.invalid/fuji", PUBLIC_APP_URL: "https://staging.example.com", API_ALLOWED_ORIGINS: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43113", INDEXER_CONTRACTS_JSON: JSON.stringify([{ address: "0x0000000000000000000000000000000000000001", contractType: "ERC1155", startBlock: 0 }]) }, { requireIndexerContracts: true });
+const workerConfig = loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://redacted.invalid/fuji", PUBLIC_APP_URL: "https://staging.example.com", API_ALLOWED_ORIGINS: "https://staging.example.com", AUTH_DOMAIN: "https://staging.example.com", AUTH_URI: "https://staging.example.com/login", INDEXER_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", INDEXER_CHAIN_ID: "43113", INDEXER_CONTRACTS_JSON: JSON.stringify([{ address: "0x0000000000000000000000000000000000000002", contractType: "ERC1155", startBlock: 1 }]) }, { requireIndexerContracts: true });
 try {
   const worker = createIndexerWorker({ config: workerConfig, pool: { query: async () => ({ rows: [] }) }, logger: { info() {}, warn() {}, error() {} } });
   console.log(JSON.stringify({ indexerWorkerConfig: "validated", chainId: workerConfig.indexer.chainId, rpcUrl: workerConfig.indexer.rpcUrl }));
