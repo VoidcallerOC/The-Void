@@ -15,9 +15,8 @@ const deployer = new ethers.Wallet(privateKey, provider);
 const network = await provider.getNetwork();
 if (network.chainId !== 43113n) throw new Error(`Unexpected chain ID: ${network.chainId}`);
 const admin = ethers.getAddress(expectedAdmin);
-const forbidden = "0x2FD6ED32CAf1FaDA14EDcE6aF40a33e74E45c507";
-if (deployer.address.toLowerCase() === forbidden.toLowerCase()) throw new Error("Compromised deployer address refused.");
 if (admin === ethers.ZeroAddress) throw new Error("Zero release admin refused.");
+if (deployer.address.toLowerCase() !== admin.toLowerCase()) throw new Error("The funded deployer must equal RELEASE_ADMIN_ADDRESS for the role-protected smoke test.");
 
 const deployment = JSON.parse(await readFile(resultPath, "utf8"));
 const address = ethers.getAddress(deployment.contractAddress);
