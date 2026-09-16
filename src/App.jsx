@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
+import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 
 // Hero is the above-the-fold landing — keep it eager. The rest of the
 // sections are split into their own chunks and loaded on navigation.
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="release/:release" element={<ReleasePage />} />
           <Route path="edition/:edition" element={<EditionPage />} />
           <Route path="experience/:experience" element={<ExperiencePage />} />
+          <Route path="studio" element={<ArtistStudioPage />} />
           <Route path="collection" element={<CollectionPage />} />
           <Route path="collectors" element={<CollectorsPage />} />
           <Route path="chronicle" element={<ChroniclePage />} />

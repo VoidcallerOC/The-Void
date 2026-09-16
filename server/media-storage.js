@@ -1,44 +1,79 @@
-import process from "node:process";
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import path from "node:path";
+import { createReadStream, promises as fs } from "node:fs";
+import { extname, resolve, sep } from "node:path";
 
-const CONTENT_TYPES = Object.freeze({ mp3: "audio/mpeg", mp4: "video/mp4", webm: "video/webm", wav: "audio/wav", flac: "audio/flac", m4a: "audio/mp4" });
+const CONTENT_TYPES = Object.freeze({ ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".flac": "audio/flac", ".mp4": "video/mp4", ".webm": "video/webm" });
 
-function safeKey(key) {
-  const value = String(key || "").trim();
-  if (!value || value.includes("\\") || value.startsWith("/") || value.split("/").some((part) => part === ".." || part === ".")) throw new Error("Invalid media key.");
-  return value;
+function safeStorageKey(value) {
+  const key = String(value || "").trim().replace(/^\/+/, "");
+  if (!key || key.includes("\0") || key.split("/").some((part) => !part || part === "." || part === "..")) throw new Error("Invalid media key");
+  return key;
 }
 
-export function createPrivateMediaStore({ root = process.env.PRIVATE_MEDIA_ROOT || path.resolve(process.cwd(), "private-media") } = {}) {
-  const rootPath = path.resolve(root);
-  function resolve(key) {
-    const clean = safeKey(key);
-    const file = path.resolve(rootPath, clean);
-    if (file !== rootPath && !file.startsWith(`${rootPath}${path.sep}`)) throw new Error("Invalid media key.");
-    return { key: clean, file };
+function fileRange(rangeHeader, size) {
+  if (!rangeHeader) return { start: 0, end: size - 1, partial: false };
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(String(rangeHeader).trim());
+  if (!match) throw Object.assign(new Error("Requested media range is invalid."), { status: 416, code: "INVALID_MEDIA_RANGE" });
+  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  const end = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) throw Object.assign(new Error("Requested media range is unsatisfiable."), { status: 416, code: "INVALID_MEDIA_RANGE" });
+  return { start, end: Math.min(end, size - 1), partial: true };
+}
+
+function allowedSignedUrl(url, allowedHosts) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new Error("Object storage signer returned an invalid URL."); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || !allowedHosts.includes(parsed.host.toLowerCase())) throw new Error("Object storage signer returned an unapproved URL.");
+  return parsed.toString();
+}
+
+export class PrivateMediaStorage {
+  constructor({ config, fetchImpl = fetch } = {}) {
+    if (!config?.driver) throw new TypeError("PrivateMediaStorage requires media configuration.");
+    this.config = config;
+    this.fetchImpl = fetchImpl;
   }
-  return {
-    root: rootPath,
-    async stat(key) {
-      const resolved = resolve(key);
-      const info = await stat(resolved.file);
-      return { ...resolved, size: info.size, contentType: CONTENT_TYPES[path.extname(resolved.file).slice(1).toLowerCase()] || "application/octet-stream" };
-    },
-    stream(key, options) {
-      return createReadStream(resolve(key).file, options);
-    },
-    resolve,
-  };
+
+  async open({ storageKey, range = null, contentType = null }) {
+    const key = safeStorageKey(storageKey);
+    if (this.config.driver === "filesystem") {
+      const root = resolve(this.config.privateRoot);
+      const path = resolve(root, key);
+      if (path !== root && !path.startsWith(`${root}${sep}`)) throw new Error("Protected media storage key escapes the private media root.");
+      let stat;
+      try { stat = await fs.stat(path); } catch { throw Object.assign(new Error("Protected media object was not found."), { status: 404, code: "MEDIA_OBJECT_NOT_FOUND" }); }
+      if (!stat.isFile() || stat.size > this.config.maxBytes) throw Object.assign(new Error("Protected media object is unavailable."), { status: 404, code: "MEDIA_OBJECT_NOT_FOUND" });
+      const selected = fileRange(range, stat.size);
+      return { type: "stream", stream: createReadStream(path, { start: selected.start, end: selected.end }), contentType: contentType || CONTENT_TYPES[extname(path).toLowerCase()] || "application/octet-stream", contentLength: selected.end - selected.start + 1, totalLength: stat.size, start: selected.start, end: selected.end, partial: selected.partial };
+    }
+    const response = await this.fetchImpl(this.config.signerEndpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.config.signerToken}` }, body: JSON.stringify({ storageKey: key, expiresInSeconds: this.config.signedUrlTtlSeconds }) });
+    if (!response.ok) throw new Error(`Object storage signer HTTP ${response.status}`);
+    const payload = await response.json();
+    return { type: "redirect", url: allowedSignedUrl(payload?.url, this.config.objectUrlHosts) };
+  }
 }
+
+export function createPrivateMediaStorage(options) { return new PrivateMediaStorage(options); }
 
 export function parseByteRange(header, size) {
-  if (!header) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
-  if (!match) return null;
-  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2] || 0));
-  const end = match[2] ? Number(match[2]) : size - 1;
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) return null;
-  return { start, end: Math.min(end, size - 1) };
+  try {
+    const selected = fileRange(header, size);
+    return { start: selected.start, end: selected.end };
+  } catch {
+    return null;
+  }
+}
+
+export function createPrivateMediaStore(options = {}) {
+  if (options.root && !options.config) {
+    const root = resolve(options.root);
+    return {
+      resolve(key) {
+        const safe = safeStorageKey(key);
+        const path = resolve(root, safe);
+        if (path !== root && !path.startsWith(`${root}${sep}`)) throw new Error("Invalid media key");
+        return path;
+      }
+    };
+  }
+  return createPrivateMediaStorage(options);
 }

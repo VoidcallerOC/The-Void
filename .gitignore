@@ -8,8 +8,6 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-out
-cache
 dist
 dist-ssr
 *.local
@@ -27,9 +25,5 @@ dist-ssr
 
 .vercel
 
-# Protected masters are deployed through private storage/mounted media, never GitHub.
-private-media/audio/*.mp3
-private-media/audio/*.wav
-private-media/audio/*.flac
-private-media/audio/*.m4a
-private-media/video/*
+# Protected masters are deployment assets, never static web or repository content.
+private-media/
