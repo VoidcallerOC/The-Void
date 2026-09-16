@@ -37,7 +37,9 @@
     "globals": "^17.6.0",
     "opentype.js": "^2.0.0",
     "vite": "^8.0.12",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "@types/node": "22.20.3",
+    "undici-types": "6.21.0"
   },
   "overrides": {
     "baseline-browser-mapping": "2.11.21",
