@@ -1,0 +1,120 @@
+name: Deploy VoidRelease1155 to Avalanche Fuji
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voidrelease1155-fuji-deployment
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: fuji
+  EXPECTED_CHAIN_ID: "43113"
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
+    steps:
+      - name: Check out certified commit
+        uses: actions/checkout@v4
+        with:
+          ref: 504c7a230d40969873afaf06464b7438a28cc470
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build and test Solidity before any broadcast
+        run: |
+          set -euo pipefail
+          forge build
+          forge test
+
+      - name: Validate Fuji-only preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS)
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: ${name}" >&2
+              exit 1
+            fi
+          done
+          if [ "${DEPLOY_NETWORK}" != "fuji" ]; then
+            echo "DEPLOY_NETWORK must be fuji" >&2
+            exit 1
+          fi
+          if ! [[ "${RELEASE_ADMIN_ADDRESS}" =~ ^0x[0-9a-fA-F]{40}$ ]] || [ "${RELEASE_ADMIN_ADDRESS}" = "0x0000000000000000000000000000000000000000" ]; then
+            echo "RELEASE_ADMIN_ADDRESS is invalid or zero" >&2
+            exit 1
+          fi
+          chain_id="$(cast chain-id --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
+          if [ "${chain_id}" != "43113" ]; then
+            echo "Refusing non-Fuji chain: ${chain_id}" >&2
+            exit 1
+          fi
+          deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
+          deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
+          compromised_lc="0x2fd6ed32caf1fad a14edce6af40a33e74e45c507"
+          compromised_lc="${compromised_lc// /}"
+          if [ "${deployer_lc}" = "${compromised_lc}" ]; then
+            echo "Refusing compromised deployer address" >&2
+            exit 1
+          fi
+          admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
+          if [ "${deployer_lc}" != "${admin_lc}" ]; then
+            echo "RELEASE_ADMIN_ADDRESS must match the funded deployer for the role-protected smoke test" >&2
+            exit 1
+          fi
+          balance_wei="$(cast balance "${deployer}" --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
+          if ! [[ "${balance_wei}" =~ ^[0-9]+$ ]] || [ "${balance_wei}" -le 0 ]; then
+            echo "Deployer has zero or unreadable Fuji AVAX balance" >&2
+            exit 1
+          fi
+          echo "Fuji preflight passed: chain_id=${chain_id}, deployer=${deployer}, balance_wei=${balance_wei}"
+          grep -Fq 'contracts/VoidRelease1155.sol:VoidRelease1155' scripts/deploy-release.mjs
+          ! grep -Fq 'MusicMarketplace.sol:MusicMarketplace' scripts/deploy-release.mjs
+
+      - name: Deploy only VoidRelease1155 to Fuji
+        id: deploy
+        run: |
+          set -euo pipefail
+          export DEPLOY_RESULT_FILE="$RUNNER_TEMP/voidrelease1155-deployment.json"
+          npm run deploy:release
+          test -s "$DEPLOY_RESULT_FILE"
+
+      - name: Independently verify deployment and run Fuji smoke test
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-fuji.mjs "$RUNNER_TEMP/voidrelease1155-deployment.json"
+
+      - name: Final regression suite
+        run: |
+          set -euo pipefail
+          forge build
+          forge test
+          npm test
+          npm run lint
+          npm run build
+
+      - name: Upload verified deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidrelease1155-fuji-deployment
+          path: deployments/release-fuji.json
+          if-no-files-found: error
+          retention-days: 90
