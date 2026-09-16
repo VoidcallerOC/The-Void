@@ -1,0 +1,22 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const exec = promisify(execFile);
+if ((process.env.DEPLOY_NETWORK || "fuji") !== "fuji") throw new Error("This script only deploys VoidRelease1155 to Avalanche Fuji (43113).");
+const rpcUrl = process.env.AVALANCHE_FUJI_RPC_URL;
+const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
+const admin = process.env.RELEASE_ADMIN_ADDRESS;
+if (!rpcUrl || !privateKey || !/^0x[a-fA-F0-9]{40}$/.test(admin || "")) throw new Error("Required: AVALANCHE_FUJI_RPC_URL, DEPLOYER_PRIVATE_KEY, RELEASE_ADMIN_ADDRESS.");
+const { stdout } = await exec("forge", ["create", "contracts/VoidRelease1155.sol:VoidRelease1155", "--rpc-url", rpcUrl, "--private-key", privateKey, "--constructor-args", admin, "--broadcast", "--json"], { maxBuffer: 10 * 1024 * 1024 });
+let result; try { result = JSON.parse(stdout); } catch { throw new Error(`Forge did not return JSON. Output: ${stdout}`); }
+const address = result.deployedTo || result.contractAddress;
+const transactionHash = result.transactionHash || result.txHash;
+if (!address || !transactionHash) throw new Error("Deployment output did not include contract address and transaction hash.");
+const artifact = JSON.parse(await readFile("out/VoidRelease1155.sol/VoidRelease1155.json", "utf8"));
+const bytecodeHash = `0x${createHash("sha256").update(Buffer.from(artifact.bytecode.object.replace(/^0x/, ""), "hex")).digest("hex")}`;
+const record = { network: "fuji", chainId: 43113, contractType: "ERC1155", contractName: "VoidRelease1155", contractAddress: address.toLowerCase(), deploymentTransaction: transactionHash.toLowerCase(), deploymentBlock: result.blockNumber ?? null, deployer: result.deployer ?? null, admin: admin.toLowerCase(), bytecodeHash, artifact: "out/VoidRelease1155.sol/VoidRelease1155.json", recordedAt: new Date().toISOString() };
+if (record.deploymentBlock == null) console.warn("Deployment block was not returned by forge; resolve it from the transaction before configuring the indexer.");
+await mkdir("deployments", { recursive: true });
+await writeFile("deployments/release-fuji.json", `${JSON.stringify(record, null, 2)}\n`);
+console.log(JSON.stringify(record, null, 2));
