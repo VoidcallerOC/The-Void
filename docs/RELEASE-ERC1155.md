@@ -16,7 +16,7 @@ The token ID is deterministic and independent of database row order:
 uint256(keccak256(abi.encode("the-void:edition:v1", releaseId, editionId)))
 ```
 
-The zero result is remapped to `1`, and a second edition with the same pair is rejected. `DEFAULT_ADMIN_ROLE` grants and revokes `ARTIST_ROLE` and `ISSUER_ROLE`. An artist creates editions, while an issuer mints them. The deployer is initially granted all three roles so that a deployment can bootstrap safely; production operations should grant artist and issuer roles to dedicated accounts and use role revocation for rotation. Collectors receive standard ERC-1155 transfers and have no issuance authority.
+The zero result is remapped to `1`, and a second edition with the same pair is rejected. `DEFAULT_ADMIN_ROLE` is the administrative authority for role grants, revocations, and pause state. `ARTIST_ROLE` authorizes edition creation, while `ISSUER_ROLE` authorizes minting. `ISSUER_ROLE` is currently a trusted platform-level role; it is not automatically restricted to the artist recorded on an edition. The deployer is initially granted all three roles so that a deployment can bootstrap safely; production operations should grant artist and issuer roles to dedicated accounts and use role revocation for rotation. An admin may renounce its own administrative access, with no recovery mechanism intentionally built into this first deployment. Collectors receive standard ERC-1155 transfers and have no issuance authority.
 
 Minting rejects zero quantities, nonexistent editions, paused state, and quantities above the remaining finite supply. The contract has no metadata update or arbitrary burn function, which avoids silent provenance and supply changes in the initial platform release.
 
