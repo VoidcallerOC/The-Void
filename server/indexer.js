@@ -80,21 +80,33 @@ export class BlockchainIndexer {
     const latest = Number(await retry(() => this.rpc.getBlockNumber(chainId), this.retryOptions));
     const target = Math.max(-1, latest - Number(config.confirmations ?? this.confirmations));
     let nextBlock = checkpoint?.nextBlock ?? Number(config.startBlock ?? 0);
-    await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, status: "RUNNING", lastError: null });
-    let processed = 0;
-    try {
+      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, status: "RUNNING", lastError: null });
+      let processed = 0;
+      try {
       while (nextBlock <= target) {
+        const rangeStart = nextBlock;
         const endBlock = Math.min(target, nextBlock + this.chunkSize - 1);
         const logs = await retry(() => this.rpc.getLogs({ chainId, address, fromBlock: nextBlock, toBlock: endBlock }), this.retryOptions);
-        for (let blockNumber = nextBlock; blockNumber <= endBlock; blockNumber += 1) {
+        const logsByBlock = new Map();
+        for (const log of logs) {
+          const blockNumber = Number(log.blockNumber);
+          const blockLogs = logsByBlock.get(blockNumber) || [];
+          blockLogs.push(log);
+          logsByBlock.set(blockNumber, blockLogs);
+        }
+        const blocksToInspect = new Set([nextBlock, ...logsByBlock.keys()]);
+        for (const blockNumber of [...blocksToInspect].sort((left, right) => left - right)) {
           const block = await retry(() => this.rpc.getBlock(chainId, blockNumber), this.retryOptions);
           await this.ensureCanonical(config, block);
-          const blockLogs = logs.filter((log) => Number(log.blockNumber) === blockNumber);
-          for (const log of blockLogs) await this.processLog(config, log, block);
-          await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: blockNumber + 1, lastProcessedBlock: blockNumber, lastProcessedHash: block.hash, finalizedBlock: target, status: "RUNNING", lastError: null });
-          nextBlock = blockNumber + 1;
-          processed += 1;
+          for (const log of logsByBlock.get(blockNumber) || []) await this.processLog(config, log, block);
+          if (logsByBlock.has(blockNumber)) {
+            await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: blockNumber + 1, lastProcessedBlock: blockNumber, lastProcessedHash: block.hash, finalizedBlock: target, status: "RUNNING", lastError: null });
+            nextBlock = blockNumber + 1;
+          }
         }
+        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: endBlock + 1, lastProcessedBlock: endBlock, finalizedBlock: target, status: "RUNNING", lastError: null });
+        processed += endBlock - rangeStart + 1;
+        nextBlock = endBlock + 1;
       }
       await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: nextBlock - 1, finalizedBlock: target, status: "IDLE", lastError: null });
       return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, state: "CONFIRMED" };
