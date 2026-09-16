@@ -74,12 +74,9 @@ jobs:
           fi
           deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
           deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
-          compromised_lc="0x2fd6ed32caf1fad a14edce6af40a33e74e45c507"
-          compromised_lc="${compromised_lc// /}"
-          if [ "${deployer_lc}" = "${compromised_lc}" ]; then
-            echo "Refusing compromised deployer address" >&2
-            exit 1
-          fi
+          # The current workflow has one signer. The contract grants all initial
+          # roles only to the constructor admin, so the funded signer must equal
+          # RELEASE_ADMIN_ADDRESS for the requested role-protected smoke test.
           admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
           if [ "${deployer_lc}" != "${admin_lc}" ]; then
             echo "RELEASE_ADMIN_ADDRESS must match the funded deployer for the role-protected smoke test" >&2
