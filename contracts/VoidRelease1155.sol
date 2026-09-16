@@ -4,6 +4,10 @@ pragma solidity ^0.8.24;
 /// @title The-Void Release Editions
 /// @notice Music-native ERC-1155 issuance infrastructure. Large media and protected
 /// content remain off-chain; each edition token carries only a public metadata URI.
+/// DEFAULT_ADMIN_ROLE controls roles and pause state. ARTIST_ROLE creates editions.
+/// ISSUER_ROLE is a trusted platform-level minting authority and is not automatically
+/// restricted to the artist recorded on an edition. An admin may renounce its access;
+/// no recovery mechanism is intentionally built into this first deployment.
 contract VoidRelease1155 {
     string public constant name = "The-Void Release Editions";
     string public constant symbol = "VOID";
@@ -164,7 +168,7 @@ contract VoidRelease1155 {
     }
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
-        return interfaceId == 0x01ffc9a7 || interfaceId == 0xd9b67a26;
+        return interfaceId == 0x01ffc9a7 || interfaceId == 0xd9b67a26 || interfaceId == 0x0e89341c;
     }
 
     function _grantRole(bytes32 role, address account) internal { if (!_roles[role][account]) { _roles[role][account] = true; emit RoleGranted(role, account, msg.sender); } }
