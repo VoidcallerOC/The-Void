@@ -1,4 +1,5 @@
 import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "./domain/models.js";
+import { FUJI_RELEASE_CONFIG, fujiTokenId } from "./lib/fuji-release.js";
 
 // Static data for the Voidcaller site.
 // Reflects the actual project: a self-titled EP collection minted on Avalanche.
@@ -200,3 +201,16 @@ export const DISCOVERY = {
   artists: [voidcallerArtist.id],
   "limited-editions": [voidcallerEdition.id],
 };
+
+// Deliberately separate staging data for the first real Fuji vertical slice.
+// This does not replace the production Voidcaller fixture catalog above.
+export const FUJI_INTEGRATION_CATALOG = (() => {
+  const artist = createArtist({ id: "fuji-test-artist", name: "Voidcaller · Fuji Test", handle: "voidcaller-fuji-test", bio: "Staging identity for the certified Fuji integration slice.", verified: false });
+  const releaseId = "fuji-test-release-001";
+  const editionId = "fuji-test-edition-001";
+  const tokenId = fujiTokenId(releaseId, editionId).toString();
+  const release = createRelease({ id: releaseId, artistId: artist.id, title: "Fuji Integration Test / Release #001", subtitle: "Certified Fuji staging release", description: "A clearly labeled staging release for validating the real Artist → Edition → Ownership → Experience path.", story: "This record exists only to prove the Fuji integration slice.", status: "published", artwork: "/assets/voidcaller_art_4.png", experiences: ["fuji-test-experience-001"], tracks: [] });
+  const edition = createEdition({ id: editionId, releaseId, title: "Collector Edition · Fuji Test", description: "Certified Fuji ERC-1155 staging edition.", includes: ["Fuji integration proof", "Ownership-gated staging experience"], tokenIds: [tokenId], contractId: "voidrelease1155-fuji-certified", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: FUJI_RELEASE_CONFIG.chainId, chain: FUJI_RELEASE_CONFIG.network, supply: "10", status: "available", metadataUri: "ipfs://the-void-fuji-integration-test-001", experienceIds: ["fuji-test-experience-001"], tier: "staging" });
+  const experience = createExperience({ id: "fuji-test-experience-001", experienceType: EXPERIENCE_TYPES.AUDIO, title: "Fuji Test Experience", description: "Unlocked only by current ownership of the certified Fuji staging edition.", requirements: [{ type: "ownership", contract: FUJI_RELEASE_CONFIG.contractAddress, tokenIds: [tokenId], minAmount: 1, chainId: FUJI_RELEASE_CONFIG.chainId }], media: { type: "audio", protected: true, previewAvailable: true } });
+  return createCatalog({ artists: [artist], releases: [release], editions: [edition], tokens: [createToken({ id: `fuji-test-token-${tokenId}`, editionId, tokenId, name: "Fuji Test Collector Edition" })], collections: [createCollection({ id: "fuji-test-collection-001", name: "Fuji Integration Test Collection", artistIds: [artist.id], releaseIds: [release.id], editionIds: [edition.id], description: "Staging-only collection for certified Fuji validation." })], experiences: [experience] });
+})();
