@@ -88,7 +88,8 @@ jobs:
             exit 1
           fi
           echo "Fuji preflight passed: chain_id=${chain_id}, deployer=${deployer}, balance_wei=${balance_wei}"
-          grep -Fq 'contracts/VoidRelease1155.sol:VoidRelease1155' scripts/deploy-release.mjs
+          grep -Fq 'new ethers.ContractFactory' scripts/deploy-release.mjs
+          grep -Fq 'out/VoidRelease1155.sol/VoidRelease1155.json' scripts/deploy-release.mjs
           ! grep -Fq 'MusicMarketplace.sol:MusicMarketplace' scripts/deploy-release.mjs
 
       - name: Deploy only VoidRelease1155 to Fuji
