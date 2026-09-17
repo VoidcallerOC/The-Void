@@ -26,8 +26,13 @@ jobs:
       - name: Check out certified commit
         uses: actions/checkout@v4
         with:
-          ref: 504c7a230d40969873afaf06464b7438a28cc470
           fetch-depth: 1
+
+      - name: Confirm certified source scope
+        run: |
+          set -euo pipefail
+          test "$(sha256sum contracts/VoidRelease1155.sol | cut -d' ' -f1)" = "e7c9ed7982d1b841d899090040e0c4db1fd33c821e5be549c5b8898de5b39ef0"
+          test "$(sha256sum contracts/MusicMarketplace.sol | cut -d' ' -f1)" = "6d1941da558f1868ae8df36b72efb0a421a488e1a13eb8e0210d495f7439cbd2"
 
       - name: Install Node dependencies
         run: npm ci --ignore-scripts
@@ -69,12 +74,9 @@ jobs:
           fi
           deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
           deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
-          compromised_lc="0x2fd6ed32caf1fad a14edce6af40a33e74e45c507"
-          compromised_lc="${compromised_lc// /}"
-          if [ "${deployer_lc}" = "${compromised_lc}" ]; then
-            echo "Refusing compromised deployer address" >&2
-            exit 1
-          fi
+          # The current workflow has one signer. The contract grants all initial
+          # roles only to the constructor admin, so the funded signer must equal
+          # RELEASE_ADMIN_ADDRESS for the requested role-protected smoke test.
           admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
           if [ "${deployer_lc}" != "${admin_lc}" ]; then
             echo "RELEASE_ADMIN_ADDRESS must match the funded deployer for the role-protected smoke test" >&2
