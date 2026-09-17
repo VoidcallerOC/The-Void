@@ -195,22 +195,23 @@ export const VOIDCALLER_CATALOG = createCatalog({
   experiences: [voidcallerExperience],
 });
 
-export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions"];
+export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions", "summit"];
 export const DISCOVERY = {
   featured: [voidcallerRelease.id],
   artists: [voidcallerArtist.id],
   "limited-editions": [voidcallerEdition.id],
+  summit: ["summit-demo-release"],
 };
 
 // Deliberately separate staging data for the first real Fuji vertical slice.
 // This does not replace the production Voidcaller fixture catalog above.
 export const FUJI_INTEGRATION_CATALOG = (() => {
-  const artist = createArtist({ id: "fuji-test-artist", name: "Voidcaller · Fuji Test", handle: "voidcaller-fuji-test", bio: "Staging identity for the certified Fuji integration slice.", verified: false });
-  const releaseId = "fuji-test-release-001";
-  const editionId = "fuji-test-edition-001";
+  const artist = createArtist({ id: "summit-demo-artist", name: "THE VOID", handle: "the-void", bio: "A music-native release prepared for the Summit demo on Avalanche Fuji.", verified: true });
+  const releaseId = "summit-demo-release";
+  const editionId = "summit-demo-edition";
   const tokenId = fujiTokenId(releaseId, editionId).toString();
-  const release = createRelease({ id: releaseId, artistId: artist.id, title: "Fuji Integration Test / Release #001", subtitle: "Certified Fuji staging release", description: "A clearly labeled staging release for validating the real Artist → Edition → Ownership → Experience path.", story: "This record exists only to prove the Fuji integration slice.", status: "published", artwork: "/assets/voidcaller_art_4.png", experiences: ["fuji-test-experience-001"], tracks: [] });
-  const edition = createEdition({ id: editionId, releaseId, title: "Collector Edition · Fuji Test", description: "Certified Fuji ERC-1155 staging edition.", includes: ["Fuji integration proof", "Ownership-gated staging experience"], tokenIds: [tokenId], contractId: "voidrelease1155-fuji-certified", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: FUJI_RELEASE_CONFIG.chainId, chain: FUJI_RELEASE_CONFIG.network, supply: "10", status: "available", metadataUri: "ipfs://the-void-fuji-integration-test-001", experienceIds: ["fuji-test-experience-001"], tier: "staging" });
-  const experience = createExperience({ id: "fuji-test-experience-001", experienceType: EXPERIENCE_TYPES.AUDIO, title: "Fuji Test Experience", description: "Unlocked only by current ownership of the certified Fuji staging edition.", requirements: [{ type: "ownership", contract: FUJI_RELEASE_CONFIG.contractAddress, tokenIds: [tokenId], minAmount: 1, chainId: FUJI_RELEASE_CONFIG.chainId }], media: { type: "audio", protected: true, previewAvailable: true } });
-  return createCatalog({ artists: [artist], releases: [release], editions: [edition], tokens: [createToken({ id: `fuji-test-token-${tokenId}`, editionId, tokenId, name: "Fuji Test Collector Edition" })], collections: [createCollection({ id: "fuji-test-collection-001", name: "Fuji Integration Test Collection", artistIds: [artist.id], releaseIds: [release.id], editionIds: [edition.id], description: "Staging-only collection for certified Fuji validation." })], experiences: [experience] });
+  const release = createRelease({ id: releaseId, artistId: artist.id, title: "THE VOID — SUMMIT DEMO", subtitle: "One real release on Avalanche Fuji", description: "A music-first release with one collectible edition and one ownership-gated Summit session.", story: "One record. One edition. One proof that music, ownership, and access can live in the same flow.", status: "published", artwork: "/assets/voidcaller_art_4.png", experiences: ["summit-session"], tracks: [{ n: 1, title: "Summit Session", time: "03:17" }] });
+  const edition = createEdition({ id: editionId, releaseId, title: "SUMMIT EDITION", description: "The certified Fuji ERC-1155 edition for the Summit demo.", includes: ["Summit Session", "Ownership-gated protected media", "On-chain collector proof"], tokenIds: [tokenId], contractId: "voidrelease1155-fuji-certified", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: FUJI_RELEASE_CONFIG.chainId, chain: FUJI_RELEASE_CONFIG.network, supply: "10", status: "available", metadataUri: "ipfs://the-void-summit-demo", experienceIds: ["summit-session"], tier: "staging" });
+  const experience = createExperience({ id: "summit-session", experienceType: EXPERIENCE_TYPES.AUDIO, title: "THE VOID — SUMMIT SESSION", description: "A protected unreleased session unlocked only by current ownership of the Summit Edition.", requirements: [{ type: "ownership", contract: FUJI_RELEASE_CONFIG.contractAddress, tokenIds: [tokenId], minAmount: 1, chainId: FUJI_RELEASE_CONFIG.chainId }], media: { type: "audio", releaseId, protected: true, previewAvailable: true } });
+  return createCatalog({ artists: [artist], releases: [release], editions: [edition], tokens: [createToken({ id: `summit-token-${tokenId}`, editionId, tokenId, name: "Summit Edition" })], collections: [createCollection({ id: "summit-collection", name: "The Void · Summit", artistIds: [artist.id], releaseIds: [release.id], editionIds: [edition.id], description: "The certified Fuji Summit demo collection." })], experiences: [experience] });
 })();
