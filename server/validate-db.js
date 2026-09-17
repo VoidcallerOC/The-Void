@@ -6,8 +6,35 @@ import { readFile } from "node:fs/promises";
 import { createDatabasePool, checkDatabaseHealth } from "./db.js";
 import { loadServerConfig } from "./config.js";
 import { listMigrations } from "./migrate.js";
+import { formatReport, requiredExtensions, verifyAgainstShadowSchema } from "./baseline.js";
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "migrations");
+
+export function declaredTables(sql) {
+  return [...sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-z0-9_]+)"?/gi)].map((match) => match[1].toLowerCase());
+}
+
+async function inspectSchemaObjects(pool, tables, extensions) {
+  const presentTables = (await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")).rows.map((row) => row.table_name);
+  const presentExtensions = (await pool.query("SELECT extname FROM pg_extension")).rows.map((row) => row.extname);
+  const missingTables = tables.filter((table) => !presentTables.includes(table));
+  const missingExtensions = extensions.filter((extension) => !presentExtensions.includes(extension));
+  if (missingTables.length) throw new Error(`Database is missing required tables: ${missingTables.join(", ")}`);
+  if (missingExtensions.length) throw new Error(`Database is missing required extensions: ${missingExtensions.join(", ")}`);
+  return { tables: tables.length, extensions, verifiedTables: tables };
+}
+
+async function verifySchemaMatchesMigrations(pool, sqls) {
+  const client = await pool.connect();
+  try {
+    const report = await verifyAgainstShadowSchema(client, sqls);
+    if (!report.compatible) throw new Error(`Database schema does not match the intended result of the migrations:\n${formatReport(report)}`);
+    return report;
+  } finally {
+    client.release();
+  }
+}
+
 export async function validateDatabase({ pool = null, config = loadServerConfig(), directory = migrationsDirectory } = {}) {
   const ownPool = pool || createDatabasePool(config);
   try {
@@ -17,16 +44,24 @@ export async function validateDatabase({ pool = null, config = loadServerConfig(
     const applied = (await ownPool.query("SELECT name, checksum, applied_at FROM schema_migrations ORDER BY name")).rows;
     const byName = new Map(applied.map((row) => [row.name, row]));
     const expected = [];
+    const tables = new Set();
+    const extensions = new Set();
+    const sqls = [];
     for (const name of migrations) {
       const sql = await readFile(join(directory, name), "utf8");
+      sqls.push(sql);
       const checksum = createHash("sha256").update(sql).digest("hex");
+      for (const table of declaredTables(sql)) tables.add(table);
+      for (const extension of requiredExtensions(sql)) extensions.add(extension);
       expected.push({ name, checksum });
       if (!byName.has(name)) throw new Error(`Migration is not applied: ${name}`);
       if (byName.get(name).checksum !== checksum) throw new Error(`Migration checksum mismatch: ${name}`);
     }
     const unknown = applied.filter((row) => !expected.some((item) => item.name === row.name));
     if (unknown.length) throw new Error(`Database contains unknown migrations: ${unknown.map((row) => row.name).join(", ")}`);
-    return { ok: true, health, migrations: expected.map((item) => ({ ...item, appliedAt: byName.get(item.name).applied_at })) };
+    const schema = await inspectSchemaObjects(ownPool, [...tables], [...extensions]);
+    await verifySchemaMatchesMigrations(ownPool, sqls);
+    return { ok: true, health, schema: { ...schema, exactMatch: true }, migrations: expected.map((item) => ({ ...item, appliedAt: byName.get(item.name).applied_at })) };
   } finally { if (!pool) await ownPool.end(); }
 }
 

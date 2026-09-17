@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { createDatabasePool } from "./db.js";
 import { loadServerConfig } from "./config.js";
 
-const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "migrations");
-const advisoryLockKey = 481562901;
+export const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "migrations");
+export const advisoryLockKey = 481562901;
 
 export async function listMigrations(directory = migrationsDirectory) {
   return (await readdir(directory)).filter((file) => /^\d+_.+\.sql$/.test(file)).sort();

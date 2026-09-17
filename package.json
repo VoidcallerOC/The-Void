@@ -11,10 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "node server/migrate.js",
+    "db:baseline": "node server/baseline.js",
+    "db:baseline:check": "node server/baseline.js --check",
     "db:validate": "node server/validate-db.js",
+    "db:validate:migrations": "node server/validate-migrations.js",
     "start:api": "npm run db:migrate && node server/index.js",
     "start:indexer": "node server/indexer-worker.js",
-    "db:validate:migrations": "node server/validate-migrations.js",
     "deploy:release": "node scripts/deploy-release.mjs"
   },
   "dependencies": {

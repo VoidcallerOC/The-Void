@@ -11,6 +11,9 @@ CREATE INDEX IF NOT EXISTS auth_nonces_active_binding_idx
   ON auth_nonces (wallet_address, chain_id, purpose, expires_at)
   WHERE consumed_at IS NULL;
 
+ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS session_hash text;
+ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS purpose text;
+
 CREATE TABLE IF NOT EXISTS auth_sessions (
   session_hash text PRIMARY KEY,
   wallet_address text NOT NULL,
