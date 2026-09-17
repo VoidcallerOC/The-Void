@@ -77,7 +77,7 @@ function parseIndexerContracts(value, { chainId }) {
 }
 
 export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {
-  const databaseUrl = String(env.DATABASE_URL || "").trim();
+  const databaseUrl = String(env.DATABASE_URL || env.POSTGRES_URL || "").trim();
   if (!databaseUrl && !allowMissingDatabase) throw new ConfigurationError("DATABASE_URL is required for the persistence layer.");
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
   const publicApp = normalizedUrl(env.PUBLIC_APP_URL || "http://localhost:5173", "PUBLIC_APP_URL");
