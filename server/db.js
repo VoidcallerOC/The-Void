@@ -10,7 +10,7 @@ export function createDatabasePool(config = loadServerConfig()) {
     max: config.poolMax,
     idleTimeoutMillis: config.poolIdleTimeoutMs,
     connectionTimeoutMillis: config.poolConnectionTimeoutMs,
-    ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
+    ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized !== false } : false,
     application_name: "voidcaller-persistence",
   });
 }
