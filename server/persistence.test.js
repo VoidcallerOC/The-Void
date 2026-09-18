@@ -54,12 +54,12 @@ describe("repository contracts", () => {
   it("persists only hashed auth secrets and atomically scopes nonce consumption", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [{ nonce_hash: "hashed-nonce" }] }) };
     const repository = createPersistenceRepository(db);
-    await repository.createNonce({ nonceHash: "hashed-nonce", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, domain: "app.voidcaller.example", uri: "https://app.voidcaller.example", purpose: "wallet-auth", issuedAt: new Date("2026-09-09T20:00:00.000Z"), expiresAt: new Date("2026-09-09T20:05:00.000Z") });
+    await repository.createNonce({ nonceHash: "hashed-nonce", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, domain: "app.voidcaller.example", origin: "https://app.voidcaller.example", uri: "https://app.voidcaller.example", purpose: "wallet-auth", issuedAt: new Date("2026-09-09T20:00:00.000Z"), expiresAt: new Date("2026-09-09T20:05:00.000Z") });
     expect(db.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO auth_nonces (nonce_hash"), expect.arrayContaining(["hashed-nonce"]));
     expect(db.query.mock.calls[0][1]).not.toContain("raw-nonce");
 
-    await repository.consumeNonce({ nonceHash: "hashed-nonce", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, domain: "app.voidcaller.example", uri: "https://app.voidcaller.example", purpose: "wallet-auth" });
-    expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("consumed_at IS NULL AND expires_at > now()"), ["hashed-nonce", "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", 43113, "app.voidcaller.example", "https://app.voidcaller.example", "wallet-auth"]);
+    await repository.consumeNonce({ nonceHash: "hashed-nonce", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, domain: "app.voidcaller.example", origin: "https://app.voidcaller.example", uri: "https://app.voidcaller.example", purpose: "wallet-auth" });
+    expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("consumed_at IS NULL AND expires_at > now()"), ["hashed-nonce", "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", 43113, "app.voidcaller.example", "https://app.voidcaller.example", "https://app.voidcaller.example", "wallet-auth"]);
 
     await repository.createAuthSession({ sessionHash: "hashed-session", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, purpose: "wallet-auth", issuedAt: new Date("2026-09-09T20:00:00.000Z"), expiresAt: new Date("2026-09-09T21:00:00.000Z") });
     expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO auth_sessions (session_hash"), expect.arrayContaining(["hashed-session"]));

@@ -75,6 +75,7 @@ function normalizeStoredChallenge(row) {
       wallet: walletAddress(row.wallet_address, "auth.wallet"),
       chainId: chainId(row.chain_id, "auth.chainId"),
       domain: requiredText(row.domain, "auth.domain", { max: 255 }),
+      origin: requiredText(row.origin, "auth.origin", { max: 2048 }),
       uri: requiredText(row.uri, "auth.uri", { max: 2048 }),
       purpose: requirePurpose(row.purpose),
       issuedAt: timestamp(row.issued_at),
@@ -107,12 +108,14 @@ export class WalletAuthService {
     const normalizedWallet = walletAddress(wallet, "auth.wallet");
     const selectedChainId = this.assertAllowedChain(rawChainId);
     const normalizedPurpose = requirePurpose(purpose);
+    const origin = this.config.authOrigin || new URL(this.config.authUri).origin;
     const issuedAt = timestamp(this.now());
     const expiresAt = new Date(issuedAt.getTime() + this.config.authChallengeTtlSeconds * 1000);
     const nonce = nonceValue(this.nonceGenerator());
     const nonceHash = hashSecret(nonce);
     const challenge = {
       domain: this.config.authDomain,
+      origin,
       uri: this.config.authUri,
       wallet: normalizedWallet,
       chainId: selectedChainId,
@@ -127,6 +130,7 @@ export class WalletAuthService {
       wallet: normalizedWallet,
       chainId: selectedChainId,
       domain: this.config.authDomain,
+      origin,
       uri: this.config.authUri,
       purpose: normalizedPurpose,
       issuedAt,
@@ -140,6 +144,7 @@ export class WalletAuthService {
     const normalizedWallet = walletAddress(wallet, "auth.wallet");
     const selectedChainId = this.assertAllowedChain(rawChainId);
     const normalizedPurpose = requirePurpose(purpose);
+    const origin = this.config.authOrigin || new URL(this.config.authUri).origin;
     const normalizedNonce = nonceValue(nonce);
     const nonceHash = hashSecret(normalizedNonce);
     const stored = normalizeStoredChallenge(await this.repository.getNonce({ nonceHash }));
@@ -147,7 +152,7 @@ export class WalletAuthService {
 
     if (stored.consumedAt) throw new ApiError(401, "AUTH_CHALLENGE_REUSED", "Authentication challenge has already been used.");
     if (stored.expiresAt <= currentTime) throw new ApiError(401, "AUTH_CHALLENGE_EXPIRED", "Authentication challenge has expired.");
-    if (stored.wallet !== normalizedWallet || stored.chainId !== selectedChainId || stored.purpose !== normalizedPurpose || stored.domain !== this.config.authDomain || stored.uri !== this.config.authUri) {
+    if (stored.wallet !== normalizedWallet || stored.chainId !== selectedChainId || stored.purpose !== normalizedPurpose || stored.domain !== this.config.authDomain || stored.origin !== origin || stored.uri !== this.config.authUri) {
       throw new ApiError(401, "AUTH_CHALLENGE_MISMATCH", "Authentication challenge does not match this request.");
     }
 
@@ -177,6 +182,7 @@ export class WalletAuthService {
         wallet: stored.wallet,
         chainId: stored.chainId,
         domain: stored.domain,
+        origin: stored.origin,
         uri: stored.uri,
         purpose: stored.purpose,
       });

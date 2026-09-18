@@ -15,13 +15,13 @@ function memoryRepository(clock) {
     nonces,
     sessions,
     createNonce: vi.fn(async (value) => {
-      nonces.set(value.nonceHash, { nonce_hash: value.nonceHash, wallet_address: value.wallet, chain_id: value.chainId, domain: value.domain, uri: value.uri, purpose: value.purpose, issued_at: value.issuedAt, expires_at: value.expiresAt, consumed_at: null, request_id: value.requestId });
+      nonces.set(value.nonceHash, { nonce_hash: value.nonceHash, wallet_address: value.wallet, chain_id: value.chainId, domain: value.domain, origin: value.origin, uri: value.uri, purpose: value.purpose, issued_at: value.issuedAt, expires_at: value.expiresAt, consumed_at: null, request_id: value.requestId });
       return nonces.get(value.nonceHash);
     }),
     getNonce: vi.fn(async ({ nonceHash }) => nonces.get(nonceHash) || null),
     consumeNonce: vi.fn(async (value) => {
       const row = nonces.get(value.nonceHash);
-      if (!row || row.consumed_at || row.wallet_address !== value.wallet || row.chain_id !== value.chainId || row.domain !== value.domain || row.uri !== value.uri || row.purpose !== value.purpose || new Date(row.expires_at) <= clock.now) {
+      if (!row || row.consumed_at || row.wallet_address !== value.wallet || row.chain_id !== value.chainId || row.domain !== value.domain || row.origin !== value.origin || row.uri !== value.uri || row.purpose !== value.purpose || new Date(row.expires_at) <= clock.now) {
         const error = new Error("Nonce is missing, expired, or already consumed.");
         error.code = "CONFLICT";
         throw error;
@@ -47,7 +47,7 @@ function harness({ allowedChainIds = [43113, 43114], challengeTtlSeconds = 300, 
   let sessionSequence = 0;
   const auth = new WalletAuthService({
     repository,
-    config: { authDomain: "app.voidcaller.example", authUri: "https://app.voidcaller.example", authAllowedChainIds: allowedChainIds, authChallengeTtlSeconds: challengeTtlSeconds, authSessionTtlSeconds: sessionTtlSeconds },
+    config: { authDomain: "app.voidcaller.example", authOrigin: "https://app.voidcaller.example", authUri: "https://app.voidcaller.example", authAllowedChainIds: allowedChainIds, authChallengeTtlSeconds: challengeTtlSeconds, authSessionTtlSeconds: sessionTtlSeconds },
     now: () => new Date(clock.now),
     nonceGenerator: () => `nonce_${String(++nonceSequence).padStart(26, "0")}`,
     sessionTokenGenerator: () => `session_${String(++sessionSequence).padStart(24, "0")}`,
