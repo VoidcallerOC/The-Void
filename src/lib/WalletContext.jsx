@@ -19,6 +19,7 @@ const LEGACY_NAMES = {
   isCore: "Core",
   isAvalanche: "Core",
 };
+const AUTH_CHAIN_ID = 43113;
 
 export function WalletProvider({ children, collectionConfig = null, ownershipReader = checkOwnership, ownershipRecordsReader = checkOwnershipRecords }) {
   const [wallets, setWallets] = useState([]); // detected providers
@@ -109,7 +110,16 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
   }, []);
 
   const authenticate = useCallback(async ({ targetProvider = providerRef.current, wallet = account, selectedChainId = chainId } = {}) => {
-    if (!targetProvider || !wallet || !Number.isInteger(selectedChainId)) return { error: "Connect a wallet and select an Avalanche network first." };
+    if (!targetProvider || !wallet || !Number.isInteger(selectedChainId)) {
+      const error = "Connect a wallet and select an Avalanche network first.";
+      setAuthenticationError(error);
+      return { error, code: "AUTH_WALLET_REQUIRED" };
+    }
+    if (selectedChainId !== AUTH_CHAIN_ID) {
+      const error = "Switch your wallet to Avalanche Fuji (43113) before signing in.";
+      setAuthenticationError(error);
+      return { error, code: "AUTH_CHAIN_UNSUPPORTED" };
+    }
     setAuthenticating(true);
     setAuthenticationError(null);
     try {
@@ -177,10 +187,12 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       const selectedChainId = parseInt(cid, 16);
       setChainId(selectedChainId);
       wireProvider(p);
-      refreshOwnership(accts[0]);
+      void refreshOwnership(accts[0]).catch(() => {});
       return authenticate({ targetProvider: p, wallet: accts[0], selectedChainId });
-    } catch {
-      return { error: "Connection rejected." };
+    } catch (error) {
+      const message = error?.code === 4001 ? "Wallet connection was rejected." : (error?.message || "Wallet connection failed.");
+      setAuthenticationError(message);
+      return { error: message, code: error?.code || "WALLET_CONNECTION_FAILED" };
     }
   }, [wireProvider, refreshOwnership, authenticate]);
 
@@ -206,7 +218,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
           setAccount(accts[0]);
           setChainId(parseInt(cid, 16));
           wireProvider(window.ethereum);
-          refreshOwnership(accts[0]);
+          void refreshOwnership(accts[0]).catch(() => {});
         }
       } catch {
         // not connected — expected
