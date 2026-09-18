@@ -156,12 +156,12 @@ export class PersistenceRepository {
 
   async createAuthSession({ sessionHash, wallet, chainId: rawChainId, purpose, issuedAt, expiresAt, requestId = null }) {
     const values = [requiredText(sessionHash, "session.sessionHash", { max: 256 }), walletAddress(wallet, "session.wallet"), chainId(rawChainId, "session.chainId"), requiredText(purpose, "session.purpose", { max: 64 }), issuedAt, expiresAt, optionalText(requestId, "session.requestId", { max: 256 })];
-    const { rows } = await this.db.query(`INSERT INTO auth_sessions (session_hash, wallet_address, chain_id, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, values);
+    const { rows } = await this.db.query(`INSERT INTO auth_sessions (token_hash, wallet_address, chain_id, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, values);
     return rows[0];
   }
 
   async getActiveAuthSession({ sessionHash }) {
-    const { rows } = await this.db.query(`SELECT session_hash, wallet_address, chain_id, purpose, issued_at, expires_at FROM auth_sessions WHERE session_hash=$1 AND revoked_at IS NULL AND expires_at > now() LIMIT 1`, [requiredText(sessionHash, "session.sessionHash", { max: 256 })]);
+    const { rows } = await this.db.query(`SELECT token_hash AS session_hash, wallet_address, chain_id, purpose, issued_at, expires_at FROM auth_sessions WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at > now() LIMIT 1`, [requiredText(sessionHash, "session.sessionHash", { max: 256 })]);
     return rows[0] || null;
   }
 
