@@ -143,7 +143,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       const normalized = apiErrorFrom(error);
       if (error?.code === "INVALID_JSON") normalized.status = 400, normalized.code = "INVALID_JSON", normalized.message = error.message;
       if (error?.code === "NOT_FOUND") normalized.status = 404, normalized.code = "NOT_FOUND", normalized.message = error.message;
-      logger.error?.("api.http.error", { requestId, path: url.pathname, method, code: normalized.code });
+      logger.error?.("api.http.error", { requestId, path: url.pathname, method, code: normalized.code, detail: error?.message || String(error) });
       return send(response, normalized.status, errorResponse(normalized, requestId), responseHeaders);
     }
   };
