@@ -62,7 +62,7 @@ describe("repository contracts", () => {
     expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("consumed_at IS NULL AND expires_at > now()"), ["hashed-nonce", "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", 43113, "app.voidcaller.example", "https://app.voidcaller.example", "https://app.voidcaller.example", "wallet-auth"]);
 
     await repository.createAuthSession({ sessionHash: "hashed-session", wallet: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", chainId: 43113, purpose: "wallet-auth", issuedAt: new Date("2026-09-09T20:00:00.000Z"), expiresAt: new Date("2026-09-09T21:00:00.000Z") });
-    expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO auth_sessions (session_hash"), expect.arrayContaining(["hashed-session"]));
+    expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO auth_sessions (token_hash"), expect.arrayContaining(["hashed-session"]));
   });
 });
 
