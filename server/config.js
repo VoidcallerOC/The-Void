@@ -85,9 +85,9 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   if (authUri.origin !== publicApp.origin) throw new ConfigurationError("AUTH_URI must share the PUBLIC_APP_URL origin.");
   const authDomain = String(env.AUTH_DOMAIN || publicApp.host).trim().toLowerCase();
   if (authDomain !== publicApp.host.toLowerCase()) throw new ConfigurationError("AUTH_DOMAIN must match the PUBLIC_APP_URL host.");
-  const authAllowedChainIds = allowedChainIds(env.AUTH_ALLOWED_CHAIN_IDS, appEnvironment === "production" ? "43114" : "43113");
-  if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== 43114)) {
-    throw new ConfigurationError("Production wallet authentication requires HTTPS and Avalanche C-Chain (43114) only.");
+  const authAllowedChainIds = allowedChainIds(env.AUTH_ALLOWED_CHAIN_IDS, "43113");
+  if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== 43113)) {
+    throw new ConfigurationError("Production wallet authentication requires HTTPS and Avalanche Fuji (43113) only.");
   }
   return Object.freeze({
     databaseUrl: databaseUrl || null,
@@ -112,10 +112,10 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
 
 export function loadIndexerConfig(env = process.env, { requireConfiguration = true } = {}) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
-  const defaultChainId = appEnvironment === "production" ? 43114 : 43113;
+  const defaultChainId = 43113;
   const chainId = Number(env.INDEXER_CHAIN_ID || defaultChainId);
   if (!AVALANCHE_AUTH_CHAIN_IDS.has(chainId)) throw new ConfigurationError("INDEXER_CHAIN_ID may contain only Avalanche Fuji (43113) or C-Chain (43114).");
-  if (appEnvironment === "production" && chainId !== 43114) throw new ConfigurationError("Production indexing requires Avalanche C-Chain (43114).");
+  if (appEnvironment === "production" && chainId !== 43113) throw new ConfigurationError("Production indexing requires Avalanche Fuji (43113).");
   const rpcUrlValue = String(env.INDEXER_RPC_URL || "").trim();
   const contractsValue = String(env.INDEXER_CONTRACTS_JSON || "").trim();
   if (!rpcUrlValue || !contractsValue) {
