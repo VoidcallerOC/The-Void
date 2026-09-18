@@ -80,7 +80,7 @@ export function MarketplacePage() {
             <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 280px) minmax(0, 1fr)", gap: 24, alignItems: "start" }} className="vc-grid-2col">
               <img src={record.release.artwork} alt={`${record.release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
               <div>
-                <MarketplaceStatusBadge status={record.editions[0]?.primary.status || MARKETPLACE_STATE.UNAVAILABLE} pulse={false} />
+                <MarketplaceStatusBadge status={secondary} pulse={false} />
                 <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".14em", color: "var(--vc-crimson)", textTransform: "uppercase", margin: "14px 0 6px" }}>{record.artist?.name} · {record.release.status}</p>
                 <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 6vw, 52px)", lineHeight: 0.95, textTransform: "uppercase", margin: "0 0 12px" }}>{record.release.title}</h2>
                 <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65, maxWidth: 640 }}>{record.release.description}</p>
@@ -98,9 +98,9 @@ export function MarketplacePage() {
                 const offers = listingsForEdition(listings, item.edition);
                 return (
                   <div key={item.edition.id} style={card}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                      <MarketplaceStatusBadge status={item.primary.status} pulse={false} />
-                      <MarketplaceStatusBadge status={secondary} pulse={secondary === MARKETPLACE_STATE.LIVE} />
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+                      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>Primary <MarketplaceStatusBadge status={item.primary.status} pulse={false} /></span>
+                      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>Secondary <MarketplaceStatusBadge status={secondary} pulse={secondary === MARKETPLACE_STATE.LIVE} /></span>
                     </div>
                     <h4 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "0 0 8px", textTransform: "uppercase" }}>{item.edition.title}</h4>
                     <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>{item.edition.description}</p>
