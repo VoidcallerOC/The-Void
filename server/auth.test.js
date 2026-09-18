@@ -176,12 +176,12 @@ describe("EIP-191 wallet authentication", () => {
     expect(repository.consumeNonce).toHaveBeenCalledWith(expect.objectContaining({ chainId: 43113, domain: "app.voidcaller.example", uri: "https://app.voidcaller.example" }));
   });
 
-  it("preserves production C-Chain-only configuration requirements", () => {
+  it("preserves production Fuji-only configuration requirements", () => {
     expect(() => new WalletAuthService({ repository: {}, config: {} })).toThrow(TypeError);
     expect(() => createAuthMessage({ domain: "x", uri: "https://x", wallet, chainId: 43114, nonce: "short", issuedAt: new Date(), expiresAt: new Date(Date.now() + 1000), purpose: "wallet-auth" })).toThrow(ApiError);
-    expect(loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "https://app.voidcaller.example" })).toMatchObject({ authDomain: "app.voidcaller.example", authAllowedChainIds: [43114] });
+    expect(loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "https://app.voidcaller.example" })).toMatchObject({ authDomain: "app.voidcaller.example", authAllowedChainIds: [43113] });
     expect(() => loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "http://app.voidcaller.example" })).toThrow(/HTTPS/);
-    expect(() => loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "https://app.voidcaller.example", AUTH_ALLOWED_CHAIN_IDS: "43113" })).toThrow(/C-Chain/);
+    expect(() => loadServerConfig({ NODE_ENV: "production", DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "https://app.voidcaller.example", AUTH_ALLOWED_CHAIN_IDS: "43114" })).toThrow(/Fuji/);
     expect(() => loadServerConfig({ DATABASE_URL: "postgres://example", PUBLIC_APP_URL: "http://localhost:5173", AUTH_ALLOWED_CHAIN_IDS: "36463" })).toThrow(/Fuji/);
   });
 });

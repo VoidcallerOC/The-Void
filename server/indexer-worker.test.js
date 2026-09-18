@@ -101,9 +101,9 @@ describe("production indexer worker", () => {
 });
 
 describe("indexer worker configuration", () => {
-  it("requires explicit RPC and contract configuration and restricts production to C-Chain", () => {
+  it("requires explicit RPC and contract configuration and restricts production to Fuji", () => {
     expect(() => loadIndexerConfig({}, { requireConfiguration: true })).toThrow(/INDEXER_RPC_URL/);
-    expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: "[]" })).toThrow(/C-Chain/);
+    expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43114", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43114, address: contract, contractType: "ERC1155", startBlock: 1 }]) })).toThrow(/Fuji/);
   });
 
   it("validates explicit Fuji contract configuration without inventing deployment data", () => {
