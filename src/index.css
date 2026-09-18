@@ -401,6 +401,15 @@ body { padding-bottom: 72px; }
   color: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+.vc-studio-action:hover,
+.vc-studio-action:focus-visible {
+  border-color: var(--vc-crimson);
+  background: var(--vc-pit);
+  box-shadow: 0 0 32px -14px rgba(225,15,31,0.7);
+  outline: none;
+  transform: translateY(-2px);
 }
 .vc-studio-action.is-primary {
   border-color: var(--vc-crimson);
@@ -432,6 +441,11 @@ body { padding-bottom: 72px; }
 .vc-release-pick.is-selected,
 .vc-release-pick:hover {
   border-color: var(--vc-crimson);
+}
+.vc-release-pick:focus-visible,
+.vc-studio-steps button:focus-visible {
+  outline: 2px solid var(--vc-crimson);
+  outline-offset: 3px;
 }
 .vc-release-pick img {
   width: 100%;
@@ -501,4 +515,3 @@ body { padding-bottom: 72px; }
     transition: none;
   }
 }
-

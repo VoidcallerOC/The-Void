@@ -167,29 +167,36 @@ export function ArtistStudioPage() {
     if (!form.releaseTitle) throw new Error("Enter a release title before creating an edition.");
     let nextArtistId = artistId || nextArtistSlug;
     let nextReleaseId = releaseId || nextReleaseSlug;
-    try {
-      const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
-        method: artistId ? "PATCH" : "POST",
-        payload: { id: nextArtistId, name: form.artistName, slug: nextArtistSlug, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
-        headers,
-      });
-      nextArtistId = artist.id;
-      setArtistId(artist.id);
-      const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
-        method: releaseId ? "PATCH" : "POST",
-        payload: { id: nextReleaseId, title: form.releaseTitle, slug: nextReleaseSlug, description: form.releaseDescription, artwork: form.releaseArtwork, status: "PUBLISHED" },
-        headers,
-      });
-      nextReleaseId = release.id;
-      setReleaseId(release.id);
-    } catch (error) {
-      if (!String(error.message || "").includes("Artist Studio request failed") && !String(error.message || "").includes("unavailable")) throw error;
-      nextArtistId = nextArtistSlug;
-      nextReleaseId = nextReleaseSlug;
-      setArtistId(nextArtistId);
-      setReleaseId(nextReleaseId);
-    }
+    const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
+      method: artistId ? "PATCH" : "POST",
+      payload: { id: nextArtistId, name: form.artistName, slug: nextArtistSlug, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
+      headers,
+    });
+    nextArtistId = artist.id;
+    setArtistId(artist.id);
+    const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
+      method: releaseId ? "PATCH" : "POST",
+      payload: { id: nextReleaseId, title: form.releaseTitle, slug: nextReleaseSlug, description: form.releaseDescription, artwork: form.releaseArtwork },
+      headers,
+    });
+    nextReleaseId = release.id;
+    setReleaseId(release.id);
     return { artistId: nextArtistId, releaseId: nextReleaseId, releaseSlug: nextReleaseSlug };
+  };
+
+  const createReleaseRecord = async () => {
+    setBusy("release"); setNotice("");
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const ids = await ensureArtistAndRelease();
+      setSelectedReleaseId(ids.releaseId);
+      setNotice(`Release created: ${form.releaseTitle}. Continue to Create Edition when you are ready.`);
+      setStep("edition");
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy("");
+    }
   };
 
   const saveDraft = async () => {
@@ -200,8 +207,7 @@ export function ArtistStudioPage() {
       const nextEditionSlug = fujiSlug(form.editionSlug || form.editionName, "edition slug");
       const tokenId = fujiTokenId(ids.releaseSlug, nextEditionSlug).toString();
       setEditionId(nextEditionSlug);
-      try {
-        const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
+      const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: editionId ? "PATCH" : "POST",
           payload: {
             id: nextEditionSlug,
@@ -219,11 +225,7 @@ export function ArtistStudioPage() {
           },
           headers,
         });
-        setEditionId(record.id);
-      } catch {
-        setEditionId(nextEditionSlug);
-      }
-      persistOverlay({ status: "available", tokenId, artistKey: ids.artistId, releaseKey: ids.releaseId, editionKey: nextEditionSlug });
+      setEditionId(record.id);
       setNotice(`Draft saved: ${form.editionName}.`);
       return nextEditionSlug;
     } catch (error) {
@@ -261,8 +263,7 @@ export function ArtistStudioPage() {
       setEditionId(nextEditionSlug);
       setReleaseId(ids.releaseId || nextReleaseSlug);
       setOnChainEdition({ tokenId: tokenId.toString(), blockNumber: verified.receipt.blockNumber ? Number.parseInt(verified.receipt.blockNumber, 16) : null, mintedSupply: verified.edition.mintedSupply.toString(), maxSupply: verified.edition.maxSupply.toString() });
-      try {
-        await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
+      await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: "POST",
           payload: {
             id: nextEditionSlug,
@@ -280,14 +281,11 @@ export function ArtistStudioPage() {
           },
           headers,
         });
-        await studioFetch(`/studio/editions/${encodeURIComponent(nextEditionSlug)}`, {
+      await studioFetch(`/studio/editions/${encodeURIComponent(nextEditionSlug)}`, {
           method: "PATCH",
           payload: { status: "PUBLISHED", metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.editionArtwork, fuji: { contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: FUJI_RELEASE_CONFIG.chainId, tokenId: tokenId.toString(), transactionHash: result.hash, metadataUri } } },
           headers,
         });
-      } catch {
-        /* overlay still records the on-chain edition if studio persistence is down */
-      }
       persistOverlay({ status: "available", tokenId: tokenId.toString(), transactionHash: result.hash, artistKey: ids.artistId, releaseKey: nextReleaseSlug, editionKey: nextEditionSlug });
       setPublished(true);
       setNotice(`Edition created on Fuji and verified on-chain. It is now available to collect.`);
@@ -402,7 +400,12 @@ export function ArtistStudioPage() {
           <TextField title="Release slug (max 31)" value={form.releaseSlug} onChange={(value) => set("releaseSlug", value)} placeholder="the-repair" />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <TextField title="Artwork URL" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} />
-          <button type="button" style={{ ...primaryBtn, marginTop: 22 }} onClick={() => setStep("edition")}>Continue to create edition</button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+            <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
+              {busy === "release" ? "Creating…" : "Create release"}
+            </button>
+            {releaseId && <button type="button" style={ghostBtn} onClick={() => setStep("edition")}>Create edition</button>}
+          </div>
         </section>
       )}
 
