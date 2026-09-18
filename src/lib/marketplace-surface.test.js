@@ -5,11 +5,18 @@ import {
   MARKETPLACE_STATE,
   attachIndexedListings,
   certifiedFujiReleaseUnchanged,
+  collectableFirst,
+  editionPriceLabel,
+  editionTypeLabel,
+  featuredMarketplaceRecord,
   findMarketplaceEdition,
+  flattenMarketplaceEditions,
   formatWeiAsAvax,
   listingMatchesEdition,
   listingsForEdition,
   marketplaceCatalog,
+  marketplaceCopy,
+  marketplaceStatusLabel,
   parseAvaxToWei,
   primaryCollectForEdition,
   resolveInfrastructureStatus,
@@ -37,6 +44,7 @@ describe("marketplace infrastructure status", () => {
     expect(resolveInfrastructureStatus()).toBe(MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE);
     expect(secondaryTradingIsLive()).toBe(false);
     expect(resolveSecondaryStatus()).toBe(MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE);
+    expect(marketplaceStatusLabel(resolveSecondaryStatus())).toBe("NOT YET LIVE");
   });
 
   it("never treats catalog or fixture records as live trading", () => {
@@ -53,6 +61,22 @@ describe("marketplace infrastructure status", () => {
     expect(resolveSecondaryStatus({ infrastructure: MARKETPLACE_STATE.LIVE, listingsState: "error" })).toBe(MARKETPLACE_STATE.UNAVAILABLE);
     expect(resolveSecondaryStatus({ infrastructure: MARKETPLACE_STATE.LIVE, listingsState: "ready" })).toBe(MARKETPLACE_STATE.LIVE);
   });
+
+  it("keeps product copy free of engineering certification banners", () => {
+    expect(marketplaceCopy().title).toBe("Marketplace");
+    expect(marketplaceCopy().body).not.toMatch(/IMPLEMENTED \/ NOT LIVE/);
+    expect(marketplaceCopy().body).toMatch(/collect/i);
+    expect(marketplaceCopy().eyebrow).toMatch(/music marketplace/i);
+  });
+
+  it("features certified available releases ahead of minted catalog relics", () => {
+    const records = marketplaceCatalog();
+    const featured = featuredMarketplaceRecord(records);
+    expect(featured.release.id).toBe("summit-demo-release");
+    expect(featured.editions[0].primary.availability).toBe("available");
+    expect(collectableFirst(flattenMarketplaceEditions())[0].edition.id).toBe("summit-demo-edition");
+    expect(editionPriceLabel(featured.editions[0].edition)).toBeNull();
+  });
 });
 
 describe("music-native catalog projection", () => {
@@ -62,8 +86,10 @@ describe("music-native catalog projection", () => {
     expect(summit.release.title).toContain("SUMMIT");
     expect(summit.editions[0].edition.title).toBe("SUMMIT EDITION");
     expect(summit.editions[0].experiences[0].title).toBe("THE VOID — SUMMIT SESSION");
-    expect(summit.editions[0].primary.href).toBe("/fuji-integration");
-    expect(summit.editions[0].primary.status).toBe(MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE);
+    expect(summit.editions[0].primary.href).toBe("/edition/summit-demo-edition");
+    expect(summit.editions[0].primary.status).toBe(MARKETPLACE_STATE.LIVE);
+    expect(summit.editions[0].primary.certified).toBe(true);
+    expect(editionTypeLabel(summit.editions[0].edition)).toBe("ERC-1155 release edition");
   });
 
   it("keeps the certified Summit Fuji configuration untouched", () => {
@@ -77,9 +103,24 @@ describe("music-native catalog projection", () => {
   it("labels minted Voidcaller relics as primary-complete, not as live secondary listings", () => {
     const primary = primaryCollectForEdition(VOIDCALLER_CATALOG.editions[0]);
     expect(primary.availability).toBe("minted");
-    expect(primary.href).toBe("/reliquary");
+    expect(primary.href).toBe("/edition/voidcaller-chapter-i");
     expect(listingMatchesEdition({ tokenContract: VOIDCALLER_CATALOG.editions[0].contractAddress, chain: 43114, tokenId: "1" }, VOIDCALLER_CATALOG.editions[0])).toBe(true);
     expect(listingMatchesEdition({ tokenContract: VOIDCALLER_CATALOG.editions[0].contractAddress, chain: 43113, tokenId: "1" }, VOIDCALLER_CATALOG.editions[0])).toBe(false);
+    expect(flattenMarketplaceEditions().some((item) => item.edition.id === "voidcaller-chapter-i")).toBe(true);
+  });
+
+  it("surfaces a studio overlay edition in the marketplace catalog without fabricating listings", () => {
+    const overlay = {
+      artists: [{ type: "artist", id: "forge", name: "Forge", handle: "forge", releases: [], collectionIds: [], experiences: [], socials: [], verified: true, verification: { status: "verified" }, wallet: "", address: "", bio: "", avatar: "", banner: "" }],
+      releases: [{ type: "release", id: "the-repair", artistId: "forge", title: "THE REPAIR", subtitle: "", description: "Chapter I", story: "", status: "published", artwork: "/assets/voidcaller_art_5.png", editions: [], tracks: [], experiences: [] }],
+      editions: [{ type: "edition", id: "chapter-i-the-repair", releaseId: "the-repair", title: "CHAPTER I — THE REPAIR", description: "ERC-1155 release edition", includes: ["Full self-titled EP"], tokenIds: ["1"], contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113, chain: "Avalanche Fuji", supply: "25", status: "available", metadataUri: "ipfs://x", experienceIds: [], experiences: [], tier: "standard", valueProposition: "" }],
+    };
+    const records = marketplaceCatalog([VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG, overlay]);
+    const created = records.find((record) => record.release.id === "the-repair");
+    expect(created.artist.name).toBe("Forge");
+    expect(created.editions[0].primary.href).toBe("/edition/chapter-i-the-repair");
+    expect(created.editions[0].primary.certified).toBe(true);
+    expect(created.editions[0].listings).toBeUndefined();
   });
 });
 

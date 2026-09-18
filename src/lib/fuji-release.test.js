@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiTokenId } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses the certified address and chain", () => {
@@ -26,5 +26,12 @@ describe("certified Fuji VoidRelease1155 integration", () => {
   it("rejects arbitrary contract injection", () => {
     expect(() => assertFujiAddress("0x0000000000000000000000000000000000000001")).toThrow(/certified Fuji/);
     expect(assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe(FUJI_RELEASE_CONFIG.contractAddress);
+  });
+
+  it("accepts Fuji-safe slugs and rejects oversize identifiers", () => {
+    expect(fujiSlug("Chapter I — The Repair")).toBe("chapter-i-the-repair");
+    expect(() => fujiSlug("this-identifier-is-definitely-too-long-for-bytes32")).toThrow(/31/);
+    expect(isCertifiedFujiEdition({ contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113 })).toBe(true);
+    expect(isCertifiedFujiEdition({ contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43114 })).toBe(false);
   });
 });

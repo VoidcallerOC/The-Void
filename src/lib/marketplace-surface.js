@@ -1,4 +1,4 @@
-import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, isCertifiedFujiEdition } from "./fuji-release.js";
 import { MARKETPLACE_CONFIG } from "./marketplace.js";
 import { CHAINS, isValidAddress } from "./web3.js";
 import { VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG } from "../data.js";
@@ -9,7 +9,17 @@ export const MARKETPLACE_STATE = Object.freeze({
   UNAVAILABLE: "UNAVAILABLE",
 });
 
+export const MARKETPLACE_STATUS_LABEL = Object.freeze({
+  [MARKETPLACE_STATE.LIVE]: "LIVE",
+  [MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE]: "NOT YET LIVE",
+  [MARKETPLACE_STATE.UNAVAILABLE]: "UNAVAILABLE",
+});
+
 const WEI_PER_AVAX = 10n ** 18n;
+
+export function marketplaceStatusLabel(status) {
+  return MARKETPLACE_STATUS_LABEL[status] || MARKETPLACE_STATUS_LABEL[MARKETPLACE_STATE.UNAVAILABLE];
+}
 
 export function resolveInfrastructureStatus(config = MARKETPLACE_CONFIG) {
   const address = String(config?.address || "").trim();
@@ -29,22 +39,22 @@ export function resolveSecondaryStatus({ infrastructure = resolveInfrastructureS
 export function marketplaceCopy(status = resolveInfrastructureStatus()) {
   if (status === MARKETPLACE_STATE.LIVE) {
     return {
-      eyebrow: "Secondary collection · live index",
+      eyebrow: "The Void · music marketplace",
       title: "Marketplace",
-      body: "Secondary collection around Releases and Editions. Listings appear only after the indexer confirms a marketplace event. A wallet receipt is not a completed trade.",
+      body: "Collect editions from The Void. See the artist, the release, what the collector receives, and the experience it unlocks — then collect. Secondary listings appear only when the indexer confirms a real marketplace event.",
     };
   }
   if (status === MARKETPLACE_STATE.UNAVAILABLE) {
     return {
-      eyebrow: "Secondary collection · unavailable",
+      eyebrow: "The Void · music marketplace",
       title: "Marketplace",
-      body: "The secondary-collection index is not reachable. Primary collection paths are unchanged. No listings are invented while the index is down.",
+      body: "Collect editions from The Void. Primary collection is unchanged. The secondary index is unreachable, so no listings are shown or invented.",
     };
   }
   return {
-    eyebrow: "Secondary collection · implemented / not live",
+    eyebrow: "The Void · music marketplace",
     title: "Marketplace",
-    body: "The Void Marketplace is the secondary-collection layer around Releases and Editions. Listing, purchase, and receipt verification are implemented, but no reviewed marketplace contract is configured. This is not live trading.",
+    body: "Collect editions from The Void. See the artist, the release, what the collector receives, and the experience it unlocks — then collect. Secondary trading is not yet live.",
   };
 }
 
@@ -62,6 +72,10 @@ export function parseAvaxToWei(avax) {
   const [whole, frac = ""] = raw.split(".");
   const fracWei = (frac + "0".repeat(18)).slice(0, 18);
   return (BigInt(whole || "0") * WEI_PER_AVAX + BigInt(fracWei)).toString();
+}
+
+export function editionPriceLabel(edition) {
+  return formatWeiAsAvax(edition?.priceWei || edition?.price || null);
 }
 
 export function resolveEditionChain(edition) {
@@ -83,43 +97,56 @@ export function resolveEditionChain(edition) {
   return null;
 }
 
+export function editionTypeLabel(edition) {
+  if (isCertifiedFujiEdition(edition)) return "ERC-1155 release edition";
+  if (edition?.chain) return `${edition.chain} edition`;
+  return "Release edition";
+}
+
 export function primaryCollectForEdition(edition) {
   if (!edition) {
-    return { availability: "unavailable", status: MARKETPLACE_STATE.UNAVAILABLE, label: "No edition", href: "/discover", note: "This collect path is not available." };
+    return { availability: "unavailable", status: MARKETPLACE_STATE.UNAVAILABLE, label: "Unavailable", href: "/marketplace", note: "This collect path is not available.", certified: false };
   }
-  if (edition.id === "summit-demo-edition") {
+  if (isCertifiedFujiEdition(edition) || edition.id === "summit-demo-edition") {
+    const minted = String(edition.status).toLowerCase() === "minted";
     return {
-      availability: "available",
-      status: MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE,
-      label: "Primary collect on certified Fuji",
-      href: "/fuji-integration",
-      note: "Issuer-controlled mint on VoidRelease1155. Certified Fuji path — not secondary trading, and not a live-certified mint until a collector receipt exists.",
+      availability: minted ? "minted" : "available",
+      status: MARKETPLACE_STATE.LIVE,
+      label: minted ? "Owned" : "Collect",
+      href: `/edition/${edition.id}`,
+      note: minted
+        ? "You already hold this certified Fuji edition. Open the collector experience."
+        : "Primary collect on certified Fuji. Secondary trading is a separate, not-yet-live layer.",
+      certified: true,
     };
   }
   if (String(edition.status).toLowerCase() === "minted") {
     return {
       availability: "minted",
       status: MARKETPLACE_STATE.LIVE,
-      label: "Primary mint complete",
-      href: "/reliquary",
-      note: "This edition was collected on the primary path. Open the collector experience. Secondary collection is a separate, not-live layer.",
+      label: "Open experience",
+      href: `/edition/${edition.id}`,
+      note: "Primary mint for this edition is complete. Open the collector experience. Secondary collection is not yet live.",
+      certified: false,
     };
   }
   if (String(edition.status).toLowerCase() === "available") {
     return {
       availability: "available",
-      status: MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE,
-      label: "Primary collection available",
+      status: MARKETPLACE_STATE.LIVE,
+      label: "Collect",
       href: `/edition/${edition.id}`,
       note: "Primary collection is the music-native Collect path. It is not a secondary marketplace trade.",
+      certified: false,
     };
   }
   return {
     availability: "unavailable",
     status: MARKETPLACE_STATE.UNAVAILABLE,
-    label: "Primary collection unavailable",
+    label: "Unavailable",
     href: `/edition/${edition.id}`,
     note: "This edition is not currently collectible on the primary path.",
+    certified: false,
   };
 }
 
@@ -148,9 +175,9 @@ export function listingsForEdition(listings = [], edition) {
 
 export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
   return catalogs.flatMap((catalog) => (catalog.releases || []).map((release) => {
-    const artist = catalog.artists.find((item) => item.id === release.artistId) || null;
-    const editions = catalog.editions.filter((edition) => edition.releaseId === release.id);
-    const experiences = catalog.experiences.filter((experience) => (release.experiences || []).includes(experience.id));
+    const artist = (catalog.artists || []).find((item) => item.id === release.artistId) || null;
+    const editions = (catalog.editions || []).filter((edition) => edition.releaseId === release.id);
+    const experiences = (catalog.experiences || []).filter((experience) => (release.experiences || []).includes(experience.id));
     return {
       catalog,
       artist,
@@ -159,7 +186,7 @@ export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRAT
         edition,
         artist,
         release,
-        experiences: catalog.experiences.filter((experience) => (edition.experienceIds || []).includes(experience.id)),
+        experiences: (catalog.experiences || []).filter((experience) => (edition.experienceIds || []).includes(experience.id) || experience.editionId === edition.id),
         primary: primaryCollectForEdition(edition),
         chain: resolveEditionChain(edition),
       })),
@@ -168,12 +195,27 @@ export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRAT
   }));
 }
 
+export function flattenMarketplaceEditions(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
+  return marketplaceCatalog(catalogs).flatMap((record) => record.editions);
+}
+
 export function findMarketplaceEdition(editionId, catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
   for (const record of marketplaceCatalog(catalogs)) {
     const match = record.editions.find((item) => item.edition.id === editionId);
     if (match) return match;
   }
   return null;
+}
+
+export function featuredMarketplaceRecord(records = []) {
+  return records.find((record) => record.editions.some((item) => item.primary.availability === "available" && item.primary.certified))
+    || records.find((record) => record.editions.some((item) => item.primary.availability === "available"))
+    || records[0]
+    || null;
+}
+
+export function collectableFirst(items = []) {
+  return [...items].sort((a, b) => Number((b.primary || b.editions?.[0]?.primary)?.availability === "available") - Number((a.primary || a.editions?.[0]?.primary)?.availability === "available"));
 }
 
 export function certifiedFujiReleaseUnchanged() {

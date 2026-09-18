@@ -78,8 +78,9 @@ export function Footer() {
           ["THE VOID", [
             { label: "Discover", to: "/discover" },
             { label: "Marketplace", to: "/marketplace" },
+            { label: "Artists", to: "/artists" },
             { label: "Collection", to: "/collection" },
-            { label: "Summit collect", to: "/fuji-integration" },
+            { label: "Artist studio", to: "/studio" },
           ]],
           ["THE RELIC", [
             { label: "I · Voidcaller (EP)", href: VC_DATA.marketplaces.find(m => m.name === "OPENSEA").href },

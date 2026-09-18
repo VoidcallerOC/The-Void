@@ -1,30 +1,42 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
-import { MarketplaceStatusBadge, MarketplaceStatusBanner } from "./MarketplaceStatus.jsx";
+import { ArtistCard, EditionCard, EmptyRail, FeaturedReleaseCard, QuietStatus } from "./MarketplaceCards.jsx";
 import { fetchIndexedListings } from "../lib/marketplace-api.js";
 import { MARKETPLACE_CONFIG } from "../lib/marketplace.js";
+import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { getCollectorLibrary } from "../lib/collection.js";
+import { useWallet } from "../lib/wallet-context.js";
+import { artworkFor, ghostBtn, primaryBtn, contentShell } from "../lib/marketplace-chrome.js";
 import {
   MARKETPLACE_STATE,
-  formatWeiAsAvax,
+  collectableFirst,
+  flattenMarketplaceEditions,
+  featuredMarketplaceRecord,
   listingsForEdition,
   marketplaceCatalog,
   marketplaceCopy,
+  marketplaceStatusLabel,
   resolveInfrastructureStatus,
   resolveSecondaryStatus,
 } from "../lib/marketplace-surface.js";
-
-const shell = { maxWidth: 1100, margin: "0 auto", padding: "clamp(120px, 16vw, 180px) clamp(20px, 5vw, 48px)" };
-const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24, color: "inherit", textDecoration: "none", display: "block" };
-const button = { display: "inline-block", border: "1px solid var(--vc-bone-dim)", color: "var(--vc-bone)", padding: "11px 16px", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", textDecoration: "none" };
 
 export function MarketplacePage() {
   const [params] = useSearchParams();
   const focusRelease = params.get("release") || "";
   const focusEdition = params.get("edition") || "";
+  const catalog = useMarketplaceCatalogs();
+  const wallet = useWallet();
   const infrastructure = resolveInfrastructureStatus();
   const copy = marketplaceCopy(infrastructure);
-  const catalog = useMemo(() => marketplaceCatalog(), []);
+  const records = useMemo(
+    () => collectableFirst(marketplaceCatalog([catalog]).filter((record) => !focusRelease || record.release.id === focusRelease)),
+    [catalog, focusRelease],
+  );
+  const editions = useMemo(
+    () => collectableFirst(flattenMarketplaceEditions([catalog]).filter((item) => !focusEdition || item.edition.id === focusEdition)),
+    [catalog, focusEdition],
+  );
   const [listingsState, setListingsState] = useState(infrastructure === MARKETPLACE_STATE.LIVE ? "loading" : "idle");
   const [listings, setListings] = useState([]);
   const [indexError, setIndexError] = useState("");
@@ -39,6 +51,7 @@ export function MarketplacePage() {
         setIndexError("");
       })
       .catch((error) => {
+        if (error?.name === "AbortError") return;
         setListings([]);
         setListingsState("error");
         setIndexError(error?.message || "The marketplace index is unavailable.");
@@ -47,106 +60,146 @@ export function MarketplacePage() {
   }, [infrastructure]);
 
   const secondary = resolveSecondaryStatus({ infrastructure, listingsState });
-  const records = catalog.filter((record) => !focusRelease || record.release.id === focusRelease);
+  const featured = featuredMarketplaceRecord(records);
+  const featuredEdition = featured?.editions.find((item) => item.primary.availability === "available") || featured?.editions[0];
+  const liveListings = secondary === MARKETPLACE_STATE.LIVE ? listings : [];
+  const listedEditions = editions.filter((item) => listingsForEdition(liveListings, item.edition).length);
+  const library = useMemo(
+    () => (wallet.connected ? getCollectorLibrary(catalog, wallet.ownershipRecords || []) : { editions: [] }),
+    [catalog, wallet.connected, wallet.ownershipRecords],
+  );
 
   return (
-    <section style={shell}>
-      <header style={{ marginBottom: 36 }}>
-        <Eyebrow red>† MARKETPLACE</Eyebrow>
-        <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(48px, 9vw, 92px)", lineHeight: 0.92, textTransform: "uppercase", margin: "16px 0" }}>{copy.title}</h1>
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.7, margin: 0 }}>{copy.body}</p>
+    <section>
+      <header className="vc-market-hero-bleed">
+        {featured && (
+          <div
+            className="vc-market-hero-bg"
+            style={{ backgroundImage: `url(${artworkFor(featuredEdition?.edition, featured.release)})` }}
+            aria-hidden
+          />
+        )}
+        <div className="vc-market-hero-shade" aria-hidden />
+        <div className="vc-market-hero-copy">
+          <Eyebrow red>† {copy.eyebrow}</Eyebrow>
+          <h1 className="vc-market-hero-title">{copy.title}</h1>
+          <p className="vc-market-hero-lede">{copy.body}</p>
+          {featuredEdition && (
+            <div className="vc-market-hero-feature">
+              <p className="vc-card-kicker">{featured.artist?.name}</p>
+              <p className="vc-market-hero-release">{featured.release.title}</p>
+              <p className="vc-card-release">{featuredEdition.edition.title}</p>
+              {(featuredEdition.edition.includes || []).length > 0 && (
+                <ul className="vc-includes">
+                  {featuredEdition.edition.includes.map((entry) => <li key={entry}>{entry}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+          <div className="vc-market-hero-actions">
+            {featuredEdition && (
+              <Link to={featuredEdition.primary.href} style={primaryBtn}>
+                {featuredEdition.primary.availability === "available" ? "Collect" : featuredEdition.primary.label}
+              </Link>
+            )}
+            {featured && <Link to={`/release/${featured.release.id}`} style={ghostBtn}>Open release</Link>}
+            <Link to="/studio?create=edition" style={ghostBtn}>Create edition</Link>
+          </div>
+          <QuietStatus primary="Certified" secondary={marketplaceStatusLabel(secondary)} />
+        </div>
       </header>
 
-      <MarketplaceStatusBanner
-        status={secondary}
-        title={copy.eyebrow}
-        actions={[
-          { to: "/discover", label: "Open discovery" },
-          { to: "/collection", label: "My collection" },
-        ]}
-      >
-        <p style={{ margin: "0 0 8px" }}>Artist → Release → Editions → Experience → Collect. Marketplace is the secondary-collection layer around that path — not a generic token exchange.</p>
-        <p style={{ margin: 0 }}>Secondary trading is {secondary === MARKETPLACE_STATE.LIVE ? "reading the live index only." : "not live-certified. No listings, orders, or trades are simulated."}</p>
-        {indexError && <p style={{ margin: "8px 0 0", color: "var(--vc-crimson)" }}>{indexError}</p>}
-      </MarketplaceStatusBanner>
+      <div style={contentShell}>
+        <SectionLabel>Featured / Available releases</SectionLabel>
+        <div className="vc-release-rail">
+          {records.map((record) => <FeaturedReleaseCard key={record.release.id} record={record} />)}
+        </div>
 
-      <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".12em", color: "var(--vc-bone-dim)", textTransform: "uppercase", margin: "28px 0 0" }}>
-        Secondary offers shown: {infrastructure === MARKETPLACE_STATE.LIVE && listingsState === "ready" ? listings.length : 0} indexed · never invented
-      </p>
+        <SectionLabel>Recently listed</SectionLabel>
+        {secondary !== MARKETPLACE_STATE.LIVE && (
+          <EmptyRail title="Secondary market · not yet live">
+            No secondary listings. Primary collect is live for certified editions. Secondary trading appears here only after a reviewed marketplace contract is configured and indexed.
+          </EmptyRail>
+        )}
+        {secondary === MARKETPLACE_STATE.LIVE && listedEditions.length === 0 && (
+          <EmptyRail title="No active listings">
+            The live index has no secondary listings right now. Primary collect is still available on certified editions.
+          </EmptyRail>
+        )}
+        {listedEditions.length > 0 && (
+          <div className="vc-market-grid">
+            {listedEditions.map((item) => (
+              <EditionCard key={`listed-${item.edition.id}`} item={item} listings={listingsForEdition(liveListings, item.edition)} secondaryStatus={secondary} />
+            ))}
+          </div>
+        )}
+        {indexError && <p style={{ color: "var(--vc-crimson)" }}>{indexError}</p>}
 
-      <div style={{ display: "grid", gap: 48, marginTop: 40 }}>
-        {records.map((record) => (
-          <article key={record.release.id}>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 280px) minmax(0, 1fr)", gap: 24, alignItems: "start" }} className="vc-grid-2col">
-              <img src={record.release.artwork} alt={`${record.release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
-              <div>
-                <MarketplaceStatusBadge status={secondary} pulse={false} />
-                <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".14em", color: "var(--vc-crimson)", textTransform: "uppercase", margin: "14px 0 6px" }}>{record.artist?.name} · {record.release.status}</p>
-                <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 6vw, 52px)", lineHeight: 0.95, textTransform: "uppercase", margin: "0 0 12px" }}>{record.release.title}</h2>
-                <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65, maxWidth: 640 }}>{record.release.description}</p>
-                <p style={{ color: "var(--vc-bone-dim)", fontSize: 14 }}>{record.release.subtitle}</p>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-                  <Link to={`/release/${record.release.id}`} style={button}>Open release</Link>
-                  <Link to={`/artist/${record.artist?.id}`} style={button}>{record.artist?.name}</Link>
-                </div>
-              </div>
-            </div>
+        <SectionLabel>Featured editions</SectionLabel>
+        <div className="vc-market-grid">
+          {editions.map((item) => (
+            <EditionCard
+              key={item.edition.id}
+              item={item}
+              listings={listingsForEdition(liveListings, item.edition)}
+              secondaryStatus={secondary}
+            />
+          ))}
+        </div>
 
-            <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, margin: "32px 0 14px", textTransform: "uppercase" }}>Editions</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-              {record.editions.filter((item) => !focusEdition || item.edition.id === focusEdition).map((item) => {
-                const offers = listingsForEdition(listings, item.edition);
-                return (
-                  <div key={item.edition.id} style={card}>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
-                      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>Primary <MarketplaceStatusBadge status={item.primary.status} pulse={false} /></span>
-                      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>Secondary <MarketplaceStatusBadge status={secondary} pulse={secondary === MARKETPLACE_STATE.LIVE} /></span>
-                    </div>
-                    <h4 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "0 0 8px", textTransform: "uppercase" }}>{item.edition.title}</h4>
-                    <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>{item.edition.description}</p>
-                    <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".08em" }}>
-                      {item.edition.supply || "Open supply"} · {item.edition.chain} · {item.edition.tier}
-                    </p>
-                    <Eyebrow>Collector receives</Eyebrow>
-                    <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 1.8, paddingLeft: 18 }}>
-                      {(item.edition.includes || []).map((entry) => <li key={entry}>{entry}</li>)}
-                    </ul>
-                    <Eyebrow>Experiences included</Eyebrow>
-                    <div style={{ display: "grid", gap: 8, margin: "10px 0 18px" }}>
-                      {item.experiences.length ? item.experiences.map((experience) => (
-                        <Link key={experience.id} to={`/experience/${experience.id}`} style={{ color: "var(--vc-bone)", textDecoration: "none" }}>
-                          {experience.title}
-                          <span style={{ color: "var(--vc-bone-dim)" }}> · {experience.experienceType}</span>
-                        </Link>
-                      )) : <span style={{ color: "var(--vc-bone-dim)" }}>No attached experiences.</span>}
-                    </div>
-                    <p style={{ color: "var(--vc-bone)", fontSize: 14, marginBottom: 8 }}>{item.primary.label}</p>
-                    <p style={{ color: "var(--vc-bone-dim)", fontSize: 13, lineHeight: 1.55 }}>{item.primary.note}</p>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-                      <Link to={item.primary.href} style={button}>{item.primary.availability === "minted" ? "Open collector experience" : "Primary collect"}</Link>
-                      <Link to={`/edition/${item.edition.id}`} style={button}>Edition page</Link>
-                    </div>
-                    <div style={{ marginTop: 20, borderTop: "1px solid var(--vc-ash)", paddingTop: 16 }}>
-                      <Eyebrow>Secondary listings</Eyebrow>
-                      {secondary !== MARKETPLACE_STATE.LIVE && (
-                        <p style={{ color: "var(--vc-bone-dim)", margin: "10px 0 0" }}>No secondary listings. The marketplace rail is {secondary.toLowerCase()}.</p>
-                      )}
-                      {secondary === MARKETPLACE_STATE.LIVE && offers.length === 0 && (
-                        <p style={{ color: "var(--vc-bone-dim)", margin: "10px 0 0" }}>The live index has no active listings for this edition.</p>
-                      )}
-                      {offers.map((listing) => (
-                        <p key={listing.listingId || listing.id} style={{ color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                          {listing.amount} remaining · {formatWeiAsAvax(listing.price) || "Price indexed"} · {listing.status}
-                        </p>
-                      ))}
-                    </div>
+        <SectionLabel>From the artists</SectionLabel>
+        <div className="vc-market-grid">
+          {catalog.artists.map((artist) => (
+            <ArtistCard key={artist.id} artist={artist} releases={catalog.releases.filter((release) => release.artistId === artist.id)} />
+          ))}
+        </div>
+
+        <SectionLabel>Collector activity</SectionLabel>
+        {library.editions.length > 0 ? (
+          <div className="vc-market-grid">
+            {library.editions.map(({ edition, release, artist, quantity }) => (
+              <article key={`held-${edition.id}`} className="vc-market-card">
+                <img src={artworkFor(edition, release)} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                <div style={{ padding: 22 }}>
+                  <p className="vc-card-kicker">{artist?.name}</p>
+                  <h3 className="vc-card-title">{edition.title}</h3>
+                  <p className="vc-card-meta">{quantity} owned · from your connected wallet</p>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+                    <Link to={`/edition/${edition.id}`} style={primaryBtn}>Owned</Link>
+                    <Link to="/collection" style={ghostBtn}>My collection</Link>
                   </div>
-                );
-              })}
-            </div>
-          </article>
-        ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyRail title="No public activity feed">
+            Collector activity is shown only from indexed on-chain events or a connected wallet's holdings. Nothing is simulated here.
+          </EmptyRail>
+        )}
+
+        <section className="vc-artist-cta">
+          <div>
+            <Eyebrow red>For artists</Eyebrow>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(36px, 5vw, 56px)", textTransform: "uppercase", lineHeight: 0.95, margin: "12px 0" }}>Publish a new edition</h2>
+            <p style={{ color: "var(--vc-bone-dim)", maxWidth: 560, lineHeight: 1.65, margin: 0 }}>
+              Artist Studio creates the release, edition, and on-chain relic on the certified Fuji contract.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link to="/studio?create=edition" style={primaryBtn}>Create edition</Link>
+            <Link to="/studio" style={ghostBtn}>Open artist studio</Link>
+          </div>
+        </section>
       </div>
     </section>
+  );
+}
+
+function SectionLabel({ children }) {
+  return (
+    <h2 className="vc-section-label">
+      {children}
+    </h2>
   );
 }

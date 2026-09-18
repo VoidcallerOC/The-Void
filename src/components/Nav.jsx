@@ -8,14 +8,11 @@ import { WalletButton } from "./WalletButton.jsx";
 const LINKS = [
   ["DISCOVER", "/discover"],
   ["MARKETPLACE", "/marketplace"],
-  ["CHRONICLE", "/chronicle"],
-  ["THE CALL", "/the-call"],
-  ["RELIQUARY", "/reliquary"],
-  ["CHOIR", "/choir"],
-  ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
+  ["ARTISTS", "/artists"],
+  ["COLLECTION", "/collection"],
+  ["STUDIO", "/studio"],
 ];
 
-// ---------------- Nav ----------------
 export function Nav({ onMint }) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -25,6 +22,10 @@ export function Nav({ onMint }) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   const solid = scrolled || menuOpen;
+  const links = [
+    ...LINKS,
+    ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
+  ];
 
   return (
     <nav
@@ -50,7 +51,7 @@ export function Nav({ onMint }) {
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
-          {LINKS.map(([label, path]) => (
+          {links.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
               {label}
             </NavLink>
@@ -63,7 +64,6 @@ export function Nav({ onMint }) {
           <WalletButton />
           <Btn onClick={onMint} style={{ whiteSpace: "nowrap" }}>CLAIM A RELIC</Btn>
         </span>
-        {/* mobile hamburger */}
         <button
           className="vc-nav-burger"
           aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -72,8 +72,8 @@ export function Nav({ onMint }) {
             display: "none",
             alignItems: "center",
             justifyContent: "center",
-            width: 40,
-            height: 40,
+            width: 44,
+            height: 44,
             background: "transparent",
             border: "1px solid var(--vc-ash)",
             color: "var(--vc-bone)",
@@ -84,7 +84,6 @@ export function Nav({ onMint }) {
         </button>
       </div>
 
-      {/* mobile dropdown menu */}
       {menuOpen && (
         <div
           className="vc-nav-menu"
@@ -102,14 +101,14 @@ export function Nav({ onMint }) {
             gap: 4,
           }}
         >
-          {LINKS.map(([label, path]) => (
+          {links.map(([label, path]) => (
             <NavLink
               key={label}
               to={path}
               end={path === "/"}
               className="vc-navlink vc-navlink-mobile"
               onClick={() => setMenuOpen(false)}
-              style={{ padding: "14px 0", borderBottom: "1px solid var(--vc-ash)", fontSize: 15 }}
+              style={{ padding: "14px 0", minHeight: 48, borderBottom: "1px solid var(--vc-ash)", fontSize: 18 }}
             >
               {label}
             </NavLink>

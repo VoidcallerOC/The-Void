@@ -1,17 +1,19 @@
 import { Link } from "react-router-dom";
-import { MARKETPLACE_STATE } from "../lib/marketplace-surface.js";
+import { MARKETPLACE_STATE, marketplaceStatusLabel } from "../lib/marketplace-surface.js";
 
 const tones = {
   [MARKETPLACE_STATE.LIVE]: { color: "#fff", background: "var(--vc-blood)", border: "var(--vc-blood)" },
-  [MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE]: { color: "var(--vc-bone)", background: "transparent", border: "var(--vc-smoke)" },
+  [MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE]: { color: "var(--vc-bone-dim)", background: "transparent", border: "var(--vc-ash)" },
   [MARKETPLACE_STATE.UNAVAILABLE]: { color: "var(--vc-bone-dim)", background: "transparent", border: "var(--vc-ash)" },
 };
 
 export function MarketplaceStatusBadge({ status, pulse = status === MARKETPLACE_STATE.LIVE }) {
   const tone = tones[status] || tones[MARKETPLACE_STATE.UNAVAILABLE];
+  const label = marketplaceStatusLabel(status);
   return (
     <span
       className="vc-market-badge"
+      title={status}
       style={{
         fontFamily: "var(--font-body)",
         fontWeight: 700,
@@ -39,7 +41,7 @@ export function MarketplaceStatusBadge({ status, pulse = status === MARKETPLACE_
           }}
         />
       )}
-      {status}
+      {label}
     </span>
   );
 }
@@ -47,17 +49,18 @@ export function MarketplaceStatusBadge({ status, pulse = status === MARKETPLACE_
 export function MarketplaceStatusBanner({ status, title, children, actions = [] }) {
   return (
     <aside
+      className="vc-market-note"
       style={{
         border: "1px solid var(--vc-ash)",
         background: "var(--vc-abyss)",
-        padding: "22px 24px",
+        padding: "18px 20px",
         display: "grid",
-        gap: 12,
+        gap: 10,
       }}
     >
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <MarketplaceStatusBadge status={status} />
-        {title && <strong style={{ fontFamily: "var(--font-display)", fontSize: 22, letterSpacing: "0.04em", textTransform: "uppercase" }}>{title}</strong>}
+        {title && <strong style={{ fontFamily: "var(--font-body)", fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase" }}>{title}</strong>}
       </div>
       <div style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65, maxWidth: 720 }}>{children}</div>
       {actions.length > 0 && (
@@ -67,7 +70,9 @@ export function MarketplaceStatusBanner({ status, title, children, actions = [] 
               key={action.to + action.label}
               to={action.to}
               style={{
-                display: "inline-block",
+                display: "inline-flex",
+                alignItems: "center",
+                minHeight: 44,
                 border: "1px solid var(--vc-bone-dim)",
                 color: "var(--vc-bone)",
                 padding: "11px 16px",
