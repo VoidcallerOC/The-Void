@@ -136,20 +136,20 @@ export class PersistenceRepository {
     return rows[0];
   }
 
-  async createNonce({ nonceHash, wallet, chainId: rawChainId, domain, uri, purpose, issuedAt, expiresAt, requestId = null }) {
-    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose"), issuedAt, expiresAt, optionalText(requestId, "nonce.requestId", { max: 256 })];
-    const { rows } = await this.db.query(`INSERT INTO auth_nonces (nonce_hash, wallet_address, chain_id, domain, uri, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, values);
+  async createNonce({ nonceHash, wallet, chainId: rawChainId, domain, origin, uri, purpose, issuedAt, expiresAt, requestId = null }) {
+    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(origin, "nonce.origin", { max: 2048 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose"), issuedAt, expiresAt, optionalText(requestId, "nonce.requestId", { max: 256 })];
+    const { rows } = await this.db.query(`INSERT INTO auth_nonces (nonce_hash, wallet_address, chain_id, domain, origin, uri, purpose, issued_at, expires_at, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, values);
     return rows[0];
   }
 
   async getNonce({ nonceHash }) {
-    const { rows } = await this.db.query(`SELECT nonce_hash, wallet_address, chain_id, domain, uri, purpose, issued_at, expires_at, consumed_at FROM auth_nonces WHERE nonce_hash=$1 LIMIT 1`, [requiredText(nonceHash, "nonce.nonceHash", { max: 256 })]);
+    const { rows } = await this.db.query(`SELECT nonce_hash, wallet_address, chain_id, domain, origin, uri, purpose, issued_at, expires_at, consumed_at FROM auth_nonces WHERE nonce_hash=$1 LIMIT 1`, [requiredText(nonceHash, "nonce.nonceHash", { max: 256 })]);
     return rows[0] || null;
   }
 
-  async consumeNonce({ nonceHash, wallet, chainId: rawChainId, domain, uri, purpose }) {
-    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose")];
-    const { rows } = await this.db.query(`UPDATE auth_nonces SET consumed_at=now() WHERE nonce_hash=$1 AND wallet_address=$2 AND chain_id=$3 AND domain=$4 AND uri=$5 AND purpose=$6 AND consumed_at IS NULL AND expires_at > now() RETURNING *`, values);
+  async consumeNonce({ nonceHash, wallet, chainId: rawChainId, domain, origin, uri, purpose }) {
+    const values = [requiredText(nonceHash, "nonce.nonceHash", { max: 256 }), walletAddress(wallet), chainId(rawChainId, "nonce.chainId"), requiredText(domain, "nonce.domain", { max: 255 }), requiredText(origin, "nonce.origin", { max: 2048 }), requiredText(uri, "nonce.uri", { max: 2048 }), requiredText(purpose, "nonce.purpose")];
+    const { rows } = await this.db.query(`UPDATE auth_nonces SET consumed_at=now() WHERE nonce_hash=$1 AND wallet_address=$2 AND chain_id=$3 AND domain=$4 AND origin=$5 AND uri=$6 AND purpose=$7 AND consumed_at IS NULL AND expires_at > now() RETURNING *`, values);
     if (!rows[0]) throw new PersistenceConflictError("Nonce is missing, expired, or already consumed.");
     return rows[0];
   }

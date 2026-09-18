@@ -101,6 +101,7 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
     ownershipMaxIndexerStalenessMs: boundedPositiveInteger(env.OWNERSHIP_MAX_INDEXER_STALENESS_MS, 120_000, "OWNERSHIP_MAX_INDEXER_STALENESS_MS", { min: 1_000, max: 3_600_000 }),
     appEnvironment,
     publicAppUrl: publicApp.toString().replace(/\/$/, ""),
+    authOrigin: publicApp.origin,
     authDomain,
     authUri: authUri.toString().replace(/\/$/, ""),
     apiAllowedOrigins: allowedOrigins(env.API_ALLOWED_ORIGINS, publicApp),
