@@ -33,8 +33,9 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
     }
   }
   const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, logger });
-  const server = createServer(createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger }));
-  return { server, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService };
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  const server = createServer(handler);
+  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
