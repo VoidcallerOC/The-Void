@@ -3,10 +3,22 @@ import { loadServerConfig } from "./config.js";
 
 const { Pool } = pg;
 
+function connectionStringForPool(connectionString, rejectUnauthorized) {
+  if (rejectUnauthorized !== false) return connectionString;
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete("sslmode");
+    url.searchParams.delete("sslrootcert");
+    return url.toString();
+  } catch {
+    return String(connectionString).replace(/([?&])sslmode=[^&]*/i, "$1").replace(/[?&]$/, "");
+  }
+}
+
 export function createDatabasePool(config = loadServerConfig()) {
   if (!config.databaseUrl) throw new Error("Cannot create a database pool without DATABASE_URL.");
   return new Pool({
-    connectionString: config.databaseUrl,
+    connectionString: connectionStringForPool(config.databaseUrl, config.databaseSslRejectUnauthorized),
     max: config.poolMax,
     idleTimeoutMillis: config.poolIdleTimeoutMs,
     connectionTimeoutMillis: config.poolConnectionTimeoutMs,
@@ -14,6 +26,8 @@ export function createDatabasePool(config = loadServerConfig()) {
     application_name: "voidcaller-persistence",
   });
 }
+
+export { connectionStringForPool };
 
 export async function withTransaction(pool, callback) {
   const client = await pool.connect();
