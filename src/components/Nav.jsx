@@ -6,6 +6,8 @@ import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 
 const LINKS = [
+  ["DISCOVER", "/discover"],
+  ["MARKETPLACE", "/marketplace"],
   ["CHRONICLE", "/chronicle"],
   ["THE CALL", "/the-call"],
   ["RELIQUARY", "/reliquary"],
@@ -42,12 +44,12 @@ export function Nav({ onMint }) {
         transition: "background 220ms cubic-bezier(0.6,0,0.2,1)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
         <Link to="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
           <img src="/assets/VoidcallerLogo.gif" alt="" style={{ width: 32, height: 32, display: "block" }} />
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
-        <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 36 }}>
+        <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
           {LINKS.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
               {label}

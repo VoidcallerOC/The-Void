@@ -103,6 +103,12 @@ body { padding-bottom: 72px; }
 /* ============================================================
    RESPONSIVE OVERRIDES
    ============================================================ */
+@media (max-width: 1180px) {
+  .vc-nav-links {
+    display: none !important;
+  }
+  .vc-nav-burger { display: inline-flex !important; }
+}
 @media (max-width: 768px) {
   .vc-nav-links,
   .vc-chain-badge,

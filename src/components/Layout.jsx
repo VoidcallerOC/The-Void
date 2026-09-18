@@ -6,6 +6,7 @@ import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { MintModal } from "./MintModal.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
+import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
 
 // Minimal in-theme placeholder shown while a lazily-loaded section chunk
 // is fetched. Sized to the viewport so the footer doesn't jump up.
@@ -46,6 +47,7 @@ export function Layout() {
   const onMint = () => setMintOpen(true);
   return (
     <WalletProvider>
+      <PreviewHostBridge />
       <ScrollToTop />
       <Grain />
       <Scanlines />

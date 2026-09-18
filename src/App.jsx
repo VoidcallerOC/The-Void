@@ -6,6 +6,7 @@ import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 import { FujiIntegrationPage } from "./components/FujiIntegrationPage.jsx";
+import { MarketplacePage } from "./components/MarketplacePage.jsx";
 
 // Hero is the above-the-fold landing — keep it eager. The rest of the
 // sections are split into their own chunks and loaded on navigation.
@@ -43,6 +44,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="discover" element={<DiscoverPage />} />
+          <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="artists" element={<ArtistsPage />} />
           <Route path="artist/:artist" element={<ArtistPage />} />
           <Route path="release/:release" element={<ReleasePage />} />
