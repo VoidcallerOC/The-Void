@@ -92,6 +92,7 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   return Object.freeze({
     databaseUrl: databaseUrl || null,
     databaseSsl: String(env.DATABASE_SSL || "true").toLowerCase() !== "false",
+    databaseSslRejectUnauthorized: String(env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? (/([?&])sslmode=require(?:&|$)/i.test(databaseUrl) ? "false" : "true")).toLowerCase() !== "false",
     poolMax: positiveInteger(env.DATABASE_POOL_MAX, 10),
     poolIdleTimeoutMs: positiveInteger(env.DATABASE_POOL_IDLE_TIMEOUT_MS, 30000),
     poolConnectionTimeoutMs: positiveInteger(env.DATABASE_POOL_CONNECTION_TIMEOUT_MS, 5000),
