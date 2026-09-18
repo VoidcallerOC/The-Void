@@ -28,6 +28,7 @@ const iface = new ethers.Interface(FUJI_RELEASE_ABI);
 const editionIface = new ethers.Interface([
   "function edition(uint256) view returns (bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists)",
   "error EditionNotFound(uint256 tokenId)",
+  "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)",
 ]);
 const bytes32 = (value, name) => {
   const text = String(value || "").trim();
@@ -122,6 +123,40 @@ export async function readFujiEdition(provider, tokenId) {
     }
     throw error;
   }
+}
+
+export async function assertFujiGas(provider, { from, data }) {
+  await assertFujiProvider(provider);
+  const to = assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress);
+  const [gasHex, gasPriceHex, balanceHex] = await Promise.all([
+    provider.request({ method: "eth_estimateGas", params: [{ from, to, data }] }),
+    provider.request({ method: "eth_gasPrice" }),
+    provider.request({ method: "eth_getBalance", params: [from, "latest"] }),
+  ]);
+  const gas = BigInt(gasHex);
+  const gasPrice = BigInt(gasPriceHex);
+  const balance = BigInt(balanceHex);
+  const required = gas * gasPrice;
+  if (balance < required) {
+    throw new Error(`Insufficient Fuji AVAX for gas. Estimated requirement is ${ethers.formatEther(required)} AVAX; wallet balance is ${ethers.formatEther(balance)} AVAX.`);
+  }
+  return { gas, gasPrice, balance, required };
+}
+
+export async function verifyFujiEditionCreation(provider, { transactionHash, releaseId, editionId, tokenId }) {
+  await assertFujiProvider(provider);
+  const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
+  if (!receipt || receipt.status !== "0x1") throw new Error("Create Edition did not receive a successful Fuji receipt.");
+  const expectedTokenId = BigInt(tokenId).toString();
+  const expectedReleaseId = fujiIds(releaseId, editionId).releaseId;
+  const expectedEditionId = fujiIds(releaseId, editionId).editionId;
+  const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()).map((log) => {
+    try { return editionIface.parseLog(log); } catch { return null; }
+  }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId.toString() === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId);
+  if (!event) throw new Error("Create Edition receipt succeeded, but the expected EditionCreated event was not found.");
+  const edition = await readFujiEdition(provider, tokenId);
+  if (!edition?.exists) throw new Error("EditionCreated was emitted, but edition(tokenId) is not available on Fuji.");
+  return { receipt, event, edition };
 }
 
 export function fujiExplorerUrl(kind, value) { return `${FUJI_RELEASE_CONFIG.explorer}/${kind}/${value}`; }

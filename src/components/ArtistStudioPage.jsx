@@ -7,6 +7,7 @@ import {
   FUJI_RELEASE_CONFIG,
   FUJI_ROLES,
   assertFujiAddress,
+  assertFujiGas,
   encodeCreateFujiEdition,
   fujiExplorerUrl,
   fujiSlug,
@@ -14,6 +15,7 @@ import {
   readFujiPaused,
   readFujiRole,
   sendFujiTransaction,
+  verifyFujiEditionCreation,
 } from "../lib/fuji-release.js";
 import { createArtist, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "../domain/models.js";
 import { notifyStudioOverlay, upsertStudioOverlay, useMarketplaceCatalogs } from "../lib/catalog-source.js";
@@ -101,6 +103,7 @@ export function ArtistStudioPage() {
   const [busy, setBusy] = useState("");
   const [txHash, setTxHash] = useState("");
   const [published, setPublished] = useState(false);
+  const [onChainEdition, setOnChainEdition] = useState(null);
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
@@ -251,10 +254,13 @@ export function ArtistStudioPage() {
       const ids = await ensureArtistAndRelease();
       const metadataUri = form.metadataUri || `ipfs://the-void-${nextEditionSlug}`;
       const { tokenId, data } = encodeCreateFujiEdition({ releaseId: nextReleaseSlug, editionId: nextEditionSlug, maxSupply: form.quantity, metadataUri });
+      await assertFujiGas(provider, { from: wallet.account, data });
       const result = await sendFujiTransaction({ provider, from: wallet.account, data });
+      const verified = await verifyFujiEditionCreation(provider, { transactionHash: result.hash, releaseId: nextReleaseSlug, editionId: nextEditionSlug, tokenId });
       setTxHash(result.hash);
       setEditionId(nextEditionSlug);
       setReleaseId(ids.releaseId || nextReleaseSlug);
+      setOnChainEdition({ tokenId: tokenId.toString(), blockNumber: verified.receipt.blockNumber ? Number.parseInt(verified.receipt.blockNumber, 16) : null, mintedSupply: verified.edition.mintedSupply.toString(), maxSupply: verified.edition.maxSupply.toString() });
       try {
         await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: "POST",
@@ -284,7 +290,7 @@ export function ArtistStudioPage() {
       }
       persistOverlay({ status: "available", tokenId: tokenId.toString(), transactionHash: result.hash, artistKey: ids.artistId, releaseKey: nextReleaseSlug, editionKey: nextEditionSlug });
       setPublished(true);
-      setNotice(`Edition created on Fuji. It is now available to collect.`);
+      setNotice(`Edition created on Fuji and verified on-chain. It is now available to collect.`);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -486,6 +492,10 @@ export function ArtistStudioPage() {
           </div>
           {published && (
             <div style={{ marginTop: 24, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ ...card, width: "100%", borderColor: "var(--vc-bone-dim)" }}>
+                <Eyebrow red>Edition created · on-chain</Eyebrow>
+                <p style={{ margin: "10px 0 0", color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Avalanche Fuji · chain {FUJI_RELEASE_CONFIG.chainId} · token {onChainEdition?.tokenId || tokenPreview}</p>
+              </div>
               <Link to={`/edition/${editionId || editionSlug}`} style={primaryBtn}>View edition</Link>
               <Link to={`/release/${releaseId || releaseSlug}`} style={ghostBtn}>View release</Link>
               <Link to="/marketplace" style={ghostBtn}>Marketplace</Link>
