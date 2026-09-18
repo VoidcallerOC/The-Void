@@ -22,8 +22,16 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const resolvedOwnershipVerifier = ownershipVerifier || createIndexedOwnershipVerifier({ db: pool, config });
   const rateLimiter = createRateLimiter();
   const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, rateLimiter, logger });
-  const resolvedMediaConfig = mediaConfig || loadMediaConfig();
-  const resolvedMediaGateway = mediaGateway || createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage: createPrivateMediaStorage({ config: resolvedMediaConfig }), mediaConfig: resolvedMediaConfig });
+  let resolvedMediaGateway = mediaGateway;
+  if (!resolvedMediaGateway) {
+    try {
+      const resolvedMediaConfig = mediaConfig || loadMediaConfig();
+      resolvedMediaGateway = createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage: createPrivateMediaStorage({ config: resolvedMediaConfig }), mediaConfig: resolvedMediaConfig });
+    } catch (error) {
+      if (String(process.env.VERCEL || "") !== "1") throw error;
+      logger.warn?.("api.media.disabled", { error: error.message });
+    }
+  }
   const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, logger });
   const server = createServer(createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger }));
   return { server, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService };
