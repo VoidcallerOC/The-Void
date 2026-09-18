@@ -10,6 +10,7 @@ import {
   fujiExplorerUrl,
   isCertifiedFujiEdition,
   readFujiBalance,
+  readFujiEdition,
   readFujiPaused,
   readFujiRole,
   sendFujiTransaction,
@@ -56,6 +57,10 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       const provider = wallet.getProvider();
       const paused = await readFujiPaused(provider);
       if (paused) throw new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused.");
+      const onChainEdition = await readFujiEdition(provider, tokenId);
+      if (!onChainEdition?.exists) {
+        throw new Error("Edition has not been created on Fuji yet. Create the Summit edition before collecting.");
+      }
       const hasIssuer = await readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account);
       setIssuer(hasIssuer);
       if (!hasIssuer) {
