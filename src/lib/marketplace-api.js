@@ -3,11 +3,12 @@ function apiBase() {
   return configured ? configured.replace(/\/$/, "") : "";
 }
 
-async function request(path, { method = "GET", body = null, headers = {}, fetchImpl = fetch } = {}) {
+async function request(path, { method = "GET", body = null, headers = {}, fetchImpl = fetch, signal } = {}) {
   const response = await fetchImpl(`${apiBase()}${path}`, {
     method,
     headers: { accept: "application/json", ...(body ? { "content-type": "application/json" } : {}), ...headers },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
   let payload;
   try { payload = await response.json(); } catch { throw new Error("Marketplace API returned an invalid response."); }
@@ -39,6 +40,19 @@ function normalizeListing(row) {
     authority: "INDEXED",
     updatedAt: row.updated_at || null,
   };
+}
+
+export async function fetchIndexedListings({ chainId, marketplaceAddress, tokenContractAddress, tokenId, sellerWallet, status = "ACTIVE", fetchImpl = fetch, signal } = {}) {
+  const query = new URLSearchParams();
+  if (chainId) query.set("chainId", String(chainId));
+  if (marketplaceAddress) query.set("marketplaceAddress", marketplaceAddress);
+  if (tokenContractAddress) query.set("tokenContractAddress", tokenContractAddress);
+  if (tokenId !== undefined && tokenId !== null && tokenId !== "") query.set("tokenId", String(tokenId));
+  if (sellerWallet) query.set("sellerWallet", sellerWallet);
+  if (status) query.set("status", status);
+  const data = await request(`/api/listings?${query}`, { fetchImpl, signal });
+  if (!Array.isArray(data)) throw new Error("Indexed marketplace listings were incomplete.");
+  return data.map(normalizeListing);
 }
 
 export async function fetchAuthoritativeListing({ chainId, marketplaceAddress, listingId, fetchImpl = fetch } = {}) {
