@@ -54,7 +54,7 @@ export function Layout() {
       <Nav onMint={onMint} />
       {/* Each route fills the viewport so short pages don't expose the footer
           on load — content centers vertically; taller pages just grow. */}
-      <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <main className="vc-main">
         <Suspense fallback={<SectionFallback />}>
           <Outlet context={{ onMint }} />
         </Suspense>

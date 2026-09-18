@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { VC_DATA } from "../data.js";
 import { Eyebrow, Btn, Tag } from "./Atoms.jsx";
 import { WordmarkGlitch } from "./Overlays.jsx";
@@ -111,6 +112,25 @@ export function Hero({ onMint }) {
         <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
           <Btn onClick={onMint}>Claim the relic</Btn>
           <Btn kind="ghost" onClick={hearEP}>Hear the EP</Btn>
+          <Link
+            to="/marketplace"
+            style={{
+              fontFamily: "var(--font-body)",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              padding: "14px 22px",
+              border: "1px solid var(--vc-bone)",
+              color: "var(--vc-bone)",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              minHeight: 44,
+            }}
+          >
+            Enter marketplace
+          </Link>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
           {VC_DATA.heroStats.map(([v, k]) => (

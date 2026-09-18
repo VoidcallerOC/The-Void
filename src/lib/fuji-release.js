@@ -11,6 +11,19 @@ export const FUJI_ROLES = Object.freeze({
   ISSUER_ROLE: ethers.keccak256(ethers.toUtf8Bytes("ISSUER_ROLE")),
 });
 
+export function fujiSlug(value, name = "id") {
+  const slug = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) throw new Error(`${name} must use letters or numbers.`);
+  if (slug.length > 31) throw new Error(`${name} must be at most 31 characters for the certified Fuji path.`);
+  return slug;
+}
+
+export function isCertifiedFujiEdition(edition) {
+  return Boolean(edition)
+    && String(edition.contractAddress || "").toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()
+    && Number(edition.chainId) === FUJI_RELEASE_CONFIG.chainId;
+}
+
 const iface = new ethers.Interface(FUJI_RELEASE_ABI);
 const bytes32 = (value, name) => {
   const text = String(value || "").trim();

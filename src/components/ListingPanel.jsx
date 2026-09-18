@@ -63,7 +63,7 @@ export function ListingPanel({ edition }) {
     <section style={{ marginTop: 40, borderTop: "1px solid var(--vc-ash)", paddingTop: 28 }}>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>Secondary collection · list {edition.title}</div>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 560, lineHeight: 1.6 }}>Owners keep the edition in wallet. A wallet receipt is only a submission signal; the listing becomes visible after the backend indexes a confirmed marketplace event.</p>
-      {!live && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>IMPLEMENTED / NOT LIVE · no reviewed marketplace contract is configured. Listing stays disabled so this cannot be mistaken for live trading.</p>}
+      {!live && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Secondary market is not yet live. Listing stays disabled so this cannot be mistaken for live trading.</p>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, opacity: live ? 1 : 0.55 }}>
         <div>
           <label htmlFor="listing-amount">QUANTITY</label>
