@@ -176,3 +176,14 @@ export function loadMediaConfig(env = process.env) {
   if (appEnvironment === "production" && signerUrl.protocol !== "https:") throw new ConfigurationError("Production MEDIA_OBJECT_SIGNER_ENDPOINT must use HTTPS.");
   return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, signerEndpoint: signerUrl.toString(), signerToken: secret(env.MEDIA_OBJECT_SIGNER_TOKEN, "MEDIA_OBJECT_SIGNER_TOKEN", { required: true }), objectUrlHosts: hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS, "MEDIA_OBJECT_URL_HOSTS"), auditHashSecret: secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" }) });
 }
+
+export function loadMetadataConfig(env = process.env) {
+  const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
+  const driver = String(env.METADATA_STORAGE_DRIVER || "").trim().toLowerCase();
+  if (!driver) return Object.freeze({ driver: null, appEnvironment });
+  if (driver !== "pinata") throw new ConfigurationError("METADATA_STORAGE_DRIVER must be pinata.");
+  const jwt = secret(env.PINATA_JWT, "PINATA_JWT", { required: true });
+  const endpoint = normalizedUrl(env.PINATA_PIN_JSON_ENDPOINT || "https://api.pinata.cloud/pinning/pinJSONToIPFS", "PINATA_PIN_JSON_ENDPOINT");
+  if (appEnvironment === "production" && endpoint.protocol !== "https:") throw new ConfigurationError("Production metadata storage requires an HTTPS Pinata endpoint.");
+  return Object.freeze({ driver, appEnvironment, jwt, endpoint: endpoint.toString(), gateway: String(env.PINATA_GATEWAY_URL || "https://gateway.pinata.cloud/ipfs/").replace(/\/$/, "") + "/" });
+}

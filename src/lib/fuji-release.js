@@ -13,7 +13,7 @@ export const FUJI_ROLES = Object.freeze({
 
 export function fujiSlug(value, name = "id") {
   const slug = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!slug) throw new Error(`${name} must use letters or numbers.`);
+  if (!slug) throw new Error(name.toLowerCase().includes("release") ? "Enter a release title before publishing." : "A name is required before publishing.");
   if (slug.length > 31) throw new Error(`${name} must be at most 31 characters for the certified Fuji path.`);
   return slug;
 }

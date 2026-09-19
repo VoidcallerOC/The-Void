@@ -62,6 +62,22 @@ describe("Artist Studio", () => {
     await expect(regression.instance.updateRelease({ request, releaseId: "release-1", input: { status: "REVIEW" } })).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
   });
 
+  it("derives a title-only release slug and resolves collisions without client input", async () => {
+    const first = service({ rows: [{ id: "artist-1", artist_id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
+    await expect(first.instance.createRelease({ request, artistId: "artist-1", input: { title: "The Void — Summit Demo" } })).resolves.toMatchObject({ status: "DRAFT" });
+    expect(first.repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ slug: "the-void-summit-demo" }));
+
+    const collision = service({ rows: [{ id: "artist-1", artist_id: "artist-1", slug: "my-new-record", display_name: "Voidcaller", status: "ACTIVE" }] });
+    await collision.instance.createRelease({ request, artistId: "artist-1", input: { title: "My New Record!", slug: "" } });
+    expect(collision.repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ slug: "my-new-record-2" }));
+  });
+
+  it("preserves the internal release slug when a legacy client sends an invalid slug", async () => {
+    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-void-summit-demo", title: "Summit Demo", description: null, status: "DRAFT", release_metadata: {}, published_at: null }] });
+    await instance.updateRelease({ request, releaseId: "release-1", input: { slug: "!!!", title: "Summit Demo Updated" } });
+    expect(repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ slug: "the-void-summit-demo", title: "Summit Demo Updated" }));
+  });
+
   it("creates a contract-agnostic ERC-1155 edition and its experience", async () => {
     const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     const edition = await instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", chainId: 43113, contractAddress: contract, tokenId: "7", quantity: "100", priceWei: "1000000000000000000" } });
