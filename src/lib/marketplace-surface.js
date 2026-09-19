@@ -1,7 +1,7 @@
 import { FUJI_RELEASE_CONFIG, isCertifiedFujiEdition } from "./fuji-release.js";
 import { MARKETPLACE_CONFIG } from "./marketplace.js";
 import { CHAINS, isValidAddress } from "./web3.js";
-import { VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG } from "../data.js";
+import { VOIDCALLER_CATALOG } from "../data.js";
 
 export const MARKETPLACE_STATE = Object.freeze({
   LIVE: "LIVE",
@@ -106,7 +106,7 @@ export function primaryCollectForEdition(edition) {
   if (!edition) {
     return { availability: "unavailable", status: MARKETPLACE_STATE.UNAVAILABLE, label: "Unavailable", href: "/marketplace", note: "This collect path is not available.", certified: false };
   }
-  if (isCertifiedFujiEdition(edition) || edition.id === "summit-demo-edition") {
+  if (isCertifiedFujiEdition(edition)) {
     const minted = String(edition.status).toLowerCase() === "minted";
     return {
       availability: minted ? "minted" : "available",
@@ -172,7 +172,7 @@ export function listingsForEdition(listings = [], edition) {
   return listings.filter((listing) => listingMatchesEdition(listing, edition));
 }
 
-export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
+export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG]) {
   return catalogs.flatMap((catalog) => (catalog.releases || []).map((release) => {
     const artist = (catalog.artists || []).find((item) => item.id === release.artistId) || null;
     const editions = (catalog.editions || []).filter((edition) => edition.releaseId === release.id);
@@ -194,11 +194,11 @@ export function marketplaceCatalog(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRAT
   }));
 }
 
-export function flattenMarketplaceEditions(catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
+export function flattenMarketplaceEditions(catalogs = [VOIDCALLER_CATALOG]) {
   return marketplaceCatalog(catalogs).flatMap((record) => record.editions);
 }
 
-export function findMarketplaceEdition(editionId, catalogs = [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]) {
+export function findMarketplaceEdition(editionId, catalogs = [VOIDCALLER_CATALOG]) {
   for (const record of marketplaceCatalog(catalogs)) {
     const match = record.editions.find((item) => item.edition.id === editionId);
     if (match) return match;
