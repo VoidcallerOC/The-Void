@@ -150,7 +150,8 @@ export function createIndexerWorker({ config, pool = null, logger = console } = 
   logger.info?.("indexer.marketplace", marketplace.enabled ? { status: "configured", address: marketplace.address, chainId: marketplace.chainId } : { status: "not_configured", address: marketplace.address ?? null, chainId: marketplace.chainId ?? null });
   return {
     async syncOnce() {
-      return createProductionIndexerWorker({ serverConfig: config, indexerConfig, pool, logger }).syncOnce();
+      const { worker } = createProductionIndexerWorker({ serverConfig: config, indexerConfig, pool, logger });
+      return worker.runOnce();
     }
   };
 }
