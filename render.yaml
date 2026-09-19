@@ -37,6 +37,28 @@ services:
         sync: false
       - key: AUTH_URI
         sync: false
+      # Pinata publishes canonical release metadata; it is separate from protected media storage.
+      - key: METADATA_STORAGE_DRIVER
+        value: pinata
+      - key: PINATA_JWT
+        sync: false
+      # Protected media requires a provider-neutral object-storage signer in production.
+      - key: MEDIA_STORAGE_DRIVER
+        value: object
+      - key: MEDIA_OBJECT_SIGNER_ENDPOINT
+        sync: false
+      - key: MEDIA_OBJECT_SIGNER_TOKEN
+        sync: false
+      - key: MEDIA_OBJECT_URL_HOSTS
+        sync: false
+      - key: MEDIA_AUDIT_HASH_SECRET
+        sync: false
+      - key: MEDIA_GRANT_TTL_SECONDS
+        value: "300"
+      - key: MEDIA_SIGNED_URL_TTL_SECONDS
+        value: "60"
+      - key: MEDIA_MAX_BYTES
+        value: "104857600"
       - key: INDEXER_RPC_URL
         value: https://api.avax-test.network/ext/bc/C/rpc
       - key: INDEXER_CHAIN_ID
@@ -51,10 +73,6 @@ services:
         sync: false
       - key: MARKETPLACE_CHAIN_ID
         value: "43113"
-      - key: PRIVATE_MEDIA_ROOT
-        sync: false
-      - key: MEDIA_STORAGE_MODE
-        value: filesystem
 
   - type: worker
     name: the-void-indexer-fuji
@@ -93,7 +111,3 @@ services:
         sync: false
       - key: MARKETPLACE_CHAIN_ID
         value: "43113"
-      - key: PRIVATE_MEDIA_ROOT
-        sync: false
-      - key: MEDIA_STORAGE_MODE
-        value: filesystem
