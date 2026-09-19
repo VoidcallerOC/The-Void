@@ -25,7 +25,7 @@ function send(response, status, body, headers = {}) {
 
 async function sendMedia(response, media, cors = {}) {
   if (media.type === "redirect") {
-    response.writeHead(302, { location: media.url, "cache-control": "no-store", "referrer-policy": "no-referrer", ...cors });
+    response.writeHead(302, { location: media.url, "accept-ranges": "bytes", "cache-control": "no-store", "referrer-policy": "no-referrer", ...cors });
     response.end();
     return;
   }
