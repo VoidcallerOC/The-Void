@@ -31,6 +31,24 @@ function pass(name, detail) { record(name, "PASS", detail); }
 function fail(name, detail) { record(name, "FAIL", detail); }
 function unverified(name, detail) { record(name, "UNVERIFIED", detail); }
 
+function rangeCheck(response, bodyLength, start, end) {
+  const expectedLength = end - start + 1;
+  const contentLength = response.headers.get("content-length") || "";
+  const contentRange = response.headers.get("content-range") || "";
+  const acceptRanges = response.headers.get("accept-ranges") || "";
+  const expectedContentRange = `bytes ${start}-${end}/`;
+  const problems = [];
+  if (response.status !== 206) problems.push(`status=${response.status}`);
+  if (bodyLength !== expectedLength) problems.push(`body=${bodyLength}, expected=${expectedLength}`);
+  if (contentLength !== String(expectedLength)) problems.push(`content-length=${contentLength || "missing"}, expected=${expectedLength}`);
+  if (!contentRange.startsWith(expectedContentRange)) problems.push(`content-range=${contentRange || "missing"}, expected-prefix=${expectedContentRange}`);
+  if (acceptRanges.toLowerCase() !== "bytes") problems.push(`accept-ranges=${acceptRanges || "missing"}, expected=bytes`);
+  return {
+    ok: problems.length === 0,
+    detail: `status=${response.status} body=${bodyLength} content-length=${contentLength || "missing"} content-range=${contentRange || "missing"} accept-ranges=${acceptRanges || "missing"}${problems.length ? `; failures=${problems.join(", ")}` : ""}`,
+  };
+}
+
 async function request(url, options = {}) {
   const response = await fetch(url, { redirect: "manual", ...options });
   const body = Buffer.from(await response.arrayBuffer());
@@ -108,13 +126,15 @@ async function privateLinkChecks(signedUrl) {
     if (full.body.length < 44 || full.body.subarray(0, 4).toString() !== "RIFF" || full.body.subarray(8, 12).toString() !== "WAVE") fail("PRIVATE_LINK_WAV", "response is not a valid WAV payload"); else pass("PRIVATE_LINK_WAV", `${full.body.length} bytes`);
     const contentLength = Number(full.response.headers.get("content-length") || -1);
     if (contentLength >= 0 && contentLength !== full.body.length) fail("PRIVATE_LINK_CONTENT_LENGTH", "header did not match body"); else pass("PRIVATE_LINK_CONTENT_LENGTH", `${full.body.length} bytes`);
+    let allRangesPassed = true;
     for (const [start, end] of [[0, 1023], [2048, 3071], [8192, 9215]]) {
       const range = await request(signedUrl, { headers: { range: `bytes=${start}-${end}`, "user-agent": "Mozilla/5.0" } });
-      const expected = end - start + 1;
-      if (range.response.status !== 206 || range.body.length !== expected || !range.response.headers.get("content-range") || !range.response.headers.get("accept-ranges")) fail(`PRIVATE_LINK_RANGE_${start}_${end}`, `status=${range.response.status} bytes=${range.body.length}`);
-      else pass(`PRIVATE_LINK_RANGE_${start}_${end}`, "HTTP 206 with valid range headers");
+      const check = rangeCheck(range.response, range.body.length, start, end);
+      if (!check.ok) { allRangesPassed = false; fail(`PRIVATE_LINK_RANGE_${start}_${end}`, check.detail); }
+      else pass(`PRIVATE_LINK_RANGE_${start}_${end}`, check.detail);
     }
-    pass("BROWSER_SEEKING", "multiple browser-style ranges succeeded");
+    if (allRangesPassed) pass("BROWSER_SEEKING", "multiple browser-style ranges succeeded with valid headers");
+    else fail("BROWSER_SEEKING", "one or more browser-style range responses failed validation");
   } catch (error) { fail("PRIVATE_LINK_RETRIEVAL", safeError(error)); }
 }
 
