@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses the certified address and chain", () => {
@@ -26,6 +26,11 @@ describe("certified Fuji VoidRelease1155 integration", () => {
   it("rejects arbitrary contract injection", () => {
     expect(() => assertFujiAddress("0x0000000000000000000000000000000000000001")).toThrow(/certified Fuji/);
     expect(assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe(FUJI_RELEASE_CONFIG.contractAddress);
+  });
+
+  it("recognizes only the expected missing-edition provider failures", () => {
+    expect(isFujiEditionNotFoundError(new Error("RPC Request failed: execution reverted"))).toBe(true);
+    expect(isFujiEditionNotFoundError(new Error("wallet disconnected"))).toBe(false);
   });
 
   it("accepts Fuji-safe slugs and rejects oversize identifiers", () => {

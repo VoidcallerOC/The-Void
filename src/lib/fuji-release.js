@@ -73,6 +73,16 @@ export function encodeFujiMint({ to, tokenId, amount = 1 }) {
   return iface.encodeFunctionData("mint", [to, BigInt(tokenId), BigInt(amount), "0x"]);
 }
 
+export function isFujiEditionNotFoundError(error) {
+  const revertData = error?.data || error?.originalError?.data || error?.cause?.data;
+  if (revertData) {
+    try {
+      if (editionIface.parseError(revertData)?.name === "EditionNotFound") return true;
+    } catch { /* Fall through to the provider's generic revert message. */ }
+  }
+  return /execution reverted/i.test(String(error?.message || error));
+}
+
 export function encodeFujiApproval(operator, approved = true) { return iface.encodeFunctionData("setApprovalForAll", [operator, approved]); }
 export function encodeFujiTransfer(from, to, tokenId, amount = 1) { return iface.encodeFunctionData("safeTransferFrom", [from, to, BigInt(tokenId), BigInt(amount), "0x"]); }
 
