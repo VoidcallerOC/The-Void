@@ -93,7 +93,7 @@ The deployed application needs an internet-reachable static frontend, a separate
 ## Exact remaining actions for a real launch
 
 1. **Create a non-production Fuji environment.** Provision isolated PostgreSQL, private object storage, a signer service, API runtime, and persistent worker runtime. Set all required non-secret and secret configuration through the host’s secret manager.
-2. **Apply and record migrations.** Run `npm run db:validate`, then `npm run db:migrate` against Fuji PostgreSQL. Verify `schema_migrations` contains all seven checksums and verify `/api/health/ready` reports database and indexer state once the worker runs.
+2. **Apply and record migrations.** On a new database, run `npm run db:validate`, then `npm run db:migrate` against Fuji PostgreSQL. Verify `schema_migrations` contains all twelve repository migration checksums and verify `/api/health/ready` reports database and indexer state once the worker runs. If the database already contains the initial schema but migration 001 is missing from `schema_migrations`, use the fail-closed recovery sequence below instead of inserting a row manually.
 3. **Deploy and review contracts.** Independently review ERC-1155 and marketplace source/parameters. Deploy them on Fuji, verify them with the appropriate explorer, retain the real contract addresses, deployment transaction hashes, and exact deployment start blocks, and register those facts in `contracts` and `INDEXER_CONTRACTS_JSON`.
 4. **Load only private master objects.** Upload master tracks with all public ACLs disabled. Create published experience records whose `protectedMedia.storageKey` values exactly match those objects. Confirm the signer accepts only valid internal requests and returns only short-lived URLs on `MEDIA_OBJECT_URL_HOSTS`.
 5. **Run the real Fuji launch-flow test.** With distinct wallets, test artist creation/publishing, collector authentication, collection, indexer detection, access grant, media authorization, listing, purchase, cancellation, failed purchase, token transfer, access loss/gain, duplicate events, worker restart, simulated RPC failure, simulated DB failure, and controlled reorganization recovery. Preserve transaction hashes, logs, and before/after ownership evidence.
@@ -111,12 +111,48 @@ The implementation does not deploy infrastructure, create an Avalanche contract,
 npm install
 npm run db:validate    # structural migration validation only
 npm run db:migrate     # requires a real configured PostgreSQL DATABASE_URL
+npm run db:baseline:check # read-only compatibility check for an unrecorded 001 schema
+npm run db:baseline     # records only 001 after exact shadow-schema verification
 npm test
 npm run lint
 npm run build
 npm audit
 npm run start:api      # requires server configuration and PostgreSQL
 npm run start:indexer  # requires PostgreSQL, RPC URL, and contract configuration
+```
+
+## Fuji/Render migration recovery runbook
+
+This recovery applies only when the existing Fuji PostgreSQL database contains
+some or all objects from `001_initial_persistence.sql`, while
+`schema_migrations` has no record for that migration. Do not run these
+commands against Render or Supabase until the operator has selected the
+intended database and authorized the operation. Do not paste ad-hoc SQL into
+the production console.
+
+From the exact API release checked out in the operator environment, run:
+
+```bash
+npm run db:baseline
+npm run db:migrate
+npm run db:validate
+```
+
+The baseline command acquires the migration advisory lock, checks the pinned
+SHA-256 of migration 001, verifies the required `pgcrypto` extension, replays
+001 in a temporary shadow schema, and compares the live schema's required
+objects. The comparison includes tables, columns and PostgreSQL types,
+nullability, material defaults, primary keys, unique and foreign keys, check
+constraints, indexes, and conflicting extra objects. If any mismatch is
+found, the command exits with a report and writes no migration record. It
+records only migration 001; the normal migration runner remains authoritative
+for migrations 002 through 012.
+
+For a read-only preflight, use `npm run db:baseline:check`. After the sequence
+completes, verify the deployed API readiness endpoint:
+
+```powershell
+curl.exe -sS -i "https://the-void-api-fuji.onrender.com/api/health/ready"
 ```
 
 ## References

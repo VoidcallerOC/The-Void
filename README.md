@@ -24,10 +24,42 @@ npm run lint     # eslint (zero-tolerance; enforced in CI)
 npm test         # vitest unit tests
 npm run db:validate # validates migration inventory and transaction structure
 npm run db:migrate  # applies migrations; requires a configured PostgreSQL service
+npm run db:baseline # verifies an existing 001 schema before recording only 001
+npm run db:baseline:check # dry-run compatibility check; never writes migration history
 ```
 
 CI (`.github/workflows/ci.yml`) runs **lint + test + build** on every PR and
 on pushes to `main`. All three are required to pass.
+
+### Recovering a database with an unrecorded initial schema
+
+If the Fuji PostgreSQL database already contains the schema from
+`001_initial_persistence.sql` but `schema_migrations` does not contain that
+row, do not insert a migration record manually. From the deployed API release,
+run the following commands against the intended database:
+
+```bash
+npm run db:baseline
+npm run db:migrate
+npm run db:validate
+```
+
+`db:baseline` takes the same PostgreSQL advisory lock as the normal migration
+runner, checks the pinned SHA-256 checksum of migration 001, replays migration
+001 into a temporary shadow schema, and compares tables, columns, types,
+nullability, defaults, primary/unique/foreign-key/check constraints, indexes,
+and required extensions with the live `public` schema. It records only
+`001_initial_persistence.sql` after an exact match. Any mismatch fails closed
+without writing `schema_migrations`; it never marks later migrations applied.
+Use `npm run db:baseline:check` first when an operator wants a read-only
+compatibility report.
+
+After the commands complete, verify readiness without running migration or
+baseline commands against Render or Supabase from an unreviewed shell:
+
+```powershell
+curl.exe -sS -i "https://the-void-api-fuji.onrender.com/api/health/ready"
+```
 
 ## Architecture
 
