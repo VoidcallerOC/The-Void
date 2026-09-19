@@ -218,6 +218,7 @@ export function ArtistStudioPage() {
           <div>
             <strong>Verified wallet required.</strong>
             <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>Connect an authorized artist wallet and sign in before creating a release.</p>
+            {wallet.authenticationError && <p role="alert" style={{ margin: "8px 0 0", color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{wallet.authenticationError}</p>}
           </div>
           <WalletButton />
         </div>
