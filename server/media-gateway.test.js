@@ -108,15 +108,25 @@ describe("private storage and old public paths", () => {
 
   it("requires provider-neutral object storage configuration in production", () => {
     expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "filesystem" })).toThrow(/requires MEDIA_STORAGE_DRIVER=object/);
-    const config = loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "object", MEDIA_OBJECT_SIGNER_ENDPOINT: "https://signer.example/internal", MEDIA_OBJECT_SIGNER_TOKEN: "a".repeat(24), MEDIA_OBJECT_URL_HOSTS: "media.example", MEDIA_AUDIT_HASH_SECRET: "b".repeat(32) });
-    expect(config).toMatchObject({ driver: "object", signerEndpoint: "https://signer.example/internal", objectUrlHosts: ["media.example"] });
+    const config = loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "object", R2_ACCOUNT_ID: "a".repeat(32), R2_BUCKET: "void-private", R2_ACCESS_KEY_ID: "access-key", R2_SECRET_ACCESS_KEY: "s".repeat(32), MEDIA_OBJECT_URL_HOSTS: "media.example", MEDIA_OBJECT_PREFIXES: "voidcaller-full-ep", MEDIA_AUDIT_HASH_SECRET: "b".repeat(32) });
+    expect(config).toMatchObject({ driver: "object", r2: { bucket: "void-private" }, objectUrlHosts: ["media.example"], protectedPrefixes: ["voidcaller-full-ep"] });
   });
 
-  it("accepts only approved HTTPS object-storage signed URLs", async () => {
-    const config = { driver: "object", signerEndpoint: "https://signer.example/internal", signerToken: "a".repeat(24), objectUrlHosts: ["media.example"], signedUrlTtlSeconds: 60 };
-    const allowed = new PrivateMediaStorage({ config, fetchImpl: vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ url: "https://media.example/audio?signature=opaque" }) }) });
+  it("signs only configured R2 prefixes and accepts only approved HTTPS URLs", async () => {
+    const config = { driver: "object", r2: { bucket: "void-private", endpoint: "https://a".repeat(1), accessKeyId: "access", secretAccessKey: "secret" }, objectUrlHosts: ["media.example"], protectedPrefixes: ["record"], signedUrlTtlSeconds: 60 };
+    const signer = vi.fn().mockResolvedValue("https://media.example/audio?signature=opaque");
+    const allowed = new PrivateMediaStorage({ config, signer });
     await expect(allowed.open({ storageKey: "record/track.mp3" })).resolves.toMatchObject({ type: "redirect", url: "https://media.example/audio?signature=opaque" });
-    const blocked = new PrivateMediaStorage({ config, fetchImpl: vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ url: "https://untrusted.example/audio" }) }) });
+    expect(signer).toHaveBeenCalledWith("record/track.mp3");
+    await expect(allowed.open({ storageKey: "other/track.mp3" })).rejects.toThrow(/outside the configured media prefixes/);
+    const blocked = new PrivateMediaStorage({ config, signer: vi.fn().mockResolvedValue("https://untrusted.example/audio") });
     await expect(blocked.open({ storageKey: "record/track.mp3" })).rejects.toThrow(/unapproved/);
+  });
+
+  it("fails closed when R2 signing fails or a key is unsafe", async () => {
+    const config = { driver: "object", objectUrlHosts: ["media.example"], protectedPrefixes: ["record"], signedUrlTtlSeconds: 60 };
+    const storage = new PrivateMediaStorage({ config, signer: vi.fn().mockRejectedValue(new Error("R2 unavailable")) });
+    await expect(storage.open({ storageKey: "record/track.mp3" })).rejects.toThrow(/signing failed/);
+    await expect(storage.open({ storageKey: "record/../secret" })).rejects.toThrow(/Invalid media key/);
   });
 });
