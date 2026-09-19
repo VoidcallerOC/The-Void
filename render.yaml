@@ -42,22 +42,14 @@ services:
         value: pinata
       - key: PINATA_JWT
         sync: false
-      # Protected media is signed server-side by the API using private Cloudflare R2.
+      # Protected media is signed server-side by the API using Pinata Private IPFS.
       - key: MEDIA_STORAGE_DRIVER
-        value: object
+        value: pinata
+      - key: PINATA_GATEWAY_URL
+        value: https://fuchsia-labour-butterfly-445.mypinata.cloud
       - key: MEDIA_OBJECT_URL_HOSTS
-        sync: false
-      - key: MEDIA_OBJECT_PREFIXES
-        sync: false
+        value: fuchsia-labour-butterfly-445.mypinata.cloud
       - key: MEDIA_AUDIT_HASH_SECRET
-        sync: false
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_BUCKET
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: MEDIA_GRANT_TTL_SECONDS
         value: "300"

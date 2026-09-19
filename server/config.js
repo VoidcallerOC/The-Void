@@ -171,14 +171,22 @@ function allowedOrigins(value, publicApp) {
 export function loadMediaConfig(env = process.env) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
   const driver = String(env.MEDIA_STORAGE_DRIVER || (appEnvironment === "production" ? "" : "filesystem")).trim().toLowerCase();
-  if (driver !== "filesystem" && driver !== "object") throw new ConfigurationError("MEDIA_STORAGE_DRIVER must be filesystem or object.");
-  if (appEnvironment === "production" && driver !== "object") throw new ConfigurationError("Production protected media requires MEDIA_STORAGE_DRIVER=object.");
+  if (driver !== "filesystem" && driver !== "pinata" && driver !== "object") throw new ConfigurationError("MEDIA_STORAGE_DRIVER must be filesystem, pinata, or object.");
+  if (appEnvironment === "production" && driver !== "pinata") throw new ConfigurationError("Production protected media requires MEDIA_STORAGE_DRIVER=pinata.");
   const grantTtlSeconds = boundedPositiveInteger(env.MEDIA_GRANT_TTL_SECONDS, 300, "MEDIA_GRANT_TTL_SECONDS", { min: 30, max: 900 });
   const signedUrlTtlSeconds = boundedPositiveInteger(env.MEDIA_SIGNED_URL_TTL_SECONDS, 60, "MEDIA_SIGNED_URL_TTL_SECONDS", { min: 15, max: 300 });
   if (signedUrlTtlSeconds > grantTtlSeconds) throw new ConfigurationError("MEDIA_SIGNED_URL_TTL_SECONDS may not exceed MEDIA_GRANT_TTL_SECONDS.");
   const maxBytes = boundedPositiveInteger(env.MEDIA_MAX_BYTES, 104857600, "MEDIA_MAX_BYTES", { min: 1, max: 1073741824 });
   const auditHashSecret = secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" });
   if (driver === "filesystem") return Object.freeze({ driver, privateRoot: resolve(String(env.MEDIA_PRIVATE_ROOT || resolve(process.cwd(), "server/private-media"))), grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret });
+  if (driver === "pinata") {
+    const jwt = secret(env.PINATA_JWT, "PINATA_JWT", { required: true });
+    const gateway = normalizedUrl(env.PINATA_GATEWAY_URL, "PINATA_GATEWAY_URL");
+    if (appEnvironment === "production" && gateway.protocol !== "https:") throw new ConfigurationError("Production PINATA_GATEWAY_URL must use HTTPS.");
+    const objectUrlHosts = hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS || gateway.host, "MEDIA_OBJECT_URL_HOSTS");
+    if (!objectUrlHosts.includes(gateway.host.toLowerCase())) throw new ConfigurationError("MEDIA_OBJECT_URL_HOSTS must include the PINATA_GATEWAY_URL host.");
+    return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, pinata: Object.freeze({ jwt, gateway: gateway.toString().replace(/\/$/, ""), endpoint: "https://api.pinata.cloud/v3/files/private/download_link" }), objectUrlHosts });
+  }
   const accountId = String(env.R2_ACCOUNT_ID || "").trim().toLowerCase();
   if (!/^[a-f0-9]{32}$/.test(accountId)) throw new ConfigurationError("R2_ACCOUNT_ID must be a 32-character Cloudflare account ID.");
   const bucket = String(env.R2_BUCKET || "").trim();

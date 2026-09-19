@@ -36,12 +36,24 @@ export class PrivateMediaStorage {
   constructor({ config, signer = null } = {}) {
     if (!config?.driver) throw new TypeError("PrivateMediaStorage requires media configuration.");
     this.config = config;
-    this.signer = signer || (config.driver === "object" ? this.createR2Signer(config) : null);
+    this.signer = signer || (config.driver === "object" ? this.createR2Signer(config) : config.driver === "pinata" ? this.createPinataSigner(config) : null);
   }
 
   createR2Signer(config) {
     const client = new S3Client({ region: "auto", endpoint: config.r2.endpoint, credentials: { accessKeyId: config.r2.accessKeyId, secretAccessKey: config.r2.secretAccessKey } });
     return async (key) => getSignedUrl(client, new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }), { expiresIn: config.signedUrlTtlSeconds });
+  }
+
+  createPinataSigner(config) {
+    return async (cid) => {
+      if (!/^(?:baf[a-z0-9]+|Qm[1-9A-HJ-NP-Za-km-z]+)$/.test(cid)) throw new Error("Pinata protected media reference must be a CID.");
+      const date = Math.floor(Date.now() / 1000);
+      const response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
+      if (!response.ok) throw new Error(`Pinata private download-link HTTP ${response.status}`);
+      const payload = await response.json();
+      if (typeof payload?.data !== "string") throw new Error("Pinata private download-link response was invalid.");
+      return payload.data;
+    };
   }
 
   async open({ storageKey, range = null, contentType = null }) {
@@ -56,7 +68,7 @@ export class PrivateMediaStorage {
       const selected = fileRange(range, stat.size);
       return { type: "stream", stream: createReadStream(path, { start: selected.start, end: selected.end }), contentType: contentType || CONTENT_TYPES[extname(path).toLowerCase()] || "application/octet-stream", contentLength: selected.end - selected.start + 1, totalLength: stat.size, start: selected.start, end: selected.end, partial: selected.partial };
     }
-    if (!allowedPrefix(key, this.config.protectedPrefixes)) throw new Error("Protected media storage key is outside the configured media prefixes.");
+    if (this.config.driver === "object" && !allowedPrefix(key, this.config.protectedPrefixes)) throw new Error("Protected media storage key is outside the configured media prefixes.");
     let signedUrl;
     try { signedUrl = await this.signer(key); } catch (error) { throw new Error(`Object storage signing failed: ${error.message}`, { cause: error }); }
     return { type: "redirect", url: allowedSignedUrl(signedUrl, this.config.objectUrlHosts) };

@@ -106,10 +106,11 @@ describe("private storage and old public paths", () => {
     expect(response.status).toBe(404);
   });
 
-  it("requires provider-neutral object storage configuration in production", () => {
-    expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "filesystem" })).toThrow(/requires MEDIA_STORAGE_DRIVER=object/);
-    const config = loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "object", R2_ACCOUNT_ID: "a".repeat(32), R2_BUCKET: "void-private", R2_ACCESS_KEY_ID: "access-key", R2_SECRET_ACCESS_KEY: "s".repeat(32), MEDIA_OBJECT_URL_HOSTS: "media.example", MEDIA_OBJECT_PREFIXES: "voidcaller-full-ep", MEDIA_AUDIT_HASH_SECRET: "b".repeat(32) });
-    expect(config).toMatchObject({ driver: "object", r2: { bucket: "void-private" }, objectUrlHosts: ["media.example"], protectedPrefixes: ["voidcaller-full-ep"] });
+  it("requires Pinata private media configuration in production", () => {
+    expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "filesystem" })).toThrow(/requires MEDIA_STORAGE_DRIVER=pinata/);
+    expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "object" })).toThrow(/requires MEDIA_STORAGE_DRIVER=pinata/);
+    const config = loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "pinata", PINATA_JWT: "p".repeat(32), PINATA_GATEWAY_URL: "https://media.example", MEDIA_AUDIT_HASH_SECRET: "b".repeat(32) });
+    expect(config).toMatchObject({ driver: "pinata", pinata: { gateway: "https://media.example" }, objectUrlHosts: ["media.example"] });
   });
 
   it("signs only configured R2 prefixes and accepts only approved HTTPS URLs", async () => {
@@ -128,5 +129,15 @@ describe("private storage and old public paths", () => {
     const storage = new PrivateMediaStorage({ config, signer: vi.fn().mockRejectedValue(new Error("R2 unavailable")) });
     await expect(storage.open({ storageKey: "record/track.mp3" })).rejects.toThrow(/signing failed/);
     await expect(storage.open({ storageKey: "record/../secret" })).rejects.toThrow(/Invalid media key/);
+  });
+
+  it("creates a Pinata private download link without exposing the JWT", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: "https://media.example/files/cid?X-Signature=opaque" }) });
+    vi.stubGlobal("fetch", fetchImpl);
+    const config = { driver: "pinata", pinata: { jwt: "secret-jwt", gateway: "https://media.example", endpoint: "https://api.pinata.cloud/v3/files/private/download_link" }, objectUrlHosts: ["media.example"], signedUrlTtlSeconds: 60 };
+    const storage = new PrivateMediaStorage({ config });
+    await expect(storage.open({ storageKey: "bafkreitestcid123" })).resolves.toMatchObject({ type: "redirect", url: "https://media.example/files/cid?X-Signature=opaque" });
+    expect(fetchImpl).toHaveBeenCalledWith(config.pinata.endpoint, expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer secret-jwt" }), body: expect.stringContaining('"expires":60') }));
+    vi.unstubAllGlobals();
   });
 });
