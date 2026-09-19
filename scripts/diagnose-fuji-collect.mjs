@@ -1,6 +1,9 @@
 import { ethers } from "ethers";
 import deployment from "../config/fuji-release.json" with { type: "json" };
 
+// Defaults are the historical Summit certification identifiers.
+// This script is a chain probe, not a public catalog. Summit is not a public release.
+
 const rpcUrl = process.env.FUJI_RPC_URL || deployment.rpcUrl;
 const provider = new ethers.JsonRpcProvider(rpcUrl, deployment.chainId, { staticNetwork: true });
 const abi = [
