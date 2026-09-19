@@ -32,8 +32,8 @@ describe("metadata storage", () => {
   });
 
   it("fails closed on storage errors and invalid identifiers", async () => {
-    const failed = new PinataMetadataStorage({ config: { endpoint: "https://pin.example/pin", jwt: "secret" }, fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }) });
-    await expect(failed.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE" });
+    const failed = new PinataMetadataStorage({ config: { endpoint: "https://pin.example/pin", jwt: "secret" }, fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ error: { reason: "Invalid JWT" } }) }) });
+    await expect(failed.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE", status: 503, details: { provider: "pinata", status: 401, reason: "Invalid JWT" }, message: /HTTP 401.*Invalid JWT.*Nothing was written on-chain/ });
     const invalid = new PinataMetadataStorage({ config: { endpoint: "https://pin.example/pin", jwt: "secret" }, fetchImpl: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ IpfsHash: "not-a-cid" }) }) });
     await expect(invalid.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_URI_INVALID" });
   });
