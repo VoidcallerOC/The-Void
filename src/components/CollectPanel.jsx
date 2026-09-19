@@ -19,7 +19,7 @@ import { getCollectorLibrary } from "../lib/collection.js";
 import { primaryCollectForEdition } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 
-export function CollectPanel({ edition, release, artist, experiences = [], catalog }) {
+export function CollectPanel({ edition, release, artist, experiences = [], catalog, variant = "panel" }) {
   const wallet = useWallet();
   const primary = primaryCollectForEdition(edition);
   const certified = isCertifiedFujiEdition(edition);
@@ -29,6 +29,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const [notice, setNotice] = useState("");
   const [txHash, setTxHash] = useState("");
   const [issuer, setIssuer] = useState(null);
+  const [notCreated, setNotCreated] = useState(false);
 
   const library = useMemo(() => (catalog ? getCollectorLibrary(catalog, wallet.ownershipRecords || []) : null), [catalog, wallet.ownershipRecords]);
   const catalogOwned = Boolean(library?.editions?.some((item) => item.edition.id === edition.id));
@@ -50,6 +51,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const collect = async () => {
     setBusy("collect");
     setNotice("");
+    setNotCreated(false);
     try {
       if (!wallet.account) throw new Error("Connect a wallet before collecting.");
       if (!wallet.authenticated) await wallet.authenticate();
@@ -59,7 +61,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       if (paused) throw new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused.");
       const onChainEdition = await readFujiEdition(provider, tokenId);
       if (!onChainEdition?.exists) {
-        throw new Error("Edition has not been created on Fuji yet. Create the Summit edition before collecting.");
+        setNotCreated(true);
+        return;
       }
       const hasIssuer = await readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account);
       setIssuer(hasIssuer);
@@ -82,6 +85,58 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   };
 
   const experienceHref = experiences[0] ? `/experience/${experiences[0].id}` : "/reliquary";
+
+  if (variant === "hero") {
+    return (
+      <div>
+        {!wallet.connected && (
+          <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <WalletButton />
+            <span style={{ color: "var(--vc-bone-dim)" }}>Connect a wallet to collect or prove ownership.</span>
+          </div>
+        )}
+        {wallet.connected && !wallet.authenticated && (
+          <p style={{ color: "var(--vc-bone-dim)" }}>Authenticate the connected wallet before collecting.</p>
+        )}
+        {issuer === false && certified && !owned && (
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>
+            The connected wallet does not have ISSUER_ROLE. Collect will not be faked. Connect an authorized issuer wallet.
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
+          {owned ? (
+            <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
+          ) : certified ? (
+            <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected} onClick={collect}>
+              {busy === "collect" ? "Confirming…" : "Collect"}
+            </button>
+          ) : primary.availability === "minted" ? (
+            <Link to={experienceHref} style={primaryBtn}>Open experience</Link>
+          ) : (
+            <span style={ghostBtn}>Collect unavailable</span>
+          )}
+          {experiences[0] && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
+        </div>
+        {notCreated && (
+          <div role="status" style={{ marginTop: 18, color: "var(--vc-bone)", lineHeight: 1.6 }}>
+            <strong style={{ display: "block", textTransform: "uppercase" }}>Edition not yet created</strong>
+            <span style={{ display: "block" }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
+            <Link to="/studio?create=edition" style={{ ...ghostBtn, display: "inline-block", marginTop: 10 }}>Open artist studio</Link>
+          </div>
+        )}
+        {notice && (
+          <p role="status" style={{ marginTop: 18, color: notice.toLowerCase().includes("confirm") || notice.toLowerCase().includes("owned") ? "var(--vc-bone)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
+            {notice}
+          </p>
+        )}
+        {txHash && (
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all" }}>
+            Receipt · <a href={fujiExplorerUrl("tx", txHash)} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{txHash}</a>
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section style={{ marginTop: 48, border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "28px 24px" }}>

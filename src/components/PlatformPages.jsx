@@ -9,7 +9,7 @@ import { getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
-import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, primaryCollectForEdition, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { CollectionMarketplaceCallout, DiscoveryMarketplaceCallout } from "./MarketplaceRails.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
 import { PurchasePanel } from "./PurchasePanel.jsx";
@@ -194,7 +194,6 @@ export function EditionPage() {
   if (!result) return <Navigate to="/marketplace" replace />;
   const { edition, release, artist, experiences } = result;
   const secondary = resolveSecondaryStatus();
-  const primary = primaryCollectForEdition(edition);
   const price = editionPriceLabel(edition);
   return (
     <section style={shell}>
@@ -224,14 +223,8 @@ export function EditionPage() {
           <p className="vc-card-meta" style={{ marginTop: 10 }}>
             Secondary · {marketplaceStatusLabel(secondary)}
           </p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            <a href="#collect" style={primaryBtn}>{primary.label}</a>
-            {experiences[0] && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
-          </div>
+          <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>
-      </div>
-      <div id="collect">
-        <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} />
       </div>
       {secondary === MARKETPLACE_STATE.LIVE && (
         <>
