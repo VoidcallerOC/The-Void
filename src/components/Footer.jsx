@@ -79,6 +79,7 @@ export function Footer() {
             { label: "Discover", to: "/discover" },
             { label: "Marketplace", to: "/marketplace" },
             { label: "Artists", to: "/artists" },
+            { label: "Become verified", to: "/verify" },
             { label: "Collection", to: "/collection" },
             { label: "Artist studio", to: "/studio" },
           ]],
