@@ -111,4 +111,7 @@ describe("indexer worker configuration", () => {
     expect(result).toMatchObject({ chainId: 43113, contracts: [{ address: contract, contractType: "ERC1155", startBlock: 123 }] });
     expect(result.contracts[0].eventTopics.TransferSingle).toMatch(/^0x[0-9a-f]{64}$/);
   });
+  it("rejects the known placeholder contract address in production configuration", () => {
+    expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: "0x0000000000000000000000000000000000000001", contractType: "MARKETPLACE", startBlock: 0 }]) })).toThrow(/placeholder contract address/);
+  });
 });

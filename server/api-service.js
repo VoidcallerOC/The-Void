@@ -47,7 +47,7 @@ function offsetValue(value) {
 function mapRow(row) { return row || null; }
 
 export class ApiService {
-  constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, rateLimiter = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {
     if (!db?.query || !repository) throw new TypeError("ApiService requires a database executor and persistence repository.");
     this.db = db;
     this.repository = repository;
@@ -55,6 +55,7 @@ export class ApiService {
     this.ownershipVerifier = ownershipVerifier;
     this.blockchainVerifier = blockchainVerifier;
     this.indexerStore = indexerStore;
+    this.indexerConfig = indexerConfig;
     this.rateLimiter = rateLimiter;
     this.logger = logger;
   }
@@ -75,7 +76,12 @@ export class ApiService {
   async getIndexerHealth({ chainId: requestedChainId = null } = {}) {
     if (!this.indexerStore?.getIndexerHealth) throw new ApiError(503, "INDEXER_UNAVAILABLE", "Indexer health storage is not configured.");
     const selectedChainId = requestedChainId === null || requestedChainId === undefined || requestedChainId === "" ? null : chainId(requestedChainId);
-    return this.indexerStore.getIndexerHealth({ chainId: selectedChainId });
+    const addresses = selectedChainId === null && this.indexerConfig?.chainId
+      ? this.indexerConfig.contracts.map((contract) => contract.address)
+      : selectedChainId !== null && this.indexerConfig?.chainId === selectedChainId
+        ? this.indexerConfig.contracts.map((contract) => contract.address)
+        : null;
+    return this.indexerStore.getIndexerHealth(addresses ? { chainId: selectedChainId, addresses } : { chainId: selectedChainId });
   }
 
   async getOperationalHealth() {
