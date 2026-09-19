@@ -173,7 +173,7 @@ export function ReleasePage() {
           )}
         </div>
       </div>
-      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Editions</h2>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Collectible releases</h2>
       <div className="vc-market-grid">
         {editionItems.length ? editionItems.map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />) : <div style={card}><Status>Forthcoming</Status><p style={{ color: "var(--vc-bone-dim)" }}>Editions will appear here when this release is collectible.</p></div>}
       </div>
@@ -197,7 +197,7 @@ export function EditionPage() {
   const price = editionPriceLabel(edition);
   return (
     <section style={shell}>
-      <PlatformHeader eyebrow={`† Edition · ${String(edition.tier || "standard").toUpperCase()}`} title={edition.title}>
+      <PlatformHeader eyebrow={`† ${release.productType || "Collectible release"}`} title={release.title}>
         <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>{edition.description}</p>
         <p>
           <Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>{artist.name}</Link>
@@ -217,11 +217,11 @@ export function EditionPage() {
             {experiences.length ? experiences.map((experience) => <li key={experience.id}>{experience.title}</li>) : <li>No attached experiences.</li>}
           </ul>
           <p className="vc-card-meta" style={{ marginTop: 16 }}>
-            {editionTypeLabel(edition)} · {edition.status} · Supply {edition.supply || "Open"}
+            {editionTypeLabel(edition)} · Supply {edition.supply || "Open"}
             {price ? ` · ${price}` : ""}
           </p>
           <p className="vc-card-meta" style={{ marginTop: 10 }}>
-            Secondary · {marketplaceStatusLabel(secondary)}
+            Secondary market · {marketplaceStatusLabel(secondary)}
           </p>
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>

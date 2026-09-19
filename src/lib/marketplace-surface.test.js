@@ -89,7 +89,7 @@ describe("music-native catalog projection", () => {
     expect(summit.editions[0].primary.href).toBe("/edition/summit-demo-edition");
     expect(summit.editions[0].primary.status).toBe(MARKETPLACE_STATE.LIVE);
     expect(summit.editions[0].primary.certified).toBe(true);
-    expect(editionTypeLabel(summit.editions[0].edition)).toBe("ERC-1155 release edition");
+    expect(editionTypeLabel(summit.editions[0].edition)).toBe("Collectible release");
   });
 
   it("keeps the certified Summit Fuji configuration untouched", () => {

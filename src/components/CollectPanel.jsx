@@ -40,12 +40,27 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   useEffect(() => {
     let live = true;
     if (!certified || !wallet.connected || !wallet.account || tokenId === undefined) return undefined;
-    readFujiBalance(wallet.getProvider(), wallet.account, tokenId)
-      .then((value) => { if (live) setBalance(value); })
-      .catch(() => { if (live) setBalance(0n); });
-    readFujiRole(wallet.getProvider(), FUJI_ROLES.ISSUER_ROLE, wallet.account)
-      .then((value) => { if (live) setIssuer(value); })
-      .catch(() => { if (live) setIssuer(false); });
+    const provider = wallet.getProvider();
+    Promise.all([
+      readFujiEdition(provider, tokenId),
+      readFujiBalance(provider, wallet.account, tokenId),
+      readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account),
+    ])
+      .then(([onChainEdition, value, hasIssuer]) => {
+        if (!live) return;
+        setNotCreated(!onChainEdition?.exists);
+        setBalance(value);
+        setIssuer(hasIssuer);
+      })
+      .catch((error) => {
+        console.error("Fuji release preflight failed", error);
+        if (live) {
+          setNotCreated(isFujiEditionNotFoundError(error));
+          if (!isFujiEditionNotFoundError(error)) setNotice("Collection is temporarily unavailable. Please try again later.");
+          setBalance(0n);
+          setIssuer(null);
+        }
+      })
     return () => { live = false; };
   }, [certified, wallet.connected, wallet.account, tokenId, wallet]);
 
@@ -88,7 +103,11 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       await wallet.refreshOwnership?.(wallet.account);
     } catch (error) {
       console.error("Collect preflight failed", error);
-      setNotice(error.message);
+      if (isFujiEditionNotFoundError(error)) {
+        setNotCreated(true);
+      } else {
+        setNotice("Collection is temporarily unavailable. Please try again later.");
+      }
     } finally {
       setBusy("");
     }
@@ -116,6 +135,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
           {owned ? (
             <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
+          ) : notCreated ? (
+            <span style={ghostBtn}>Not yet available</span>
           ) : certified ? (
             <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected} onClick={collect}>
               {busy === "collect" ? "Confirming…" : "Collect"}
@@ -129,9 +150,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
         </div>
         {notCreated && (
           <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
-            <strong style={{ display: "block", letterSpacing: ".08em" }}>EDITION NOT YET CREATED</strong>
-            <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
-            <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>OPEN ARTIST STUDIO</Link>
+            <strong style={{ display: "block", letterSpacing: ".08em" }}>NOT YET PUBLISHED</strong>
+            <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This release hasn&apos;t been published on-chain yet.</span>
+            {wallet.authenticated && issuer === true ? <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>PUBLISH RELEASE</Link> : <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 14 }}>COMING TO THE VOID · This release isn&apos;t collectible yet.</span>}
           </div>
         )}
         {notice && (
@@ -150,7 +171,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
 
   return (
     <section style={{ marginTop: 48, border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "28px 24px" }}>
-      <Eyebrow red>Primary collection</Eyebrow>
+      <Eyebrow red>Collectible release</Eyebrow>
       <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", textTransform: "uppercase", lineHeight: 0.95, margin: "12px 0" }}>
         {owned ? "Owned" : "Collect"}
       </h2>
@@ -159,7 +180,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       </p>
       {certified && (
         <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".08em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>
-          Certified Fuji · {FUJI_RELEASE_CONFIG.networkName} · issuer-controlled mint
+          On-chain ownership verification · {FUJI_RELEASE_CONFIG.networkName}
         </p>
       )}
       {!wallet.connected && (
@@ -183,6 +204,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
             <Link to={experienceHref} style={ghostBtn}>Open experience</Link>
             <Link to="/collection" style={ghostBtn}>My collection</Link>
           </>
+        ) : notCreated ? (
+          <span style={ghostBtn}>Not yet available</span>
         ) : certified ? (
           <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected} onClick={collect}>
             {busy === "collect" ? "Confirming…" : "Collect"}
@@ -195,9 +218,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       </div>
       {notCreated && (
         <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
-          <strong style={{ display: "block", letterSpacing: ".08em" }}>EDITION NOT YET CREATED</strong>
-          <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
-          <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>OPEN ARTIST STUDIO</Link>
+          <strong style={{ display: "block", letterSpacing: ".08em" }}>NOT YET PUBLISHED</strong>
+          <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This release hasn&apos;t been published on-chain yet.</span>
+          {wallet.authenticated && issuer === true ? <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>PUBLISH RELEASE</Link> : <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 14 }}>COMING TO THE VOID · This release isn&apos;t collectible yet.</span>}
         </div>
       )}
       {notice && !notCreated && (
