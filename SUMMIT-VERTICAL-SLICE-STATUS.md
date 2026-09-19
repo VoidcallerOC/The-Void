@@ -1,6 +1,9 @@
 # SUMMIT VERTICAL SLICE STATUS
 
+> **Historical / certification record.** Summit was an internal Fuji demo fixture used to prove the VoidRelease1155 architecture. It is **not** a public release, catalog entry, collectible, or production experience.
+
 ## VERDICT
+
 
 🟡 PARTIAL
 
