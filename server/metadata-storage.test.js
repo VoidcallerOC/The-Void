@@ -33,8 +33,22 @@ describe("metadata storage", () => {
 
   it("fails closed on storage errors and invalid identifiers", async () => {
     const failed = new PinataMetadataStorage({ config: { endpoint: "https://pin.example/pin", jwt: "secret" }, fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ error: { reason: "Invalid JWT" } }) }) });
-    await expect(failed.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE", status: 503, details: { provider: "pinata", status: 401, reason: "Invalid JWT" }, message: /HTTP 401.*Invalid JWT.*Nothing was written on-chain/ });
+    await expect(failed.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE", status: 503, details: { provider: "pinata", status: 401, reason: "Invalid JWT", authorization: true }, message: /HTTP 401.*Invalid JWT.*Nothing was written on-chain/ });
     const invalid = new PinataMetadataStorage({ config: { endpoint: "https://pin.example/pin", jwt: "secret" }, fetchImpl: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ IpfsHash: "not-a-cid" }) }) });
     await expect(invalid.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_URI_INVALID" });
+  });
+
+  it("surfaces an actionable, JWT-safe message when the key lacks the pinJSONToIPFS scope", async () => {
+    const jwt = "eyJ-super-secret-production-pinata-jwt-value-do-not-leak-abcdef0123456789";
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => JSON.stringify({ error: { reason: "NO_SCOPES_FOUND", details: "This key does not have the required scopes associated with it." } }) });
+    const storage = new PinataMetadataStorage({ config: { endpoint: "https://api.pinata.cloud/pinning/pinJSONToIPFS", jwt }, fetchImpl });
+    const error = await storage.write({ metadata: input, name: "summit" }).then(() => null, (err) => err);
+    expect(error).toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE", status: 503, details: { provider: "pinata", status: 403, reason: "NO_SCOPES_FOUND", code: "NO_SCOPES_FOUND", authorization: true } });
+    // Operator-facing guidance points at the credential, not the release, and stays fail-closed.
+    expect(error.message).toMatch(/Metadata storage authorization failed\. Check the configured Pinata API key permissions\./);
+    expect(error.message).toMatch(/HTTP 403.*NO_SCOPES_FOUND.*Nothing was written on-chain/);
+    // The JWT must never appear in the surfaced message or diagnostic details.
+    expect(error.message).not.toContain(jwt);
+    expect(JSON.stringify(error.details)).not.toContain(jwt);
   });
 });
