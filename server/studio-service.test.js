@@ -19,10 +19,10 @@ function repository() {
   repo.inTransaction = vi.fn(async (callback) => callback(repo));
   return repo;
 }
-function service({ rows = [], authenticated = true } = {}) {
+function service({ rows = [], authenticated = true, authenticatedWallet = owner, metadataStorage = null } = {}) {
   const repo = repository();
   const db = { query: vi.fn().mockResolvedValue({ rows }) };
-  return { instance: new ArtistStudioService({ db, repository: repo, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: owner }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
+  return { instance: new ArtistStudioService({ db, repository: repo, metadataStorage, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: authenticatedWallet }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
 }
 const request = { requestId: "request-1", headers: {} };
 
@@ -47,6 +47,26 @@ describe("Artist Studio", () => {
 
     const denied = service();
     await expect(denied.instance.updateArtist({ request, artistId: "artist-1", input: { name: "Not allowed" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
+  });
+
+  it("keeps publish authorization bound to wallet A and rejects wallet B or no session", async () => {
+    const release = { id: "release-a", artist_id: "artist-a", slug: "voidcaller-full-ep", title: "Voidcaller Full EP", description: "The record.", status: "DRAFT", release_metadata: {}, published_at: null, display_name: "Voidcaller" };
+    const edition = { id: "edition-a", release_id: release.id, contract_id: "contract-a", title: "Voidcaller Full EP", description: "The record.", tier: "standard", supply: "25", application_metadata: {}, metadata_uri: null, metadata_version: null };
+    const metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://real-metadata-cid" }) };
+    const authorized = service({ authenticatedWallet: owner, metadataStorage });
+    authorized.db.query
+      .mockResolvedValueOnce({ rows: [release] })
+      .mockResolvedValueOnce({ rows: [edition] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(authorized.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).resolves.toMatchObject({ releaseId: release.id, metadataUri: "ipfs://real-metadata-cid" });
+    expect(metadataStorage.write).toHaveBeenCalledOnce();
+
+    const walletB = "0x2222222222222222222222222222222222222222";
+    const denied = service({ authenticatedWallet: walletB, rows: [] });
+    await expect(denied.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
+
+    const unauthenticated = service({ authenticated: false, rows: [] });
+    await expect(unauthenticated.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("creates a release, validates lifecycle publishing, and prevents regression", async () => {

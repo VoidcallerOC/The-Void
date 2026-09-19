@@ -119,10 +119,10 @@ export class ArtistStudioService {
 
   async publishMetadata({ request, releaseId, input = {} }) {
     const identity = await this.identity(request);
-    if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
     const { rows } = await this.db.query("SELECT r.*, a.display_name, ao.owner_wallet FROM releases r JOIN artists a ON a.id=r.artist_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish metadata for this release.");
+    if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
     if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];

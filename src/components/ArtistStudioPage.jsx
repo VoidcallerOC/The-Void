@@ -9,6 +9,7 @@ import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { validateReleasePublish } from "../lib/studio-publish.js";
+import { selectReleaseTemplate } from "../lib/studio-selection.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -185,20 +186,14 @@ export function ArtistStudioPage() {
   };
 
   const selectExistingRelease = (record) => {
-    setSelectedReleaseId(record.release.id);
-    setArtistId(record.artist?.id || "");
-    setReleaseId(record.release.id);
-    setForm((prior) => ({
-      ...prior,
-      artistName: record.artist?.name || prior.artistName,
-      artistBio: record.artist?.bio || prior.artistBio,
-      releaseTitle: record.release.title,
-      releaseDescription: record.release.description || prior.releaseDescription,
-      releaseArtwork: record.release.artwork || prior.releaseArtwork,
-      trackArtwork: record.release.artwork || prior.trackArtwork,
-    }));
+    const selection = selectReleaseTemplate(record);
+    setSelectedReleaseId(selection.selectedReleaseId);
+    setArtistId(selection.artistId);
+    setReleaseId(selection.releaseId);
+    setEditionId(selection.editionId);
+    setForm((prior) => ({ ...prior, ...selection.form }));
     setStep("track");
-    setNotice(`Release selected: ${record.release.title}. Add tracks and experiences.`);
+    setNotice(`Release template loaded: ${selection.form.releaseTitle}. Create it under the authenticated artist wallet before publishing.`);
   };
 
   return (
