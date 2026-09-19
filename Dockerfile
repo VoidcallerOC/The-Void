@@ -14,7 +14,6 @@ COPY src ./src
 COPY scripts ./scripts
 COPY private-media ./private-media
 COPY contracts ./contracts
-COPY scripts/pinata-cert.mjs ./scripts/pinata-cert.mjs
 COPY .env.example ./
 USER node
 EXPOSE 8787
