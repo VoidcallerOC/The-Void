@@ -61,13 +61,14 @@ async function pinataChecks() {
   const jwt = process.env.PINATA_JWT;
   if (!jwt) { unverified("PINATA_JWT_PRESENT", "server-side PINATA_JWT is unavailable in this runtime"); return null; }
   pass("PINATA_JWT_PRESENT", "present; value redacted");
+  let config;
   try {
     const { response } = await request("https://api.pinata.cloud/data/testAuthentication", { headers: { authorization: `Bearer ${jwt}` } });
     if (response.status === 200) pass("PINATA_AUTHENTICATION", "HTTP 200"); else fail("PINATA_AUTHENTICATION", `HTTP ${response.status}`);
   } catch (error) { fail("PINATA_AUTHENTICATION", safeError(error)); }
   let storage;
   try {
-    const config = loadMediaConfig(process.env);
+    config = loadMediaConfig(process.env);
     if (config.driver !== "pinata") fail("PRODUCTION_MEDIA_DRIVER", `configured driver is ${config.driver}`);
     else pass("PRODUCTION_MEDIA_DRIVER", "pinata");
     storage = createPrivateMediaStorage({ config });
