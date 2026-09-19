@@ -9,6 +9,7 @@ import {
   encodeFujiMint,
   fujiExplorerUrl,
   isCertifiedFujiEdition,
+  isFujiEditionNotFoundError,
   readFujiBalance,
   readFujiEdition,
   readFujiPaused,
@@ -59,7 +60,15 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       const provider = wallet.getProvider();
       const paused = await readFujiPaused(provider);
       if (paused) throw new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused.");
-      const onChainEdition = await readFujiEdition(provider, tokenId);
+      let onChainEdition;
+      try {
+        onChainEdition = await readFujiEdition(provider, tokenId);
+      } catch (error) {
+        if (!isFujiEditionNotFoundError(error)) throw error;
+        console.error("Fuji edition preflight: expected missing edition", error);
+        setNotCreated(true);
+        return;
+      }
       if (!onChainEdition?.exists) {
         setNotCreated(true);
         return;
@@ -78,6 +87,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       setNotice("Collect confirmed. This edition is now in your collection.");
       await wallet.refreshOwnership?.(wallet.account);
     } catch (error) {
+      console.error("Collect preflight failed", error);
       setNotice(error.message);
     } finally {
       setBusy("");
@@ -118,10 +128,10 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
           {experiences[0] && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
         </div>
         {notCreated && (
-          <div role="status" style={{ marginTop: 18, color: "var(--vc-bone)", lineHeight: 1.6 }}>
-            <strong style={{ display: "block", textTransform: "uppercase" }}>Edition not yet created</strong>
-            <span style={{ display: "block" }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
-            <Link to="/studio?create=edition" style={{ ...ghostBtn, display: "inline-block", marginTop: 10 }}>Open artist studio</Link>
+          <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
+            <strong style={{ display: "block", letterSpacing: ".08em" }}>EDITION NOT YET CREATED</strong>
+            <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
+            <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>OPEN ARTIST STUDIO</Link>
           </div>
         )}
         {notice && (
@@ -183,7 +193,14 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
           <span style={ghostBtn}>Collect unavailable</span>
         )}
       </div>
-      {notice && (
+      {notCreated && (
+        <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
+          <strong style={{ display: "block", letterSpacing: ".08em" }}>EDITION NOT YET CREATED</strong>
+          <span style={{ display: "block", color: "var(--vc-bone-dim)", marginTop: 6 }}>This edition hasn&apos;t been created on Avalanche Fuji yet.</span>
+          <Link to="/studio" style={{ ...primaryBtn, display: "inline-block", marginTop: 14 }}>OPEN ARTIST STUDIO</Link>
+        </div>
+      )}
+      {notice && !notCreated && (
         <p role="status" style={{ marginTop: 18, color: notice.toLowerCase().includes("confirm") || notice.toLowerCase().includes("owned") ? "var(--vc-bone)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
           {notice}
         </p>
