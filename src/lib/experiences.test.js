@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEdition, createExperience, createRequirement, EXPERIENCE_TYPES } from "../domain/models.js";
+import { createEdition, createExperience, createRequirement, EXPERIENCE_CATEGORIES, EXPERIENCE_TYPES } from "../domain/models.js";
 import { canAccessExperience, resolveExperienceAccess } from "./collection.js";
 import { createAuthorizationGrant, grantAllows } from "./media-auth.js";
 
@@ -11,6 +11,12 @@ const requirement = createRequirement({ contract, tokenIds: [1], minAmount: 1, c
 describe("Phase 6 experiences", () => {
   it("supports the complete conceptual experience type set", () => {
     expect(Object.values(EXPERIENCE_TYPES)).toEqual(expect.arrayContaining(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]));
+  });
+  it("maps collector language to existing protected delivery types", () => {
+    expect(createExperience({ id: "unreleased", productType: "UNRELEASED_TRACK" }).experienceType).toBe("AUDIO");
+    expect(createExperience({ id: "video", productType: "MUSIC_VIDEO" }).experienceType).toBe("VIDEO");
+    expect(createExperience({ id: "archive", productType: "COLLECTOR_ARCHIVE" }).experienceType).toBe("DOWNLOAD");
+    expect(EXPERIENCE_CATEGORIES.VIP_BACKSTAGE.supported).toBe(false);
   });
   it("associates multiple experiences with an edition without token-id UI rules", () => {
     const edition = createEdition({ id: "archive", releaseId: "r", title: "Archive", experienceIds: ["audio", "stems", "live"], tier: "archive", valueProposition: "Album, demos, stems, and a live recording" });

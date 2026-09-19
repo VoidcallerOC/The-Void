@@ -1,8 +1,36 @@
 // Music-native platform domain models. These are application records rather
 // than blockchain records; contract data is infrastructure attached to editions.
+// Product language is what the collector sees. EXPERIENCE_TYPES remains the
+// delivery-compatible vocabulary used by the existing media/auth services.
 export const EXPERIENCE_TYPES = Object.freeze({
   AUDIO: "AUDIO", VIDEO: "VIDEO", STEMS: "STEMS", DOWNLOAD: "DOWNLOAD", ARTWORK: "ARTWORK", LYRICS: "LYRICS", DEMO: "DEMO", LIVE_RECORDING: "LIVE_RECORDING", TICKET: "TICKET", VIP_ACCESS: "VIP_ACCESS", DISCOUNT: "DISCOUNT", PHYSICAL_REDEMPTION: "PHYSICAL_REDEMPTION",
 });
+
+export const EXPERIENCE_CATEGORIES = Object.freeze({
+  FULL_RECORD: { label: "Full record", deliveryType: "AUDIO", supported: true },
+  UNRELEASED_TRACK: { label: "Unreleased track", deliveryType: "AUDIO", supported: true },
+  DEMO: { label: "Demo", deliveryType: "DEMO", supported: true },
+  LIVE_RECORDING: { label: "Live recording", deliveryType: "LIVE_RECORDING", supported: true },
+  ALTERNATE_VERSION: { label: "Alternate version", deliveryType: "AUDIO", supported: true },
+  INSTRUMENTAL: { label: "Instrumental", deliveryType: "AUDIO", supported: true },
+  STEMS: { label: "Stems", deliveryType: "STEMS", supported: true },
+  MUSIC_VIDEO: { label: "Music video", deliveryType: "VIDEO", supported: true },
+  DIGITAL_DOWNLOAD: { label: "Digital download", deliveryType: "DOWNLOAD", supported: true },
+  ALTERNATE_ARTWORK: { label: "Alternate artwork", deliveryType: "ARTWORK", supported: false, note: "Artwork delivery is not yet protected by the media gateway." },
+  COLLECTOR_ARCHIVE: { label: "Collector archive", deliveryType: "DOWNLOAD", supported: true },
+  MEMBERSHIP: { label: "Membership", deliveryType: "TICKET", supported: false },
+  VIP_BACKSTAGE: { label: "VIP / backstage", deliveryType: "VIP_ACCESS", supported: false },
+  PHYSICAL_DIGITAL: { label: "Physical + digital", deliveryType: "PHYSICAL_REDEMPTION", supported: false, note: "Physical fulfillment is not connected to Artist Studio yet." },
+  CUSTOM_EXPERIENCE: { label: "Custom experience", deliveryType: null, supported: false },
+});
+
+export function experienceCategory(category) {
+  return EXPERIENCE_CATEGORIES[String(category || "").toUpperCase()] || null;
+}
+
+export function experienceCategoryLabel(category) {
+  return experienceCategory(category)?.label || String(category || "Experience").replaceAll("_", " ");
+}
 
 export function createArtist({ id, name, handle = id, wallet = "", address = wallet, bio = "", avatar = "", banner = "", socials = [], verified = false, verification = { status: verified ? "verified" : "unverified" }, releases = [], collectionIds = [], experiences = [], ...rest }) {
   return { type: "artist", id, name, handle, wallet: wallet || address, address: address || wallet, bio, avatar, banner, socials, verified: Boolean(verified), verification, releases, collectionIds, experiences, ...rest };
@@ -22,9 +50,12 @@ export function createCollection({ id, name, artistIds = [], releaseIds = [], ed
 export function createRequirement({ type = "ownership", contract = "", tokenIds = [], minAmount = 1, chainId = null, ...rest }) {
   return { type, contract: contract.toLowerCase(), tokenIds: tokenIds.map(String), minAmount, chainId, ...rest };
 }
-export function createExperience({ id, experienceType = EXPERIENCE_TYPES.AUDIO, title, description = "", requirements = [], media = {}, editionId = null, access = "collector", ...rest }) {
-  if (!Object.values(EXPERIENCE_TYPES).includes(experienceType)) throw new Error(`Unsupported experience type: ${experienceType}`);
-  return { type: "experience", id, experienceType, title, description, requirements, media, editionId, access, ...rest };
+export function createExperience({ id, productType, experienceType = EXPERIENCE_TYPES.AUDIO, title, description = "", requirements = [], media = {}, editionId = null, access = "collector", ...rest }) {
+  const category = productType ? experienceCategory(productType) : null;
+  if (productType && !category) throw new Error(`Unsupported experience category: ${productType}`);
+  const deliveryType = category?.deliveryType || experienceType;
+  if (!Object.values(EXPERIENCE_TYPES).includes(deliveryType)) throw new Error(`Unsupported experience type: ${deliveryType}`);
+  return { type: "experience", id, productType: productType ? String(productType).toUpperCase() : null, experienceType: deliveryType, title: title || (category ? category.label : ""), description, requirements, media, editionId, access, ...rest };
 }
 export function createCatalog({ artists = [], releases = [], editions = [], tokens = [], collections = [], experiences = [] }) { return { artists, releases, editions, tokens, collections, experiences }; }
 export function catalogById(items = []) { return Object.fromEntries(items.map((item) => [item.id, item])); }

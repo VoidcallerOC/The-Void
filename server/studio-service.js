@@ -5,6 +5,12 @@ import { chainId, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, re
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
+const PRODUCT_TYPES = Object.freeze({
+  FULL_RECORD: "AUDIO", UNRELEASED_TRACK: "AUDIO", DEMO: "DEMO", LIVE_RECORDING: "LIVE_RECORDING",
+  ALTERNATE_VERSION: "AUDIO", INSTRUMENTAL: "AUDIO", STEMS: "STEMS", MUSIC_VIDEO: "VIDEO",
+  DIGITAL_DOWNLOAD: "DOWNLOAD", ALTERNATE_ARTWORK: "ARTWORK", COLLECTOR_ARCHIVE: "DOWNLOAD",
+  MEMBERSHIP: "TICKET", VIP_BACKSTAGE: "VIP_ACCESS", PHYSICAL_DIGITAL: "PHYSICAL_REDEMPTION",
+});
 
 function normalizedSlug(value, field) {
   const slug = requiredText(value, field, { max: 96 }).toLowerCase();
@@ -158,7 +164,11 @@ export class ArtistStudioService {
     const edition = rows[0];
     if (!edition) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this edition.");
     const id = input.id ? requiredText(input.id, "experience.id", { max: 128 }) : `experience-${randomUUID()}`;
-    const experience = await this.repository.saveExperience({ id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(String(input.type || input.experienceType || "").toUpperCase(), "experience.type", TYPES), requirements: requireRequirements(input.requirements), mediaConfig: requireMediaConfig(input.mediaConfig), status: "DRAFT" });
+    const productType = input.productType ? String(input.productType).toUpperCase() : null;
+    const mappedType = productType ? PRODUCT_TYPES[productType] : String(input.type || input.experienceType || "").toUpperCase();
+    if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
+    const mediaConfig = { ...requireMediaConfig(input.mediaConfig), ...(productType ? { productType, deliveryType: mappedType } : {}) };
+    const experience = await this.repository.saveExperience({ id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: requireRequirements(input.requirements), mediaConfig, status: "DRAFT" });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_CREATED", subjectType: "experience", subjectId: experience.id, payload: { editionId: edition.id } });
     return experience;
   }
@@ -169,7 +179,11 @@ export class ArtistStudioService {
     const experience = rows[0];
     if (!experience) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this experience.");
     if (experience.status === "PUBLISHED" && input.status && lifecycle(input.status) !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", "Published experiences cannot return to an earlier lifecycle state.");
-    const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: input.type === undefined && input.experienceType === undefined ? experience.experience_type : enumValue(String(input.type || input.experienceType).toUpperCase(), "experience.type", TYPES), requirements: input.requirements === undefined ? experience.requirements : requireRequirements(input.requirements), mediaConfig: input.mediaConfig === undefined ? experience.media_config : requireMediaConfig(input.mediaConfig), version: Number(experience.version || 1) + 1, status: input.status === undefined ? experience.status : lifecycle(input.status) });
+    const productType = input.productType ? String(input.productType).toUpperCase() : null;
+    const mappedType = productType ? PRODUCT_TYPES[productType] : (input.type === undefined && input.experienceType === undefined ? experience.experience_type : String(input.type || input.experienceType).toUpperCase());
+    if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
+    const mediaConfig = input.mediaConfig === undefined ? experience.media_config : requireMediaConfig(input.mediaConfig);
+    const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: input.requirements === undefined ? experience.requirements : requireRequirements(input.requirements), mediaConfig: productType ? { ...mediaConfig, productType, deliveryType: mappedType } : mediaConfig, version: Number(experience.version || 1) + 1, status: input.status === undefined ? experience.status : lifecycle(input.status) });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_UPDATED", subjectType: "experience", subjectId: experience.id });
     return saved;
   }
