@@ -2,7 +2,7 @@ import process from "node:process";
 import { createServer } from "node:http";
 import { createApiHandler } from "./api-http.js";
 import { createStructuredLogger, createRateLimiter } from "./api-runtime.js";
-import { loadMediaConfig, loadMetadataConfig, loadServerConfig } from "./config.js";
+import { loadIndexerConfig, loadMediaConfig, loadMetadataConfig, loadServerConfig } from "./config.js";
 import { closeDatabasePool, createDatabasePool } from "./db.js";
 import { createPersistenceRepository } from "./repositories.js";
 import { ApiService } from "./api-service.js";
@@ -24,7 +24,8 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const metadataStorage = metadataConfig.driver === "pinata" ? createPinataMetadataStorage({ config: metadataConfig, logger }) : null;
   const resolvedOwnershipVerifier = ownershipVerifier || createIndexedOwnershipVerifier({ db: pool, config });
   const rateLimiter = createRateLimiter();
-  const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, rateLimiter, logger });
+  const indexerConfig = config.indexer || loadIndexerConfig(process.env, { requireConfiguration: false });
+  const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, indexerConfig, rateLimiter, logger });
   let resolvedMediaGateway = mediaGateway;
   if (!resolvedMediaGateway) {
     try {

@@ -78,3 +78,11 @@ describe("marketplace event projection storage", () => {
     expect(replay).toHaveBeenCalledWith(canonicalEvent);
   });
 });
+
+describe("indexer health contract filtering", () => {
+  it("filters health aggregation to configured contract addresses", async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    await new IndexerStore(db).getIndexerHealth({ chainId: 43113, addresses: [token] });
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining("contract_address = ANY($2::text[])"), [43113, [token]]);
+  });
+});

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { id } from "ethers";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
+const PLACEHOLDER_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001";
 const ERC1155_EVENT_TOPICS = Object.freeze({
   TransferSingle: id("TransferSingle(address,address,address,uint256,uint256)"),
   TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])")
@@ -64,6 +65,7 @@ function parseIndexerContracts(value, { chainId }) {
   return Object.freeze(parsed.map((contract, index) => {
     if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}] must be an object.`);
     const address = evmAddress(contract.address, `INDEXER_CONTRACTS_JSON[${index}].address`);
+    if (address === PLACEHOLDER_CONTRACT_ADDRESS) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].address may not use the placeholder contract address.`);
     if (addresses.has(address)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON contains duplicate address ${address}.`);
     addresses.add(address);
     const contractType = String(contract.contractType || "").trim().toUpperCase();
