@@ -17,6 +17,11 @@ function safeError(error) {
   return message.replace(/https?:\/\/[^\s)]+/gi, "[redacted-url]").replace(/Bearer\s+[^\s)]+/gi, "Bearer [redacted]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]");
 }
 
+function safeProviderBody(body) {
+  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body || "");
+  return text.replace(/https?:\/\/[^\s"']+/gi, "[redacted-url]").replace(/Bearer\s+[^\s"']+/gi, "Bearer [redacted]").replace(/(jwt|token|authorization|signature|signed_url|download_link)\s*[:=]\s*["']?[^,"'\s}]+/gi, "$1=[redacted]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]").slice(0, 500) || "[empty-body]";
+}
+
 function record(name, status, detail = "") {
   results.push({ name, status, detail });
   console.log(`${status} ${name}${detail ? ` — ${detail}` : ""}`);
@@ -67,6 +72,13 @@ async function pinataChecks() {
     else pass("PRODUCTION_MEDIA_DRIVER", "pinata");
     storage = createPrivateMediaStorage({ config });
   } catch (error) { unverified("PINATA_PRIVATE_LINK", `production media configuration unavailable: ${safeError(error)}`); return null; }
+  try {
+    const date = Math.floor(Date.now() / 1000);
+    const direct = await request(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
+    const body = safeProviderBody(direct.body);
+    if (direct.response.ok) pass("PINATA_PRIVATE_LINK_PROVIDER_RESPONSE", `HTTP ${direct.response.status}; body=${body}`);
+    else fail("PINATA_PRIVATE_LINK_PROVIDER_RESPONSE", `HTTP ${direct.response.status}; body=${body}`);
+  } catch (error) { unverified("PINATA_PRIVATE_LINK_PROVIDER_RESPONSE", safeError(error)); }
   try {
     const media = await storage.open({ storageKey: cid, contentType: "audio/wav" });
     if (media.type !== "redirect") fail("PINATA_PRIVATE_LINK", "production storage did not return a private redirect");
