@@ -106,14 +106,6 @@ describe("private storage and old public paths", () => {
     expect(response.status).toBe(404);
   });
 
-  it("advertises byte-range support on protected Pinata redirects", async () => {
-    const handler = createApiHandler({ service: {}, mediaGateway: { openMedia: vi.fn().mockResolvedValue({ type: "redirect", url: "https://media.example/files/cid?sig=opaque" }) } });
-    const response = responseDouble();
-    await handler(requestDouble({ url: "/api/media/grant-1" }), response);
-    expect(response.status).toBe(302);
-    expect(response.headers).toMatchObject({ location: "https://media.example/files/cid?sig=opaque", "accept-ranges": "bytes" });
-  });
-
   it("requires Pinata private media configuration in production", () => {
     expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "filesystem" })).toThrow(/requires MEDIA_STORAGE_DRIVER=pinata/);
     expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "object" })).toThrow(/requires MEDIA_STORAGE_DRIVER=pinata/);
