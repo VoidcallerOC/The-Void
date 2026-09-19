@@ -8,16 +8,9 @@ BEGIN;
 --
 -- FORCE ROW LEVEL SECURITY is intentionally not set so the service-role
 -- connection continues to operate without restriction.
-
--- Supabase provides these roles; plain PostgreSQL (CI) does not.
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    CREATE ROLE anon NOLOGIN;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    CREATE ROLE authenticated NOLOGIN;
-  END IF;
-END $$;
+--
+-- The anon and authenticated roles are provided by Supabase. In CI they
+-- are created by the workflow before migrations run.
 
 -- === public.artists ===
 ALTER TABLE artists ENABLE ROW LEVEL SECURITY;
