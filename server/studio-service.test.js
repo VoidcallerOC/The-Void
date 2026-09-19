@@ -90,6 +90,12 @@ describe("Artist Studio", () => {
     expect(experience).toMatchObject({ id: "experience-1", edition_id: "edition-1", status: "DRAFT" });
   });
 
+  it("derives the internal compatibility title from the release without editionName", async () => {
+    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "voidcaller-full-ep", title: "Voidcaller Full EP" }] });
+    await expect(instance.createEdition({ request, releaseId: "release-1", input: { quantity: "25", priceWei: "1" } })).resolves.toMatchObject({ status: "DRAFT" });
+    expect(repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ title: "Voidcaller Full EP", supply: "25" }));
+  });
+
   it("ignores artist blockchain fields and derives the certified contract and token", async () => {
     const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", slug: "bad", chainId: 1, contractAddress: "not-an-address", tokenId: "-1", quantity: "1", priceWei: "1" } })).resolves.toMatchObject({ id: expect.stringMatching(/^edition-/) });

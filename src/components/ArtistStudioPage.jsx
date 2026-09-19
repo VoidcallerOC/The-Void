@@ -8,13 +8,14 @@ import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { validateReleasePublish } from "../lib/studio-publish.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
 const label = { display: "block", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)", marginTop: 16 };
 const STEPS = [
   ["release", "Your release"],
-  ["edition", "Release details"],
+  ["track", "Tracks"],
   ["experience", "Experiences"],
   ["supply", "Supply"],
   ["preview", "Preview"],
@@ -49,9 +50,9 @@ function initialState() {
     releaseTitle: "",
     releaseDescription: "",
     releaseArtwork: "/assets/voidcaller_art_5.png",
-    editionName: "",
-    editionDescription: "",
-    editionArtwork: "/assets/voidcaller_art_4.png",
+    trackTitle: "",
+    trackDescription: "",
+    trackArtwork: "/assets/voidcaller_art_4.png",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "10000000000000000",
@@ -66,7 +67,7 @@ export function ArtistStudioPage() {
   const [params] = useSearchParams();
   const catalog = useMarketplaceCatalogs();
   const existingReleases = useMemo(() => marketplaceCatalog([catalog]), [catalog]);
-  const createIntent = params.get("create") === "release" ? "release" : "edition";
+  const createIntent = params.get("create") === "release" ? "release" : "track";
   const [form, setForm] = useState(initialState);
   const [step, setStep] = useState("release");
   const [selectedReleaseId, setSelectedReleaseId] = useState("");
@@ -82,7 +83,7 @@ export function ArtistStudioPage() {
 
   const ensureArtistAndRelease = async () => {
     if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
-    if (!form.releaseTitle) throw new Error("Enter a release title before creating an edition.");
+    if (!form.releaseTitle) throw new Error("Enter a release title before creating a track.");
     let nextArtistId = artistId;
     let nextReleaseId = releaseId;
     const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
@@ -108,8 +109,8 @@ export function ArtistStudioPage() {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
       setSelectedReleaseId(ids.releaseId);
-      setNotice(`Release created: ${form.releaseTitle}. Continue to Create Edition when you are ready.`);
-      setStep("edition");
+      setNotice(`Release created: ${form.releaseTitle}. Continue to Tracks when you are ready.`);
+      setStep("track");
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -126,18 +127,18 @@ export function ArtistStudioPage() {
           method: editionId ? "PATCH" : "POST",
           payload: {
             id: editionId || undefined,
-            name: form.editionName,
-            description: form.editionDescription,
-            artwork: form.editionArtwork,
+            title: form.trackTitle || form.releaseTitle,
+            description: form.trackDescription,
+            artwork: form.trackArtwork,
             quantity: form.quantity,
             priceWei: form.priceWei,
             marketplace: {},
-            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.editionArtwork },
+            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork },
           },
           headers,
         });
       setEditionId(record.id);
-      setNotice(`Draft saved: ${form.editionName}.`);
+      setNotice(`Track draft saved: ${form.trackTitle || form.releaseTitle}.`);
       return record.id;
     } catch (error) {
       setNotice(error.message);
@@ -150,12 +151,16 @@ export function ArtistStudioPage() {
   const publishEdition = async () => {
     setBusy("publish"); setNotice("");
     try {
-      if (!form.editionName) throw new Error("Enter an edition name.");
-      if (!form.quantity || BigInt(form.quantity) <= 0n) throw new Error("Edition supply must be greater than zero.");
+      validateReleasePublish({
+        release: { title: form.releaseTitle, type: "ep" },
+        tracks: [{ title: form.trackTitle || form.releaseTitle }],
+        supply: form.quantity,
+        metadata: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
+      });
       if (!editionId) await saveDraft();
       const metadata = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/metadata`, {
         method: "POST",
-        payload: { artwork: form.editionArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        payload: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
       });
       const provider = wallet.getProvider?.();
@@ -175,8 +180,8 @@ export function ArtistStudioPage() {
 
   const goCreateEdition = () => {
     if (!form.releaseTitle) setStep("release");
-    else setStep("edition");
-    setNotice(form.releaseTitle ? "" : "Select or create a release, then continue to Create Edition.");
+    else setStep("track");
+    setNotice(form.releaseTitle ? "" : "Select or create a release, then continue to Tracks.");
   };
 
   const selectExistingRelease = (record) => {
@@ -190,10 +195,10 @@ export function ArtistStudioPage() {
       releaseTitle: record.release.title,
       releaseDescription: record.release.description || prior.releaseDescription,
       releaseArtwork: record.release.artwork || prior.releaseArtwork,
-      editionArtwork: record.release.artwork || prior.editionArtwork,
+      trackArtwork: record.release.artwork || prior.trackArtwork,
     }));
-    setStep("edition");
-    setNotice(`Release selected: ${record.release.title}. Enter edition details.`);
+    setStep("track");
+    setNotice(`Release selected: ${record.release.title}. Add tracks and experiences.`);
   };
 
   return (
@@ -202,7 +207,7 @@ export function ArtistStudioPage() {
         <Eyebrow red>† Artist studio</Eyebrow>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 9vw, 92px)", textTransform: "uppercase", lineHeight: 0.9, margin: "16px 0" }}>Create the relic</h1>
         <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>
-          Artist → Release → Edition → Experience → Collect. The Void handles the infrastructure underneath and never reports success without a receipt.
+          Artist → Release → Track → Experience → Collect. The Void handles the infrastructure underneath and never reports success without a receipt.
         </p>
       </header>
 
@@ -212,10 +217,10 @@ export function ArtistStudioPage() {
           <h2>Create release</h2>
           <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Name the artist and the record.</p>
         </button>
-        <button type="button" className={`vc-studio-action${createIntent === "edition" ? " is-primary" : ""}`} onClick={goCreateEdition}>
+        <button type="button" className={`vc-studio-action${createIntent === "track" ? " is-primary" : ""}`} onClick={goCreateEdition}>
           <Eyebrow red>02</Eyebrow>
-          <h2>Create edition</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Edition details, experiences, supply, preview, publish.</p>
+          <h2>Add tracks</h2>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Track details, experiences, supply, preview, publish.</p>
         </button>
       </div>
 
@@ -227,7 +232,7 @@ export function ArtistStudioPage() {
         <div style={{ ...card, marginBottom: 24, borderColor: "var(--vc-crimson)", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <strong>Verified wallet required.</strong>
-            <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>Connect an authorized artist wallet and sign in before creating an edition.</p>
+            <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>Connect an authorized artist wallet and sign in before creating a release.</p>
           </div>
           <WalletButton />
         </div>
@@ -244,10 +249,10 @@ export function ArtistStudioPage() {
       {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: notice.includes("saved") ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
 
       {step === "release" && (
-        <section style={card} id="create-edition">
+        <section style={card} id="create-release">
           <Eyebrow red>Your release</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>The record</h2>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose an existing release, or create a new one. Create Edition always publishes to the certified Fuji contract.</p>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose an existing release, or create a new one. Publishing uses the certified Fuji contract underneath.</p>
           {existingReleases.length > 0 && (
             <div className="vc-release-picker">
               {existingReleases.map((record) => (
@@ -275,19 +280,19 @@ export function ArtistStudioPage() {
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Creating…" : "Create release"}
             </button>
-            {releaseId && <button type="button" style={ghostBtn} onClick={() => setStep("edition")}>Create edition</button>}
+            {releaseId && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
           </div>
         </section>
       )}
 
-      {step === "edition" && (
+      {step === "track" && (
         <section style={card}>
-          <Eyebrow red>Create edition</Eyebrow>
-          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Edition details</h2>
+          <Eyebrow red>Tracks</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Track details</h2>
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}</p>
-          <TextField title="Edition name" value={form.editionName} onChange={(value) => set("editionName", value)} required placeholder="Chapter I — The Repair" />
-          <TextField title="Description" value={form.editionDescription} onChange={(value) => set("editionDescription", value)} multiline />
-          <TextField title="Artwork URL" value={form.editionArtwork} onChange={(value) => set("editionArtwork", value)} />
+          <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
+          <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
+          <TextField title="Artwork URL" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} />
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("release")}>Back</button>
@@ -302,7 +307,7 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>What it unlocks</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose the music-native promise first. The protected delivery mechanism is handled underneath by the existing experience service.</p>
           <label style={label}>
-            What does this edition unlock?
+            What does this track unlock?
             <select value={form.productType} onChange={(event) => set("productType", event.target.value)} style={field}>
               {Object.entries(EXPERIENCE_CATEGORIES).map(([value, category]) => <option key={value} value={value} disabled={!category.supported}>{category.label}{category.supported ? "" : " — coming soon"}</option>)}
             </select>
@@ -313,7 +318,7 @@ export function ArtistStudioPage() {
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-            <button type="button" style={ghostBtn} onClick={() => setStep("edition")}>Back</button>
+            <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
             <button type="button" style={primaryBtn} onClick={() => setStep("supply")}>Continue</button>
           </div>
         </section>

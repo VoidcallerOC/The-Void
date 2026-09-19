@@ -225,8 +225,8 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     const selectedChainId = CERTIFIED_CHAIN_ID;
     const address = CERTIFIED_CONTRACT;
-    const editionName = requiredText(input.name || input.title, "edition.name", { max: 256 });
-    const editionSlug = generatedSlug(editionName, "edition name");
+    const editionName = requiredText(input.trackTitle || input.title || input.name || release.title, "track.title", { max: 256 });
+    const editionSlug = generatedSlug(editionName, "track title");
     const tokenId = certifiedTokenId(release.slug, editionSlug);
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
     const edition = await this.repository.inTransaction(async (repository) => {
