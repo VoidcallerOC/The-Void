@@ -110,6 +110,16 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
     } finally { await pool.end(); }
   }, 120000);
 
+  it("refuses an existing 001 record with a mismatched checksum", async () => {
+    const { pool, config } = await scratchDatabase();
+    try {
+      await pool.query("CREATE TABLE schema_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())");
+      await pool.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [baselineMigrationName, "not-the-repository-checksum"]);
+      await expect(baselineDatabase({ pool, config, directory: localMigrations })).rejects.toThrow(/differs from the repository checksum/);
+      expect((await pool.query("SELECT checksum FROM schema_migrations WHERE name = $1", [baselineMigrationName])).rows[0].checksum).toBe("not-the-repository-checksum");
+    } finally { await pool.end(); }
+  }, 120000);
+
   it("refuses to baseline a partially created schema and writes no migration record", async () => {
     const { pool, config } = await scratchDatabase();
     try {
