@@ -1,6 +1,9 @@
 # Collect Diagnosis
 
+> **Historical / certification record.** Summit was an internal Fuji demo fixture, not a public release. The certified Fuji contract remains platform infrastructure.
+
 **Date:** 2026-09-18  
+
 **Network:** Avalanche Fuji  
 **RPC:** `https://api.avax-test.network/ext/bc/C/rpc`
 

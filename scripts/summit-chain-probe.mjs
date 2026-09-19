@@ -1,6 +1,8 @@
 import deployment from "../config/fuji-release.json" with { type: "json" };
 import { ethers } from "ethers";
 
+// Historical Summit certification identifiers. This probe is not a public catalog.
+
 const provider = new ethers.JsonRpcProvider(deployment.rpcUrl, deployment.chainId, { staticNetwork: true });
 const contract = new ethers.Contract(deployment.contractAddress, deployment.abi, provider);
 const releaseId = ethers.encodeBytes32String("summit-demo-release");
