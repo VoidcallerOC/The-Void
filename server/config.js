@@ -5,7 +5,7 @@ import { id } from "ethers";
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 const ERC1155_EVENT_TOPICS = Object.freeze({
   TransferSingle: id("TransferSingle(address,address,address,uint256,uint256)"),
-  TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])"),
+  TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])")
 });
 
 export class ConfigurationError extends Error {
@@ -156,6 +156,12 @@ function hostAllowlist(value, name) {
   return Object.freeze([...new Set(hosts)]);
 }
 
+function protectedPrefixes(value, name) {
+  const prefixes = String(value || "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (!prefixes.length || prefixes.some((prefix) => prefix.startsWith("/") || prefix.includes("\\") || prefix.split("/").some((part) => !part || part === "." || part === ".."))) throw new ConfigurationError(`${name} must contain one or more safe object-key prefixes.`);
+  return Object.freeze([...new Set(prefixes.map((prefix) => prefix.replace(/\/+$/, "")))]);
+}
+
 function allowedOrigins(value, publicApp) {
   const configured = String(value || "").split(",").map((entry) => entry.trim()).filter(Boolean);
   const origins = [publicApp.origin, ...configured.map((entry) => normalizedUrl(entry, "API_ALLOWED_ORIGINS").origin)];
@@ -171,10 +177,18 @@ export function loadMediaConfig(env = process.env) {
   const signedUrlTtlSeconds = boundedPositiveInteger(env.MEDIA_SIGNED_URL_TTL_SECONDS, 60, "MEDIA_SIGNED_URL_TTL_SECONDS", { min: 15, max: 300 });
   if (signedUrlTtlSeconds > grantTtlSeconds) throw new ConfigurationError("MEDIA_SIGNED_URL_TTL_SECONDS may not exceed MEDIA_GRANT_TTL_SECONDS.");
   const maxBytes = boundedPositiveInteger(env.MEDIA_MAX_BYTES, 104857600, "MEDIA_MAX_BYTES", { min: 1, max: 1073741824 });
-  if (driver === "filesystem") return Object.freeze({ driver, privateRoot: resolve(String(env.MEDIA_PRIVATE_ROOT || resolve(process.cwd(), "server/private-media"))), grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret: secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" }) });
-  const signerUrl = normalizedUrl(env.MEDIA_OBJECT_SIGNER_ENDPOINT, "MEDIA_OBJECT_SIGNER_ENDPOINT");
-  if (appEnvironment === "production" && signerUrl.protocol !== "https:") throw new ConfigurationError("Production MEDIA_OBJECT_SIGNER_ENDPOINT must use HTTPS.");
-  return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, signerEndpoint: signerUrl.toString(), signerToken: secret(env.MEDIA_OBJECT_SIGNER_TOKEN, "MEDIA_OBJECT_SIGNER_TOKEN", { required: true }), objectUrlHosts: hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS, "MEDIA_OBJECT_URL_HOSTS"), auditHashSecret: secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" }) });
+  const auditHashSecret = secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" });
+  if (driver === "filesystem") return Object.freeze({ driver, privateRoot: resolve(String(env.MEDIA_PRIVATE_ROOT || resolve(process.cwd(), "server/private-media"))), grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret });
+  const accountId = String(env.R2_ACCOUNT_ID || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{32}$/.test(accountId)) throw new ConfigurationError("R2_ACCOUNT_ID must be a 32-character Cloudflare account ID.");
+  const bucket = String(env.R2_BUCKET || "").trim();
+  if (!bucket || /[\\/\s]/.test(bucket)) throw new ConfigurationError("R2_BUCKET must be a non-empty bucket name without spaces or slashes.");
+  const accessKeyId = String(env.R2_ACCESS_KEY_ID || "").trim();
+  if (!accessKeyId) throw new ConfigurationError("R2_ACCESS_KEY_ID is required.");
+  const secretAccessKey = secret(env.R2_SECRET_ACCESS_KEY, "R2_SECRET_ACCESS_KEY", { required: true });
+  const endpoint = normalizedUrl(env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`, "R2_ENDPOINT");
+  if (appEnvironment === "production" && endpoint.protocol !== "https:") throw new ConfigurationError("Production R2_ENDPOINT must use HTTPS.");
+  return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, r2: Object.freeze({ accountId, bucket, accessKeyId, secretAccessKey, endpoint: endpoint.toString() }), objectUrlHosts: hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS, "MEDIA_OBJECT_URL_HOSTS"), protectedPrefixes: protectedPrefixes(env.MEDIA_OBJECT_PREFIXES, "MEDIA_OBJECT_PREFIXES") });
 }
 
 export function loadMetadataConfig(env = process.env) {

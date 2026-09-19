@@ -1,5 +1,7 @@
 import { createReadStream, promises as fs } from "node:fs";
 import { extname, resolve, sep } from "node:path";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const CONTENT_TYPES = Object.freeze({ ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".flac": "audio/flac", ".mp4": "video/mp4", ".webm": "video/webm" });
 
@@ -26,11 +28,20 @@ function allowedSignedUrl(url, allowedHosts) {
   return parsed.toString();
 }
 
+function allowedPrefix(key, prefixes) {
+  return prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
+}
+
 export class PrivateMediaStorage {
-  constructor({ config, fetchImpl = fetch } = {}) {
+  constructor({ config, signer = null } = {}) {
     if (!config?.driver) throw new TypeError("PrivateMediaStorage requires media configuration.");
     this.config = config;
-    this.fetchImpl = fetchImpl;
+    this.signer = signer || (config.driver === "object" ? this.createR2Signer(config) : null);
+  }
+
+  createR2Signer(config) {
+    const client = new S3Client({ region: "auto", endpoint: config.r2.endpoint, credentials: { accessKeyId: config.r2.accessKeyId, secretAccessKey: config.r2.secretAccessKey } });
+    return async (key) => getSignedUrl(client, new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }), { expiresIn: config.signedUrlTtlSeconds });
   }
 
   async open({ storageKey, range = null, contentType = null }) {
@@ -45,10 +56,10 @@ export class PrivateMediaStorage {
       const selected = fileRange(range, stat.size);
       return { type: "stream", stream: createReadStream(path, { start: selected.start, end: selected.end }), contentType: contentType || CONTENT_TYPES[extname(path).toLowerCase()] || "application/octet-stream", contentLength: selected.end - selected.start + 1, totalLength: stat.size, start: selected.start, end: selected.end, partial: selected.partial };
     }
-    const response = await this.fetchImpl(this.config.signerEndpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.config.signerToken}` }, body: JSON.stringify({ storageKey: key, expiresInSeconds: this.config.signedUrlTtlSeconds }) });
-    if (!response.ok) throw new Error(`Object storage signer HTTP ${response.status}`);
-    const payload = await response.json();
-    return { type: "redirect", url: allowedSignedUrl(payload?.url, this.config.objectUrlHosts) };
+    if (!allowedPrefix(key, this.config.protectedPrefixes)) throw new Error("Protected media storage key is outside the configured media prefixes.");
+    let signedUrl;
+    try { signedUrl = await this.signer(key); } catch (error) { throw new Error(`Object storage signing failed: ${error.message}`, { cause: error }); }
+    return { type: "redirect", url: allowedSignedUrl(signedUrl, this.config.objectUrlHosts) };
   }
 }
 

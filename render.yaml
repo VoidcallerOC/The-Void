@@ -42,16 +42,22 @@ services:
         value: pinata
       - key: PINATA_JWT
         sync: false
-      # Protected media requires a provider-neutral object-storage signer in production.
+      # Protected media is signed server-side by the API using private Cloudflare R2.
       - key: MEDIA_STORAGE_DRIVER
         value: object
-      - key: MEDIA_OBJECT_SIGNER_ENDPOINT
-        sync: false
-      - key: MEDIA_OBJECT_SIGNER_TOKEN
-        sync: false
       - key: MEDIA_OBJECT_URL_HOSTS
         sync: false
+      - key: MEDIA_OBJECT_PREFIXES
+        sync: false
       - key: MEDIA_AUDIT_HASH_SECRET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
         sync: false
       - key: MEDIA_GRANT_TTL_SECONDS
         value: "300"
