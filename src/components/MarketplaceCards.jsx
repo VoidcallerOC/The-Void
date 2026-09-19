@@ -6,6 +6,7 @@ import {
   MARKETPLACE_STATE,
 } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
+import { experienceCategoryLabel } from "../domain/models.js";
 
 export function SectionHead({ eyebrow, title, children, action }) {
   return (
@@ -73,7 +74,7 @@ export function EditionCard({ item, listings = [], secondaryStatus }) {
         <div>
           <Eyebrow>Experience</Eyebrow>
           <p className="vc-card-body" style={{ marginTop: 8 }}>
-            {experiences.length ? experiences.map((experience) => experience.title).join(" · ") : "No attached experiences."}
+            {experiences.length ? experiences.map((experience) => `${experience.title || experienceCategoryLabel(experience.productType) || "Experience"} · ${experienceCategoryLabel(experience.productType || experience.experienceType)}`).join(" · ") : "No attached experiences."}
           </p>
         </div>
         <p className="vc-card-meta">
@@ -112,7 +113,7 @@ export function FeaturedReleaseCard({ record }) {
         </p>
         <Includes items={edition.includes} />
         <p className="vc-card-body">
-          Experience · {experiences.length ? experiences.map((experience) => experience.title).join(" · ") : "No attached experiences."}
+          What it unlocks · {experiences.length ? experiences.map((experience) => `${experience.title || experienceCategoryLabel(experience.productType) || "Experience"} · ${experienceCategoryLabel(experience.productType || experience.experienceType)}`).join(" · ") : "No attached experiences."}
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
           <CollectCta primary={primary} owned={owned} />

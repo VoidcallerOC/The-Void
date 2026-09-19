@@ -17,7 +17,7 @@ import {
   sendFujiTransaction,
   verifyFujiEditionCreation,
 } from "../lib/fuji-release.js";
-import { createArtist, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "../domain/models.js";
+import { createArtist, createEdition, createExperience, createRelease, createToken, EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
 import { notifyStudioOverlay, upsertStudioOverlay, useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
@@ -82,7 +82,7 @@ function initialState() {
     priceWei: "10000000000000000",
     experienceTitle: "",
     experienceDescription: "",
-    experienceType: "AUDIO",
+    productType: "FULL_RECORD",
   };
 }
 
@@ -140,12 +140,12 @@ export function ArtistStudioPage() {
     const experience = form.experienceTitle
       ? createExperience({
         id: nextExperienceId,
-        experienceType: EXPERIENCE_TYPES[form.experienceType] || EXPERIENCE_TYPES.AUDIO,
+        productType: form.productType,
         title: form.experienceTitle,
         description: form.experienceDescription,
         editionId: edition.id,
         requirements: tokenId ? [{ type: "ownership", contract: FUJI_RELEASE_CONFIG.contractAddress, tokenIds: [String(tokenId)], minAmount: 1, chainId: FUJI_RELEASE_CONFIG.chainId }] : [],
-        media: { type: "audio", protected: false, previewAvailable: true },
+        media: { type: experienceCategory(form.productType)?.deliveryType?.toLowerCase() || "audio", protected: false, previewAvailable: true },
       })
       : null;
     upsertStudioOverlay({
@@ -430,17 +430,18 @@ export function ArtistStudioPage() {
         <section style={card}>
           <Eyebrow red>Experiences</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>What it unlocks</h2>
-          <TextField title="Experience title" value={form.experienceTitle} onChange={(value) => set("experienceTitle", value)} placeholder="Collector Reliquary" />
-          <TextField title="Description" value={form.experienceDescription} onChange={(value) => set("experienceDescription", value)} multiline />
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose the music-native promise first. The protected delivery mechanism is handled underneath by the existing experience service.</p>
           <label style={label}>
-            Type
-            <select value={form.experienceType} onChange={(event) => set("experienceType", event.target.value)} style={field}>
-              <option>AUDIO</option>
-              <option>VIDEO</option>
-              <option>DOWNLOAD</option>
-              <option>STEMS</option>
+            What does this edition unlock?
+            <select value={form.productType} onChange={(event) => set("productType", event.target.value)} style={field}>
+              {Object.entries(EXPERIENCE_CATEGORIES).map(([value, category]) => <option key={value} value={value} disabled={!category.supported}>{category.label}{category.supported ? "" : " — coming soon"}</option>)}
             </select>
           </label>
+          <TextField title="Experience name" value={form.experienceTitle} onChange={(value) => set("experienceTitle", value)} placeholder={experienceCategoryLabel(form.productType)} />
+          <TextField title="Description" value={form.experienceDescription} onChange={(value) => set("experienceDescription", value)} multiline />
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
+            Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
+          </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("edition")}>Back</button>
             <button type="button" style={primaryBtn} onClick={() => setStep("supply")}>Continue</button>
