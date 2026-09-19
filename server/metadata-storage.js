@@ -9,6 +9,15 @@ function text(value, max = 20000) {
   return result ? result.slice(0, max) : null;
 }
 
+function providerFailure(response, body) {
+  let parsed = null;
+  try { parsed = JSON.parse(body); } catch { /* provider may return plain text */ }
+  const source = parsed?.error ?? parsed?.errors ?? parsed;
+  const reason = typeof source === "string" ? source : source?.reason || source?.message || source?.details || "provider rejected the request";
+  const safeReason = String(reason).replace(/https?:\/\/[^\s)]+/gi, "[redacted-url]").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]").slice(0, 240);
+  return { provider: "pinata", status: response.status, reason: safeReason };
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
@@ -58,8 +67,10 @@ export class PinataMetadataStorage {
       body: JSON.stringify({ pinataContent: metadata, pinataMetadata: { name } }),
     });
     if (!response.ok) {
-      this.logger.error?.("metadata.storage.failed", { status: response.status });
-      throw new ApiError(503, "METADATA_STORAGE_UNAVAILABLE", "Metadata could not be published. Nothing was written on-chain.");
+      const body = await response.text().catch(() => "");
+      const details = providerFailure(response, body);
+      this.logger.error?.("metadata.storage.failed", details);
+      throw new ApiError(503, "METADATA_STORAGE_UNAVAILABLE", `Metadata provider rejected the upload (HTTP ${response.status}): ${details.reason}. Nothing was written on-chain.`, details);
     }
     const body = await response.json().catch(() => null);
     const cid = String(body?.IpfsHash || "").trim();
