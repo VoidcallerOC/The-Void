@@ -108,6 +108,22 @@ export class IndexerStore {
     return rows[0] || null;
   }
 
+  async applyTransfer(event) {
+    return withTransaction(this.db, async (client) => {
+      const contractAddress = address(event.contractAddress, "contractAddress");
+      const from = address(event.from, "from");
+      const to = address(event.to, "to");
+      const tokenId = numeric(event.tokenId, "tokenId");
+      const amount = numeric(event.amount, "amount");
+      const { rows } = await client.query(`INSERT INTO transfers (chain_id, contract_address, token_id, from_wallet, to_wallet, amount, transaction_hash, block_number, block_hash, log_index, event_type, event_data, block_timestamp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (chain_id, transaction_hash, log_index) DO NOTHING RETURNING *`, [event.chainId, contractAddress, tokenId, from, to, amount, lower(event.transactionHash), event.blockNumber, lower(event.blockHash), event.logIndex, event.eventType, event.raw || {}, event.blockTimestamp]);
+      if (!rows[0]) return { duplicate: true };
+      const watermark = `${event.blockNumber}:${event.logIndex}`;
+      if (from !== "0x0000000000000000000000000000000000000000") await this.adjustOwnership(client, { chainId: event.chainId, contractAddress, tokenId, wallet: from, delta: -BigInt(amount), blockNumber: event.blockNumber, blockHash: event.blockHash, watermark });
+      if (to !== "0x0000000000000000000000000000000000000000") await this.adjustOwnership(client, { chainId: event.chainId, contractAddress, tokenId, wallet: to, delta: BigInt(amount), blockNumber: event.blockNumber, blockHash: event.blockHash, watermark });
+      return { duplicate: false, transfer: rows[0] };
+    });
+  }
+
   async applyMarketplaceEvent(event) {
     return withTransaction(this.db, async (client) => {
       const marker = await client.query(`INSERT INTO marketplace_event_projections (chain_id, marketplace_address, transaction_hash, log_index, listing_id, event_type) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING *`, [event.chainId, address(event.marketplaceAddress, "marketplaceAddress"), lower(event.transactionHash), event.logIndex, numeric(event.listingId, "listingId", { positive: true }), event.eventType]);

@@ -86,3 +86,15 @@ describe("indexer health contract filtering", () => {
     expect(db.query).toHaveBeenCalledWith(expect.stringContaining("contract_address = ANY($2::text[])"), [43113, [token]]);
   });
 });
+
+describe("ERC1155 transfer projection storage", () => {
+  it("persists a transfer and updates the recipient ownership snapshot atomically", async () => {
+    const { pool, client } = poolWith([
+      {}, { rows: [{ id: "transfer-1" }] }, { rows: [] }, {}, {}, {},
+    ]);
+    const result = await new IndexerStore(pool).applyTransfer({ chainId: 43113, contractAddress: token, transactionHash, blockNumber: 100, blockHash, logIndex: 4, eventType: "MINT", from: "0x0000000000000000000000000000000000000000", to: buyer, tokenId: "12", amount: "2", blockTimestamp: new Date(), raw: {} });
+    expect(result).toMatchObject({ duplicate: false, transfer: { id: "transfer-1" } });
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO transfers"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO ownership_snapshots"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
+  });
+});
