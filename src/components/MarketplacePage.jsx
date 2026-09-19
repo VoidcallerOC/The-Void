@@ -103,7 +103,7 @@ export function MarketplacePage() {
               </Link>
             )}
             {featured && <Link to={`/release/${featured.release.id}`} style={ghostBtn}>Open release</Link>}
-            <Link to="/studio?create=edition" style={ghostBtn}>Create edition</Link>
+            <Link to="/studio?create=track" style={ghostBtn}>Add tracks</Link>
           </div>
           <QuietStatus primary="Certified" secondary={marketplaceStatusLabel(secondary)} />
         </div>
@@ -181,13 +181,13 @@ export function MarketplacePage() {
         <section className="vc-artist-cta">
           <div>
             <Eyebrow red>For artists</Eyebrow>
-            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(36px, 5vw, 56px)", textTransform: "uppercase", lineHeight: 0.95, margin: "12px 0" }}>Publish a new edition</h2>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(36px, 5vw, 56px)", textTransform: "uppercase", lineHeight: 0.95, margin: "12px 0" }}>Publish a new release</h2>
             <p style={{ color: "var(--vc-bone-dim)", maxWidth: 560, lineHeight: 1.65, margin: 0 }}>
-              Artist Studio creates the release, edition, and on-chain relic on the certified Fuji contract.
+              Artist Studio creates the release, tracks, and on-chain relic on the certified Fuji contract.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Link to="/studio?create=edition" style={primaryBtn}>Create edition</Link>
+            <Link to="/studio?create=track" style={primaryBtn}>Add tracks</Link>
             <Link to="/studio" style={ghostBtn}>Open artist studio</Link>
           </div>
         </section>
