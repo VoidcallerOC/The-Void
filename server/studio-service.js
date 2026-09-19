@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
+import deployment from "../config/fuji-release.json" with { type: "json" };
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -22,6 +24,16 @@ function contractAddress(value, field) {
   const address = requiredText(value, field, { max: 42 }).toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(address)) throw new ApiError(400, "INVALID_CONTRACT_ADDRESS", `${field} must be a 20-byte EVM address.`);
   return address;
+}
+
+const CERTIFIED_CHAIN_ID = deployment.chainId;
+const CERTIFIED_CONTRACT = deployment.contractAddress.toLowerCase();
+function certifiedTokenId(releaseSlug, editionSlug) {
+  const releaseId = ethers.encodeBytes32String(requiredText(releaseSlug, "release.slug", { max: 31 }));
+  const editionId = ethers.encodeBytes32String(requiredText(editionSlug, "edition.slug", { max: 31 }));
+  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32", "bytes32"], ["the-void:edition:v1", releaseId, editionId]));
+  const tokenId = BigInt(digest);
+  return tokenId === 0n ? 1n : tokenId;
 }
 
 function lifecycle(value, field = "status") { return enumValue(String(value || "").toUpperCase(), field, LIFECYCLE); }
@@ -133,14 +145,15 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
-    const selectedChainId = chainId(input.chainId, "edition.chainId");
-    const address = contractAddress(input.contractAddress, "edition.contractAddress");
-    const tokenId = nonNegativeBigInt(input.tokenId, "edition.tokenId");
+    const selectedChainId = CERTIFIED_CHAIN_ID;
+    const address = CERTIFIED_CONTRACT;
+    const editionSlug = normalizedSlug(input.slug || input.id || input.name, "edition.slug");
+    const tokenId = certifiedTokenId(release.slug, editionSlug);
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
     const edition = await this.repository.inTransaction(async (repository) => {
       const contract = await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
       const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? null : positiveBigInt(input.quantity, "edition.quantity"), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
-      await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: optionalText(input.metadataUri, "edition.metadataUri", { max: 2048 }), metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
+      await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
       return saved;
     });
     await this.audit({ identity, request, eventType: "STUDIO_EDITION_CREATED", subjectType: "edition", subjectId: edition.id, payload: { releaseId: release.id, chainId: selectedChainId } });

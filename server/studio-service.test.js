@@ -63,21 +63,22 @@ describe("Artist Studio", () => {
   });
 
   it("creates a contract-agnostic ERC-1155 edition and its experience", async () => {
-    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1" }] });
+    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     const edition = await instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", chainId: 43113, contractAddress: contract, tokenId: "7", quantity: "100", priceWei: "1000000000000000000" } });
     expect(edition).toMatchObject({ id: "edition-1", status: "DRAFT" });
-    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: contract, contractType: "ERC1155", chainId: 43113 }));
-    expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: "7" }));
+    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: "0x262b774cf9a1949170b58e2d57f6189980fe757b", contractType: "ERC1155", chainId: 43113 }));
+    expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: expect.any(BigInt), metadataUri: null }));
 
     const experienceService = service({ rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] });
     const experience = await experienceService.instance.createExperience({ request, editionId: "edition-1", input: { id: "experience-1", title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["7"] }], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] } } });
     expect(experience).toMatchObject({ id: "experience-1", edition_id: "edition-1", status: "DRAFT" });
   });
 
-  it("rejects invalid contract/token data before a database write", async () => {
-    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1" }] });
-    await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", chainId: 43113, contractAddress: "not-an-address", tokenId: "-1", quantity: "0", priceWei: "0" } })).rejects.toMatchObject({ code: "INVALID_CONTRACT_ADDRESS" });
-    expect(repo.saveContract).not.toHaveBeenCalled();
+  it("ignores artist blockchain fields and derives the certified contract and token", async () => {
+    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
+    await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", slug: "bad", chainId: 1, contractAddress: "not-an-address", tokenId: "-1", quantity: "1", priceWei: "1" } })).resolves.toMatchObject({ id: expect.stringMatching(/^edition-/) });
+    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ chainId: 43113, address: "0x262b774cf9a1949170b58e2d57f6189980fe757b" }));
+    expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ tokenId: expect.any(BigInt), metadataUri: null }));
 
     const unauthorized = service({ rows: [] });
     await expect(unauthorized.instance.createEdition({ request, releaseId: "release-1", input: { name: "Denied", chainId: 43113, contractAddress: contract, tokenId: "1", quantity: "1", priceWei: "1" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });

@@ -3,22 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import {
-  FUJI_RELEASE_CONFIG,
-  FUJI_ROLES,
-  assertFujiAddress,
-  assertFujiGas,
-  encodeCreateFujiEdition,
-  fujiExplorerUrl,
-  fujiSlug,
-  fujiTokenId,
-  readFujiPaused,
-  readFujiRole,
-  sendFujiTransaction,
-  verifyFujiEditionCreation,
-} from "../lib/fuji-release.js";
-import { createArtist, createEdition, createExperience, createRelease, createToken, EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
-import { notifyStudioOverlay, upsertStudioOverlay, useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { fujiSlug } from "../lib/fuji-release.js";
+import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
+import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 
@@ -30,7 +17,7 @@ const STEPS = [
   ["edition", "Edition details"],
   ["experience", "Experiences"],
   ["supply", "Supply"],
-  ["metadata", "Metadata"],
+  ["preview", "Preview"],
   ["publish", "Publish"],
 ];
 
@@ -78,7 +65,6 @@ function initialState() {
     editionArtwork: "/assets/voidcaller_art_4.png",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
-    metadataUri: "",
     priceWei: "10000000000000000",
     experienceTitle: "",
     experienceDescription: "",
@@ -98,67 +84,12 @@ export function ArtistStudioPage() {
   const [artistId, setArtistId] = useState("");
   const [releaseId, setReleaseId] = useState("");
   const [editionId, setEditionId] = useState("");
-  const [experienceId, setExperienceId] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
-  const [txHash, setTxHash] = useState("");
-  const [published, setPublished] = useState(false);
-  const [onChainEdition, setOnChainEdition] = useState(null);
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
 
-  const releaseSlug = form.releaseSlug || safeSlug(form.releaseTitle);
-  const editionSlug = form.editionSlug || safeSlug(form.editionName);
-  const tokenPreview = releaseSlug && editionSlug ? fujiTokenId(releaseSlug, editionSlug).toString() : "";
-
-  const persistOverlay = ({ status = "available", tokenId, transactionHash, artistKey, releaseKey, editionKey }) => {
-    const nextArtistId = artistKey || artistId || safeSlug(form.artistSlug || form.artistName) || "studio-artist";
-    const nextReleaseId = releaseKey || releaseId || releaseSlug;
-    const nextEditionId = editionKey || editionId || editionSlug;
-    const nextExperienceId = experienceId || (form.experienceTitle ? `${nextEditionId}-session` : "");
-    const artist = createArtist({ id: nextArtistId, name: form.artistName || "Untitled artist", handle: form.artistSlug || nextArtistId, bio: form.artistBio, verified: true, avatar: form.releaseArtwork, banner: form.releaseArtwork });
-    const release = createRelease({ id: nextReleaseId, artistId: artist.id, title: form.releaseTitle, subtitle: "Studio release", description: form.releaseDescription, artwork: form.releaseArtwork, status: "published", experiences: nextExperienceId ? [nextExperienceId] : [], tracks: [] });
-    const includes = form.includes.split("\n").map((line) => line.trim()).filter(Boolean);
-    const edition = createEdition({
-      id: nextEditionId,
-      releaseId: release.id,
-      title: form.editionName,
-      description: form.editionDescription,
-      includes,
-      tokenIds: tokenId ? [String(tokenId)] : [],
-      contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
-      chainId: FUJI_RELEASE_CONFIG.chainId,
-      chain: FUJI_RELEASE_CONFIG.networkName,
-      supply: form.quantity,
-      status,
-      metadataUri: form.metadataUri || `ipfs://the-void-${nextEditionId}`,
-      experienceIds: nextExperienceId ? [nextExperienceId] : [],
-      artwork: form.editionArtwork || form.releaseArtwork,
-      tier: "standard",
-    });
-    const experience = form.experienceTitle
-      ? createExperience({
-        id: nextExperienceId,
-        productType: form.productType,
-        title: form.experienceTitle,
-        description: form.experienceDescription,
-        editionId: edition.id,
-        requirements: tokenId ? [{ type: "ownership", contract: FUJI_RELEASE_CONFIG.contractAddress, tokenIds: [String(tokenId)], minAmount: 1, chainId: FUJI_RELEASE_CONFIG.chainId }] : [],
-        media: { type: experienceCategory(form.productType)?.deliveryType?.toLowerCase() || "audio", protected: false, previewAvailable: true },
-      })
-      : null;
-    upsertStudioOverlay({
-      artists: [artist],
-      releases: [release],
-      editions: [edition],
-      tokens: tokenId ? [createToken({ id: `${edition.id}-token`, editionId: edition.id, tokenId: String(tokenId), name: edition.title })] : [],
-      experiences: experience ? [experience] : [],
-    });
-    notifyStudioOverlay();
-    if (nextExperienceId) setExperienceId(nextExperienceId);
-    return { artist, release, edition, experience, transactionHash };
-  };
 
   const ensureArtistAndRelease = async () => {
     const nextArtistSlug = fujiSlug(form.artistSlug || form.artistName, "artist slug");
@@ -205,7 +136,6 @@ export function ArtistStudioPage() {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
       const nextEditionSlug = fujiSlug(form.editionSlug || form.editionName, "edition slug");
-      const tokenId = fujiTokenId(ids.releaseSlug, nextEditionSlug).toString();
       setEditionId(nextEditionSlug);
       const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: editionId ? "PATCH" : "POST",
@@ -214,11 +144,7 @@ export function ArtistStudioPage() {
             name: form.editionName,
             description: form.editionDescription,
             artwork: form.editionArtwork,
-            chainId: FUJI_RELEASE_CONFIG.chainId,
-            contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
-            tokenId,
             quantity: form.quantity,
-            metadataUri: form.metadataUri || `ipfs://the-void-${nextEditionSlug}`,
             priceWei: form.priceWei,
             marketplace: {},
             metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.editionArtwork },
@@ -239,56 +165,9 @@ export function ArtistStudioPage() {
   const publishEdition = async () => {
     setBusy("publish"); setNotice("");
     try {
-      if (!wallet.account) throw new Error("Connect a wallet first.");
-      if (!wallet.authenticated) await wallet.authenticate();
-      const provider = wallet.getProvider();
-      const nextReleaseSlug = fujiSlug(form.releaseSlug || form.releaseTitle, "release slug");
-      const nextEditionSlug = fujiSlug(form.editionSlug || form.editionName, "edition slug");
       if (!form.editionName) throw new Error("Enter an edition name.");
       if (!form.quantity || BigInt(form.quantity) <= 0n) throw new Error("Edition supply must be greater than zero.");
-      assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress);
-      const paused = await readFujiPaused(provider);
-      if (paused) throw new Error("The certified Fuji release is paused.");
-      const hasArtistRole = await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account);
-      if (!hasArtistRole) {
-        throw new Error("This wallet does not have ARTIST_ROLE on VoidRelease1155. Create Edition is limited to authorized artist wallets. The transaction was not sent.");
-      }
-      const ids = await ensureArtistAndRelease();
-      const metadataUri = form.metadataUri || `ipfs://the-void-${nextEditionSlug}`;
-      const { tokenId, data } = encodeCreateFujiEdition({ releaseId: nextReleaseSlug, editionId: nextEditionSlug, maxSupply: form.quantity, metadataUri });
-      await assertFujiGas(provider, { from: wallet.account, data });
-      const result = await sendFujiTransaction({ provider, from: wallet.account, data });
-      const verified = await verifyFujiEditionCreation(provider, { transactionHash: result.hash, releaseId: nextReleaseSlug, editionId: nextEditionSlug, tokenId });
-      setTxHash(result.hash);
-      setEditionId(nextEditionSlug);
-      setReleaseId(ids.releaseId || nextReleaseSlug);
-      setOnChainEdition({ tokenId: tokenId.toString(), blockNumber: verified.receipt.blockNumber ? Number.parseInt(verified.receipt.blockNumber, 16) : null, mintedSupply: verified.edition.mintedSupply.toString(), maxSupply: verified.edition.maxSupply.toString() });
-      await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
-          method: "POST",
-          payload: {
-            id: nextEditionSlug,
-            name: form.editionName,
-            description: form.editionDescription,
-            artwork: form.editionArtwork,
-            chainId: FUJI_RELEASE_CONFIG.chainId,
-            contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
-            tokenId: tokenId.toString(),
-            quantity: form.quantity,
-            metadataUri,
-            priceWei: form.priceWei,
-            marketplace: {},
-            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.editionArtwork },
-          },
-          headers,
-        });
-      await studioFetch(`/studio/editions/${encodeURIComponent(nextEditionSlug)}`, {
-          method: "PATCH",
-          payload: { status: "PUBLISHED", metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.editionArtwork, fuji: { contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: FUJI_RELEASE_CONFIG.chainId, tokenId: tokenId.toString(), transactionHash: result.hash, metadataUri } } },
-          headers,
-        });
-      persistOverlay({ status: "available", tokenId: tokenId.toString(), transactionHash: result.hash, artistKey: ids.artistId, releaseKey: nextReleaseSlug, editionKey: nextEditionSlug });
-      setPublished(true);
-      setNotice(`Edition created on Fuji and verified on-chain. It is now available to collect.`);
+      throw new Error("Publishing is paused: automatic metadata storage is not configured. No blockchain transaction was sent.");
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -329,7 +208,7 @@ export function ArtistStudioPage() {
         <Eyebrow red>† Artist studio</Eyebrow>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 9vw, 92px)", textTransform: "uppercase", lineHeight: 0.9, margin: "16px 0" }}>Create the relic</h1>
         <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>
-          Artist → Release → Edition → Experience → Collect. Create Edition publishes to the certified Fuji VoidRelease1155. It never reports success without a receipt.
+          Artist → Release → Edition → Experience → Collect. The Void handles the infrastructure underneath and never reports success without a receipt.
         </p>
       </header>
 
@@ -342,7 +221,7 @@ export function ArtistStudioPage() {
         <button type="button" className={`vc-studio-action${createIntent === "edition" ? " is-primary" : ""}`} onClick={goCreateEdition}>
           <Eyebrow red>02</Eyebrow>
           <h2>Create edition</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Edition details, experiences, supply, metadata, publish.</p>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Edition details, experiences, supply, preview, publish.</p>
         </button>
       </div>
 
@@ -368,7 +247,7 @@ export function ArtistStudioPage() {
         ))}
       </nav>
 
-      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: published || notice.includes("saved") ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
+      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: notice.includes("saved") ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
 
       {step === "release" && (
         <section style={card} id="create-edition">
@@ -455,25 +334,33 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>How many relics</h2>
           <TextField title="Quantity" value={form.quantity} onChange={(value) => set("quantity", value)} required />
           <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-          <p style={{ color: "var(--vc-bone-dim)" }}>Certified chain {FUJI_RELEASE_CONFIG.chainId} · VoidRelease1155. Token ID is derived after the slug is set.</p>
+          <p style={{ color: "var(--vc-bone-dim)" }}>Set the number of collectors this release is made for.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("experience")}>Back</button>
-            <button type="button" style={primaryBtn} onClick={() => setStep("metadata")}>Continue</button>
+            <button type="button" style={primaryBtn} onClick={() => setStep("preview")}>Continue</button>
           </div>
         </section>
       )}
 
-      {step === "metadata" && (
+      {step === "preview" && (
         <section style={card}>
-          <Eyebrow red>Metadata</Eyebrow>
-          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>On-chain record</h2>
-          <TextField title="Metadata URI" value={form.metadataUri} onChange={(value) => set("metadataUri", value)} placeholder="ipfs://the-void-chapter-i" />
-          <TextField title="Certified chain ID" value={String(FUJI_RELEASE_CONFIG.chainId)} onChange={() => {}} readOnly />
-          <TextField title="Certified contract" value={FUJI_RELEASE_CONFIG.contractAddress} onChange={() => {}} readOnly />
-          <TextField title="Deterministic token ID" value={tokenPreview || "Calculated from release and edition slugs"} onChange={() => {}} readOnly />
+          <Eyebrow red>Release preview</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>{form.releaseTitle || "Untitled release"}</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 240px) 1fr", gap: 24, alignItems: "start", marginTop: 20 }}>
+            <img src={form.releaseArtwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover" }} />
+            <div>
+              <p><strong>Artist</strong><br />{form.artistName || "—"}</p>
+              <p><strong>Release</strong><br />{form.releaseTitle || "—"}</p>
+              <p><strong>Type</strong><br />EP</p>
+              <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
+              <p><strong>Experiences</strong><br />{form.experienceTitle || experienceCategoryLabel(form.productType)}</p>
+              <p><strong>Supply</strong><br />{form.quantity || "—"}</p>
+            </div>
+          </div>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginTop: 24 }}>Publishing creates the on-chain collectible for this release. No blockchain knowledge required.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("supply")}>Back</button>
-            <button type="button" style={primaryBtn} onClick={() => setStep("publish")}>Review and publish</button>
+            <button type="button" style={primaryBtn} onClick={() => setStep("publish")}>Publish release</button>
           </div>
         </section>
       )}
@@ -494,22 +381,6 @@ export function ArtistStudioPage() {
               {busy === "publish" ? "Confirming…" : "Create edition"}
             </button>
           </div>
-          {published && (
-            <div style={{ marginTop: 24, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ ...card, width: "100%", borderColor: "var(--vc-bone-dim)" }}>
-                <Eyebrow red>Edition created · on-chain</Eyebrow>
-                <p style={{ margin: "10px 0 0", color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Avalanche Fuji · chain {FUJI_RELEASE_CONFIG.chainId} · token {onChainEdition?.tokenId || tokenPreview}</p>
-              </div>
-              <Link to={`/edition/${editionId || editionSlug}`} style={primaryBtn}>View edition</Link>
-              <Link to={`/release/${releaseId || releaseSlug}`} style={ghostBtn}>View release</Link>
-              <Link to="/marketplace" style={ghostBtn}>Marketplace</Link>
-            </div>
-          )}
-          {txHash && (
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all", marginTop: 16 }}>
-              Receipt · <a href={fujiExplorerUrl("tx", txHash)} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{txHash}</a>
-            </p>
-          )}
         </section>
       )}
     </section>
