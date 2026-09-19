@@ -1,0 +1,392 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,800;1,900&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import "tailwindcss";
+
+/* VOIDCALLER — official band display typeface. High-contrast Didone.
+   The hero wordmark is cut from this same face, so they share one silhouette. */
+@font-face {
+  font-family: "Voidcaller";
+  src: url("/fonts/Voidcaller-Regular.ttf?v=2") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --color-void: #000000;
+  --color-abyss: #0a0a0b;
+  --color-pit: #131315;
+  --color-ash: #1f1f22;
+  --color-smoke: #3a3a3f;
+  --color-bone: #f2ede2;
+  --color-bone-dim: #b8b2a4;
+  --color-skull: #ffffff;
+  --color-blood: #b80710;
+  --color-crimson: #e10f1f;
+  --color-ember: #ff3d2e;
+  --color-rust: #5a0e14;
+  --color-clot: #2a0408;
+  --color-glitch: #4de3e1;
+  --font-display: "Voidcaller", "Times New Roman", serif;
+  --font-body: "Archivo", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+}
+
+:root {
+  --vc-void: #000000;
+  --vc-abyss: #0a0a0b;
+  --vc-pit: #131315;
+  --vc-ash: #1f1f22;
+  --vc-smoke: #3a3a3f;
+  --vc-bone: #f2ede2;
+  --vc-bone-dim: #b8b2a4;
+  --vc-skull: #ffffff;
+  --vc-blood: #b80710;
+  --vc-crimson: #e10f1f;
+  --vc-ember: #ff3d2e;
+  --vc-rust: #5a0e14;
+  --vc-clot: #2a0408;
+  --vc-glitch-cyan: #4de3e1;
+  --bg: var(--vc-void);
+  --bg-raised: var(--vc-abyss);
+  --fg: var(--vc-bone);
+  --fg-muted: var(--vc-bone-dim);
+  --accent: var(--vc-crimson);
+  --font-display: "Voidcaller", "Times New Roman", serif;
+  --font-body: "Archivo", "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --t-mega: clamp(72px, 12vw, 200px);
+  --t-h1: clamp(48px, 6vw, 88px);
+  --t-h2: clamp(36px, 4vw, 56px);
+  --lh-display: 0.95;
+  --lh-tight: 1.1;
+  --tr-tight: -0.02em;
+  --tr-normal: 0;
+  --tr-loose: 0.08em;
+  --tr-shout: 0.18em;
+  --ease-blade: cubic-bezier(0.6, 0, 0.2, 1);
+  --d-fast: 120ms;
+  --d-base: 220ms;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--vc-void);
+    color: var(--vc-bone);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: var(--vc-blood);
+    color: #fff;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  a {
+    color: inherit;
+  }
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+/* Display face is unicase Regular only — never let the browser faux-bold it. */
+.font-display,
+.vc-mega,
+.vc-h1,
+.vc-h2,
+.vc-hero-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
+.vc-mega {
+  font-size: var(--t-mega);
+  line-height: var(--lh-display);
+  text-transform: uppercase;
+}
+.vc-h1 {
+  font-size: var(--t-h1);
+  line-height: var(--lh-display);
+  text-transform: uppercase;
+}
+.vc-h2 {
+  font-size: var(--t-h2);
+  line-height: var(--lh-tight);
+  text-transform: uppercase;
+}
+.vc-hero-title {
+  font-size: clamp(56px, 11vw, 118px);
+  line-height: 0.86;
+  text-transform: uppercase;
+}
+
+@keyframes vc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 8px var(--vc-ember);
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: 0 0 16px var(--vc-ember);
+  }
+}
+@keyframes vc-rgb-flicker {
+  0% {
+    text-shadow: none;
+  }
+  45% {
+    text-shadow:
+      -2px 0 var(--vc-crimson),
+      2px 0 var(--vc-glitch-cyan);
+  }
+  60% {
+    text-shadow:
+      1px 0 var(--vc-crimson),
+      -1px 0 var(--vc-glitch-cyan);
+  }
+  100% {
+    text-shadow: none;
+  }
+}
+@keyframes vc-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.vc-navlink {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--vc-bone-dim);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color 120ms var(--ease-blade);
+}
+.vc-navlink:hover {
+  color: var(--vc-crimson);
+  text-decoration: underline;
+  text-decoration-color: var(--vc-crimson);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+.vc-navlink.active {
+  color: var(--vc-bone);
+}
+
+.vc-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--vc-void);
+  color: var(--vc-bone);
+}
+.vc-main {
+  flex: 1;
+  padding-top: 88px;
+}
+.vc-page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 48px clamp(16px, 4vw, 32px) 96px;
+  animation: vc-fade 400ms var(--ease-blade) both;
+}
+
+.vc-hero-bleed {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--vc-ash);
+  min-height: min(88vh, 780px);
+  display: flex;
+  align-items: flex-end;
+}
+.vc-hero-bleed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 18% 80%, rgba(184, 7, 16, 0.28), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 90% 10%, rgba(42, 4, 8, 0.7), transparent 55%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.88) 100%);
+  pointer-events: none;
+}
+.vc-hero-bleed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.09;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  pointer-events: none;
+}
+.vc-hero-copy {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 120px clamp(16px, 4vw, 32px) 64px;
+}
+
+.vc-card {
+  border: 1px solid var(--vc-ash);
+  background: var(--vc-abyss);
+  padding: 24px;
+}
+.vc-field {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 7px;
+  padding: 12px;
+  min-height: 44px;
+  color: var(--vc-bone);
+  background: var(--vc-pit);
+  border: 1px solid var(--vc-ash);
+  font-family: var(--font-body);
+  font-size: 16px;
+  border-radius: 2px;
+  outline: none;
+  transition:
+    border-color 160ms var(--ease-blade),
+    box-shadow 160ms var(--ease-blade);
+}
+.vc-field:focus {
+  border-color: var(--vc-crimson);
+  box-shadow: 0 0 0 1px var(--vc-crimson);
+}
+.vc-field-error {
+  border-color: var(--vc-crimson);
+}
+.vc-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vc-bone-dim);
+  margin-top: 16px;
+}
+.vc-error {
+  color: var(--vc-crimson);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+}
+.vc-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.vc-market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 22px;
+}
+.vc-userchip {
+  color: var(--vc-bone);
+  font-family: var(--font-body);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.vc-userchip .rounded-full {
+  border-radius: 2px;
+  background: var(--vc-pit) !important;
+  border: 1px solid var(--vc-ash);
+  color: var(--vc-bone);
+}
+
+select.vc-field option {
+  background: var(--vc-pit);
+  color: var(--vc-bone);
+}
+
+.vc-nav-burger {
+  display: none;
+}
+@media (max-width: 1180px) {
+  .vc-nav-links {
+    display: none !important;
+  }
+  .vc-nav-burger {
+    display: inline-flex !important;
+  }
+}
+@media (max-width: 768px) {
+  .vc-wordmark {
+    display: none;
+  }
+  .vc-nav-links,
+  .vc-nav-cta-extra {
+    display: none !important;
+  }
+  .vc-nav-burger {
+    display: inline-flex !important;
+  }
+  .vc-grid-2,
+  .vc-footer-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .vc-hero-bleed {
+    min-height: 0;
+    align-items: stretch;
+  }
+  .vc-hero-copy {
+    padding: 96px 16px 36px;
+  }
+  .vc-footer-bottom {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vc-page,
+  .vc-navlink,
+  .vc-field {
+    animation: none !important;
+    transition: none !important;
+  }
+}
