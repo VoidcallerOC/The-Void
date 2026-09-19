@@ -113,6 +113,28 @@ describe("private storage and old public paths", () => {
     expect(config).toMatchObject({ driver: "pinata", pinata: { gateway: "https://media.example" }, objectUrlHosts: ["media.example"] });
   });
 
+  it("defaults to Pinata in production when MEDIA_STORAGE_DRIVER is absent or empty", () => {
+    const pinataEnv = { NODE_ENV: "production", PINATA_JWT: "p".repeat(32), PINATA_GATEWAY_URL: "https://media.example", MEDIA_AUDIT_HASH_SECRET: "b".repeat(32) };
+    const missing = loadMediaConfig(pinataEnv);
+    expect(missing).toMatchObject({ driver: "pinata", pinata: { gateway: "https://media.example" }, objectUrlHosts: ["media.example"] });
+    const empty = loadMediaConfig({ ...pinataEnv, MEDIA_STORAGE_DRIVER: "" });
+    expect(empty).toMatchObject({ driver: "pinata" });
+    const blank = loadMediaConfig({ ...pinataEnv, MEDIA_STORAGE_DRIVER: "   " });
+    expect(blank).toMatchObject({ driver: "pinata" });
+  });
+
+  it("preserves an explicitly supplied MEDIA_STORAGE_DRIVER value", () => {
+    const filesystem = loadMediaConfig({ MEDIA_STORAGE_DRIVER: "filesystem" });
+    expect(filesystem).toMatchObject({ driver: "filesystem" });
+    const object = loadMediaConfig({ MEDIA_STORAGE_DRIVER: "object", R2_ACCOUNT_ID: "a".repeat(32), R2_BUCKET: "void-private", R2_ACCESS_KEY_ID: "access", R2_SECRET_ACCESS_KEY: "s".repeat(32), MEDIA_OBJECT_URL_HOSTS: "media.example", MEDIA_OBJECT_PREFIXES: "record" });
+    expect(object).toMatchObject({ driver: "object", r2: { bucket: "void-private" } });
+  });
+
+  it("still rejects an explicitly supplied invalid MEDIA_STORAGE_DRIVER value", () => {
+    expect(() => loadMediaConfig({ MEDIA_STORAGE_DRIVER: "garbage" })).toThrow(/MEDIA_STORAGE_DRIVER must be filesystem, pinata, or object/);
+    expect(() => loadMediaConfig({ NODE_ENV: "production", MEDIA_STORAGE_DRIVER: "garbage" })).toThrow(/MEDIA_STORAGE_DRIVER must be filesystem, pinata, or object/);
+  });
+
   it("signs only configured R2 prefixes and accepts only approved HTTPS URLs", async () => {
     const config = { driver: "object", r2: { bucket: "void-private", endpoint: "https://a".repeat(1), accessKeyId: "access", secretAccessKey: "secret" }, objectUrlHosts: ["media.example"], protectedPrefixes: ["record"], signedUrlTtlSeconds: 60 };
     const signer = vi.fn().mockResolvedValue("https://media.example/audio?signature=opaque");
