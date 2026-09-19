@@ -6,7 +6,6 @@ import {
   attachIndexedListings,
   certifiedFujiReleaseUnchanged,
   collectableFirst,
-  editionPriceLabel,
   editionTypeLabel,
   featuredMarketplaceRecord,
   findMarketplaceEdition,
@@ -23,7 +22,8 @@ import {
   resolveSecondaryStatus,
   secondaryTradingIsLive,
 } from "./marketplace-surface.js";
-import { FUJI_INTEGRATION_CATALOG, VOIDCALLER_CATALOG } from "../data.js";
+import { VOIDCALLER_CATALOG } from "../data.js";
+import { FUJI_INTEGRATION_CATALOG } from "./fixtures/summit-fuji-catalog.js";
 
 const indexedListing = {
   listingId: "7",
@@ -69,35 +69,41 @@ describe("marketplace infrastructure status", () => {
     expect(marketplaceCopy().eyebrow).toMatch(/music marketplace/i);
   });
 
-  it("features certified available releases ahead of minted catalog relics", () => {
+  it("does not feature Summit as a public marketplace release", () => {
     const records = marketplaceCatalog();
+    expect(records.some((record) => record.release.id === "summit-demo-release")).toBe(false);
+    expect(flattenMarketplaceEditions().some((item) => item.edition.id === "summit-demo-edition")).toBe(false);
     const featured = featuredMarketplaceRecord(records);
-    expect(featured.release.id).toBe("summit-demo-release");
-    expect(featured.editions[0].primary.availability).toBe("available");
-    expect(collectableFirst(flattenMarketplaceEditions())[0].edition.id).toBe("summit-demo-edition");
-    expect(editionPriceLabel(featured.editions[0].edition)).toBeNull();
+    expect(featured.release.id).not.toBe("summit-demo-release");
+    expect(featured.release.title).not.toMatch(/SUMMIT/i);
+    expect(featured.editions[0].edition.title).not.toMatch(/SUMMIT/i);
   });
 });
 
 describe("music-native catalog projection", () => {
-  it("projects artist → release → edition → experience without token IDs as the product", () => {
-    const summit = marketplaceCatalog().find((record) => record.release.id === "summit-demo-release");
-    expect(summit.artist.name).toBe("THE VOID");
-    expect(summit.release.title).toContain("SUMMIT");
-    expect(summit.editions[0].edition.title).toBe("SUMMIT EDITION");
-    expect(summit.editions[0].experiences[0].title).toBe("THE VOID — SUMMIT SESSION");
-    expect(summit.editions[0].primary.href).toBe("/edition/summit-demo-edition");
-    expect(summit.editions[0].primary.status).toBe(MARKETPLACE_STATE.LIVE);
-    expect(summit.editions[0].primary.certified).toBe(true);
-    expect(editionTypeLabel(summit.editions[0].edition)).toBe("Collectible release");
+  it("projects artist → release → edition → experience for the public Voidcaller catalog", () => {
+    const relic = marketplaceCatalog().find((record) => record.release.id === "voidcaller-self-titled");
+    expect(relic.artist.name).toBe("Voidcaller");
+    expect(relic.release.title).toBe("VOIDCALLER");
+    expect(relic.editions[0].edition.title).toBe("Chapter I · The Relic");
+    expect(relic.editions[0].primary.href).toBe("/edition/voidcaller-chapter-i");
+    expect(editionTypeLabel(relic.editions[0].edition)).toBe("Collectible release");
   });
 
-  it("keeps the certified Summit Fuji configuration untouched", () => {
+  it("keeps the certified Fuji configuration untouched", () => {
     expect(certifiedFujiReleaseUnchanged()).toBe(true);
     expect(FUJI_RELEASE_CONFIG.chainId).toBe(43113);
     expect(FUJI_RELEASE_CONFIG.contractName).toBe("VoidRelease1155");
     expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x262B774cf9a1949170B58E2d57F6189980FE757b");
-    expect(findMarketplaceEdition("summit-demo-edition").edition.contractAddress).toBe(FUJI_RELEASE_CONFIG.contractAddress);
+  });
+
+  it("can still project the Summit fixture when tests supply it explicitly", () => {
+    const summit = marketplaceCatalog([FUJI_INTEGRATION_CATALOG]).find((record) => record.release.id === "summit-demo-release");
+    expect(summit.editions[0].edition.title).toBe("SUMMIT EDITION");
+    expect(summit.editions[0].primary.href).toBe("/edition/summit-demo-edition");
+    expect(summit.editions[0].primary.certified).toBe(true);
+    expect(findMarketplaceEdition("summit-demo-edition", [FUJI_INTEGRATION_CATALOG]).edition.contractAddress).toBe(FUJI_RELEASE_CONFIG.contractAddress);
+    expect(collectableFirst(flattenMarketplaceEditions([FUJI_INTEGRATION_CATALOG]))[0].edition.id).toBe("summit-demo-edition");
   });
 
   it("labels minted Voidcaller relics as primary-complete, not as live secondary listings", () => {
@@ -115,7 +121,7 @@ describe("music-native catalog projection", () => {
       releases: [{ type: "release", id: "the-repair", artistId: "forge", title: "THE REPAIR", subtitle: "", description: "Chapter I", story: "", status: "published", artwork: "/assets/voidcaller_art_5.png", editions: [], tracks: [], experiences: [] }],
       editions: [{ type: "edition", id: "chapter-i-the-repair", releaseId: "the-repair", title: "CHAPTER I — THE REPAIR", description: "ERC-1155 release edition", includes: ["Full self-titled EP"], tokenIds: ["1"], contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113, chain: "Avalanche Fuji", supply: "25", status: "available", metadataUri: "ipfs://x", experienceIds: [], experiences: [], tier: "standard", valueProposition: "" }],
     };
-    const records = marketplaceCatalog([VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG, overlay]);
+    const records = marketplaceCatalog([VOIDCALLER_CATALOG, overlay]);
     const created = records.find((record) => record.release.id === "the-repair");
     expect(created.artist.name).toBe("Forge");
     expect(created.editions[0].primary.href).toBe("/edition/chapter-i-the-repair");

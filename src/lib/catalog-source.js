@@ -8,8 +8,9 @@ import {
   createToken,
   EXPERIENCE_TYPES,
 } from "../domain/models.js";
-import { VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG } from "../data.js";
+import { VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
+import { stripSummitDemoCatalog } from "./summit-demo.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -26,7 +27,7 @@ function storage() {
 }
 
 export function baseCatalogs() {
-  return [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG];
+  return [VOIDCALLER_CATALOG];
 }
 
 export function readStudioOverlay(store = storage()) {
@@ -189,12 +190,12 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
     fetchJson("/api/editions", { fetchImpl, signal }).catch(() => []),
     fetchJson("/api/experiences", { fetchImpl, signal }).catch(() => []),
   ]);
-  return mapPublishedCatalog({
+  return stripSummitDemoCatalog(mapPublishedCatalog({
     artists: asArray(artists),
     releases: asArray(releases),
     editions: asArray(editions),
     experiences: asArray(experiences),
-  });
+  }));
 }
 
 export function useMarketplaceCatalogs() {
@@ -220,7 +221,7 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   return useMemo(
-    () => mergeCatalogs([VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG, overlay, published]),
+    () => stripSummitDemoCatalog(mergeCatalogs([...baseCatalogs(), overlay, published])),
     [overlay, published],
   );
 }

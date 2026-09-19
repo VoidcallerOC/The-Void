@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG } from "../data.js";
+import { VOIDCALLER_CATALOG } from "../data.js";
+import { FUJI_INTEGRATION_CATALOG } from "./fixtures/summit-fuji-catalog.js";
 import { createArtist, createCatalog, createEdition, createRelease } from "../domain/models.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import {
+  baseCatalogs,
+  fetchPublishedCatalog,
   mapPublishedCatalog,
   mergeCatalogs,
   readStudioOverlay,
@@ -10,23 +13,33 @@ import {
   upsertStudioOverlay,
   writeStudioOverlay,
 } from "./catalog-source.js";
+import { stripSummitDemoCatalog } from "./summit-demo.js";
 
 describe("catalog source", () => {
-  it("keeps the static Voidcaller and Summit catalogs canonical when merging", () => {
+  it("keeps Summit out of the production catalog", () => {
+    expect(baseCatalogs()).toEqual([VOIDCALLER_CATALOG]);
+    expect(baseCatalogs().some((catalog) => catalog.releases.some((item) => item.id === "summit-demo-release"))).toBe(false);
+    const leaked = mergeCatalogs([VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]);
+    expect(stripSummitDemoCatalog(leaked).releases.some((item) => item.id === "summit-demo-release")).toBe(false);
+    expect(stripSummitDemoCatalog(leaked).editions.some((item) => item.id === "summit-demo-edition")).toBe(false);
+  });
+
+  it("keeps the static Voidcaller catalog canonical when merging overlays", () => {
     const overlay = createCatalog({
       artists: [createArtist({ id: "voidcaller", name: "Should not win" }), createArtist({ id: "new-artist", name: "New" })],
       releases: [createRelease({ id: "new-release", artistId: "new-artist", title: "New Record" })],
       editions: [createEdition({ id: "new-edition", releaseId: "new-release", title: "New Edition", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113 })],
     });
-    const merged = mergeCatalogs([VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG, overlay]);
+    const merged = mergeCatalogs([VOIDCALLER_CATALOG, overlay]);
     expect(merged.artists.find((item) => item.id === "voidcaller").name).toBe("Voidcaller");
     expect(merged.artists.some((item) => item.id === "new-artist")).toBe(true);
-    expect(merged.editions.some((item) => item.id === "summit-demo-edition")).toBe(true);
+    expect(merged.editions.some((item) => item.id === "summit-demo-edition")).toBe(false);
     expect(merged.editions.some((item) => item.id === "new-edition")).toBe(true);
   });
 
-  it("resolves Summit records without falling back to the Voidcaller catalog", () => {
-    expect(resolveCatalog("summit-demo-edition").editions[0].id).toBe("summit-demo-edition");
+  it("resolves Summit records only when the test fixture catalog is supplied", () => {
+    expect(resolveCatalog("summit-demo-edition").editions.some((item) => item.id === "summit-demo-edition")).toBe(false);
+    expect(resolveCatalog("summit-demo-edition", [VOIDCALLER_CATALOG, FUJI_INTEGRATION_CATALOG]).editions[0].id).toBe("summit-demo-edition");
     expect(resolveCatalog("voidcaller-chapter-i").editions[0].id).toBe("voidcaller-chapter-i");
   });
 
@@ -40,6 +53,22 @@ describe("catalog source", () => {
     expect(catalog.editions[0]).toMatchObject({ id: "e1", title: "Chapter I", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113 });
     expect(catalog.editions[0].includes).toEqual(["Full EP"]);
     expect(catalog.experiences[0].title).toBe("Session");
+  });
+
+  it("strips Summit records from published API catalog responses", async () => {
+    const payload = (data) => ({ ok: true, json: async () => ({ data }) });
+    const fetchImpl = async (url) => {
+      if (url.endsWith("/api/artists")) return payload([{ id: "summit-demo-artist", display_name: "THE VOID", slug: "the-void" }]);
+      if (url.endsWith("/api/releases")) return payload([{ id: "r-summit", artist_id: "summit-demo-artist", title: "THE VOID — SUMMIT DEMO", description: "Fixture", status: "PUBLISHED", release_metadata: {} }]);
+      if (url.endsWith("/api/editions")) return payload([{ id: "e-summit", release_id: "r-summit", title: "SUMMIT EDITION", description: "Fixture", supply: "10", status: "PUBLISHED", chain_id: 43113, contract_address: FUJI_RELEASE_CONFIG.contractAddress, application_metadata: {} }]);
+      if (url.endsWith("/api/experiences")) return payload([{ id: "summit-session", title: "THE VOID — SUMMIT SESSION", experience_type: "AUDIO", edition_id: "e-summit", description: "Fixture" }]);
+      throw new Error(`unexpected ${url}`);
+    };
+    const catalog = await fetchPublishedCatalog({ fetchImpl });
+    expect(catalog.releases).toEqual([]);
+    expect(catalog.editions).toEqual([]);
+    expect(catalog.experiences).toEqual([]);
+    expect(catalog.artists).toEqual([]);
   });
 
   it("persists a studio overlay without inventing marketplace listings", () => {
