@@ -5,8 +5,11 @@ import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
-import { FujiIntegrationPage } from "./components/FujiIntegrationPage.jsx";
 import { MarketplacePage } from "./components/MarketplacePage.jsx";
+
+// Compile-time gate. Vite inlines VITE_* so the Fuji certification page is
+// dropped from the production graph unless VITE_SUMMIT_DEMO is explicitly on.
+const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 
 // Hero is the above-the-fold landing — keep it eager. The rest of the
 // sections are split into their own chunks and loaded on navigation.
@@ -15,6 +18,9 @@ const TheBleed = lazy(() => import("./components/TheBleed.jsx").then((m) => ({ d
 const Choir = lazy(() => import("./components/Choir.jsx").then((m) => ({ default: m.Choir })));
 const Covenant = lazy(() => import("./components/Covenant.jsx").then((m) => ({ default: m.Covenant })));
 const Reliquary = lazy(() => import("./components/Reliquary.jsx").then((m) => ({ default: m.Reliquary })));
+const FujiIntegrationPage = SUMMIT_DEMO
+  ? lazy(() => import("./components/FujiIntegrationPage.jsx").then((m) => ({ default: m.FujiIntegrationPage })))
+  : null;
 
 // Thin page wrappers — pull onMint from the Layout's Outlet context where needed.
 function HomePage() {
@@ -51,7 +57,7 @@ export default function App() {
           <Route path="edition/:edition" element={<EditionPage />} />
           <Route path="experience/:experience" element={<ExperiencePage />} />
           <Route path="studio" element={<ArtistStudioPage />} />
-          <Route path="fuji-integration" element={<FujiIntegrationPage />} />
+          {SUMMIT_DEMO && FujiIntegrationPage && <Route path="fuji-integration" element={<FujiIntegrationPage />} />}
           <Route path="collection" element={<CollectionPage />} />
           <Route path="collectors" element={<CollectorsPage />} />
           <Route path="chronicle" element={<ChroniclePage />} />
