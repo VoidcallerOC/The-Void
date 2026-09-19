@@ -34,6 +34,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Create Supabase-compatible roles
+        run: psql "$TEST_DATABASE_URL" -c "CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;"
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+
       - name: Test
         run: npm test
         env:
