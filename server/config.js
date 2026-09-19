@@ -170,7 +170,8 @@ function allowedOrigins(value, publicApp) {
 
 export function loadMediaConfig(env = process.env) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
-  const driver = String(env.MEDIA_STORAGE_DRIVER || (appEnvironment === "production" ? "" : "filesystem")).trim().toLowerCase();
+  const explicitDriver = String(env.MEDIA_STORAGE_DRIVER || "").trim().toLowerCase();
+  const driver = explicitDriver || (appEnvironment === "production" ? "pinata" : "filesystem");
   if (driver !== "filesystem" && driver !== "pinata" && driver !== "object") throw new ConfigurationError("MEDIA_STORAGE_DRIVER must be filesystem, pinata, or object.");
   if (appEnvironment === "production" && driver !== "pinata") throw new ConfigurationError("Production protected media requires MEDIA_STORAGE_DRIVER=pinata.");
   const grantTtlSeconds = boundedPositiveInteger(env.MEDIA_GRANT_TTL_SECONDS, 300, "MEDIA_GRANT_TTL_SECONDS", { min: 30, max: 900 });
