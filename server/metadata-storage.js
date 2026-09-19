@@ -14,8 +14,14 @@ function providerFailure(response, body) {
   try { parsed = JSON.parse(body); } catch { /* provider may return plain text */ }
   const source = parsed?.error ?? parsed?.errors ?? parsed;
   const reason = typeof source === "string" ? source : source?.reason || source?.message || source?.details || "provider rejected the request";
+  const rawCode = source && typeof source === "object" ? (source.reason ?? source.code ?? source.error_code) : null;
   const safeReason = String(reason).replace(/https?:\/\/[^\s)]+/gi, "[redacted-url]").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]").slice(0, 240);
-  return { provider: "pinata", status: response.status, reason: safeReason };
+  const code = rawCode ? String(rawCode).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 64) || null : null;
+  // An authenticated-but-unscoped key (Pinata "NO_SCOPES_FOUND"), an invalid/expired
+  // credential (401), or any forbidden response (403) all mean the operator must fix
+  // the configured key rather than the release. The raw JWT never reaches this object.
+  const authorization = response.status === 401 || response.status === 403;
+  return { provider: "pinata", status: response.status, code, reason: safeReason, authorization };
 }
 
 function stableValue(value) {
@@ -70,7 +76,8 @@ export class PinataMetadataStorage {
       const body = await response.text().catch(() => "");
       const details = providerFailure(response, body);
       this.logger.error?.("metadata.storage.failed", details);
-      throw new ApiError(503, "METADATA_STORAGE_UNAVAILABLE", `Metadata provider rejected the upload (HTTP ${response.status}): ${details.reason}. Nothing was written on-chain.`, details);
+      const guidance = details.authorization ? "Metadata storage authorization failed. Check the configured Pinata API key permissions. " : "";
+      throw new ApiError(503, "METADATA_STORAGE_UNAVAILABLE", `${guidance}Metadata provider rejected the upload (HTTP ${response.status}): ${details.reason}. Nothing was written on-chain.`, details);
     }
     const body = await response.json().catch(() => null);
     const cid = String(body?.IpfsHash || "").trim();
