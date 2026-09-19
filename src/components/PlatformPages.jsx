@@ -55,7 +55,7 @@ export function DiscoverPage() {
     ? catalog.artists.filter((artist) => !ids.length || ids.includes(artist.id))
     : category === "limited-editions"
       ? flattenMarketplaceEditions([catalog]).filter((item) => !ids.length || ids.includes(item.edition.id))
-      : records.filter((record) => category === "summit" ? record.release.id === "summit-demo-release" : (!ids.length || ids.includes(record.release.id)));
+      : records.filter((record) => !ids.length || ids.includes(record.release.id));
   const secondary = resolveSecondaryStatus();
   return (
     <section style={shell}>
