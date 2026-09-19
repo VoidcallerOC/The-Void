@@ -1,5 +1,5 @@
 import process from "node:process";
-import { loadServerConfig } from "./config.js";
+import { loadIndexerConfig, loadServerConfig } from "./config.js";
 import { createApiServer } from "./index.js";
 import { migrate } from "./migrate.js";
 import { createIndexerWorker } from "./indexer-worker.js";
@@ -57,6 +57,7 @@ function pathOf(request) {
 export function createVercelHandler({ env = process.env, logger = console } = {}) {
   applyFujiRuntimeDefaults(env);
   const config = loadServerConfig(env, { allowMissingDatabase: true });
+  const indexerConfig = loadIndexerConfig(env, { requireConfiguration: false });
   const { handler, pool } = createApiServer({ config, logger });
   let migrated = null;
   let worker = null;
@@ -69,8 +70,8 @@ export function createVercelHandler({ env = process.env, logger = console } = {}
 
   async function tickIndexer() {
     if (!config.databaseUrl || !pool) return { skipped: true, reason: "database_not_configured" };
-    if (!config.indexer.contracts.length) return { skipped: true, reason: "indexer_contracts_not_configured" };
-    if (!worker) worker = createIndexerWorker({ config, pool, logger });
+    if (!indexerConfig?.contracts?.length) return { skipped: true, reason: "indexer_contracts_not_configured" };
+    if (!worker) worker = createIndexerWorker({ config: indexerConfig, pool, logger });
     const result = await worker.syncOnce();
     return { skipped: false, result };
   }
