@@ -98,6 +98,21 @@ describe("HTTP API boundary", () => {
     expect(unavailableResponse.status).toBe(503);
     expect(JSON.parse(unavailableResponse.body).error.code).toBe("ARTIST_STUDIO_UNAVAILABLE");
   });
+
+  it("routes metadata publication to the canonical Studio endpoint and rejects obsolete paths", async () => {
+    const studioService = { publishMetadata: vi.fn().mockResolvedValue({ releaseId: "release-a", metadataUri: "ipfs://cid" }) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/releases/release-a/metadata", body: JSON.stringify({ releaseType: "EP" }), headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toEqual({ releaseId: "release-a", metadataUri: "ipfs://cid" });
+    expect(studioService.publishMetadata).toHaveBeenCalledWith(expect.objectContaining({ releaseId: "release-a", input: { releaseType: "EP" } }));
+
+    const missing = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/releases/release-a/obsolete", body: "{}" }), missing);
+    expect(missing.status).toBe(404);
+    expect(JSON.parse(missing.body).error.code).toBe("NOT_FOUND");
+  });
 });
 
 describe("API service trust boundaries", () => {
