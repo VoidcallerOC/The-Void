@@ -16,8 +16,10 @@ async function postJson(path, body, { fetchImpl = fetch } = {}) {
   let payload;
   try { payload = await response.json(); } catch { throw new Error("Authentication service returned an invalid response."); }
   if (!response.ok) {
-    const error = new Error(payload?.error?.message || "Wallet authentication failed.");
+    const error = new Error(payload?.error?.message || (response.status === 404 ? `Wallet authentication route not found: POST ${path} (${response.status}).` : "Wallet authentication failed."));
     error.code = payload?.error?.code || "AUTH_REQUEST_FAILED";
+    error.status = response.status;
+    error.endpoint = path;
     throw error;
   }
   if (!payload?.data) throw new Error("Authentication service returned an invalid response.");
