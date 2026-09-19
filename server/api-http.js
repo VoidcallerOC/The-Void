@@ -120,6 +120,14 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.updateRelease({ request: apiRequest, releaseId: base[2], input: body });
         }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "metadata" && base.length === 4) {
+          if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+          data = await studioService.publishMetadata({ request: apiRequest, releaseId: base[2], input: body });
+        }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "publication" && base[4] === "confirm" && base.length === 5) {
+          if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+          data = await studioService.confirmPublication({ request: apiRequest, releaseId: base[2], input: body });
+        }
         else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "editions" && base.length === 4) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.createEdition({ request: apiRequest, releaseId: base[2], input: body });

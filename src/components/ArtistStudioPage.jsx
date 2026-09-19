@@ -3,18 +3,18 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import { fujiSlug } from "../lib/fuji-release.js";
 import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
+import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
 const label = { display: "block", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)", marginTop: 16 };
 const STEPS = [
-  ["release", "Select release"],
-  ["edition", "Edition details"],
+  ["release", "Your release"],
+  ["edition", "Release details"],
   ["experience", "Experiences"],
   ["supply", "Supply"],
   ["preview", "Preview"],
@@ -42,25 +42,14 @@ async function studioFetch(path, { method, payload, headers }) {
   return body.data;
 }
 
-function safeSlug(value) {
-  try {
-    return value ? fujiSlug(value) : "";
-  } catch {
-    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 31);
-  }
-}
-
 function initialState() {
   return {
     artistName: "",
-    artistSlug: "",
     artistBio: "",
     releaseTitle: "",
-    releaseSlug: "",
     releaseDescription: "",
     releaseArtwork: "/assets/voidcaller_art_5.png",
     editionName: "",
-    editionSlug: "",
     editionDescription: "",
     editionArtwork: "/assets/voidcaller_art_4.png",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
@@ -92,27 +81,25 @@ export function ArtistStudioPage() {
 
 
   const ensureArtistAndRelease = async () => {
-    const nextArtistSlug = fujiSlug(form.artistSlug || form.artistName, "artist slug");
-    const nextReleaseSlug = fujiSlug(form.releaseSlug || form.releaseTitle, "release slug");
     if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
     if (!form.releaseTitle) throw new Error("Enter a release title before creating an edition.");
-    let nextArtistId = artistId || nextArtistSlug;
-    let nextReleaseId = releaseId || nextReleaseSlug;
+    let nextArtistId = artistId;
+    let nextReleaseId = releaseId;
     const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
       method: artistId ? "PATCH" : "POST",
-      payload: { id: nextArtistId, name: form.artistName, slug: nextArtistSlug, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
+      payload: { id: nextArtistId || undefined, name: form.artistName, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
       headers,
     });
     nextArtistId = artist.id;
     setArtistId(artist.id);
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
-      payload: { id: nextReleaseId, title: form.releaseTitle, slug: nextReleaseSlug, description: form.releaseDescription, artwork: form.releaseArtwork },
+      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, description: form.releaseDescription, artwork: form.releaseArtwork },
       headers,
     });
     nextReleaseId = release.id;
     setReleaseId(release.id);
-    return { artistId: nextArtistId, releaseId: nextReleaseId, releaseSlug: nextReleaseSlug };
+    return { artistId: nextArtistId, releaseId: nextReleaseId };
   };
 
   const createReleaseRecord = async () => {
@@ -135,12 +122,10 @@ export function ArtistStudioPage() {
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
-      const nextEditionSlug = fujiSlug(form.editionSlug || form.editionName, "edition slug");
-      setEditionId(nextEditionSlug);
       const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: editionId ? "PATCH" : "POST",
           payload: {
-            id: nextEditionSlug,
+            id: editionId || undefined,
             name: form.editionName,
             description: form.editionDescription,
             artwork: form.editionArtwork,
@@ -153,7 +138,7 @@ export function ArtistStudioPage() {
         });
       setEditionId(record.id);
       setNotice(`Draft saved: ${form.editionName}.`);
-      return nextEditionSlug;
+      return record.id;
     } catch (error) {
       setNotice(error.message);
       throw error;
@@ -167,7 +152,20 @@ export function ArtistStudioPage() {
     try {
       if (!form.editionName) throw new Error("Enter an edition name.");
       if (!form.quantity || BigInt(form.quantity) <= 0n) throw new Error("Edition supply must be greater than zero.");
-      throw new Error("Publishing is paused: automatic metadata storage is not configured. No blockchain transaction was sent.");
+      if (!editionId) await saveDraft();
+      const metadata = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/metadata`, {
+        method: "POST",
+        payload: { artwork: form.editionArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        headers,
+      });
+      const provider = wallet.getProvider?.();
+      if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This authenticated artist wallet is not authorized to publish releases on Fuji.");
+      const encoded = encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
+      const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
+      await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
+      await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/publication/confirm`, { method: "POST", payload: { transactionHash: transaction.hash }, headers });
+      setNotice(`Published ${form.releaseTitle}. Transaction confirmed: ${transaction.hash}`);
+      setStep("publish");
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -182,18 +180,14 @@ export function ArtistStudioPage() {
   };
 
   const selectExistingRelease = (record) => {
-    const nextReleaseSlug = safeSlug(record.release.id) || safeSlug(record.release.title);
-    const nextArtistSlug = safeSlug(record.artist?.handle || record.artist?.id || record.artist?.name);
     setSelectedReleaseId(record.release.id);
-    setArtistId(record.artist?.id || nextArtistSlug);
+    setArtistId(record.artist?.id || "");
     setReleaseId(record.release.id);
     setForm((prior) => ({
       ...prior,
       artistName: record.artist?.name || prior.artistName,
-      artistSlug: nextArtistSlug,
       artistBio: record.artist?.bio || prior.artistBio,
       releaseTitle: record.release.title,
-      releaseSlug: nextReleaseSlug.slice(0, 31),
       releaseDescription: record.release.description || prior.releaseDescription,
       releaseArtwork: record.release.artwork || prior.releaseArtwork,
       editionArtwork: record.release.artwork || prior.editionArtwork,
@@ -251,7 +245,7 @@ export function ArtistStudioPage() {
 
       {step === "release" && (
         <section style={card} id="create-edition">
-          <Eyebrow red>Select release</Eyebrow>
+          <Eyebrow red>Your release</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>The record</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose an existing release, or create a new one. Create Edition always publishes to the certified Fuji contract.</p>
           {existingReleases.length > 0 && (
@@ -273,10 +267,8 @@ export function ArtistStudioPage() {
             </div>
           )}
           <TextField title="Artist name" value={form.artistName} onChange={(value) => set("artistName", value)} required />
-          <TextField title="Artist slug" value={form.artistSlug} onChange={(value) => set("artistSlug", value)} placeholder="voidcaller" />
           <TextField title="Artist bio" value={form.artistBio} onChange={(value) => set("artistBio", value)} multiline />
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
-          <TextField title="Release slug (max 31)" value={form.releaseSlug} onChange={(value) => set("releaseSlug", value)} placeholder="the-repair" />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <TextField title="Artwork URL" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
@@ -294,7 +286,6 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Edition details</h2>
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}</p>
           <TextField title="Edition name" value={form.editionName} onChange={(value) => set("editionName", value)} required placeholder="Chapter I — The Repair" />
-          <TextField title="Edition slug (max 31)" value={form.editionSlug} onChange={(value) => set("editionSlug", value)} placeholder="chapter-i-the-repair" />
           <TextField title="Description" value={form.editionDescription} onChange={(value) => set("editionDescription", value)} multiline />
           <TextField title="Artwork URL" value={form.editionArtwork} onChange={(value) => set("editionArtwork", value)} />
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
@@ -344,7 +335,7 @@ export function ArtistStudioPage() {
 
       {step === "preview" && (
         <section style={card}>
-          <Eyebrow red>Release preview</Eyebrow>
+          <Eyebrow red>Review</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>{form.releaseTitle || "Untitled release"}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 240px) 1fr", gap: 24, alignItems: "start", marginTop: 20 }}>
             <img src={form.releaseArtwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover" }} />
@@ -368,17 +359,16 @@ export function ArtistStudioPage() {
       {step === "publish" && (
         <section style={card}>
           <Eyebrow red>Publish</Eyebrow>
-          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Create edition on Fuji</h2>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Publish release</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-            {form.artistName || "Artist"} → {form.releaseTitle || "Release"} → {form.editionName || "Edition"}. Supply {form.quantity || "—"}.
-            The wallet must hold ARTIST_ROLE. Success requires a confirmed receipt.
+            Publishing creates your collectible release on The Void. Supply {form.quantity || "—"}.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={() => saveDraft().catch(() => {})}>
               {busy === "draft" ? "Saving…" : "Save draft"}
             </button>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={publishEdition}>
-              {busy === "publish" ? "Confirming…" : "Create edition"}
+              {busy === "publish" ? "Publishing…" : "Publish release"}
             </button>
           </div>
         </section>

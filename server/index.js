@@ -2,7 +2,7 @@ import process from "node:process";
 import { createServer } from "node:http";
 import { createApiHandler } from "./api-http.js";
 import { createStructuredLogger, createRateLimiter } from "./api-runtime.js";
-import { loadMediaConfig, loadServerConfig } from "./config.js";
+import { loadMediaConfig, loadMetadataConfig, loadServerConfig } from "./config.js";
 import { closeDatabasePool, createDatabasePool } from "./db.js";
 import { createPersistenceRepository } from "./repositories.js";
 import { ApiService } from "./api-service.js";
@@ -12,6 +12,7 @@ import { createPrivateMediaStorage } from "./media-storage.js";
 import { createProtectedMediaGateway } from "./media-gateway.js";
 import { createIndexedOwnershipVerifier } from "./ownership.js";
 import { createArtistStudioService } from "./studio-service.js";
+import { createPinataMetadataStorage } from "./metadata-storage.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
   const pool = db || createDatabasePool(config);
@@ -19,6 +20,8 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const indexerStore = createIndexerStore(pool);
   const resolvedAuthService = authService || new WalletAuthService({ repository, config });
   const resolvedAuthenticator = authenticator || createWalletAuthenticator(resolvedAuthService);
+  const metadataConfig = loadMetadataConfig();
+  const metadataStorage = metadataConfig.driver === "pinata" ? createPinataMetadataStorage({ config: metadataConfig, logger }) : null;
   const resolvedOwnershipVerifier = ownershipVerifier || createIndexedOwnershipVerifier({ db: pool, config });
   const rateLimiter = createRateLimiter();
   const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, rateLimiter, logger });
@@ -32,7 +35,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
       logger.warn?.("api.media.disabled", { error: error.message });
     }
   }
-  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, logger });
+  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, logger });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
   return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService };

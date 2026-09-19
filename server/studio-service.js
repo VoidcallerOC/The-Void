@@ -4,6 +4,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import deployment from "../config/fuji-release.json" with { type: "json" };
+import { canonicalMetadata } from "./metadata-storage.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -18,6 +19,26 @@ function normalizedSlug(value, field) {
   const slug = requiredText(value, field, { max: 96 }).toLowerCase();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new ApiError(400, "INVALID_SLUG", `${field} must use lowercase letters, numbers, and single hyphens.`);
   return slug;
+}
+
+function generatedSlug(value, field) {
+  const slug = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 31).replace(/-+$/g, "");
+  if (!slug) throw new ApiError(400, "TITLE_REQUIRED", `${field} is required before publishing.`);
+  return slug;
+}
+
+async function availableSlug(db, { table, scopeColumn, scopeValue, value, field }) {
+  const base = generatedSlug(value, field);
+  const where = scopeColumn ? `WHERE ${scopeColumn}=$1 AND slug LIKE $2` : "WHERE slug LIKE $1";
+  const params = scopeColumn ? [scopeValue, `${base}%`] : [`${base}%`];
+  const { rows } = await db.query(`SELECT slug FROM ${table} ${where} LIMIT 100`, params);
+  const used = new Set((rows || []).map((row) => row.slug));
+  if (!used.has(base)) return base;
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base.slice(0, Math.max(1, 31 - String(suffix).length - 1))}-${suffix}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new ApiError(409, "SLUG_COLLISION", `The ${field} could not be assigned a unique internal identifier.`);
 }
 
 function contractAddress(value, field) {
@@ -75,11 +96,12 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
+    this.metadataStorage = metadataStorage;
     this.logger = logger;
   }
 
@@ -95,13 +117,67 @@ export class ArtistStudioService {
     await this.repository.appendAuditEvent({ eventType, actorWallet: identity.wallet, subjectType, subjectId, requestId: request.requestId || null, payload });
   }
 
+  async publishMetadata({ request, releaseId, input = {} }) {
+    const identity = await this.identity(request);
+    if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
+    const { rows } = await this.db.query("SELECT r.*, a.display_name, ao.owner_wallet FROM releases r JOIN artists a ON a.id=r.artist_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish metadata for this release.");
+    if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    const edition = editionResult.rows[0];
+    if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
+    const experiences = await this.db.query("SELECT title, description, experience_type FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
+    const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: input.releaseType, tier: edition.tier });
+    const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest ? { uri: edition.metadata_uri } : null;
+    const stored = previous || await this.metadataStorage.write({ metadata: { ...generated.metadata, _void: { version: 1, digest: generated.digest } }, name: `${release.slug}-${edition.id}` });
+    await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")), metadataUri: stored.uri, metadata: { ...generated.metadata, _void: { version: 1, digest: generated.digest } }, metadataVersion: generated.digest });
+    await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest } });
+    const editionSlug = generatedSlug(edition.title, "edition name");
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest };
+  }
+
+  async confirmPublication({ request, releaseId, input }) {
+    const identity = await this.identity(request);
+    const transactionHash = requiredText(input?.transactionHash, "transactionHash", { max: 128 }).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The publication transaction could not be verified.");
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    const edition = editionResult.rows[0];
+    if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
+    try {
+      const provider = new ethers.JsonRpcProvider(deployment.rpcUrl);
+      const receipt = await provider.getTransactionReceipt(transactionHash);
+      if (!receipt || receipt.status !== 1) throw new Error("receipt unavailable or unsuccessful");
+      const eventInterface = new ethers.Interface([...deployment.abi, "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
+      const expectedTokenId = certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
+      const expectedReleaseId = ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
+      const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
+      const event = receipt.logs.map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
+      if (!event) throw new Error("expected EditionCreated event was not found");
+      const contract = new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, "function edition(uint256) view returns (bytes32, bytes32, address, uint256, uint256, string, bool)"], provider);
+      const onChain = await contract.edition(expectedTokenId);
+      if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
+      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: edition.application_metadata || {} });
+      await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
+      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString() } });
+      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, status: "PUBLISHED" };
+    } catch (error) {
+      this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
+      throw new ApiError(409, "PUBLICATION_NOT_CONFIRMED", "The blockchain publication could not be verified. Your release remains unpublished and can be retried.");
+    }
+  }
+
   async createArtist({ request, input }) {
     const identity = await this.identity(request);
     const wallet = input.ownerWallet ? walletAddress(input.ownerWallet, "ownerWallet") : identity.wallet;
     assertWalletMatches(identity, wallet, "ownerWallet");
     const id = input.id ? requiredText(input.id, "artist.id", { max: 128 }) : `artist-${randomUUID()}`;
+    const slug = await availableSlug(this.db, { table: "artists", value: input.name, field: "artist name" });
     const artist = await this.repository.inTransaction(async (repository) => {
-      const saved = await repository.saveArtist({ id, slug: normalizedSlug(input.slug || input.name, "artist.slug"), displayName: requiredText(input.name, "artist.name", { max: 256 }), metadata: jsonObject(input.metadata, "artist.metadata") });
+      const saved = await repository.saveArtist({ id, slug, displayName: requiredText(input.name, "artist.name", { max: 256 }), metadata: jsonObject(input.metadata, "artist.metadata") });
       await repository.saveArtistProfile({ artistId: saved.id, ...profileInput(input) });
       await repository.assignArtistOwner({ artistId: saved.id, wallet: identity.wallet, role: "OWNER" });
       return saved;
@@ -124,7 +200,9 @@ export class ArtistStudioService {
   async createRelease({ request, artistId, input }) {
     const { identity, artist } = await this.ownedArtist({ artistId, request });
     const id = input.id ? requiredText(input.id, "release.id", { max: 128 }) : `release-${randomUUID()}`;
-    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug: normalizedSlug(input.slug || input.title, "release.slug"), title: requiredText(input.title, "release.title", { max: 256 }), description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
+    const title = requiredText(input.title, "release.title", { max: 256 });
+    const slug = await availableSlug(this.db, { table: "releases", scopeColumn: "artist_id", scopeValue: artist.id, value: title, field: "release title" });
+    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return release;
   }
@@ -135,7 +213,7 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     if (release.status === "PUBLISHED" && input.status && lifecycle(input.status) !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", "Published releases cannot return to an earlier lifecycle state.");
-    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: input.slug === undefined ? release.slug : normalizedSlug(input.slug, "release.slug"), title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status: input.status === undefined ? release.status : lifecycle(input.status), metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: lifecycle(input.status || release.status) === "PUBLISHED" ? (release.published_at || new Date()) : null });
+    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status: input.status === undefined ? release.status : lifecycle(input.status), metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: lifecycle(input.status || release.status) === "PUBLISHED" ? (release.published_at || new Date()) : null });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
     return saved;
   }
@@ -147,12 +225,13 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     const selectedChainId = CERTIFIED_CHAIN_ID;
     const address = CERTIFIED_CONTRACT;
-    const editionSlug = normalizedSlug(input.slug || input.id || input.name, "edition.slug");
+    const editionName = requiredText(input.name || input.title, "edition.name", { max: 256 });
+    const editionSlug = generatedSlug(editionName, "edition name");
     const tokenId = certifiedTokenId(release.slug, editionSlug);
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
     const edition = await this.repository.inTransaction(async (repository) => {
       const contract = await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
-      const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? null : positiveBigInt(input.quantity, "edition.quantity"), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
+      const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? null : positiveBigInt(input.quantity, "edition.quantity"), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
       await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
       return saved;
     });
