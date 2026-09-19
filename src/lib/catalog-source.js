@@ -102,7 +102,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       bio: row.bio || "",
       avatar: meta.profileArtwork || meta.artwork || "/assets/voidcaller_art_4.png",
       banner: meta.banner || meta.profileArtwork || "/assets/voidcaller_art_6.png",
-      verified: true,
+      verified: row.verified === true || row.verification_status === "VERIFIED",
     });
   });
   const mappedReleases = asArray(releases).filter((row) => row?.id).map((row) => {

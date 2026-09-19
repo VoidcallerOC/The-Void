@@ -91,7 +91,10 @@ export function ArtistsPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Artists" title="Artists">
-        <p style={{ color: "var(--vc-bone-dim)" }}>Artists are the roots of every release and experience.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>Artists are the roots of every release and experience. The verified mark is earned through application and review — it is not assigned by the catalog.</p>
+        <div style={{ marginTop: 22 }}>
+          <Link to="/verify" style={ghostBtn}>Become verified</Link>
+        </div>
       </PlatformHeader>
       <div className="vc-market-grid">
         {catalog.artists.map((artist) => <ArtistCard key={artist.id} artist={artist} releases={catalog.releases.filter((release) => release.artistId === artist.id)} />)}

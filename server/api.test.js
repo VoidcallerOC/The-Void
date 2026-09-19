@@ -113,6 +113,35 @@ describe("HTTP API boundary", () => {
     expect(missing.status).toBe(404);
     expect(JSON.parse(missing.body).error.code).toBe("NOT_FOUND");
   });
+
+  it("routes artist verification through the configured service and stays fail-closed without it", async () => {
+    const verificationService = {
+      getMine: vi.fn().mockResolvedValue({ application: null, canReapply: true, reviewer: false }),
+      submit: vi.fn().mockResolvedValue({ publicId: "va_1", status: "SUBMITTED", artistName: "Voidcaller" }),
+      listVerified: vi.fn().mockResolvedValue([]),
+    };
+    const handler = createApiHandler({ service: {}, verificationService });
+    const me = responseDouble();
+    await handler(requestDouble({ method: "GET", url: "/api/verification/me", headers: { authorization: "Bearer opaque" } }), me);
+    expect(me.status).toBe(200);
+    expect(verificationService.getMine).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ requestId: expect.any(String) }) }));
+
+    const publicList = responseDouble();
+    await handler(requestDouble({ method: "GET", url: "/api/verification/artists" }), publicList);
+    expect(publicList.status).toBe(200);
+    expect(verificationService.listVerified).toHaveBeenCalled();
+
+    const submit = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/verification/applications", body: JSON.stringify({ artistName: "Voidcaller" }), headers: { authorization: "Bearer opaque" } }), submit);
+    expect(submit.status).toBe(200);
+    expect(verificationService.submit).toHaveBeenCalledWith(expect.objectContaining({ input: { artistName: "Voidcaller" } }));
+
+    const unavailable = createApiHandler({ service: {} });
+    const unavailableResponse = responseDouble();
+    await unavailable(requestDouble({ method: "GET", url: "/api/verification/me" }), unavailableResponse);
+    expect(unavailableResponse.status).toBe(503);
+    expect(JSON.parse(unavailableResponse.body).error.code).toBe("VERIFICATION_UNAVAILABLE");
+  });
 });
 
 describe("API service trust boundaries", () => {

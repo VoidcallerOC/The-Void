@@ -156,7 +156,7 @@ export function ArtistCard({ artist, releases = [] }) {
   return (
     <Link to={`/artist/${artist.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none", display: "flex", flexDirection: "column" }}>
       <div style={{ minHeight: 200, backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.78)), url(${artist.banner || artist.avatar || "/assets/voidcaller_art_6.png"})`, backgroundSize: "cover", backgroundPosition: "center", padding: 22, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-        <p className="vc-card-kicker">Artist</p>
+        <p className="vc-card-kicker">{artist.verified ? "Verified artist" : "Artist"}</p>
         <h3 className="vc-card-title" style={{ fontSize: 34 }}>{artist.name}</h3>
       </div>
       <div style={{ padding: 22 }}>
