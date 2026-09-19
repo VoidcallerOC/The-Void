@@ -98,9 +98,8 @@ export function resolveEditionChain(edition) {
 }
 
 export function editionTypeLabel(edition) {
-  if (isCertifiedFujiEdition(edition)) return "ERC-1155 release edition";
-  if (edition?.chain) return `${edition.chain} edition`;
-  return "Release edition";
+  if (edition?.releaseType) return edition.releaseType;
+  return "Collectible release";
 }
 
 export function primaryCollectForEdition(edition) {
