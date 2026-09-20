@@ -91,7 +91,7 @@ export function ArtistsPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Artists" title="Artists">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>Artists are the roots of every release and experience. The verified mark is earned through application and review — it is not assigned by the catalog.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>Artists are the roots of every release and experience. The verified mark is branded on-chain to the artist wallet that signed — it is not assigned by the catalog.</p>
         <div style={{ marginTop: 22 }}>
           <Link to="/verify" style={ghostBtn}>Become verified</Link>
         </div>

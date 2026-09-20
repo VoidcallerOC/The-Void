@@ -3,6 +3,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { checkDatabaseHealth } from "./db.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
+import { isHiddenPublicArtist } from "../src/lib/summit-demo.js";
 
 const PUBLIC_STATUS = "PUBLISHED";
 const ACTIVE_LISTING = "ACTIVE";
@@ -110,13 +111,15 @@ export class ApiService {
   async getArtist({ idOrSlug }) {
     const key = requiredText(idOrSlug, "artist");
     const { rows } = await this.db.query(`${ARTIST_SELECT} WHERE a.status=$1 AND (a.id=$2 OR a.slug=$2) LIMIT 1`, [PUBLIC_STATUS === "PUBLISHED" ? "ACTIVE" : "ACTIVE", key]);
-    if (!rows[0]) throw new ApiError(404, "ARTIST_NOT_FOUND", "Artist was not found.");
+    if (!rows[0] || isHiddenPublicArtist(rows[0])) throw new ApiError(404, "ARTIST_NOT_FOUND", "Artist was not found.");
     return mapRow(rows[0]);
   }
 
   async listArtists({ limit, offset, status = "ACTIVE" }) {
-    const { rows } = await this.db.query(`${ARTIST_SELECT} WHERE a.status=$1 ORDER BY a.display_name ASC LIMIT $2 OFFSET $3`, [status, limitValue(limit), offsetValue(offset)]);
-    return rows;
+    const take = limitValue(limit);
+    const skip = offsetValue(offset);
+    const { rows } = await this.db.query(`${ARTIST_SELECT} WHERE a.status=$1 ORDER BY a.display_name ASC`, [status]);
+    return rows.filter((row) => !isHiddenPublicArtist(row)).slice(skip, skip + take);
   }
 
   async getRelease({ idOrSlug }) {
