@@ -12,6 +12,7 @@ import { createPrivateMediaStorage } from "./media-storage.js";
 import { createProtectedMediaGateway } from "./media-gateway.js";
 import { createIndexedOwnershipVerifier } from "./ownership.js";
 import { createArtistStudioService } from "./studio-service.js";
+import { createArtistVerificationService } from "./verification-service.js";
 import { createPinataMetadataStorage } from "./metadata-storage.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
@@ -37,9 +38,10 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
     }
   }
   const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, logger });
-  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
-  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService };
+  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

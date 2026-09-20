@@ -53,6 +53,16 @@ describe("catalog source", () => {
     expect(catalog.editions[0]).toMatchObject({ id: "e1", title: "Chapter I", contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113 });
     expect(catalog.editions[0].includes).toEqual(["Full EP"]);
     expect(catalog.experiences[0].title).toBe("Session");
+    expect(catalog.artists[0].verified).toBe(false);
+  });
+
+  it("only marks published artists verified when the API row is verified", () => {
+    const unverified = mapPublishedCatalog({ artists: [{ id: "a1", display_name: "Forge", slug: "forge" }] });
+    const verified = mapPublishedCatalog({ artists: [{ id: "a1", display_name: "Forge", slug: "forge", verified: true }] });
+    const byStatus = mapPublishedCatalog({ artists: [{ id: "a1", display_name: "Forge", slug: "forge", verification_status: "VERIFIED" }] });
+    expect(unverified.artists[0].verified).toBe(false);
+    expect(verified.artists[0].verified).toBe(true);
+    expect(byStatus.artists[0].verified).toBe(true);
   });
 
   it("strips Summit records from published API catalog responses", async () => {

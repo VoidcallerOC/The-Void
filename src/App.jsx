@@ -6,6 +6,7 @@ import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 import { MarketplacePage } from "./components/MarketplacePage.jsx";
+import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 
 // Compile-time gate. Vite inlines VITE_* so the Fuji certification page is
 // dropped from the production graph unless VITE_SUMMIT_DEMO is explicitly on.
@@ -57,6 +58,12 @@ export default function App() {
           <Route path="edition/:edition" element={<EditionPage />} />
           <Route path="experience/:experience" element={<ExperiencePage />} />
           <Route path="studio" element={<ArtistStudioPage />} />
+          <Route path="verify" element={<VerifyLanding />} />
+          <Route path="verify/apply" element={<VerifyApplyPage />} />
+          <Route path="verify/received" element={<VerifyReceivedPage />} />
+          <Route path="verify/dashboard" element={<VerifyDashboardPage />} />
+          <Route path="verify/review" element={<VerifyReviewQueuePage />} />
+          <Route path="verify/review/:id" element={<VerifyReviewApplicationPage />} />
           {SUMMIT_DEMO && FujiIntegrationPage && <Route path="fuji-integration" element={<FujiIntegrationPage />} />}
           <Route path="collection" element={<CollectionPage />} />
           <Route path="collectors" element={<CollectorsPage />} />
