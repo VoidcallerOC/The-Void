@@ -10,7 +10,7 @@ import {
 } from "../domain/models.js";
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
-import { stripSummitDemoCatalog } from "./summit-demo.js";
+import { collapsePublicCatalog } from "./summit-demo.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -190,7 +190,7 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
     fetchJson("/api/editions", { fetchImpl, signal }).catch(() => []),
     fetchJson("/api/experiences", { fetchImpl, signal }).catch(() => []),
   ]);
-  return stripSummitDemoCatalog(mapPublishedCatalog({
+  return collapsePublicCatalog(mapPublishedCatalog({
     artists: asArray(artists),
     releases: asArray(releases),
     editions: asArray(editions),
@@ -221,7 +221,7 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   return useMemo(
-    () => stripSummitDemoCatalog(mergeCatalogs([...baseCatalogs(), overlay, published])),
+    () => collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, published])),
     [overlay, published],
   );
 }
