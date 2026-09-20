@@ -46,6 +46,13 @@ function offsetValue(value) {
 
 function mapRow(row) { return row || null; }
 
+const ARTIST_SELECT = `SELECT a.*, p.bio, p.website_url, p.social_links, p.profile_metadata,
+      EXISTS (
+        SELECT 1 FROM artist_verification_applications v
+        WHERE v.status='VERIFIED' AND (v.artist_id=a.id OR lower(v.slug)=lower(a.slug))
+      ) AS verified
+    FROM artists a LEFT JOIN artist_profiles p ON p.artist_id=a.id`;
+
 export class ApiService {
   constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {
     if (!db?.query || !repository) throw new TypeError("ApiService requires a database executor and persistence repository.");
@@ -102,13 +109,13 @@ export class ApiService {
 
   async getArtist({ idOrSlug }) {
     const key = requiredText(idOrSlug, "artist");
-    const { rows } = await this.db.query(`SELECT a.*, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE a.status=$1 AND (a.id=$2 OR a.slug=$2) LIMIT 1`, [PUBLIC_STATUS === "PUBLISHED" ? "ACTIVE" : "ACTIVE", key]);
+    const { rows } = await this.db.query(`${ARTIST_SELECT} WHERE a.status=$1 AND (a.id=$2 OR a.slug=$2) LIMIT 1`, [PUBLIC_STATUS === "PUBLISHED" ? "ACTIVE" : "ACTIVE", key]);
     if (!rows[0]) throw new ApiError(404, "ARTIST_NOT_FOUND", "Artist was not found.");
     return mapRow(rows[0]);
   }
 
   async listArtists({ limit, offset, status = "ACTIVE" }) {
-    const { rows } = await this.db.query(`SELECT a.*, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE a.status=$1 ORDER BY a.display_name ASC LIMIT $2 OFFSET $3`, [status, limitValue(limit), offsetValue(offset)]);
+    const { rows } = await this.db.query(`${ARTIST_SELECT} WHERE a.status=$1 ORDER BY a.display_name ASC LIMIT $2 OFFSET $3`, [status, limitValue(limit), offsetValue(offset)]);
     return rows;
   }
 
