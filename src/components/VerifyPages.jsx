@@ -23,7 +23,7 @@ const STATUS_COPY = {
   SUBMITTED: "Your application is in the review queue. A human will read the evidence.",
   UNDER_REVIEW: "A reviewer is looking at the evidence for this identity.",
   NEEDS_INFORMATION: "The reviewer needs more from you before a decision.",
-  VERIFIED: "This identity is verified. The mark is shown on the artist profile.",
+  VERIFIED: "This identity is verified. The mark is branded on-chain to the wallet that signed. It cannot be transferred, listed, or borrowed.",
   DECLINED: "This application was declined. You may submit a new one.",
   REVOKED: "Verification was revoked. You may submit a new application.",
 };
@@ -104,13 +104,13 @@ export function VerifyLanding() {
   return (
     <section style={shell}>
       <PageHeader eyebrow="† Artist verification" title="Become verified">
-        <p style={{ ...muted, maxWidth: 640 }}>Establish your identity. Authenticate your work. Become a verified artist within The Void.</p>
+        <p style={{ ...muted, maxWidth: 640 }}>Establish your identity. Authenticate your work. The mark is branded to the wallet that signs.</p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 28 }}>
           <Link to="/verify/apply" style={primaryBtn}>Apply for verification</Link>
           <Link to="/verify/dashboard" style={ghostBtn}>View application status</Link>
         </div>
       </PageHeader>
-      <div style={{ display: "grid", gap: 32, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+      <div style={{ display: "grid", gap: 32, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
         <article>
           <Eyebrow red>What it is</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: 36, textTransform: "uppercase", lineHeight: 1, margin: "12px 0 16px" }}>Control, not blessing</h2>
@@ -119,15 +119,20 @@ export function VerifyLanding() {
         <article>
           <Eyebrow>The chain</Eyebrow>
           <ol style={{ listStyle: "none", padding: 0, margin: "18px 0 0", display: "flex", flexDirection: "column", gap: 12, fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: ".12em", textTransform: "uppercase" }}>
-            {["01  Connect a wallet", "02  Submit an application", "03  Human review", "04  Decision", "05  Verified artist mark"].map((step) => (
+            {["01  Connect a wallet", "02  Submit an application", "03  Human review", "04  Decision", "05  Mark branded to the wallet"].map((step) => (
               <li key={step} style={{ borderLeft: "1px solid var(--vc-ash)", paddingLeft: 16 }}>{step}</li>
             ))}
           </ol>
         </article>
+        <article>
+          <Eyebrow red>The mark</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: 36, textTransform: "uppercase", lineHeight: 1, margin: "12px 0 16px" }}>Branded to the wallet</h2>
+          <p style={muted}>The mark is branded on-chain to the wallet that signed. It is not a login, not a social, not a name anyone can type. Lose the key, lose the mark. It cannot be transferred, listed, or borrowed.</p>
+        </article>
       </div>
       <div style={{ ...card, marginTop: 48 }}>
         <Eyebrow red>Do not overpromise</Eyebrow>
-        <p style={{ ...muted, marginTop: 12, maxWidth: 720 }}>A verified mark means a reviewer accepted evidence that you control the named identity. It is not a ranking, a booking, a distribution deal, or a guarantee of collection. False or unverifiable claims are declined.</p>
+        <p style={{ ...muted, marginTop: 12, maxWidth: 720 }}>A verified mark means a reviewer accepted evidence that you control the named identity, and that identity is bound to the authenticated wallet. It is not a ranking, a booking, a distribution deal, or a guarantee of collection. It is not a token you can sell. False or unverifiable claims are declined.</p>
       </div>
     </section>
   );
@@ -376,6 +381,16 @@ export function VerifyDashboardPage() {
             <StatusTag status={application.status} />
           </div>
           <p style={{ ...muted, marginTop: 18 }}>{STATUS_COPY[application.status] || "Application recorded."}</p>
+          {application.status === "VERIFIED" && (
+            <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--vc-ash)" }}>
+              <Eyebrow red>The mark</Eyebrow>
+              <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "10px 0 8px" }}>Branded to this wallet</h3>
+              <p style={muted}>Collectors see the mark next to the identity that proved control. Move wallets and the mark does not follow. Steal the name and the chain still points at the address that earned it.</p>
+              {wallet.account && (
+                <p style={{ fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: ".08em", color: "var(--vc-bone)", margin: "14px 0 0", wordBreak: "break-all" }}>{wallet.account}</p>
+              )}
+            </div>
+          )}
           {application.informationRequest && (
             <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--vc-ash)" }}>
               <Eyebrow>Information requested</Eyebrow>

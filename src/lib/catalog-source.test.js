@@ -13,7 +13,7 @@ import {
   upsertStudioOverlay,
   writeStudioOverlay,
 } from "./catalog-source.js";
-import { stripSummitDemoCatalog } from "./summit-demo.js";
+import { collapsePublicCatalog, stripSummitDemoCatalog } from "./summit-demo.js";
 
 describe("catalog source", () => {
   it("keeps Summit out of the production catalog", () => {
@@ -35,6 +35,20 @@ describe("catalog source", () => {
     expect(merged.artists.some((item) => item.id === "new-artist")).toBe(true);
     expect(merged.editions.some((item) => item.id === "summit-demo-edition")).toBe(false);
     expect(merged.editions.some((item) => item.id === "new-edition")).toBe(true);
+  });
+
+  it("shows one Voidcaller on the public artists grid when Studio published aliases leak", () => {
+    const published = mapPublishedCatalog({
+      artists: [
+        { id: "artist-void-1", display_name: "THE VOID", slug: "the-void", bio: "A music-native release prepared for the Summit demo on Avalanche Fuji." },
+        { id: "artist-voidcaller-2", display_name: "Voidcaller", slug: "voidcaller-2", bio: "A music-native project where records become relics and ownership unlocks the full experience." },
+        { id: "artist-voidcaller-3", display_name: "Voidcaller", slug: "voidcaller-3" },
+      ],
+    });
+    const publicCatalog = collapsePublicCatalog(mergeCatalogs([VOIDCALLER_CATALOG, published]));
+    expect(publicCatalog.artists.map((item) => item.id)).toEqual(["voidcaller"]);
+    expect(publicCatalog.artists[0].verified).toBe(true);
+    expect(publicCatalog.releases.filter((item) => item.artistId === "voidcaller")).toHaveLength(1);
   });
 
   it("resolves Summit records only when the test fixture catalog is supplied", () => {
@@ -68,7 +82,12 @@ describe("catalog source", () => {
   it("strips Summit records from published API catalog responses", async () => {
     const payload = (data) => ({ ok: true, json: async () => ({ data }) });
     const fetchImpl = async (url) => {
-      if (url.endsWith("/api/artists")) return payload([{ id: "summit-demo-artist", display_name: "THE VOID", slug: "the-void" }]);
+      if (url.endsWith("/api/artists")) return payload([
+        { id: "summit-demo-artist", display_name: "THE VOID", slug: "the-void" },
+        { id: "artist-a5c0ab65", display_name: "THE VOID", slug: "the-void-2", bio: "A music-native release prepared for the Summit demo on Avalanche Fuji." },
+        { id: "artist-voidcaller-4", display_name: "Voidcaller", slug: "voidcaller-4" },
+        { id: "artist-forge", display_name: "Forge", slug: "forge", bio: "CT" },
+      ]);
       if (url.endsWith("/api/releases")) return payload([{ id: "r-summit", artist_id: "summit-demo-artist", title: "THE VOID — SUMMIT DEMO", description: "Fixture", status: "PUBLISHED", release_metadata: {} }]);
       if (url.endsWith("/api/editions")) return payload([{ id: "e-summit", release_id: "r-summit", title: "SUMMIT EDITION", description: "Fixture", supply: "10", status: "PUBLISHED", chain_id: 43113, contract_address: FUJI_RELEASE_CONFIG.contractAddress, application_metadata: {} }]);
       if (url.endsWith("/api/experiences")) return payload([{ id: "summit-session", title: "THE VOID — SUMMIT SESSION", experience_type: "AUDIO", edition_id: "e-summit", description: "Fixture" }]);
@@ -78,7 +97,7 @@ describe("catalog source", () => {
     expect(catalog.releases).toEqual([]);
     expect(catalog.editions).toEqual([]);
     expect(catalog.experiences).toEqual([]);
-    expect(catalog.artists).toEqual([]);
+    expect(catalog.artists.map((item) => item.id)).toEqual(["artist-forge"]);
   });
 
   it("persists a studio overlay without inventing marketplace listings", () => {
