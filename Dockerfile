@@ -11,9 +11,6 @@ COPY package*.json ./
 COPY server ./server
 COPY config ./config
 COPY src ./src
-COPY scripts ./scripts
-COPY private-media ./private-media
-COPY contracts ./contracts
 COPY .env.example ./
 USER node
 EXPOSE 8787
