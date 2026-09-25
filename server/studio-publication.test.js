@@ -1,6 +1,8 @@
 import { ethers } from "ethers";
+import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 import fujiRelease from "../config/fuji-release.json" with { type: "json" };
+import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceAnchorService } from "./provenance-anchor.js";
 import { ArtistStudioService } from "./studio-service.js";
@@ -46,7 +48,7 @@ function editionCreatedReceipt(uri = "ipfs://metadata") {
   return { status: 1, logs: [{ address: fujiRelease.contractAddress, topics: encoded.topics, data: encoded.data }] };
 }
 
-function studio({ rows = [], chain = null, records = null, metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata" }) } } = {}) {
+function studio({ rows = [], chain = null, records = null, metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata" }) }, metadataFetcher = null } = {}) {
   const repo = repository();
   const db = { query: vi.fn().mockResolvedValue({ rows }) };
   const instance = new ArtistStudioService({
@@ -55,6 +57,7 @@ function studio({ rows = [], chain = null, records = null, metadataStorage = { w
     metadataStorage,
     provenanceRecords: records,
     publicationChain: chain,
+    metadataFetcher,
     authenticator: vi.fn().mockResolvedValue({ wallet: owner }),
     logger: { error: vi.fn(), info: vi.fn() },
   });
@@ -149,6 +152,40 @@ describe("Artist Studio publication pipeline", () => {
     duplicate.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [editionRow()] } : { rows: [releaseRow("PUBLISHED")] });
     await expect(duplicate.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "RELEASE_ALREADY_PUBLISHED" });
     expect(duplicate.chain.getTransactionReceipt).not.toHaveBeenCalled();
+  });
+
+  it("verifies provenance from the edition metadata CID and does not verify a mismatched CID", async () => {
+    const generated = canonicalMetadata({ release: releaseRow(), edition: { title: "Chapter I", description: null, supply: "10" }, artist: { name: "Voidcaller" }, releaseType: "EP" });
+    const provenance = canonicalProvenanceManifest({ releaseId: "release-1", editionId: "edition-1", creator: { artistId: "artist-1", wallet: owner }, metadataDigest: generated.digest, createdAt: "2026-09-25T20:00:00.000Z", artwork: "11".repeat(32) });
+    const document = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
+    const identity = ids("the-record", "chapter-i");
+    const chain = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ ...editionCreatedReceipt(), blockNumber: 90 }),
+      edition: vi.fn().mockResolvedValue([identity.releaseId, identity.editionId, owner, 10n, 0n, "ipfs://metadata", true]),
+      getBlock: vi.fn().mockResolvedValue({ timestamp: 1_758_835_200 }),
+    };
+    const records = {
+      findOwnedByRoot: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" }),
+      recordVerifiedAnchor: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "ANCHORED", verification_status: "VERIFIED" }),
+      recordAnchorFailure: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "FAILED", verification_status: "UNVERIFIED" }),
+    };
+    const verified = studio({ records, chain, metadataFetcher: async () => Buffer.from(JSON.stringify(document)) });
+    verified.db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("FROM experiences")) return { rows: [] };
+      if (String(sql).includes("FROM editions")) return { rows: [editionRow(document)] };
+      return { rows: [releaseRow()] };
+    });
+    await expect(verified.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true, copyrightOwnership: false });
+    expect(records.recordVerifiedAnchor).toHaveBeenCalledWith(expect.objectContaining({ transactionHash: tx, blockNumber: 90, anchorEvent: "EditionCreated", blockTimestamp: "2025-09-25T21:20:00.000Z" }));
+
+    const mismatched = studio({ records, chain, metadataFetcher: async () => Buffer.from(JSON.stringify({ ...document, description: "not the pinned bytes" })) });
+    mismatched.db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("FROM experiences")) return { rows: [] };
+      if (String(sql).includes("FROM editions")) return { rows: [editionRow(document)] };
+      return { rows: [releaseRow()] };
+    });
+    await expect(mismatched.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
+    expect(records.recordAnchorFailure).toHaveBeenCalled();
   });
 });
 

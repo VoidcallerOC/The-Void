@@ -171,26 +171,7 @@ export function ArtistStudioPage() {
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
       await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
       const confirmed = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/publication/confirm`, { method: "POST", payload: { transactionHash: transaction.hash }, headers });
-      let provenanceStatus = confirmed.provenanceStatus || "PROVENANCE_PENDING";
-      let fullyPublished = confirmed.fullyPublished === true && provenanceStatus === "PROVENANCE_VERIFIED";
-      if (!fullyPublished) {
-        try {
-          const prepared = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provenance/anchor/prepare`, { method: "POST", payload: {}, headers });
-          if (prepared.verificationStatus === "VERIFIED" && prepared.fullyPublished === true) {
-            provenanceStatus = "PROVENANCE_VERIFIED";
-            fullyPublished = true;
-          } else if (prepared.data && prepared.contractAddress) {
-            const anchorTx = await sendFujiTransaction({ provider, from: wallet.account, data: prepared.data, to: prepared.contractAddress, anchorAddress: prepared.contractAddress });
-            const anchored = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provenance/anchor/confirm`, { method: "POST", payload: { transactionHash: anchorTx.hash }, headers });
-            provenanceStatus = anchored.provenanceStatus || "PROVENANCE_PENDING";
-            fullyPublished = anchored.fullyPublished === true && provenanceStatus === "PROVENANCE_VERIFIED";
-          }
-        } catch (error) {
-          provenanceStatus = error.code === "PROVENANCE_ANCHOR_NOT_CONFIGURED" || error.code === "PROVENANCE_ANCHOR_UNAVAILABLE" ? "PROVENANCE_PENDING" : "PROVENANCE_FAILED";
-          fullyPublished = false;
-        }
-      }
-      const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus, fullyPublished });
+      const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);
       if (!result.fullyPublished) return;
       setPublishedTokenId(encoded.tokenId.toString());
