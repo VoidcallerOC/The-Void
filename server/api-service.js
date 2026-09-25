@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ApiError } from "./api-errors.js";
+import { ARTIST_SELECT } from "./artist-verified-select.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { checkDatabaseHealth } from "./db.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
@@ -86,13 +87,6 @@ const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description
 const EXPERIENCE_PUBLIC_SELECT = `id, artist_id, release_id, edition_id, title, description, experience_type, version, status, created_at, updated_at, (jsonb_typeof(requirements) = 'array' AND jsonb_array_length(requirements) > 0) AS gated, (COALESCE(media_config->>'protected', '') = 'true' OR (jsonb_typeof(media_config->'protectedMedia') = 'array' AND jsonb_array_length(media_config->'protectedMedia') > 0)) AS protected`;
 const RELEASE_PUBLIC_SELECT = `r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata, r.published_at, r.created_at, r.updated_at, a.slug AS artist_slug, a.display_name AS artist_name`;
 const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address`;
-
-const ARTIST_SELECT = `SELECT a.*, p.bio, p.website_url, p.social_links, p.profile_metadata,
-      EXISTS (
-        SELECT 1 FROM artist_verification_applications v
-        WHERE v.status='VERIFIED' AND (v.artist_id=a.id OR lower(v.slug)=lower(a.slug))
-      ) AS verified
-    FROM artists a LEFT JOIN artist_profiles p ON p.artist_id=a.id`;
 
 export class ApiService {
   constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {

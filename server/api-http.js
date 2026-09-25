@@ -1,8 +1,9 @@
 import { Buffer } from "node:buffer";
 import { pipeline } from "node:stream/promises";
-import { createRequestId } from "./api-runtime.js";
+import { createRequestId, createRateLimiter } from "./api-runtime.js";
 import { ApiError, apiErrorFrom, errorResponse } from "./api-errors.js";
 
+const challengeLimiter = createRateLimiter({ limit: 8, windowMs: 10 * 60 * 1000 });
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 
 async function readJson(request) {
@@ -37,7 +38,7 @@ async function sendMedia(response, media, cors = {}) {
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
-export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
+export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, contractOwnerVerification = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
   if (!service) throw new TypeError("createApiHandler requires an ApiService.");
   return async function handle(request, response) {
     const requestId = request.headers["x-request-id"] || createRequestId();
@@ -67,6 +68,15 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       let data;
       if (method === "GET" && base[0] === "artists" && base.length === 1) data = await service.listArtists({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "indexer" && base[1] === "health" && base.length === 2) data = await service.getIndexerHealth({ chainId: url.searchParams.get("chainId") });
+      else if (method === "GET" && base[0] === "artists" && base.length === 3 && base[2] === "verification") {
+        if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");
+        data = await contractOwnerVerification.getStatus({ slug: base[1] });
+      }
+      else if (method === "GET" && base[0] === "artists" && base.length === 4 && base[2] === "verify" && base[3] === "challenge") {
+        if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");
+        challengeLimiter.check(`${apiRequest.rateLimitKey}:artist-verify-challenge:${String(base[1] || "").toLowerCase()}`);
+        data = await contractOwnerVerification.createChallenge({ slug: base[1] });
+      }
       else if (method === "GET" && base[0] === "artists" && base.length === 2) data = await service.getArtist({ idOrSlug: base[1] });
       else if (method === "GET" && base[0] === "releases" && base.length === 1) data = await service.listReleases({ ...Object.fromEntries(url.searchParams) });
       else if (method === "GET" && base[0] === "releases" && base.length === 2) data = await service.getRelease({ idOrSlug: base[1] });
@@ -96,6 +106,11 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "POST" && base.join("/") === "auth/verify") {
           if (!authService) throw new ApiError(503, "AUTH_UNAVAILABLE", "Wallet authentication is unavailable.");
           data = await authService.verifyChallenge({ ...body, requestId });
+        }
+        else if (method === "POST" && base[0] === "artists" && base.length === 3 && base[2] === "verify") {
+          if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");
+          rateLimiter?.check(`${apiRequest.rateLimitKey}:artist-verify-submit:${String(base[1] || "").toLowerCase()}`);
+          data = await contractOwnerVerification.verifyClaim({ slug: base[1], address: body.address, signature: body.signature, nonce: body.nonce });
         }
         else if (method === "POST" && base.join("/") === "listings") data = await service.createListing({ request: apiRequest, input: body });
         else if (method === "POST" && base.join("/") === "listings/cancel") data = await service.cancelListing({ request: apiRequest, input: body });
