@@ -63,7 +63,7 @@ describe.skipIf(!testDatabaseUrl)("provenance persistence", () => {
     pool.on("error", ignoreAdminTerminate);
     pools.push(pool);
     await migrate({ pool, config });
-    await pool.query("INSERT INTO artists (id, slug, display_name) VALUES ('artist-1', 'voidcaller', 'Voidcaller')");
+    await pool.query("INSERT INTO artists (id, slug, display_name) VALUES ('artist-1', 'provenance-artist', 'Provenance Artist')");
     await pool.query("INSERT INTO artist_owners (artist_id, owner_wallet, role) VALUES ('artist-1', $1, 'OWNER')", [owner]);
     await pool.query("INSERT INTO releases (id, artist_id, slug, title) VALUES ('release-1', 'artist-1', 'the-record', 'The Record'), ('release-2', 'artist-1', 'other-record', 'Other')");
     await pool.query("INSERT INTO editions (id, release_id, title) VALUES ('edition-1', 'release-1', 'Chapter I'), ('edition-2', 'release-2', 'Chapter II')");
