@@ -30,6 +30,15 @@ function stableValue(value) {
   return value;
 }
 
+/** SHA-256 of the canonical metadata object. `_void` and `provenance` are not
+ * part of this object; callers add them only after the digest exists. */
+export function digestCanonicalMetadata(metadata) {
+  const normalized = stableValue(metadata);
+  const serialized = JSON.stringify(normalized);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) throw new ApiError(400, "METADATA_TOO_LARGE", "Release metadata is too large to publish.");
+  return { metadata: normalized, serialized, digest: createHash("sha256").update(serialized).digest("hex") };
+}
+
 export function canonicalMetadata(input) {
   if (!input?.release || !input?.edition) throw new ApiError(400, "METADATA_INPUT_INVALID", "Release details are required before metadata can be published.");
   const release = input.release;
@@ -51,11 +60,8 @@ export function canonicalMetadata(input) {
       ...(text(input.tier, 128) ? [{ trait_type: "Tier", value: text(input.tier, 128) }] : []),
     ],
   };
-  const normalized = stableValue(metadata);
-  const serialized = JSON.stringify(normalized);
-  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) throw new ApiError(400, "METADATA_TOO_LARGE", "Release metadata is too large to publish.");
-  if (!normalized.name || !normalized.artist) throw new ApiError(400, "METADATA_INPUT_INVALID", "A release title and artist are required before metadata can be published.");
-  return { metadata: normalized, serialized, digest: createHash("sha256").update(serialized).digest("hex") };
+  if (!metadata.name || !metadata.artist) throw new ApiError(400, "METADATA_INPUT_INVALID", "A release title and artist are required before metadata can be published.");
+  return digestCanonicalMetadata(metadata);
 }
 
 export class PinataMetadataStorage {
