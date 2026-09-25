@@ -9,6 +9,7 @@ const FIELDS = [
   "schema_version", "proof_timestamp", "chain_key", "chain_id", "transaction_hash", "block_number",
   "anchor_status", "verification_status", "verified_at", "failure_code", "failure_detail",
   "attempt_count", "next_retry_at", "created_at", "updated_at",
+  "block_timestamp", "anchor_contract", "anchor_event",
 ];
 const RETURNING = FIELDS.join(", ");
 const OWNED_COLUMNS = FIELDS.map((field) => `p.${field}`).join(", ");
@@ -80,6 +81,18 @@ function blockNumber(value, { required = false } = {}) {
   return parsed;
 }
 
+function anchorEventName(value) {
+  const name = String(value ?? "").trim();
+  if (name !== "ProvenanceAnchored") invalid("anchorEvent must be ProvenanceAnchored.");
+  return name;
+}
+
+function anchorContract(value) {
+  const address = String(value ?? "").trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(address)) invalid("anchorContract must be the configured contract address.");
+  return address;
+}
+
 function failureCode(value) {
   const code = String(value ?? "").trim();
   if (!/^[A-Z0-9_]{1,64}$/.test(code)) invalid("failureCode must be a short status code.");
@@ -145,6 +158,48 @@ export class ProvenanceRecords {
     );
     if (!rows[0]) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot update this provenance record.");
     return rows[0];
+  }
+
+  async findOwnedByRoot({ releaseId, editionId, manifestSha256, creatorWallet }) {
+    const owned = await this.ownedEdition({ releaseId, editionId, wallet: creatorWallet });
+    const root = contentHash(manifestSha256, "manifestSha256", { required: true });
+    const { rows } = await this.db.query(
+      `SELECT ${OWNED_COLUMNS}
+       FROM provenance_proofs p
+       JOIN editions e ON e.id = p.edition_id AND e.release_id = p.release_id
+       JOIN releases r ON r.id = p.release_id
+       JOIN artist_owners ao ON ao.artist_id = r.artist_id AND ao.owner_wallet = $4
+       WHERE p.release_id = $1 AND p.edition_id = $2 AND p.manifest_sha256 = $3
+       LIMIT 1`,
+      [owned.release_id, owned.edition_id, root, owned.wallet],
+    );
+    return rows[0] || null;
+  }
+
+  async recordSubmittedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, anchorContract: contract, anchorEvent: eventName }) {
+    const current = await this.loadOwned(id, creatorWallet);
+    if (current.verification_status === "VERIFIED" || current.anchor_status === "ANCHORED") {
+      throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance record is already verified.");
+    }
+    if (!OPENABLE.has(current.anchor_status)) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before submitting another transaction.");
+    const key = chainKey(network);
+    const chain = optionalChainId(chainId);
+    if (!key || !chain) invalid("A submitted anchor requires chainKey and chainId.");
+    try {
+      const { rows } = await this.db.query(
+        `UPDATE provenance_proofs
+         SET anchor_status = 'SUBMITTED', verification_status = 'UNVERIFIED', verified_at = NULL,
+             chain_key = $2, chain_id = $3, transaction_hash = $4, anchor_contract = $5, anchor_event = $6,
+             block_number = NULL, block_timestamp = NULL, failure_code = NULL, failure_detail = NULL, next_retry_at = NULL, updated_at = now()
+         WHERE id = $1 AND anchor_status IN ('PENDING', 'SUBMITTED') AND verification_status <> 'VERIFIED'
+         RETURNING ${RETURNING}`,
+        [current.id, key, chain, transactionHash(txHash, { required: true }), anchorContract(contract), anchorEventName(eventName)],
+      );
+      if (!rows[0]) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before submitting another transaction.");
+      return rows[0];
+    } catch (error) {
+      mapDbError(error);
+    }
   }
 
   async createProof({ releaseId, editionId, creatorWallet, metadataSha256, artworkSha256 = null, audioSha256 = null, experienceSha256 = null, manifestSha256, schemaVersion: version, proofTimestamp: timestamp, id = null }) {
@@ -224,7 +279,7 @@ export class ProvenanceRecords {
     }
   }
 
-  async recordVerifiedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, blockNumber: block, verifiedAt = new Date() }) {
+  async recordVerifiedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, blockNumber: block, blockTimestamp = null, anchorContract: contract, anchorEvent: eventName, verifiedAt = new Date() }) {
     const current = await this.loadOwned(id, creatorWallet);
     if (current.verification_status === "VERIFIED") throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance record is already verified.");
     if (!OPENABLE.has(current.anchor_status)) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before verifying it.");
@@ -236,10 +291,11 @@ export class ProvenanceRecords {
         `UPDATE provenance_proofs
          SET anchor_status = 'ANCHORED', verification_status = 'VERIFIED', verified_at = $2,
              chain_key = $3, chain_id = $4, transaction_hash = $5, block_number = $6,
+             block_timestamp = $7, anchor_contract = $8, anchor_event = $9,
              failure_code = NULL, failure_detail = NULL, next_retry_at = NULL, updated_at = now()
          WHERE id = $1 AND anchor_status IN ('PENDING', 'SUBMITTED') AND verification_status <> 'VERIFIED'
          RETURNING ${RETURNING}`,
-        [current.id, proofTimestamp(verifiedAt), key, chain, transactionHash(txHash, { required: true }), blockNumber(block, { required: true })],
+        [current.id, proofTimestamp(verifiedAt), key, chain, transactionHash(txHash, { required: true }), blockNumber(block, { required: true }), proofTimestamp(blockTimestamp), anchorContract(contract), anchorEventName(eventName)],
       );
       if (!rows[0]) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before verifying it.");
       return rows[0];

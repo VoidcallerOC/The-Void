@@ -132,9 +132,12 @@ describe("provenance records", () => {
       chainId: 43113,
       transactionHash: `0x${"AB".repeat(32)}`,
       blockNumber: 90,
+      blockTimestamp: "2026-09-25T22:00:01.000Z",
+      anchorContract: "0x262B774cf9a1949170B58E2d57F6189980FE757b",
+      anchorEvent: "ProvenanceAnchored",
       verifiedAt: "2026-09-25T22:00:00.000Z",
     })).resolves.toMatchObject({ anchor_status: "ANCHORED", verification_status: "VERIFIED", chain_id: 43113, block_number: 90 });
-    expect(query.mock.calls[1][1]).toEqual(["proof-1", "2026-09-25T22:00:00.000Z", "fuji", 43113, `0x${"ab".repeat(32)}`, 90]);
+    expect(query.mock.calls[1][1]).toEqual(["proof-1", "2026-09-25T22:00:00.000Z", "fuji", 43113, `0x${"ab".repeat(32)}`, 90, "2026-09-25T22:00:01.000Z", "0x262b774cf9a1949170b58e2d57f6189980fe757b", "ProvenanceAnchored"]);
   });
 
   it("refuses to verify without a transaction and refuses failure text that points at media", async () => {
