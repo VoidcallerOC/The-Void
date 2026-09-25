@@ -30,6 +30,16 @@ function normalizeRequirement(input, fallbackChainId) {
   return { type: SUPPORTED_REQUIREMENT, contract: contractAddress(input.contract), tokenIds, minAmount: nonNegativeBigInt(input.minAmount ?? 1, "requirement.minAmount"), chainId: selectedChainId };
 }
 
+function mediaIsProtected(mediaConfig) {
+  let config = mediaConfig;
+  if (typeof config === "string") {
+    try { config = JSON.parse(config); } catch { return true; }
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
+  if (config.protected === true) return true;
+  return Array.isArray(config.protectedMedia) && config.protectedMedia.length > 0;
+}
+
 function checkpointFresh(row, { maxLagBlocks, maxStalenessMs, now }) {
   if (!row || !["IDLE", "RUNNING"].includes(String(row.status || "").toUpperCase())) return false;
   const latest = Number(row.latest_known_block);
@@ -63,10 +73,13 @@ export class IndexedOwnershipVerifier {
     }
   }
 
-  async verify({ wallet, experienceId = null, requirements }) {
+  async verify({ wallet, experienceId = null, requirements, mediaConfig = null }) {
     const normalizedWallet = walletAddress(wallet);
     const parsed = parseRequirements(requirements);
-    if (!parsed.length) return { owns: true, state: "CONFIRMED", chainId: null, watermark: "NO_REQUIREMENT", experienceId };
+    if (!parsed.length) {
+      if (mediaIsProtected(mediaConfig)) return { owns: false, state: "CONFIRMED", chainId: null, watermark: null, experienceId };
+      return { owns: true, state: "CONFIRMED", chainId: null, watermark: "NO_REQUIREMENT", experienceId };
+    }
 
     const matches = [];
     for (const source of parsed) {

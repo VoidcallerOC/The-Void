@@ -83,6 +83,19 @@ export class PersistenceRepository {
     return rows[0];
   }
 
+  async saveMediaAsset({ id, artistId, storageKey, mediaType }) {
+    const assetId = requiredText(id, "mediaAsset.id", { max: 128 });
+    const key = requiredText(storageKey, "mediaAsset.storageKey", { max: 1024 });
+    if (key.includes("..") || key.startsWith("/") || key.includes("\0")) throw new PersistenceValidationError("mediaAsset.storageKey must be a server storage key.", "mediaAsset.storageKey");
+    const type = enumValue(String(mediaType || "").toUpperCase(), "mediaAsset.mediaType", ["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "DEMO", "LIVE_RECORDING"]);
+    const owner = requiredText(artistId, "mediaAsset.artistId");
+    try {
+      const { rows } = await this.db.query(`INSERT INTO media_assets (media_key, id, artist_id, storage_key, media_type, visibility) VALUES ($1,$1,$2,$3,$4,'PROTECTED') ON CONFLICT (storage_key) DO UPDATE SET artist_id=media_assets.artist_id WHERE media_assets.artist_id=$2 RETURNING *`, [assetId, owner, key, type]);
+      if (!rows[0]) throw new PersistenceConflictError("Protected media storage key is already owned by another artist.");
+      return rows[0];
+    } catch (error) { throw normalizeDbError(error, "Protected media asset already exists."); }
+  }
+
   async upsertCollector(wallet) {
     const address = walletAddress(wallet);
     const { rows } = await this.db.query(`INSERT INTO collectors (wallet_address) VALUES ($1) ON CONFLICT (wallet_address) DO UPDATE SET last_seen_at=now() RETURNING *`, [address]);
