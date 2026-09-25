@@ -1,5 +1,7 @@
 import { ApiError } from "./api-errors.js";
 import { chainId, nonNegativeBigInt, requiredText, walletAddress } from "./validation.js";
+import { isLegacyMainnetRequirement } from "../src/lib/legacy-genesis.js";
+import { createMainnetBalanceClient, verifyLegacyMainnetOwnership } from "./legacy-ownership.js";
 
 const SUPPORTED_REQUIREMENT = "erc1155-balance";
 
@@ -55,12 +57,14 @@ function checkpointFresh(row, { maxLagBlocks, maxStalenessMs, now }) {
  * never part of this decision.
  */
 export class IndexedOwnershipVerifier {
-  constructor({ db, config, now = () => new Date() } = {}) {
+  constructor({ db, config, now = () => new Date(), mainnetClient = null, denyUnauthorizedWith401 = true } = {}) {
     if (!db?.query) throw new TypeError("IndexedOwnershipVerifier requires a database executor.");
     if (!config?.ownershipMaxIndexerLagBlocks || !config?.ownershipMaxIndexerStalenessMs || !Array.isArray(config.authAllowedChainIds)) throw new TypeError("IndexedOwnershipVerifier requires server ownership configuration.");
     this.db = db;
     this.config = config;
     this.now = now;
+    this.mainnetClient = mainnetClient || (config.mainnetRpcUrl ? createMainnetBalanceClient({ rpcUrl: config.mainnetRpcUrl }) : null);
+    this.denyUnauthorizedWith401 = denyUnauthorizedWith401;
   }
 
   async assertCheckpoint({ chainId: selectedChainId, contract }) {
@@ -84,6 +88,14 @@ export class IndexedOwnershipVerifier {
     const matches = [];
     for (const source of parsed) {
       const requirement = normalizeRequirement(source, this.config.authAllowedChainIds[0]);
+      if (isLegacyMainnetRequirement(requirement)) {
+        if (!this.mainnetClient) throw new ApiError(503, "MAINNET_RPC_UNAVAILABLE", "MAINNET_RPC_URL is not configured.");
+        const live = await verifyLegacyMainnetOwnership({ requirement, wallet: normalizedWallet, client: this.mainnetClient, experienceId });
+        if (!live.owns && this.denyUnauthorizedWith401) throw new ApiError(401, "UNAUTHORIZED", "Wallet does not hold the required legacy token.");
+        if (!live.owns) return live;
+        matches.push({ chainId: live.chainId, watermark: live.watermark, tokenId: "legacy" });
+        continue;
+      }
       if (!this.config.authAllowedChainIds.includes(requirement.chainId)) throw new ApiError(400, "EXPERIENCE_REQUIREMENT_INVALID", "Experience requirement chain is not enabled for this environment.");
       await this.assertCheckpoint({ chainId: requirement.chainId, contract: requirement.contract });
       const { rows } = await this.db.query(
@@ -93,7 +105,7 @@ export class IndexedOwnershipVerifier {
       if (!rows[0]) return { owns: false, state: "CONFIRMED", chainId: requirement.chainId, watermark: null, experienceId };
       matches.push({ chainId: requirement.chainId, watermark: rows[0].synchronization_watermark, tokenId: String(rows[0].token_id) });
     }
-    return { owns: true, state: "CONFIRMED", chainId: matches[0].chainId, watermark: matches.map((item) => `${item.chainId}:${item.tokenId}:${item.watermark}`).join("|"), experienceId };
+    return { owns: true, state: "CONFIRMED", chainId: matches[0].chainId, watermark: matches.map((item) => `${item.chainId}:${item.tokenId}:${item.watermark}`).join("|"), experienceId, source: matches[0].tokenId === "legacy" ? "mainnet-rpc" : "indexer" };
   }
 }
 
