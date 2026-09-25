@@ -8,6 +8,9 @@ const ERC1155_EVENT_TOPICS = Object.freeze({
   TransferSingle: id("TransferSingle(address,address,address,uint256,uint256)"),
   TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])")
 });
+const PRIMARY_SALE_EVENT_TOPICS = Object.freeze({
+  Purchased: id("Purchased(uint256,address,uint256,uint256,uint256,uint256)")
+});
 
 export class ConfigurationError extends Error {
   constructor(message) {
@@ -60,22 +63,27 @@ function evmAddress(value, name) {
 function parseIndexerContracts(value, { chainId }) {
   let parsed;
   try { parsed = JSON.parse(String(value || "")); } catch { throw new ConfigurationError("INDEXER_CONTRACTS_JSON must be valid JSON."); }
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new ConfigurationError("INDEXER_CONTRACTS_JSON must contain at least one registered ERC1155 or MARKETPLACE contract.");
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new ConfigurationError("INDEXER_CONTRACTS_JSON must contain at least one registered ERC1155, MARKETPLACE, or PRIMARY_SALE contract.");
   const addresses = new Set();
-  return Object.freeze(parsed.map((contract, index) => {
+  const contracts = parsed.map((contract, index) => {
     if (!contract || typeof contract !== "object" || Array.isArray(contract)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}] must be an object.`);
     const address = evmAddress(contract.address, `INDEXER_CONTRACTS_JSON[${index}].address`);
     if (address === PLACEHOLDER_CONTRACT_ADDRESS) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].address may not use the placeholder contract address.`);
     if (addresses.has(address)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON contains duplicate address ${address}.`);
     addresses.add(address);
     const contractType = String(contract.contractType || "").trim().toUpperCase();
-    if (contractType !== "ERC1155" && contractType !== "MARKETPLACE") throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].contractType must be ERC1155 or MARKETPLACE.`);
+    if (contractType !== "ERC1155" && contractType !== "MARKETPLACE" && contractType !== "PRIMARY_SALE") throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].contractType must be ERC1155, MARKETPLACE, or PRIMARY_SALE.`);
     const declaredChainId = contract.chainId === undefined ? chainId : Number(contract.chainId);
     if (declaredChainId !== chainId) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].chainId must match INDEXER_CHAIN_ID.`);
     const startBlock = nonNegativeInteger(contract.startBlock, null, `INDEXER_CONTRACTS_JSON[${index}].startBlock`);
     const platformFeeBps = contract.platformFeeBps === undefined || contract.platformFeeBps === null ? null : nonNegativeInteger(contract.platformFeeBps, null, `INDEXER_CONTRACTS_JSON[${index}].platformFeeBps`, { max: 10_000 });
-    return Object.freeze({ chainId, address, contractType, startBlock, platformFeeBps, reconcileListings: contract.reconcileListings !== false, eventTopics: contractType === "ERC1155" ? ERC1155_EVENT_TOPICS : undefined });
-  }));
+    const tokenAddress = contractType === "PRIMARY_SALE" ? evmAddress(contract.tokenAddress, `INDEXER_CONTRACTS_JSON[${index}].tokenAddress`) : null;
+    if (tokenAddress && tokenAddress === address) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].tokenAddress must be the ERC1155 release, not the sale contract.`);
+    const eventTopics = contractType === "ERC1155" ? ERC1155_EVENT_TOPICS : contractType === "PRIMARY_SALE" ? PRIMARY_SALE_EVENT_TOPICS : undefined;
+    return Object.freeze({ chainId, address, contractType, startBlock, platformFeeBps, tokenAddress, reconcileListings: contract.reconcileListings !== false, eventTopics });
+  });
+  const saleAddresses = Object.freeze(contracts.filter((contract) => contract.contractType === "PRIMARY_SALE").map((contract) => contract.address));
+  return Object.freeze(contracts.map((contract) => contract.contractType === "ERC1155" ? Object.freeze({ ...contract, skipMintOperators: saleAddresses }) : contract));
 }
 
 export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {

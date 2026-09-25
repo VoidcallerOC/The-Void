@@ -47,6 +47,15 @@ export function fujiTokenId(releaseId, editionId) {
   return tokenId === 0n ? 1n : tokenId;
 }
 
+export function assertFujiTransactionTarget(address) {
+  if (!ethers.isAddress(address)) throw new Error("Only the certified Fuji release or its primary sale contract is allowed for this path.");
+  const target = ethers.getAddress(address);
+  if (target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) return ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress);
+  const sale = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "");
+  if (ethers.isAddress(sale) && ethers.getAddress(sale) !== ethers.ZeroAddress && target.toLowerCase() === sale.toLowerCase()) return ethers.getAddress(sale);
+  throw new Error("Only the certified Fuji release or its primary sale contract is allowed for this path.");
+}
+
 export function assertFujiAddress(address) {
   if (!ethers.isAddress(address) || address.toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) throw new Error("Only the certified Fuji VoidRelease1155 contract is allowed for this path.");
   return FUJI_RELEASE_CONFIG.contractAddress;
@@ -60,11 +69,22 @@ export async function assertFujiProvider(provider) {
   return chainId;
 }
 
-export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metadataUri }) {
+const v2CreateIface = new ethers.Interface([
+  "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
+]);
+
+export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps }) {
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (BigInt(maxSupply) <= 0n) throw new Error("Edition supply must be greater than zero.");
   const ids = fujiIds(releaseId, editionId);
-  return { tokenId: fujiTokenId(releaseId, editionId), data: iface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri]) };
+  const tokenId = fujiTokenId(releaseId, editionId);
+  if (payout === undefined && royaltyBps === undefined) {
+    return { tokenId, data: iface.encodeFunctionData("createEdition(bytes32,bytes32,uint256,string)", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri]) };
+  }
+  if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
+  const bps = BigInt(royaltyBps ?? 0);
+  if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  return { tokenId, data: v2CreateIface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri, ethers.getAddress(payout), bps]) };
 }
 
 export function encodeFujiMint({ to, tokenId, amount = 1 }) {
@@ -86,10 +106,12 @@ export function isFujiEditionNotFoundError(error) {
 export function encodeFujiApproval(operator, approved = true) { return iface.encodeFunctionData("setApprovalForAll", [operator, approved]); }
 export function encodeFujiTransfer(from, to, tokenId, amount = 1) { return iface.encodeFunctionData("safeTransferFrom", [from, to, BigInt(tokenId), BigInt(amount), "0x"]); }
 
-export async function sendFujiTransaction({ provider, from, data }) {
+export async function sendFujiTransaction({ provider, from, data, to, value }) {
   await assertFujiProvider(provider);
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
-  const hash = await provider.request({ method: "eth_sendTransaction", params: [{ from, to: assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress), data }] });
+  const tx = { from, to: assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress), data };
+  if (value !== undefined && value !== null && BigInt(value) > 0n) tx.value = ethers.toQuantity(BigInt(value));
+  const hash = await provider.request({ method: "eth_sendTransaction", params: [tx] });
   const receipt = await waitForReceipt(provider, hash);
   if (!receipt || receipt.status !== "0x1") throw new Error("Fuji transaction reverted or did not receive a successful receipt.");
   return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };

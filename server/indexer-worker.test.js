@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadIndexerConfig } from "./config.js";
+import { reportIndexedContracts } from "./indexer-contracts.js";
 import { IndexerLeaseError, ProductionIndexerWorker } from "./indexer-worker.js";
 
 const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -110,6 +111,28 @@ describe("indexer worker configuration", () => {
     const result = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]) });
     expect(result).toMatchObject({ chainId: 43113, contracts: [{ address: contract, contractType: "ERC1155", startBlock: 123 }] });
     expect(result.contracts[0].eventTopics.TransferSingle).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(result.contracts[0].skipMintOperators).toEqual([]);
+  });
+
+  it("indexes the ERC1155 release and the primary sale together", () => {
+    const sale = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const result = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 10 }, { chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: contract, startBlock: 11 }]) });
+    expect(result.contracts[0]).toMatchObject({ contractType: "ERC1155", skipMintOperators: [sale] });
+    expect(result.contracts[1]).toMatchObject({ contractType: "PRIMARY_SALE", tokenAddress: contract, address: sale });
+    expect(result.contracts[1].eventTopics.Purchased).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(() => loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: sale, contractType: "PRIMARY_SALE", startBlock: 11 }]) })).toThrow(/tokenAddress/);
+  });
+
+  it("reports both the ERC1155 release and the primary sale on readiness", () => {
+    const sale = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const ready = reportIndexedContracts({
+      configured: [{ address: contract, contractType: "ERC1155" }, { address: sale, contractType: "PRIMARY_SALE" }],
+      indexed: [{ address: contract, type: "ERC1155", status: "IDLE" }, { address: sale, type: "PRIMARY_SALE", status: "RUNNING" }],
+    });
+    expect(ready.ok).toBe(true);
+    expect(ready.release).toMatchObject({ contractType: "ERC1155", healthy: true, address: contract });
+    expect(ready.primarySale).toMatchObject({ contractType: "PRIMARY_SALE", healthy: true, address: sale });
+    expect(reportIndexedContracts({ configured: [{ address: contract, contractType: "ERC1155" }], indexed: [{ address: contract, type: "ERC1155", status: "IDLE" }] }).ok).toBe(false);
   });
   it("rejects the known placeholder contract address in production configuration", () => {
     expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: "0x0000000000000000000000000000000000000001", contractType: "MARKETPLACE", startBlock: 0 }]) })).toThrow(/placeholder contract address/);
