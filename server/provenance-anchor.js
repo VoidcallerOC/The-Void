@@ -6,6 +6,7 @@ import { ConfigurationError } from "./config.js";
 import fujiRelease from "../config/fuji-release.json" with { type: "json" };
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceRecords } from "./provenance-records.js";
+import { publicationView } from "./studio-publication.js";
 
 const FUJI_RELEASE = fujiRelease.contractAddress.toLowerCase();
 const EVENT_NAME = "ProvenanceAnchored";
@@ -157,6 +158,13 @@ export async function inspectAnchorTransaction({ reader, config, expected }) {
   };
 }
 
+function publicationFields(context, proof) {
+  const view = publicationView({ releaseStatus: context?.release_status, proof });
+  return { provenanceStatus: view.provenanceStatus, fullyPublished: view.fullyPublished, status: view.status };
+}
+
+const VERIFICATION_FAILURES = new Set(["ANCHOR_EVENT_MISMATCH", "ANCHOR_STATE_MISMATCH", "ANCHOR_CALL_MISMATCH", "ANCHOR_TARGET_MISMATCH", "ANCHOR_SIGNER_MISMATCH", "ANCHOR_NOT_CONFIRMED"]);
+
 function assetHash(record, role) {
   const matches = (record.assets || []).filter((asset) => asset?.role === role);
   return matches.length === 1 ? matches[0].sha256 : null;
@@ -213,7 +221,7 @@ export class ProvenanceAnchorService {
 
   async editionContext(releaseId, wallet) {
     const { rows } = await this.db.query(
-      `SELECT r.id AS release_id, r.slug AS release_slug, r.artist_id, e.id AS edition_id, e.title,
+      `SELECT r.id AS release_id, r.slug AS release_slug, r.status AS release_status, r.artist_id, e.id AS edition_id, e.title,
               t.token_id, t.metadata, t.metadata_version
        FROM releases r
        JOIN artist_owners ao ON ao.artist_id = r.artist_id AND ao.owner_wallet = $2
@@ -262,7 +270,7 @@ export class ProvenanceAnchorService {
     const context = await this.editionContext(String(releaseId || "").trim(), identity.wallet);
     const proof = await this.ensureProof(context, identity.wallet);
     if (proof.verification_status === "VERIFIED") {
-      return { proofId: proof.id, provenanceRoot: context.root, chainId: this.config.chainId, network: this.config.network, anchorStatus: proof.anchor_status, verificationStatus: "VERIFIED", alreadyAnchored: true, data: null };
+      return { proofId: proof.id, provenanceRoot: context.root, chainId: this.config.chainId, network: this.config.network, anchorStatus: proof.anchor_status, verificationStatus: "VERIFIED", alreadyAnchored: true, data: null, ...publicationFields(context, proof) };
     }
     const call = encodeAnchorCall({ releaseSlug: context.release_slug, editionTitleSlug: context.editionSlug, provenanceRoot: context.root });
     return {
@@ -280,6 +288,7 @@ export class ProvenanceAnchorService {
       anchorStatus: proof.anchor_status,
       verificationStatus: proof.verification_status,
       alreadyAnchored: false,
+      ...publicationFields(context, proof),
       note: "This anchor commits the provenance root. It does not establish legal copyright ownership.",
     };
   }
@@ -307,7 +316,7 @@ export class ProvenanceAnchorService {
     const observed = await inspectAnchorTransaction({ reader: this.chainReader(), config: this.config, expected: this.expected(context, identity.wallet, hash) });
     if (observed.outcome === "failed") {
       const failed = await this.records.recordAnchorFailure({ id: proof.id, creatorWallet: identity.wallet, failureCode: "ANCHOR_TRANSACTION_REVERTED", failureDetail: "The anchor transaction reverted." });
-      return { proofId: failed.id, provenanceRoot: context.root, anchorStatus: "FAILED", verificationStatus: "UNVERIFIED", transactionHash: hash };
+      return { proofId: failed.id, provenanceRoot: context.root, anchorStatus: "FAILED", verificationStatus: "UNVERIFIED", transactionHash: hash, provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false };
     }
     const submitted = await this.records.recordSubmittedAnchor({
       id: proof.id,
@@ -318,7 +327,7 @@ export class ProvenanceAnchorService {
       anchorContract: this.config.contractAddress,
       anchorEvent: EVENT_NAME,
     });
-    return { proofId: submitted.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: observed.outcome === "pending" };
+    return { proofId: submitted.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: observed.outcome === "pending", ...publicationFields(context, { anchor_status: "SUBMITTED", verification_status: "UNVERIFIED" }) };
   }
 
   async confirm({ request, releaseId, input = {} }) {
@@ -330,21 +339,29 @@ export class ProvenanceAnchorService {
     const existing = await this.ensureProof(context, identity.wallet);
     if (existing.verification_status === "VERIFIED") {
       if (String(existing.transaction_hash || "").toLowerCase() === hash) {
-        return { proofId: existing.id, provenanceRoot: context.root, anchorStatus: "ANCHORED", verificationStatus: "VERIFIED", transactionHash: hash };
+        return { proofId: existing.id, provenanceRoot: context.root, anchorStatus: "ANCHORED", verificationStatus: "VERIFIED", transactionHash: hash, ...publicationFields(context, existing) };
       }
       throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance root is already verified.");
     }
     const proof = await this.openForAttempt(existing, identity.wallet);
-    const observed = await inspectAnchorTransaction({ reader: this.chainReader(), config: this.config, expected: this.expected(context, identity.wallet, hash) });
+    let observed;
+    try {
+      observed = await inspectAnchorTransaction({ reader: this.chainReader(), config: this.config, expected: this.expected(context, identity.wallet, hash) });
+    } catch (error) {
+      if (VERIFICATION_FAILURES.has(error?.code)) {
+        await this.records.recordAnchorFailure({ id: proof.id, creatorWallet: identity.wallet, failureCode: error.code, failureDetail: "The anchor transaction was not verified." }).catch(() => {});
+      }
+      throw error;
+    }
     if (observed.outcome === "pending") {
       const pending = await this.records.recordSubmittedAnchor({
         id: proof.id, creatorWallet: identity.wallet, chainKey: this.config.network, chainId: this.config.chainId, transactionHash: hash, anchorContract: this.config.contractAddress, anchorEvent: EVENT_NAME,
       });
-      return { proofId: pending.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: true };
+      return { proofId: pending.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: true, ...publicationFields(context, { anchor_status: "SUBMITTED", verification_status: "UNVERIFIED" }) };
     }
     if (observed.outcome === "failed") {
       const failed = await this.records.recordAnchorFailure({ id: proof.id, creatorWallet: identity.wallet, failureCode: "ANCHOR_TRANSACTION_REVERTED", failureDetail: "The anchor transaction reverted." });
-      return { proofId: failed.id, provenanceRoot: context.root, anchorStatus: "FAILED", verificationStatus: "UNVERIFIED", transactionHash: hash };
+      return { proofId: failed.id, provenanceRoot: context.root, anchorStatus: "FAILED", verificationStatus: "UNVERIFIED", transactionHash: hash, provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false };
     }
     const verified = await this.records.recordVerifiedAnchor({
       id: proof.id,
@@ -369,6 +386,7 @@ export class ProvenanceAnchorService {
       eventName: EVENT_NAME,
       anchorStatus: "ANCHORED",
       verificationStatus: "VERIFIED",
+      ...publicationFields(context, { anchor_status: "ANCHORED", verification_status: "VERIFIED" }),
       note: "Verification confirms the on-chain provenance root. It does not establish legal copyright ownership.",
     };
   }

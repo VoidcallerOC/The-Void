@@ -7,6 +7,7 @@ import { chainId, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, re
 import deployment from "../config/fuji-release.json" with { type: "json" };
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
+import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -129,13 +130,15 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, provenanceRecords = null, publicationChain = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
     this.metadataStorage = metadataStorage;
     this.mediaUploader = mediaUploader;
+    this.provenanceRecords = provenanceRecords;
+    this.publicationChain = publicationChain;
     this.logger = logger;
   }
 
@@ -203,9 +206,11 @@ export class ArtistStudioService {
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
     const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
     await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")), metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
+    assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: metadataDocument, provenanceRoot: provenance.root });
+    const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root };
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -215,11 +220,16 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
-    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
+    const provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
+    const currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
+    if (release.status === "PUBLISHED" && publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }).fullyPublished) {
+      throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release is already published and its provenance is verified.");
+    }
     try {
-      const provider = new ethers.JsonRpcProvider(deployment.rpcUrl);
+      const provider = this.publicationChain || new ethers.JsonRpcProvider(deployment.rpcUrl);
       const receipt = await provider.getTransactionReceipt(transactionHash);
       if (!receipt || receipt.status !== 1) throw new Error("receipt unavailable or unsuccessful");
       const eventInterface = new ethers.Interface([...deployment.abi, "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
@@ -228,15 +238,17 @@ export class ArtistStudioService {
       const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
       const event = receipt.logs.map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
       if (!event) throw new Error("expected EditionCreated event was not found");
-      const contract = new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, "function edition(uint256) view returns (bytes32, bytes32, address, uint256, uint256, string, bool)"], provider);
-      const onChain = await contract.edition(expectedTokenId);
+      const onChain = this.publicationChain
+        ? await this.publicationChain.edition(expectedTokenId)
+        : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, "function edition(uint256) view returns (bytes32, bytes32, address, uint256, uint256, string, bool)"], provider).edition(expectedTokenId);
       if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
       await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: edition.application_metadata || {} });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
-      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString() } });
-      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, status: "PUBLISHED" };
+      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), provenanceRoot: provenance.root } });
+      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, ...publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }) };
     } catch (error) {
+      if (error instanceof ApiError) throw error;
       this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
       throw new ApiError(409, "PUBLICATION_NOT_CONFIRMED", "The blockchain publication could not be verified. Your release remains unpublished and can be retried.");
     }
