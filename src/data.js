@@ -39,8 +39,6 @@ export const VC_DATA = {
   },
   chain: "AVALANCHE",
   contract: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
-  // On-chain proof for the self-titled EP — real traction, the trust signal.
-  // Update these as the collection moves.
   heroStats: [
     ["477", "BEARERS"],
     ["1,620", "RELICS FORGED"],
@@ -88,17 +86,12 @@ export const VC_DATA = {
       supply: "TBA",
     },
   ],
-  // ============ THE SELF-TITLED EP (released / minted) ============
-  // Full tracks are server-gated. The catalog contains public previews only;
-  // bearer playback obtains a short-lived opaque grant from the media API.
   firstEPTracks: [
     { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
     { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
     { n: "03", title: "Complex",          time: "5:08", tokenId: 3, previewSrc: "/assets/audio-preview/ep1-03-complex-preview.mp3",        protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-complex.png",        artVid: "/assets/track-art-vid/ep1-complex" },
     { n: "04", title: "Enough",           time: "4:46", tokenId: 0, previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
   ],
-  // ============ TUNNEL VISION (upcoming) ============
-  // Unreleased EP — playback is a ~30s fragment per track until mint.
   tracklist: [
     { n: "01", title: "Warning Signs",   time: "3:38", preview: true, src: "/assets/audio-preview/ep2-01-warning-signs-preview.mp3",   art: "/assets/track-art/ep2-warning-signs.png",   artVid: "/assets/track-art-vid/ep2-warning-signs" },
     { n: "02", title: "Pathway",         time: "3:28", preview: true, src: "/assets/audio-preview/ep2-02-pathway-preview.mp3",         art: "/assets/track-art/ep2-pathway.png",         artVid: "/assets/track-art-vid/ep2-pathway" },
@@ -134,8 +127,6 @@ export const VC_DATA = {
   },
 };
 
-// Platform-facing records. Voidcaller is the first catalog, not a special case
-// in the UI or Web3 layers.
 const voidcallerArtist = createArtist({
   id: "voidcaller",
   name: "Voidcaller",
@@ -144,7 +135,7 @@ const voidcallerArtist = createArtist({
   avatar: "/assets/voidcaller_art_4.png",
   banner: "/assets/voidcaller_art_6.png",
   socials: VC_DATA.socials,
-  verified: true,
+  verified: false,
 });
 
 const voidcallerRelease = createRelease({
