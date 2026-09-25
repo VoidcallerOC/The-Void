@@ -23,24 +23,16 @@ BEGIN;
 -- (src/lib/summit-demo.js). Move its slug to the next free 'voidcaller-N'
 -- (still hidden as an alias) so the canonical id 'voidcaller' can take the
 -- slug. Only the slug changes; ids, owners and releases are untouched.
-WITH aliases AS (
-  SELECT id, row_number() OVER (ORDER BY id) AS ordinal
-  FROM artists
-  WHERE slug = 'voidcaller' AND id <> 'voidcaller'
-), available AS (
-  SELECT 'voidcaller-' || n AS slug, row_number() OVER (ORDER BY n) AS ordinal
-  FROM generate_series(2, 10000) AS n
-  WHERE NOT EXISTS (SELECT 1 FROM artists taken WHERE taken.slug = 'voidcaller-' || n)
-), assignments AS (
-  SELECT aliases.id, available.slug
-  FROM aliases
-  JOIN available USING (ordinal)
-)
 UPDATE artists
-SET slug = assignments.slug,
+SET slug = (
+      SELECT 'voidcaller-' || n
+      FROM generate_series(2, 10000) AS n
+      WHERE NOT EXISTS (SELECT 1 FROM artists taken WHERE taken.slug = 'voidcaller-' || n)
+      ORDER BY n
+      LIMIT 1
+    ),
     updated_at = now()
-FROM assignments
-WHERE artists.id = assignments.id;
+WHERE slug = 'voidcaller' AND id <> 'voidcaller';
 
 INSERT INTO artists (id, slug, display_name, status, application_metadata)
 VALUES (
