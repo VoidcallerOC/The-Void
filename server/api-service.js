@@ -47,6 +47,45 @@ function offsetValue(value) {
 
 function mapRow(row) { return row || null; }
 
+const SENSITIVE_PUBLIC_KEYS = new Set(["mediaconfig", "requirements", "storagekey", "protectedmedia", "cid"]);
+const CID_VALUE = /^(?:ipfs:\/\/)?(?:baf[a-z2-7]{20,}|qm[1-9a-hj-np-za-km-z]{44,})$/i;
+const CID_EMBEDDED = /(?:ipfs:\/\/)?(?:baf[a-z2-7]{20,}|qm[1-9a-hj-np-za-km-z]{44,})/gi;
+
+function sanitizePublicValue(value) {
+  if (typeof value === "string") {
+    if (CID_VALUE.test(value.trim())) return undefined;
+    const redacted = value.replace(CID_EMBEDDED, "").trim();
+    return redacted ? redacted : undefined;
+  }
+  if (Array.isArray(value)) return value.map(sanitizePublicValue).filter((item) => item !== undefined);
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_PUBLIC_KEYS.has(String(key).toLowerCase().replace(/[_-]/g, ""))) continue;
+    const next = sanitizePublicValue(child);
+    if (next !== undefined) out[key] = next;
+  }
+  return out;
+}
+
+function toPublicRow(row, fields) {
+  if (!row) return null;
+  const out = {};
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(row, field)) continue;
+    const value = sanitizePublicValue(row[field]);
+    if (value !== undefined) out[field] = value;
+  }
+  return out;
+}
+
+const EXPERIENCE_PUBLIC_FIELDS = ["id", "artist_id", "release_id", "edition_id", "title", "description", "experience_type", "version", "status", "created_at", "updated_at", "gated", "protected"];
+const RELEASE_PUBLIC_FIELDS = ["id", "artist_id", "slug", "title", "description", "status", "release_metadata", "published_at", "created_at", "updated_at", "artist_slug", "artist_name"];
+const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description", "supply", "status", "application_metadata", "created_at", "updated_at", "release_title", "artist_id", "chain_id", "contract_address"];
+const EXPERIENCE_PUBLIC_SELECT = `id, artist_id, release_id, edition_id, title, description, experience_type, version, status, created_at, updated_at, (jsonb_typeof(requirements) = 'array' AND jsonb_array_length(requirements) > 0) AS gated, (COALESCE(media_config->>'protected', '') = 'true' OR (jsonb_typeof(media_config->'protectedMedia') = 'array' AND jsonb_array_length(media_config->'protectedMedia') > 0)) AS protected`;
+const RELEASE_PUBLIC_SELECT = `r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata, r.published_at, r.created_at, r.updated_at, a.slug AS artist_slug, a.display_name AS artist_name`;
+const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address`;
+
 const ARTIST_SELECT = `SELECT a.*, p.bio, p.website_url, p.social_links, p.profile_metadata,
       EXISTS (
         SELECT 1 FROM artist_verification_applications v
@@ -124,39 +163,39 @@ export class ApiService {
 
   async getRelease({ idOrSlug }) {
     const key = requiredText(idOrSlug, "release");
-    const { rows } = await this.db.query(`SELECT r.*, a.slug AS artist_slug, a.display_name AS artist_name FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND (r.id=$2 OR r.slug=$2) LIMIT 1`, [PUBLIC_STATUS, key]);
+    const { rows } = await this.db.query(`SELECT ${RELEASE_PUBLIC_SELECT} FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND (r.id=$2 OR r.slug=$2) LIMIT 1`, [PUBLIC_STATUS, key]);
     if (!rows[0]) throw new ApiError(404, "RELEASE_NOT_FOUND", "Release was not found.");
-    return mapRow(rows[0]);
+    return toPublicRow(rows[0], RELEASE_PUBLIC_FIELDS);
   }
 
   async listReleases({ artistId = null, limit, offset }) {
     const values = [PUBLIC_STATUS, artistId, limitValue(limit), offsetValue(offset)];
-    const { rows } = await this.db.query(`SELECT r.*, a.slug AS artist_slug, a.display_name AS artist_name FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND ($2::text IS NULL OR r.artist_id=$2) ORDER BY r.published_at DESC NULLS LAST, r.title ASC LIMIT $3 OFFSET $4`, values);
-    return rows;
+    const { rows } = await this.db.query(`SELECT ${RELEASE_PUBLIC_SELECT} FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND ($2::text IS NULL OR r.artist_id=$2) ORDER BY r.published_at DESC NULLS LAST, r.title ASC LIMIT $3 OFFSET $4`, values);
+    return rows.map((row) => toPublicRow(row, RELEASE_PUBLIC_FIELDS));
   }
 
   async getEdition({ id }) {
     const key = requiredText(id, "edition");
-    const { rows } = await this.db.query(`SELECT e.*, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
     if (!rows[0]) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
-    return mapRow(rows[0]);
+    return toPublicRow(rows[0], EDITION_PUBLIC_FIELDS);
   }
 
   async listEditions({ releaseId = null, limit, offset }) {
-    const { rows } = await this.db.query(`SELECT e.*, r.title AS release_title, c.chain_id, c.address AS contract_address FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND ($2::text IS NULL OR e.release_id=$2) ORDER BY e.created_at DESC LIMIT $3 OFFSET $4`, [PUBLIC_STATUS, releaseId, limitValue(limit), offsetValue(offset)]);
-    return rows;
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND ($2::text IS NULL OR e.release_id=$2) ORDER BY e.created_at DESC LIMIT $3 OFFSET $4`, [PUBLIC_STATUS, releaseId, limitValue(limit), offsetValue(offset)]);
+    return rows.map((row) => toPublicRow(row, EDITION_PUBLIC_FIELDS));
   }
 
   async getExperience({ id }) {
     const key = requiredText(id, "experience");
-    const { rows } = await this.db.query(`SELECT * FROM experiences WHERE status=$1 AND id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
+    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
     if (!rows[0]) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
-    return mapRow(rows[0]);
+    return toPublicRow(rows[0], EXPERIENCE_PUBLIC_FIELDS);
   }
 
   async listExperiences({ editionId = null, releaseId = null, limit, offset }) {
-    const { rows } = await this.db.query(`SELECT * FROM experiences WHERE status=$1 AND ($2::text IS NULL OR edition_id=$2) AND ($3::text IS NULL OR release_id=$3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, [PUBLIC_STATUS, editionId, releaseId, limitValue(limit), offsetValue(offset)]);
-    return rows;
+    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND ($2::text IS NULL OR edition_id=$2) AND ($3::text IS NULL OR release_id=$3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, [PUBLIC_STATUS, editionId, releaseId, limitValue(limit), offsetValue(offset)]);
+    return rows.map((row) => toPublicRow(row, EXPERIENCE_PUBLIC_FIELDS));
   }
 
   async listListings({ chainId: rawChainId = null, tokenContractAddress = null, tokenId = null, sellerWallet = null, status = ACTIVE_LISTING, limit, offset }) {

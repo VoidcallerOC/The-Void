@@ -11,7 +11,8 @@ import { PrivateMediaStorage } from "./media-storage.js";
 const wallet = "0x1111111111111111111111111111111111111111";
 const otherWallet = "0x2222222222222222222222222222222222222222";
 const mediaConfig = { driver: "filesystem", privateRoot: "/private-media", grantTtlSeconds: 300, signedUrlTtlSeconds: 60, maxBytes: 1024 * 1024, auditHashSecret: "test-audit-secret" };
-const experience = { id: "voidcaller-full-ep", status: "PUBLISHED", requirements: [{ type: "erc1155-balance" }], media_config: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "voidcaller-full-ep/ep1-01-the-hollow.mp3", contentType: "audio/mpeg" }] } };
+const assetRow = { id: "asset-1", artist_id: "artist-1", storage_key: "voidcaller-full-ep/ep1-01-the-hollow.mp3" };
+const experience = { id: "voidcaller-full-ep", artist_id: "artist-1", status: "PUBLISHED", requirements: [{ type: "erc1155-balance", contract: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tokenIds: ["7"], minAmount: "1" }], media_config: { protected: true, protectedMedia: [{ mediaType: "AUDIO", assetId: "asset-1", contentType: "audio/mpeg" }] } };
 
 function request({ headers = {}, requestId = "request-1" } = {}) { return { headers, requestId, ip: "127.0.0.1" }; }
 
@@ -24,7 +25,7 @@ function harness({ identity = { wallet }, ownership = { owns: true, state: "FINA
     getMediaGrant: vi.fn().mockResolvedValue(grant),
     revokeMediaGrant: vi.fn().mockResolvedValue({ grant_id: "grant-1", experience_id: experience.id, media_type: "AUDIO", revoked_at: new Date().toISOString() }),
   };
-  const db = { query: vi.fn().mockResolvedValue({ rows: [experience] }) };
+  const db = { query: vi.fn(async (sql) => (String(sql).includes("media_assets") ? { rows: [assetRow] } : { rows: [experience] })) };
   const gateway = new ProtectedMediaGateway({ db, repository, authenticator: async () => identity, ownershipVerifier: vi.fn().mockResolvedValue(ownership), storage: storage || { open: vi.fn().mockResolvedValue({ type: "redirect", url: "https://media.example/protected?sig=opaque" }) }, mediaConfig });
   return { gateway, db, repository };
 }
@@ -43,6 +44,15 @@ describe("protected media gateway", () => {
     await expect(gateway.issueGrant({ request: request(), input: { wallet, experienceId: experience.id, mediaType: "AUDIO" } })).rejects.toMatchObject({ code: "EXPERIENCE_ENTITLEMENT_REQUIRED" });
     expect(repository.createGrant).not.toHaveBeenCalled();
     expect(repository.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "MEDIA_ACCESS_DENIED", actorWallet: wallet }));
+  });
+
+  it("does not sign a foreign or unknown storage key even when ownership verification passes", async () => {
+    for (const rows of [[{ id: "asset-9", artist_id: "other-artist", storage_key: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }], []]) {
+      const { gateway, repository, db } = harness();
+      db.query.mockImplementation(async (sql) => (String(sql).includes("media_assets") ? { rows } : { rows: [experience] }));
+      await expect(gateway.issueGrant({ request: request(), input: { wallet, experienceId: experience.id, mediaType: "AUDIO" } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_OWNED" });
+      expect(repository.createGrant).not.toHaveBeenCalled();
+    }
   });
 
   it("issues a wallet-bound short-lived opaque grant only to an authenticated confirmed owner", async () => {
