@@ -58,8 +58,13 @@ describe("Artist Studio", () => {
       .mockResolvedValueOnce({ rows: [release] })
       .mockResolvedValueOnce({ rows: [edition] })
       .mockResolvedValueOnce({ rows: [] });
-    await expect(authorized.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).resolves.toMatchObject({ releaseId: release.id, metadataUri: "ipfs://real-metadata-cid" });
+    await expect(authorized.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).resolves.toMatchObject({ releaseId: release.id, metadataUri: "ipfs://real-metadata-cid", digest: expect.stringMatching(/^[0-9a-f]{64}$/), provenanceRoot: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(metadataStorage.write).toHaveBeenCalledOnce();
+    const published = authorized.repo.saveToken.mock.calls[0][0];
+    expect(published.metadataVersion).toBe(published.metadata._void.digest);
+    expect(published.metadata.provenance.metadataDigest).toBe(published.metadataVersion);
+    expect(published.metadata.provenance.root).not.toBe(published.metadataVersion);
+    expect(JSON.stringify(published.metadata.provenance)).not.toMatch(/storageKey|storage_key|ipfs:|https?:|secret|filename/i);
 
     const walletB = "0x2222222222222222222222222222222222222222";
     const denied = service({ authenticatedWallet: walletB, rows: [] });
@@ -190,7 +195,9 @@ describe("Artist Studio", () => {
     expect(result).toMatchObject({ mediaType: "AUDIO" });
     expect(result.id).toMatch(/^asset-/);
     expect(JSON.stringify(result)).not.toContain(storageKey);
-    expect(repo.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", storageKey, mediaType: "AUDIO" }));
+    expect(repo.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", storageKey, mediaType: "AUDIO", contentSha256: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", byteSize: 1 }));
+    expect(JSON.stringify(result)).not.toContain(storageKey);
+    expect(JSON.stringify(result)).not.toContain("ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb");
     expect(repo.saveExperience).not.toHaveBeenCalled();
   });
 });
