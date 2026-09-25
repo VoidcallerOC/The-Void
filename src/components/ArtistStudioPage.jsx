@@ -9,7 +9,7 @@ import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
-import { studioPublicationPath, validateReleasePublish } from "../lib/studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioFetch } from "../lib/studio-api.js";
 
@@ -171,9 +171,11 @@ export function ArtistStudioPage() {
         : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
       await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
-      await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
+      const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
+      const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
+      setNotice(result.message);
+      if (!result.fullyPublished) return;
       setPublishedTokenId(encoded.tokenId.toString());
-      setNotice(`Published ${form.releaseTitle}. Transaction confirmed: ${transaction.hash}`);
       setStep("sale");
     } catch (error) {
       setNotice(error.message);
