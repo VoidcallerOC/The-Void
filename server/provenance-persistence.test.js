@@ -144,7 +144,7 @@ describe.skipIf(!testDatabaseUrl)("provenance persistence", () => {
     const retried = await records.retryProof({ id: "proof-1", creatorWallet: owner });
     expect(retried).toMatchObject({ id: "proof-1", anchor_status: "PENDING", attempt_count: 1, failure_code: null, verification_status: "UNVERIFIED" });
 
-    const verified = await records.recordVerifiedAnchor({ id: "proof-1", creatorWallet: owner, chainKey: "fuji", chainId: 43113, transactionHash: tx, blockNumber: 90, verifiedAt: "2026-09-25T22:00:00.000Z" });
+    const verified = await records.recordVerifiedAnchor({ id: "proof-1", creatorWallet: owner, chainKey: "fuji", chainId: 43113, transactionHash: tx, blockNumber: 90, blockTimestamp: "2026-09-25T22:00:01.000Z", anchorContract: "0x262B774cf9a1949170B58E2d57F6189980FE757b", anchorEvent: "ProvenanceAnchored", verifiedAt: "2026-09-25T22:00:00.000Z" });
     expect(verified.anchor_status).toBe("ANCHORED");
     expect(verified.verification_status).toBe("VERIFIED");
     expect(verified.chain_key).toBe("fuji");
