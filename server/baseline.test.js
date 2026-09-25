@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadServerConfig } from "./config.js";
-import { migrate, migrationsDirectory } from "./migrate.js";
+import { listMigrations, migrate, migrationsDirectory } from "./migrate.js";
 import { baselineDatabase, baselineMigrationChecksum, baselineMigrationName, normalizedChecksum, requiredExtensions, stripTransactionControl } from "./baseline.js";
 import { validateDatabase } from "./validate-db.js";
 
@@ -62,14 +62,15 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
     return (await pool.query("SELECT name FROM schema_migrations ORDER BY name")).rows.map((row) => row.name);
   }
 
-  it("applies 001 through 006 on an empty database", async () => {
+  it("applies the complete migration inventory on an empty database", async () => {
     const { pool, config } = await scratchDatabase();
     try {
       const result = await migrate({ pool, config });
-      expect(result.applied).toHaveLength(20);
+      const migrationCount = (await listMigrations(localMigrations)).length;
+      expect(result.applied).toHaveLength(migrationCount);
       const validation = await validateDatabase({ pool, config });
       expect(validation.ok).toBe(true);
-      expect(validation.migrations).toHaveLength(20);
+      expect(validation.migrations).toHaveLength(migrationCount);
       expect(validation.schema.verifiedTables).toContain("artists");
       expect(validation.schema.exactMatch).toBe(true);
     } finally { await pool.end(); }
@@ -84,7 +85,7 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
     } finally { await pool.end(); }
   }, 120000);
 
-  it("baselines a compatible pre-existing 001 schema and then migrates 002 through 006", async () => {
+  it("baselines a compatible pre-existing 001 schema and then applies later migrations", async () => {
     const { pool, config } = await scratchDatabase();
     try {
       await pool.query(await migrationSql());
@@ -92,10 +93,11 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
       expect(baseline).toMatchObject({ baselined: true, reason: "recorded", name: baselineMigrationName });
       expect(await appliedMigrationNames(pool)).toEqual([baselineMigrationName]);
       const migrated = await migrate({ pool, config });
-      expect(migrated.applied).toHaveLength(20);
+      const migrationCount = (await listMigrations(localMigrations)).length;
+      expect(migrated.applied).toHaveLength(migrationCount);
       const validation = await validateDatabase({ pool, config });
       expect(validation.ok).toBe(true);
-      expect(validation.migrations.map((item) => item.name)).toHaveLength(20);
+      expect(validation.migrations.map((item) => item.name)).toHaveLength(migrationCount);
     } finally { await pool.end(); }
   }, 120000);
 
