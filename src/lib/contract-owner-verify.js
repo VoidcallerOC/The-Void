@@ -26,11 +26,11 @@ export async function requestArtistChallenge(slug, { fetchImpl = fetch } = {}) {
   return payload.data;
 }
 
-export async function submitArtistVerification({ slug, address, signature, fetchImpl = fetch }) {
+export async function submitArtistVerification({ slug, address, signature, nonce, fetchImpl = fetch }) {
   const response = await fetchImpl(`${apiBase()}/api/artists/${encodeURIComponent(slug)}/verify`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ address, signature }),
+    body: JSON.stringify({ address, signature, nonce }),
   });
   const payload = await readJson(response);
   if (!response.ok) {

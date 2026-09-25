@@ -28,7 +28,7 @@ export function VerifyArtistControl({ slug }) {
       }
       const challenge = await requestArtistChallenge(slug);
       const signature = await provider.request({ method: "personal_sign", params: [challenge.message, account] });
-      const next = await submitArtistVerification({ slug, address: account, signature });
+      const next = await submitArtistVerification({ slug, address: account, signature, nonce: challenge.nonce });
       setRecord(next);
       setNotice("On-chain owner() matched. Artist is verified.");
     } catch (error) {
