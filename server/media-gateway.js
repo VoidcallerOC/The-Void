@@ -2,9 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { requiredText, walletAddress } from "./validation.js";
+import { LEGACY_IPFS_GATEWAY, isLegacyMainnetRequirement, legacyAudioTokenId, legacyIpfsToHttp } from "../src/lib/legacy-genesis.js";
 
 const ACTIVE_OWNERSHIP_STATES = new Set(["CONFIRMED", "FINALIZED", "RECONCILED"]);
 const SUPPORTED_MEDIA_TYPES = new Set(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "DEMO", "LIVE_RECORDING"]);
+// Media that is already public on IPFS (the legacy tokens' on-chain
+// animation_url). Only migrations write this kind: the Studio rejects
+// protectedMedia entries without an uploaded asset.
+const PUBLIC_IPFS_SOURCE = "public-ipfs";
 
 function mediaType(value) {
   const type = requiredText(value, "mediaType", { max: 64 }).toUpperCase();
@@ -17,11 +22,34 @@ function parseMediaConfig(value) {
   try { return JSON.parse(String(value || "{}")); } catch { throw new ApiError(500, "EXPERIENCE_MEDIA_CONFIGURATION_INVALID", "Experience media configuration is invalid."); }
 }
 
+function requirementList(value) {
+  if (Array.isArray(value)) return value;
+  try { const parsed = JSON.parse(String(value || "[]")); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+// A public-ipfs source is honored only for an exact legacy token audio URI on
+// an experience gated solely by the legacy mainnet requirement for that same
+// token. Anything else fails closed as unconfigured.
+function publicIpfsReference(experience, asset) {
+  const uri = String(asset.uri || "").trim();
+  const tokenId = legacyAudioTokenId(uri);
+  const requirements = requirementList(experience.requirements);
+  const gatedByToken = tokenId !== null
+    && requirements.length > 0
+    && requirements.every((requirement) => isLegacyMainnetRequirement(requirement))
+    && requirements.some((requirement) => Array.isArray(requirement.tokenIds) && requirement.tokenIds.map(String).includes(String(tokenId)));
+  if (!gatedByToken) throw new ApiError(503, "PROTECTED_MEDIA_NOT_CONFIGURED", "Protected media is not configured for this experience.");
+  return { publicIpfsUri: uri, contentType: String(asset.contentType || "").trim() || null };
+}
+
 function protectedReference(experience, requestedMediaType) {
   const config = parseMediaConfig(experience.media_config);
   if (config.protected !== true) throw new ApiError(409, "EXPERIENCE_MEDIA_NOT_PROTECTED", "This experience has no protected media for this endpoint.");
   const candidates = Array.isArray(config.protectedMedia) ? config.protectedMedia : [];
   const asset = candidates.find((item) => String(item?.mediaType || "").toUpperCase() === requestedMediaType);
+  // An entry that names an uploaded asset (every Studio-written entry) always
+  // takes the private-storage path below, whatever else it carries.
+  if (asset && typeof asset === "object" && asset.source === PUBLIC_IPFS_SOURCE && !asset.assetId && !asset.storageKey) return publicIpfsReference(experience, asset);
   const assetId = String(asset?.assetId || "").trim();
   const storageKey = String(asset?.storageKey || "").trim();
   if (!asset || typeof asset !== "object" || (!assetId && !storageKey)) throw new ApiError(503, "PROTECTED_MEDIA_NOT_CONFIGURED", "Protected media is not configured for this experience.");
@@ -38,8 +66,11 @@ function accessContext(request = {}, secret = null) {
 }
 
 export class ProtectedMediaGateway {
-  constructor({ db, repository, authenticator, ownershipVerifier, storage, mediaConfig } = {}) {
+  constructor({ db, repository, authenticator, ownershipVerifier, storage, mediaConfig, publicIpfsGateway = null } = {}) {
     if (!db?.query || !repository || !authenticator || typeof ownershipVerifier !== "function" || !storage || !mediaConfig) throw new TypeError("ProtectedMediaGateway requires persistence, wallet authentication, ownership verification, private storage, and media configuration.");
+    const gateway = new URL(publicIpfsGateway || LEGACY_IPFS_GATEWAY);
+    if (gateway.protocol !== "https:") throw new TypeError("The public IPFS gateway must use HTTPS.");
+    this.publicIpfsGateway = gateway.toString();
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
@@ -79,13 +110,14 @@ export class ProtectedMediaGateway {
       await this.repository.appendAuditEvent({ eventType: "MEDIA_ACCESS_DENIED", actorWallet: wallet, subjectType: "experience", subjectId: experience.id, requestId: request.requestId || null, payload: { mediaType: requestedMediaType, reason: error.code || "ENTITLEMENT_DENIED" } });
       throw error;
     }
-    const asset = await this.resolveOwnedAsset(experience, reference);
+    const asset = reference.publicIpfsUri ? { publicIpfsUri: reference.publicIpfsUri, contentType: reference.contentType } : await this.resolveOwnedAsset(experience, reference);
+    const objectReference = asset.publicIpfsUri ? { publicIpfsUri: asset.publicIpfsUri } : { storageKey: asset.storageKey };
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + (this.mediaConfig.grantTtlSeconds * 1000));
     const grantId = randomUUID();
     const context = accessContext(request, this.mediaConfig.auditHashSecret);
     const grant = await this.repository.inTransaction(async (repository) => {
-      const created = await repository.createGrant({ grantId, experienceId: experience.id, wallet, mediaType: requestedMediaType, issuedAt, expiresAt, ownershipChainId: ownership.chainId ?? null, ownershipWatermark: ownership.watermark ?? null, metadata: { storageKey: asset.storageKey, contentType: asset.contentType, entitlementState: String(ownership.state).toUpperCase() } });
+      const created = await repository.createGrant({ grantId, experienceId: experience.id, wallet, mediaType: requestedMediaType, issuedAt, expiresAt, ownershipChainId: ownership.chainId ?? null, ownershipWatermark: ownership.watermark ?? null, metadata: { ...objectReference, contentType: asset.contentType, entitlementState: String(ownership.state).toUpperCase() } });
       await repository.recordMediaAuthorization({ grantId, wallet, experienceId: experience.id, mediaType: requestedMediaType, action: "GRANT_ISSUED", ...context });
       await repository.appendAuditEvent({ eventType: "MEDIA_GRANT_ISSUED", actorWallet: wallet, subjectType: "experience", subjectId: experience.id, requestId: context.requestId, chainId: ownership.chainId ?? null, payload: { grantId, mediaType: requestedMediaType, expiresAt: expiresAt.toISOString(), ownershipWatermark: ownership.watermark ?? null } });
       return created;
@@ -119,9 +151,20 @@ export class ProtectedMediaGateway {
       throw new ApiError(403, grant.revoked_at ? "MEDIA_GRANT_REVOKED" : "MEDIA_GRANT_EXPIRED", "Protected media authorization is no longer active.");
     }
     const metadata = parseMediaConfig(grant.metadata);
-    if (!metadata.storageKey) throw new ApiError(500, "MEDIA_GRANT_CONFIGURATION_INVALID", "Protected media grant is missing its immutable object reference.");
-    const media = await this.storage.open({ storageKey: metadata.storageKey, range: request.headers?.range || null, contentType: metadata.contentType || null });
-    await this.repository.recordMediaAuthorization({ grantId: grant.grant_id, wallet: grant.wallet_address, experienceId: grant.experience_id, mediaType: grant.media_type, action: "MEDIA_AUTHORIZED", reason: media.type === "redirect" ? "SIGNED_OBJECT_URL" : "PRIVATE_STREAM", ...context });
+    let media;
+    let reason;
+    if (metadata.publicIpfsUri) {
+      // Already-public token audio: redirect to the public gateway. Re-check
+      // the allowlist so a grant row can never point the redirect elsewhere.
+      if (legacyAudioTokenId(metadata.publicIpfsUri) === null) throw new ApiError(500, "MEDIA_GRANT_CONFIGURATION_INVALID", "Protected media grant is missing its immutable object reference.");
+      media = { type: "redirect", url: legacyIpfsToHttp(metadata.publicIpfsUri, this.publicIpfsGateway) };
+      reason = "PUBLIC_IPFS_URL";
+    } else {
+      if (!metadata.storageKey) throw new ApiError(500, "MEDIA_GRANT_CONFIGURATION_INVALID", "Protected media grant is missing its immutable object reference.");
+      media = await this.storage.open({ storageKey: metadata.storageKey, range: request.headers?.range || null, contentType: metadata.contentType || null });
+      reason = media.type === "redirect" ? "SIGNED_OBJECT_URL" : "PRIVATE_STREAM";
+    }
+    await this.repository.recordMediaAuthorization({ grantId: grant.grant_id, wallet: grant.wallet_address, experienceId: grant.experience_id, mediaType: grant.media_type, action: "MEDIA_AUTHORIZED", reason, ...context });
     await this.repository.appendAuditEvent({ eventType: "MEDIA_ACCESS_AUTHORIZED", actorWallet: grant.wallet_address, subjectType: "experience", subjectId: grant.experience_id, requestId: context.requestId, payload: { grantId: grant.grant_id, mediaType: grant.media_type, delivery: media.type } });
     return media;
   }

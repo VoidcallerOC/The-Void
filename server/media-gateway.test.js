@@ -7,6 +7,7 @@ import { createApiHandler } from "./api-http.js";
 import { loadMediaConfig } from "./config.js";
 import { ProtectedMediaGateway } from "./media-gateway.js";
 import { PrivateMediaStorage } from "./media-storage.js";
+import { LEGACY_CHAIN_ID, LEGACY_CONTRACT, LEGACY_IPFS_MEDIA } from "../src/lib/legacy-genesis.js";
 
 const wallet = "0x1111111111111111111111111111111111111111";
 const otherWallet = "0x2222222222222222222222222222222222222222";
@@ -92,6 +93,93 @@ describe("protected media gateway", () => {
     expect(repository.revokeMediaGrant).toHaveBeenCalledWith({ grantId: "grant-1", wallet, reason: "logout" });
     expect(repository.recordMediaAuthorization).toHaveBeenCalledWith(expect.objectContaining({ action: "REVOKED" }));
     await expect(gateway.revokeGrant({ request: request(), input: { wallet: otherWallet, grantId: "grant-1" } })).rejects.toMatchObject({ code: "WALLET_MISMATCH" });
+  });
+});
+
+describe("public IPFS legacy audio", () => {
+  const legacyRequirement = (tokenId) => ({ type: "erc1155-balance", contract: LEGACY_CONTRACT, tokenIds: [String(tokenId)], minAmount: "1", chainId: LEGACY_CHAIN_ID });
+  const publicEntry = (tokenId, overrides = {}) => ({ mediaType: "AUDIO", source: "public-ipfs", uri: LEGACY_IPFS_MEDIA[tokenId].animationUrl, contentType: LEGACY_IPFS_MEDIA[tokenId].audioContentType, ...overrides });
+  const legacyExperience = (tokenId, entry = publicEntry(tokenId), requirements = [legacyRequirement(tokenId)]) => ({ id: `voidcaller-legacy-track-${tokenId}`, artist_id: "voidcaller", status: "PUBLISHED", requirements, media_config: { protected: true, protectedMedia: [entry] } });
+  const input = (row) => ({ wallet, experienceId: row.id, mediaType: "AUDIO" });
+
+  function legacyHarness(row, { grant = null, publicIpfsGateway } = {}) {
+    const built = harness({ grant });
+    built.db.query.mockImplementation(async (sql) => (String(sql).includes("media_assets") ? { rows: [assetRow] } : { rows: [row] }));
+    const ownershipVerifier = vi.fn().mockResolvedValue({ owns: true, state: "CONFIRMED", chainId: LEGACY_CHAIN_ID, watermark: "43114:legacy:live" });
+    const storage = { open: vi.fn() };
+    const gateway = new ProtectedMediaGateway({ db: built.db, repository: built.repository, authenticator: async () => ({ wallet }), ownershipVerifier, storage, mediaConfig, publicIpfsGateway });
+    return { ...built, gateway, ownershipVerifier, storage };
+  }
+
+  it("grants a holder the token's own public animation_url and redirects to the gateway without touching private storage", async () => {
+    for (const tokenId of [0, 1, 2, 3]) {
+      const row = legacyExperience(tokenId);
+      const { gateway, repository, db, storage } = legacyHarness(row);
+      const result = await gateway.issueGrant({ request: request(), input: input(row) });
+      expect(result).toMatchObject({ state: "CONFIRMED", accessUrl: expect.stringMatching(/^\/api\/media\//) });
+      expect(result.accessUrl).toMatch(/^\/api\/media\/[0-9a-f-]{36}$/);
+      expect(db.query.mock.calls.some(([sql]) => String(sql).includes("media_assets"))).toBe(false);
+      const created = repository.createGrant.mock.calls[0][0];
+      expect(created.metadata).toEqual({ publicIpfsUri: LEGACY_IPFS_MEDIA[tokenId].animationUrl, contentType: LEGACY_IPFS_MEDIA[tokenId].audioContentType, entitlementState: "CONFIRMED" });
+
+      const activeGrant = { grant_id: created.grantId, wallet_address: wallet, experience_id: row.id, media_type: "AUDIO", expires_at: new Date(Date.now() + 60_000).toISOString(), revoked_at: null, metadata: created.metadata };
+      repository.getMediaGrant.mockResolvedValue(activeGrant);
+      const media = await gateway.openMedia({ request: request({ headers: { range: "bytes=0-1" } }), grantId: created.grantId });
+      expect(media).toEqual({ type: "redirect", url: `https://gateway.pinata.cloud/ipfs/${LEGACY_IPFS_MEDIA[tokenId].animationUrl.slice(7)}` });
+      expect(storage.open).not.toHaveBeenCalled();
+      expect(repository.recordMediaAuthorization).toHaveBeenCalledWith(expect.objectContaining({ action: "MEDIA_AUTHORIZED", reason: "PUBLIC_IPFS_URL" }));
+    }
+  });
+
+  it("serves the redirect over HTTP as a 302 to the public gateway", async () => {
+    const row = legacyExperience(1);
+    const grant = { grant_id: "grant-legacy", wallet_address: wallet, experience_id: row.id, media_type: "AUDIO", expires_at: new Date(Date.now() + 60_000).toISOString(), revoked_at: null, metadata: { publicIpfsUri: LEGACY_IPFS_MEDIA[1].animationUrl, contentType: "audio/mpeg" } };
+    const { gateway } = legacyHarness(row, { grant });
+    const response = responseDouble();
+    await createApiHandler({ service: {}, mediaGateway: gateway })(requestDouble({ url: "/api/media/grant-legacy" }), response);
+    expect(response.status).toBe(302);
+    expect(response.headers.location).toBe("https://gateway.pinata.cloud/ipfs/QmfCKKX55HdmKw6cFiM1qCFeLhXc3UNrs3rmHfG8CjMbJP/1.mp3");
+  });
+
+  it("fails closed for a public-ipfs entry that is not the gated token's own animation_url", async () => {
+    const cases = [
+      legacyExperience(1, publicEntry(1, { uri: "ipfs://bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234/track.wav" })),
+      legacyExperience(1, publicEntry(2)),
+      legacyExperience(1, publicEntry(1), [legacyRequirement(2)]),
+      legacyExperience(1, publicEntry(1), [{ ...legacyRequirement(1), chainId: 43113 }]),
+      legacyExperience(1, publicEntry(1), [{ type: "erc1155-balance", contract: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tokenIds: ["1"], minAmount: "1" }]),
+      legacyExperience(1, publicEntry(1), [legacyRequirement(1), { type: "erc1155-balance", contract: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tokenIds: ["7"], minAmount: "1" }]),
+      legacyExperience(1, publicEntry(1), []),
+    ];
+    for (const row of cases) {
+      const { gateway, repository, ownershipVerifier } = legacyHarness(row);
+      await expect(gateway.issueGrant({ request: request(), input: input(row) })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_CONFIGURED", status: 503 });
+      expect(ownershipVerifier).not.toHaveBeenCalled();
+      expect(repository.createGrant).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps the private-storage path for any entry that names an uploaded asset", async () => {
+    const row = legacyExperience(1, publicEntry(1, { assetId: "asset-1" }));
+    row.artist_id = "artist-1";
+    const { gateway, repository, db } = legacyHarness(row);
+    await gateway.issueGrant({ request: request(), input: input(row) });
+    expect(db.query.mock.calls.some(([sql]) => String(sql).includes("media_assets"))).toBe(true);
+    expect(repository.createGrant.mock.calls[0][0].metadata).toMatchObject({ storageKey: assetRow.storage_key });
+    expect(repository.createGrant.mock.calls[0][0].metadata.publicIpfsUri).toBeUndefined();
+  });
+
+  it("refuses to redirect a grant whose stored URI is not an allowlisted token audio file", async () => {
+    const grant = { grant_id: "tampered", wallet_address: wallet, experience_id: "voidcaller-legacy-track-1", media_type: "AUDIO", expires_at: new Date(Date.now() + 60_000).toISOString(), revoked_at: null, metadata: { publicIpfsUri: "ipfs://bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234/x.wav" } };
+    const { gateway, repository, storage } = legacyHarness(legacyExperience(1), { grant });
+    await expect(gateway.openMedia({ request: request(), grantId: "tampered" })).rejects.toMatchObject({ code: "MEDIA_GRANT_CONFIGURATION_INVALID", status: 500 });
+    expect(storage.open).not.toHaveBeenCalled();
+    expect(repository.recordMediaAuthorization).not.toHaveBeenCalledWith(expect.objectContaining({ action: "MEDIA_AUTHORIZED" }));
+  });
+
+  it("only accepts an HTTPS public gateway override", () => {
+    expect(() => legacyHarness(legacyExperience(1), { publicIpfsGateway: "http://gateway.example/ipfs/" })).toThrow(/HTTPS/);
+    expect(legacyHarness(legacyExperience(1), { publicIpfsGateway: "https://gateway.example/ipfs/" }).gateway.publicIpfsGateway).toBe("https://gateway.example/ipfs/");
   });
 });
 
