@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateReleasePublish } from "./studio-publish.js";
+import { studioPublicationPath, validateReleasePublish } from "./studio-publish.js";
 
 const validInput = {
   release: { title: "Voidcaller Full EP", type: "ep" },
@@ -27,5 +27,18 @@ describe("Release-native Studio publish validation", () => {
 
   it("rejects an invalid track", () => {
     expect(() => validateReleasePublish({ ...validInput, tracks: [{ title: "" }] })).toThrow("Track 1 title is required.");
+  });
+});
+
+describe("Studio publish route", () => {
+  it("uses the saved release id for the existing metadata and confirm routes", () => {
+    expect(studioPublicationPath("release-a", "metadata")).toBe("/studio/releases/release-a/metadata");
+    expect(studioPublicationPath("release-a", "publication/confirm")).toBe("/studio/releases/release-a/publication/confirm");
+  });
+
+  it("does not build the collapsed path that the API reports as Route not found", () => {
+    expect(() => studioPublicationPath("", "metadata")).toThrow("Save the release before publishing.");
+    expect(() => studioPublicationPath("  ", "publication/confirm")).toThrow("Save the release before publishing.");
+    expect(studioPublicationPath("rel/1", "metadata")).toBe("/studio/releases/rel%2F1/metadata");
   });
 });
