@@ -37,7 +37,6 @@ export function createClaimMessage({ slug, contract, chainId, nonce, expiresAt }
 }
 
 export function verifyPersonalSign({ address, message, signature }) {
-  // EIP-191 personal_sign. Same recovery as viem verifyMessage.
   const recovered = verifyMessage(message, signature);
   return recovered.toLowerCase() === String(address).toLowerCase();
 }
@@ -120,25 +119,23 @@ export class ContractOwnerVerificationService {
     return { nonce, message, slug: artist.slug, contract: artist.contract, chainId: artist.chainId, expiresAt };
   }
 
-  async verifyClaim({ slug, address, signature }) {
+  async verifyClaim({ slug, address, signature, nonce }) {
     const artist = resolveClaimableArtist(slug);
     if (!artist) throw new ApiError(404, "ARTIST_NOT_FOUND", "Artist was not found.");
     const wallet = walletAddress(address, "address");
     const sig = requiredText(signature, "signature", { max: 132 });
+    const challengeNonce = requiredText(nonce, "nonce", { max: 128 });
     const { rows } = await this.db.query(
-      "SELECT nonce, message, expires_at, used_at FROM artist_contract_verify_challenges WHERE artist_slug=$1 AND used_at IS NULL ORDER BY created_at DESC LIMIT 5",
-      [artist.slug],
+      "SELECT nonce, message, expires_at, used_at FROM artist_contract_verify_challenges WHERE nonce=$1 AND artist_slug=$2 LIMIT 1",
+      [challengeNonce, artist.slug],
     );
-    const live = rows.find((row) => {
-      try {
-        return verifyPersonalSign({ address: wallet, message: row.message, signature: sig });
-      } catch {
-        return false;
-      }
-    });
+    const live = rows[0];
     if (!live) throw new ApiError(401, "INVALID_SIGNATURE", "Signature does not match a live challenge for this artist.");
     if (live.used_at) throw new ApiError(409, "NONCE_REUSED", "This verification challenge was already used.");
     if (new Date(live.expires_at).getTime() <= this.now().getTime()) throw new ApiError(401, "CHALLENGE_EXPIRED", "Verification challenge has expired.");
+    let matches = false;
+    try { matches = verifyPersonalSign({ address: wallet, message: live.message, signature: sig }); } catch { matches = false; }
+    if (!matches) throw new ApiError(401, "INVALID_SIGNATURE", "Signature does not match a live challenge for this artist.");
     const consumed = await this.db.query(
       "UPDATE artist_contract_verify_challenges SET used_at=$1 WHERE nonce=$2 AND used_at IS NULL RETURNING nonce",
       [this.now().toISOString(), live.nonce],
@@ -148,20 +145,19 @@ export class ContractOwnerVerificationService {
     if (onChainOwner.toLowerCase() !== wallet.toLowerCase()) {
       throw new ApiError(403, "NOT_CONTRACT_OWNER", "Signer is not the on-chain owner() of the legacy collection.");
     }
-    const existing = await this.db.query(
-      "SELECT id, wallet_address, verified_at FROM artist_contract_verifications WHERE artist_slug=$1 AND contract_address=$2 AND chain_id=$3 LIMIT 1",
-      [artist.slug, artist.contract, artist.chainId],
-    );
-    if (existing.rows[0]) {
-      return { verified: true, slug: artist.slug, wallet: existing.rows[0].wallet_address, contract: artist.contract, chainId: artist.chainId, verifiedAt: existing.rows[0].verified_at, idempotent: true };
-    }
     const id = randomUUID();
     const verifiedAt = this.now().toISOString();
     await this.db.query(
-      "INSERT INTO artist_contract_verifications (id, artist_slug, wallet_address, contract_address, chain_id, signature, message, verified_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      "INSERT INTO artist_contract_verifications (id, artist_slug, wallet_address, contract_address, chain_id, signature, message, verified_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (artist_slug, contract_address, chain_id) DO NOTHING",
       [id, artist.slug, wallet, artist.contract, artist.chainId, sig, live.message, verifiedAt],
     );
-    return { verified: true, slug: artist.slug, wallet, contract: artist.contract, chainId: artist.chainId, verifiedAt, snowtrace: `${SNOWTRACE}${artist.contract}` };
+    const persisted = await this.db.query(
+      "SELECT id, wallet_address, verified_at FROM artist_contract_verifications WHERE artist_slug=$1 AND contract_address=$2 AND chain_id=$3 LIMIT 1",
+      [artist.slug, artist.contract, artist.chainId],
+    );
+    const row = persisted.rows[0];
+    if (!row) throw new ApiError(500, "VERIFICATION_PERSIST_FAILED", "Verification record could not be read after insert.");
+    return { verified: true, slug: artist.slug, wallet: row.wallet_address, contract: artist.contract, chainId: artist.chainId, verifiedAt: row.verified_at, snowtrace: `${SNOWTRACE}${artist.contract}` };
   }
 }
 
