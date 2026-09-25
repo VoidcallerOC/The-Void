@@ -66,6 +66,34 @@ export function legacyExperienceId(tokenId) {
   return `voidcaller-legacy-track-${tokenId}`;
 }
 
+/** Evidence that exists for the four minted mainnet tokens, and the gaps that
+ * forbid a verified provenance backfill. This does not write those releases. */
+export function legacyReleaseEvidence() {
+  return {
+    sufficientForVerifiedProvenance: false,
+    chainId: LEGACY_CHAIN_ID,
+    contract: LEGACY_CONTRACT,
+    metadataBase: LEGACY_METADATA_BASE,
+    copyrightOwnership: false,
+    artistVerification: "CONTRACT_OWNER_WALLET_ONLY",
+    gaps: [
+      "Each token URI is an IPFS metadata document, not a Studio canonical provenance document, and none contains a provenance root.",
+      "Artwork and audio are IPFS URIs. The repository does not contain SHA-256 digests of those exact bytes.",
+      "Token 0's animation URL ends in .mp3 but the gateway content type is audio/wav. A filename is not a byte identity.",
+      "Original mint transaction hashes and block timestamps are not stored here. They have to be read from C-Chain before any later backfill.",
+    ],
+    tokens: LEGACY_TOKENS.map((token) => ({
+      tokenId: token.tokenId,
+      title: token.title,
+      metadataUri: legacyMetadataUri(token.tokenId),
+      image: LEGACY_IPFS_MEDIA[token.tokenId].image,
+      animationUrl: LEGACY_IPFS_MEDIA[token.tokenId].animationUrl,
+      audioContentType: LEGACY_IPFS_MEDIA[token.tokenId].audioContentType,
+      provenanceRoot: null,
+    })),
+  };
+}
+
 export function isLegacyMainnetRequirement(requirement) {
   if (!requirement || typeof requirement !== "object") return false;
   const chainId = Number(requirement.chainId);

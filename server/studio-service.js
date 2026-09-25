@@ -8,6 +8,7 @@ import deployment from "../config/fuji-release.json" with { type: "json" };
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
+import { verifyEditionPublication } from "./publication-anchor.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -130,7 +131,7 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, provenanceRecords = null, publicationChain = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
@@ -139,6 +140,7 @@ export class ArtistStudioService {
     this.mediaUploader = mediaUploader;
     this.provenanceRecords = provenanceRecords;
     this.publicationChain = publicationChain;
+    this.metadataFetcher = metadataFetcher;
     this.logger = logger;
   }
 
@@ -242,11 +244,60 @@ export class ArtistStudioService {
         ? await this.publicationChain.edition(expectedTokenId)
         : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, "function edition(uint256) view returns (bytes32, bytes32, address, uint256, uint256, string, bool)"], provider).edition(expectedTokenId);
       if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
+      let proof = currentProof;
+      if (this.metadataFetcher && proof?.verification_status !== "VERIFIED") {
+        try {
+          const bytes = await this.metadataFetcher(edition.metadata_uri);
+          const block = this.publicationChain?.getBlock ? await this.publicationChain.getBlock(receipt.blockNumber) : await provider.getBlock(receipt.blockNumber);
+          const anchorTimestamp = block?.timestamp == null ? null : new Date(Number(block.timestamp) * 1000).toISOString();
+          const anchor = verifyEditionPublication({
+            metadataUri: edition.metadata_uri,
+            bytes,
+            receipt: { status: Number(receipt.status), blockNumber: receipt.blockNumber, transactionHash },
+            event,
+            onChainUri: onChain[5],
+            blockTimestamp: anchorTimestamp,
+            releaseId: release.id,
+            editionId: edition.id,
+          });
+          if (anchor.provenanceRoot !== provenance.root || anchor.metadataDigest !== provenance.metadataDigest) {
+            throw new ApiError(409, "PROVENANCE_INCONSISTENT", "The metadata CID does not commit this release's provenance root.");
+          }
+          if (this.provenanceRecords && proof) {
+            proof = await this.provenanceRecords.recordVerifiedAnchor({
+              id: proof.id,
+              creatorWallet: identity.wallet,
+              chainKey: deployment.chainKey || "fuji",
+              chainId: deployment.chainId,
+              transactionHash,
+              blockNumber: receipt.blockNumber,
+              blockTimestamp: anchor.anchorBlockTimestamp,
+              anchorContract: CERTIFIED_CONTRACT,
+              anchorEvent: "EditionCreated",
+            });
+          }
+        } catch (error) {
+          if (error?.code === "PROVENANCE_INCONSISTENT" || error?.code === "PROVENANCE_ASSET_MISMATCH") {
+            if (this.provenanceRecords && proof && proof.anchor_status !== "ANCHORED") {
+              proof = await this.provenanceRecords.recordAnchorFailure({
+                id: proof.id,
+                creatorWallet: identity.wallet,
+                failureCode: error.code,
+                failureDetail: "The publication metadata CID did not match the canonical provenance.",
+              }).catch(() => proof);
+            }
+          } else if (error instanceof ApiError && error.code === "PUBLICATION_NOT_CONFIRMED") {
+            throw error;
+          } else {
+            this.logger.error?.("studio.provenance.cid_unverified", { releaseId: release.id, detail: error.message });
+          }
+        }
+      }
       await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: edition.application_metadata || {} });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
       await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), provenanceRoot: provenance.root } });
-      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, ...publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }) };
+      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, anchorEvent: "EditionCreated", copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
