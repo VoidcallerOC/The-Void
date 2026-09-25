@@ -102,8 +102,31 @@ export class ProductionIndexerWorker {
     });
   }
 
+  async waitForLease() {
+    await new Promise((resolve) => {
+      const delay = Math.max(1, Math.min(this.config.pollIntervalMs, this.config.leaseTtlMs));
+      const timer = setTimeout(() => { this._wake = null; resolve(); }, delay);
+      this._wake = () => { clearTimeout(timer); this._wake = null; resolve(); };
+    });
+  }
+
   async start() {
-    await this.acquire();
+    while (!this.stopping) {
+      try {
+        await this.acquire();
+      } catch (error) {
+        if (!(error instanceof IndexerLeaseError)) throw error;
+        const retryInMs = Math.max(1, Math.min(this.config.pollIntervalMs, this.config.leaseTtlMs));
+        this.logger.warn?.("indexer.worker.lease.waiting", { ownerId: this.ownerId, chainId: this.config.chainId, retryInMs });
+        await this.waitForLease();
+        continue;
+      }
+      break;
+    }
+    if (this.stopping) {
+      await this.release();
+      return { stopped: true };
+    }
     try {
       while (!this.stopping) {
         try { await this.cycle(); } catch (error) {
