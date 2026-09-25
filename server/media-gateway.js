@@ -17,13 +17,15 @@ function parseMediaConfig(value) {
   try { return JSON.parse(String(value || "{}")); } catch { throw new ApiError(500, "EXPERIENCE_MEDIA_CONFIGURATION_INVALID", "Experience media configuration is invalid."); }
 }
 
-function protectedObject(experience, requestedMediaType) {
+function protectedReference(experience, requestedMediaType) {
   const config = parseMediaConfig(experience.media_config);
   if (config.protected !== true) throw new ApiError(409, "EXPERIENCE_MEDIA_NOT_PROTECTED", "This experience has no protected media for this endpoint.");
   const candidates = Array.isArray(config.protectedMedia) ? config.protectedMedia : [];
   const asset = candidates.find((item) => String(item?.mediaType || "").toUpperCase() === requestedMediaType);
-  if (!asset || typeof asset !== "object" || !String(asset.storageKey || "").trim()) throw new ApiError(503, "PROTECTED_MEDIA_NOT_CONFIGURED", "Protected media is not configured for this experience.");
-  return { storageKey: String(asset.storageKey).trim(), contentType: String(asset.contentType || "").trim() || null };
+  const assetId = String(asset?.assetId || "").trim();
+  const storageKey = String(asset?.storageKey || "").trim();
+  if (!asset || typeof asset !== "object" || (!assetId && !storageKey)) throw new ApiError(503, "PROTECTED_MEDIA_NOT_CONFIGURED", "Protected media is not configured for this experience.");
+  return { assetId, storageKey, contentType: String(asset.contentType || "").trim() || null };
 }
 
 function fingerprint(value, secret) {
@@ -47,9 +49,16 @@ export class ProtectedMediaGateway {
   }
 
   async loadExperience(experienceId) {
-    const { rows } = await this.db.query("SELECT id, requirements, media_config, status FROM experiences WHERE id=$1 AND status='PUBLISHED' LIMIT 1", [requiredText(experienceId, "experienceId")]);
+    const { rows } = await this.db.query("SELECT id, artist_id, requirements, media_config, status FROM experiences WHERE id=$1 AND status='PUBLISHED' LIMIT 1", [requiredText(experienceId, "experienceId")]);
     if (!rows[0]) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
     return rows[0];
+  }
+
+  async resolveOwnedAsset(experience, reference) {
+    const { rows } = await this.db.query("SELECT id, artist_id, storage_key FROM media_assets WHERE ($1 <> '' AND id=$1) OR ($1 = '' AND $2 <> '' AND storage_key=$2) LIMIT 1", [reference.assetId, reference.storageKey]);
+    const row = rows[0];
+    if (!row?.storage_key || !row.artist_id || !experience.artist_id || String(row.artist_id) !== String(experience.artist_id)) throw new ApiError(403, "PROTECTED_MEDIA_NOT_OWNED", "Protected media is not an asset owned by this experience's artist.");
+    return { storageKey: String(row.storage_key), contentType: reference.contentType, assetId: row.id };
   }
 
   async assertEntitlement({ wallet, experience }) {
@@ -64,12 +73,13 @@ export class ProtectedMediaGateway {
     const wallet = walletAddress(identity.wallet);
     const requestedMediaType = mediaType(input.mediaType);
     const experience = await this.loadExperience(input.experienceId);
-    const asset = protectedObject(experience, requestedMediaType);
+    const reference = protectedReference(experience, requestedMediaType);
     let ownership;
     try { ownership = await this.assertEntitlement({ wallet, experience }); } catch (error) {
       await this.repository.appendAuditEvent({ eventType: "MEDIA_ACCESS_DENIED", actorWallet: wallet, subjectType: "experience", subjectId: experience.id, requestId: request.requestId || null, payload: { mediaType: requestedMediaType, reason: error.code || "ENTITLEMENT_DENIED" } });
       throw error;
     }
+    const asset = await this.resolveOwnedAsset(experience, reference);
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + (this.mediaConfig.grantTtlSeconds * 1000));
     const grantId = randomUUID();
