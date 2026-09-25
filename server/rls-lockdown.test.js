@@ -49,15 +49,24 @@ async function attemptAs(client, role, sql) {
 }
 
 function ignoreAdminTerminate(error) {
-  // DROP DATABASE ... WITH (FORCE) and pg_terminate_backend emit 57P01 on any
-  // still-open pooled client. Swallow it so teardown cannot fail the suite.
-  if (error?.code === "57P01") return;
+  // DROP DATABASE / pg_terminate_backend emit 57P01 on any still-open
+  // pooled client. Swallow it so teardown cannot become an uncaught exception.
+  if (!error) return;
+  if (error.code === "57P01") return;
+  if (String(error.message || "").includes("administrator command")) return;
+}
+
+async function closePool(pool) {
+  if (!pool) return;
+  pool.on("error", ignoreAdminTerminate);
+  await pool.end().catch(ignoreAdminTerminate);
 }
 
 describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
   let adminPool;
   const created = [];
   const scratchPools = [];
+  const scratchClients = [];
 
   beforeAll(async () => {
     adminPool = new pg.Pool({ connectionString: testDatabaseUrl, ssl: false, max: 2 });
@@ -66,14 +75,19 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
   });
 
   afterAll(async () => {
-    for (const pool of scratchPools) {
-      pool.removeAllListeners("error");
-      pool.on("error", ignoreAdminTerminate);
-      await pool.end().catch(() => {});
+    // Close every client and pool *before* dropping the scratch database so a
+    // 57P01 from WITH (FORCE) / terminate cannot surface as unhandled.
+    for (const client of scratchClients) {
+      client.on?.("error", ignoreAdminTerminate);
+      try { client.release(); } catch { /* already released or terminated */ }
     }
+    scratchClients.length = 0;
+    for (const pool of scratchPools) await closePool(pool);
     scratchPools.length = 0;
-    for (const name of created) await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)}`).catch(() => {});
-    await adminPool.end().catch(() => {});
+    for (const name of created) {
+      await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)}`).catch(ignoreAdminTerminate);
+    }
+    await closePool(adminPool);
   });
 
   async function scratchDatabase() {
@@ -92,6 +106,8 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
   it("denies anon and authenticated while the table owner keeps full CRUD", async () => {
     const { pool, config } = await scratchDatabase();
     const client = await pool.connect();
+    client.on("error", ignoreAdminTerminate);
+    scratchClients.push(client);
     try {
       await grantSupabaseApiDefaults(pool);
       await pool.query("CREATE TABLE rls_grant_probe (id integer PRIMARY KEY)");
@@ -259,7 +275,11 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
       expect((await pool.query(defaultAcls)).rows).toEqual([]);
     } finally {
       try { client.release(); } catch { /* already released or terminated */ }
-      await pool.end().catch(() => {});
+      const idx = scratchClients.indexOf(client);
+      if (idx >= 0) scratchClients.splice(idx, 1);
+      await closePool(pool);
+      const poolIdx = scratchPools.indexOf(pool);
+      if (poolIdx >= 0) scratchPools.splice(poolIdx, 1);
     }
   }, 120000);
 });
