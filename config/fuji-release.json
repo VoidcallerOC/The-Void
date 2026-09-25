@@ -8,6 +8,8 @@
   "contractAddress": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
   "deploymentTransaction": "0x69eb5de1a6db53578d3995b5af34c0a78f47b27dee1c1a2b7aed6522b14f33f9",
   "deploymentBlock": 58428586,
+  "primarySaleName": "VoidPrimarySale",
+  "primarySaleAddress": "",
   "rpcUrl": "https://api.avax-test.network/ext/bc/C/rpc",
   "explorer": "https://testnet.snowtrace.io",
   "abi": [
@@ -20,7 +22,26 @@
     "function isApprovedForAll(address account, address operator) view returns (bool)",
     "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)",
     "function hasRole(bytes32 role, address account) view returns (bool)",
-    "function paused() view returns (bool)"
+    "function paused() view returns (bool)",
+    "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
+    "function payoutOf(uint256 tokenId) view returns (address)",
+    "function artistOf(uint256 tokenId) view returns (address)",
+    "function maxSupplyOf(uint256 tokenId) view returns (uint256)",
+    "function royaltyInfo(uint256 tokenId, uint256 salePrice) view returns (address receiver, uint256 royaltyAmount)"
+  ],
+  "primarySaleAbi": [
+    "function sales(uint256) view returns (uint256 priceWei, uint256 maxSupply, uint256 sold, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused, bool configured)",
+    "function walletPurchased(uint256,address) view returns (uint256)",
+    "function purchase(uint256 tokenId, uint256 qty) payable",
+    "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
+    "error SoldOut(uint256 tokenId, uint256 remaining, uint256 requested)",
+    "error WrongPayment(uint256 expected, uint256 actual)",
+    "error WalletLimitExceeded(uint256 tokenId, uint256 limit, uint256 already, uint256 requested)",
+    "error SalePaused(uint256 tokenId)",
+    "error SaleNotStarted(uint256 tokenId)",
+    "error SaleEnded(uint256 tokenId)",
+    "error SaleNotConfigured(uint256 tokenId)",
+    "error ZeroQuantity()"
   ]
 }
 

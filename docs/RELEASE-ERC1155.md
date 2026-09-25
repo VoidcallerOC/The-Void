@@ -1,6 +1,16 @@
 # The-Void Release ERC-1155
 
-`VoidRelease1155` is the platform issuance contract for the music-native domain model **Artist → Release → Edition → Experience → Collect**. It is separate from `MusicMarketplace.sol` and does not perform listings, purchases, settlement, or royalties.
+`VoidRelease1155` is the platform issuance contract for the music-native domain model **Artist → Release → Edition → Experience → Collect**. It is separate from `MusicMarketplace.sol` and does not perform listings, purchases, settlement, or royalties. The certified Fuji deployment of this contract is unchanged.
+
+## ERC-1155 V2 and primary sale
+
+`VoidRelease1155` is not upgradeable. `VoidRelease1155V2` is a new deployment with the same edition, role, and metadata behavior, plus ERC-2981. The token standard stays ERC-1155. There is no ERC-20 and no conversion to ERC-721.
+
+`royaltyInfo` returns the edition payout address and `salePrice * royaltyBps / 10_000`. Royalty basis points are set in `createEdition` and capped at 1000 (10%). The 4-argument `createEdition` still exists and records the artist as the payout with a zero royalty. `MusicMarketplace` already queries `royaltyInfo` and pays zero when the call reverts, which is what the certified V1 deployment does. Resale royalties require the marketplace to be pointed at V2. This change does not deploy `MusicMarketplace`.
+
+`VoidPrimarySale` is a separate contract. The release admin grants it `ISSUER_ROLE`. An artist configures only their own edition: price in AVAX wei, sale supply, per-wallet limit, optional start and end times, and a pause flag. `purchase` requires the exact AVAX amount, checks supply, wallet limit, and the time window, then mints the ERC-1155 to the buyer. Proceeds are pull payments. The platform fee is capped by the constructor basis points. The owner can lower it and can raise it back up to that cap, but cannot exceed the cap.
+
+V2 and the sale contract are not deployed by committing this source. `config/fuji-release.json` stays on the certified V1 address until an operator runs the Fuji script below.
 
 ## Implementation
 
@@ -22,13 +32,18 @@ Minting rejects zero quantities, nonexistent editions, paused state, and quantit
 
 ## Indexer configuration
 
-The existing indexer already decodes standard ERC-1155 transfer topics and projects them into `blockchain_events`, `transfers`, and `ownership_snapshots`. After a **real** Fuji deployment, configure the environment with the actual address and deployment block; do not use the historical placeholder address or start from block zero:
+The indexer decodes standard ERC-1155 transfer topics into `blockchain_events`, `transfers`, and `ownership_snapshots`. Primary sales are a separate indexer contract type, `PRIMARY_SALE`, and require `tokenAddress` set to the ERC-1155 release. A `Purchased` log writes `primary_purchases` and credits ownership on that ERC-1155. The matching mint `TransferSingle` is stored, but ownership is not credited again when the operator is the sale contract. `/api/health/ready` reports both the ERC-1155 release and the primary sale and is not ready unless both checkpoints are `IDLE` or `RUNNING`.
+
+After a **real** Fuji deployment of V2 and the sale, configure the environment with the actual addresses and deployment blocks. Do not use a placeholder address or start from block zero:
 
 ```json
-[{"address":"<REAL_FUJI_ADDRESS>","contractType":"ERC1155","startBlock":<DEPLOYMENT_BLOCK>,"eventTopics":{}}]
+[
+  {"address":"<V2_ADDRESS>","contractType":"ERC1155","startBlock":<V2_BLOCK>},
+  {"address":"<SALE_ADDRESS>","contractType":"PRIMARY_SALE","tokenAddress":"<V2_ADDRESS>","startBlock":<SALE_BLOCK>}
+]
 ```
 
-The contract-specific configuration belongs in `INDEXER_CONTRACTS_JSON`. Do not edit production configuration in source control as part of a local build. The indexer must be restarted after configuration and verified with real `TransferSingle` and `TransferBatch` transactions. Duplicate handling and checkpoint/restart behavior are already keyed by chain, transaction hash, and log index in the existing persistence layer.
+The contract-specific configuration belongs in `INDEXER_CONTRACTS_JSON`. Do not edit production configuration in source control as part of a local build. Restart the indexer after configuration. Duplicate handling and checkpoint/restart behavior stay keyed by chain, transaction hash, and log index.
 
 ## Fuji deployment
 
@@ -42,7 +57,7 @@ npm run lint
 npm run build
 ```
 
-The deployment command is deliberately explicit and Fuji-only:
+The V1 deployment command is deliberately explicit and Fuji-only. It does not rewrite `config/fuji-release.json`:
 
 ```bash
 AVALANCHE_FUJI_RPC_URL=... \
@@ -51,4 +66,16 @@ RELEASE_ADMIN_ADDRESS=0x... \
 node scripts/deploy-release.mjs
 ```
 
-It writes `deployments/release-fuji.json` with the address, transaction hash, block when returned by Forge, chain ID `43113`, admin, and bytecode hash. A deployment record is not evidence by itself: independently verify the transaction receipt and deployed bytecode against Fuji RPC before configuring the indexer. This change does not deploy anything, change Render disks, mutate production configuration, or modify the existing Voidcaller C-Chain contract.
+V2 plus the primary sale, still Fuji only, still ERC-1155, and not run by this change:
+
+```bash
+DEPLOY_NETWORK=fuji \
+AVALANCHE_FUJI_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc \
+DEPLOYER_PRIVATE_KEY=... \
+RELEASE_ADMIN_ADDRESS=0x... \
+PLATFORM_FEE_RECIPIENT=0x... \
+PLATFORM_FEE_BPS=250 \
+npm run deploy:release-v2
+```
+
+`RELEASE_ADMIN_ADDRESS` must be the deployer, because the script grants `ISSUER_ROLE` to `VoidPrimarySale`. The script refuses a non-Fuji chain, a mainnet RPC, and chain id 43114. It rewrites `config/fuji-release.json` with the V2 address and the sale address. After that rewrite, update the tests and README rows that pin `VoidRelease1155` at `0x262B774cf9a1949170B58E2d57F6189980FE757b`, then commit the new config. Independently verify both receipts on the Fuji explorer before starting the indexer. This change does not deploy anything, does not deploy `MusicMarketplace`, and does not modify mainnet configuration.
