@@ -8,7 +8,7 @@ const rpcUrl = process.env.FUJI_RPC_URL || deployment.rpcUrl;
 const provider = new ethers.JsonRpcProvider(rpcUrl, deployment.chainId, { staticNetwork: true });
 const abi = [
   ...deployment.abi,
-  "function edition(uint256) view returns (bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists)",
+  "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))",
   "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)",
 ];
 const iface = new ethers.Interface(abi);
