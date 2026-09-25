@@ -48,16 +48,17 @@ Published metadata and ordering are subject to the immutability rules enforced b
 | Layer | Current implementation |
 | --- | --- |
 | Frontend | React 19, Vite 8, React Router 7, inline-style components, and shared domain/lib modules under `src/` |
-| Frontend deployment | Vercel static frontend with SPA rewrites; `/api/*` is proxied to the Render API service |
+| Frontend deployment | Vercel static frontend (`the-void-alpha.vercel.app`) with SPA rewrites; `/api/*` is proxied to the Render API service |
 | API/backend | Node.js API under `server/`, deployed separately from the frontend on Render |
 | Production API service | `the-void-api-fuji` |
+| Worker | Render background worker `the-void-indexer-fuji`, running `npm run start:indexer` |
 | Database | PostgreSQL for persistence, wallet authentication, catalog and Release state, experiences, marketplace state, migration history, and indexer state |
 | Indexer | Persistent Fuji indexer/worker that reads configured contracts and maintains durable chain state |
 | Blockchain | Avalanche Fuji ERC-1155 release contract and the contract-compatible publication flow |
 | Metadata | Pinata JSON/IPFS metadata storage when `METADATA_STORAGE_DRIVER=pinata` is configured |
 | Protected media | Pinata-based private media download links in production, with server-side wallet, ownership, and entitlement checks |
 
-Vercel does **not** contain the production API or persistent indexer runtime. The `vercel.json` configuration rewrites API traffic to `https://the-void-api-fuji.onrender.com` and schedules the indexer tick endpoint. The Render service and PostgreSQL database must be configured independently.
+Vercel does **not** contain the production API, serverless API functions, cron, or persistent indexer runtime. The `vercel.json` configuration only serves the static frontend and rewrites `/api/*` traffic to `https://the-void-api-fuji.onrender.com`. Render owns both backend processes: `the-void-api-fuji` serves the API and `the-void-indexer-fuji` runs the persistent worker. Both use the dedicated The-Void Fuji PostgreSQL database.
 
 ## Blockchain
 
