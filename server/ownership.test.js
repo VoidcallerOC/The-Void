@@ -27,6 +27,14 @@ describe("indexed ownership verification", () => {
     await expect(empty.verify({ wallet, requirements: [{ type: "erc1155-balance", contract, tokenIds: ["7"] }] })).resolves.toMatchObject({ owns: false, state: "CONFIRMED" });
   });
 
+  it("fails closed for protected media when requirements are empty", async () => {
+    const verifier = new IndexedOwnershipVerifier({ db: { query: vi.fn() }, config });
+    await expect(verifier.verify({ wallet, requirements: [], mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO" }] } })).resolves.toMatchObject({ owns: false, state: "CONFIRMED", watermark: null });
+    await expect(verifier.verify({ wallet, requirements: [], mediaConfig: { protectedMedia: [{ storageKey: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }] } })).resolves.toMatchObject({ owns: false });
+    await expect(verifier.verify({ wallet, requirements: [] })).resolves.toMatchObject({ owns: true, watermark: "NO_REQUIREMENT" });
+    expect(verifier.db.query).not.toHaveBeenCalled();
+  });
+
   it("rejects unsupported or malformed experience requirements", async () => {
     const verifier = new IndexedOwnershipVerifier({ db: { query: vi.fn() }, config });
     await expect(verifier.verify({ wallet, requirements: [{ type: "wallet-claim", contract, tokenIds: ["7"] }] })).rejects.toMatchObject({ code: "EXPERIENCE_REQUIREMENT_UNSUPPORTED" });
