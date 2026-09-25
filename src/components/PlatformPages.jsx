@@ -103,7 +103,7 @@ export function ArtistsPage() {
   );
 }
 
-export function ArtistPage() {
+export function ArtistPage({ children = null } = {}) {
   const catalog = useMarketplaceCatalogs();
   const { artist: artistId } = useParams();
   const result = getArtistCatalog(catalog, artistId);
@@ -113,6 +113,7 @@ export function ArtistPage() {
   const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => editions.some((edition) => edition.id === item.edition.id));
   return (
     <section style={shell}>
+      {children}
       <div style={{ ...card, minHeight: 280, backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.2), rgba(0,0,0,.85)), url(${artist.banner})`, backgroundSize: "cover", backgroundPosition: "center", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
         <Status>{artist.verified ? "Verified artist" : "Artist"}</Status>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 10vw, 100px)", margin: "12px 0 4px", textTransform: "uppercase" }}>{artist.name}</h1>
@@ -143,7 +144,7 @@ export function ArtistPage() {
   );
 }
 
-export function ReleasePage() {
+export function ReleasePage({ children = null } = {}) {
   const catalog = useMarketplaceCatalogs();
   const { release: releaseId } = useParams();
   const result = getReleaseCatalog(catalog, releaseId);
@@ -153,6 +154,7 @@ export function ReleasePage() {
   const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => item.release?.id === release.id);
   return (
     <section style={shell}>
+      {children}
       <PlatformHeader eyebrow="† Release" title={release.title}>
         <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>{release.description}</p>
         <p><Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>{artist.name}</Link> · <Status>{release.status}</Status></p>
