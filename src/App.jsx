@@ -52,6 +52,19 @@ function ArtistRoutePage() {
     </>
   );
 }
+function ReleaseRoutePage() {
+  const { release } = useParams();
+  return (
+    <>
+      {release === "voidcaller-self-titled" && (
+        <div style={{ maxWidth: 1100, margin: "24px auto 0", padding: "0 24px" }}>
+          <VerifyArtistControl slug="voidcaller" />
+        </div>
+      )}
+      <ReleasePage />
+    </>
+  );
+}
 
 export default function App() {
   return (
@@ -63,7 +76,7 @@ export default function App() {
           <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="artists" element={<ArtistsPage />} />
           <Route path="artist/:artist" element={<ArtistRoutePage />} />
-          <Route path="release/:release" element={<ReleasePage />} />
+          <Route path="release/:release" element={<ReleaseRoutePage />} />
           <Route path="edition/:edition" element={<EditionPage />} />
           <Route path="experience/:experience" element={<ExperiencePage />} />
           <Route path="studio" element={<ArtistStudioPage />} />
