@@ -14,6 +14,8 @@ Listings support native-currency unit pricing, partial fills, optional expiratio
 
 When the token contract implements ERC-2981, the marketplace calls `royaltyInfo` and pays the returned receiver if the royalty is within the remaining sale proceeds. Unsupported or reverting royalty interfaces result in no royalty payment. Platform fee configuration is centralized in the immutable constructor parameters rather than duplicated in the frontend.
 
+The certified Fuji `VoidRelease1155` deployment has no ERC-2981 `royaltyInfo`. `MusicMarketplace` therefore pays a zero royalty on that token. `VoidRelease1155V2` is a new ERC-1155 (not an upgrade of V1) with per-edition `royaltyInfo`: the receiver is the edition payout address and the royalty is capped at 10%. Resale royalties work only when the marketplace token is V2. This change does not deploy `MusicMarketplace` and does not touch Avalanche mainnet (chain 43114). Primary sales are native AVAX paid to `VoidPrimarySale`, which mints the same ERC-1155. There is no ERC-20 settlement.
+
 The contract emits `ListingCreated`, `ListingCancelled`, `ListingExpired`, and `ListingSold` events. The frontend and future indexer use these events as the authoritative listing lifecycle signals.
 
 ## Contract files

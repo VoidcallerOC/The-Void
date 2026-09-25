@@ -1,8 +1,8 @@
 -- Read-only RLS and grant audit for the public schema.
--- Paste into the Supabase SQL editor before and after migration 016.
+-- Paste into the Supabase SQL editor before and after migration 017.
 -- This script does not insert, update, delete, grant, revoke, or alter anything.
 --
--- After 016, expect:
+-- After 017, expect:
 --   tables_without_rls = 0
 --   tables_with_force_rls = 0
 --   tables_with_anon_or_authenticated_grants = 0
@@ -40,7 +40,7 @@ SELECT
   CASE
     WHEN to_regclass('public.chain_blocks') IS NOT NULL
      AND to_regclass('public.chain_block_observations') IS NOT NULL
-      THEN 'both tables exist; 016 does not drop or rename chain_blocks'
+      THEN 'both tables exist; 017 does not drop or rename chain_blocks'
     WHEN to_regclass('public.chain_blocks') IS NOT NULL
       THEN 'chain_blocks exists and chain_block_observations does not'
     WHEN to_regclass('public.chain_block_observations') IS NOT NULL

@@ -70,6 +70,7 @@ export class IndexerStore {
       await client.query("UPDATE ownership_snapshots SET synchronization_watermark='REORG_PENDING', updated_at=now() WHERE chain_id=$1 AND source_block_number >= $2", [chainId, fromBlock]);
       await client.query(`UPDATE listings SET status='REORGED', updated_at=now() WHERE chain_id=$1 AND (created_block_number >= $2 OR id IN (SELECT listing_id FROM purchases WHERE chain_id=$1 AND block_number >= $2) OR id IN (SELECT l.id FROM listings l JOIN contracts mc ON mc.id=l.marketplace_contract_id JOIN blockchain_events e ON e.chain_id=l.chain_id AND e.contract_address=mc.address WHERE l.chain_id=$1 AND e.block_number >= $2 AND e.event_type IN ('ListingCreated','ListingCancelled','ListingExpired','ListingSold') AND COALESCE(e.event_data->>'listingId','') ~ '^[0-9]+$' AND l.listing_id=(e.event_data->>'listingId')::numeric))`, [chainId, fromBlock]);
       await client.query("UPDATE purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
+      await client.query("UPDATE primary_purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("UPDATE transactions SET status='REORGED', updated_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query(`INSERT INTO indexer_rebuild_jobs (chain_id, from_block, state, updated_at) VALUES ($1,$2,'PENDING',now()) ON CONFLICT (chain_id) DO UPDATE SET from_block=LEAST(indexer_rebuild_jobs.from_block, EXCLUDED.from_block), state='PENDING', last_error=NULL, started_at=NULL, completed_at=NULL, updated_at=now()`, [chainId, fromBlock]);
       return { chainId, fromBlock, replacementHash };
@@ -89,14 +90,18 @@ export class IndexerStore {
         await client.query(`WITH movements AS (SELECT chain_id, contract_address, token_id, to_wallet AS wallet_address, amount::numeric AS delta, block_number, block_hash, log_index FROM transfers WHERE chain_id=$1 AND is_canonical=true AND to_wallet <> '0x0000000000000000000000000000000000000000' UNION ALL SELECT chain_id, contract_address, token_id, from_wallet AS wallet_address, -amount::numeric AS delta, block_number, block_hash, log_index FROM transfers WHERE chain_id=$1 AND is_canonical=true AND from_wallet <> '0x0000000000000000000000000000000000000000'), balances AS (SELECT chain_id, contract_address, token_id, wallet_address, SUM(delta) AS amount FROM movements GROUP BY chain_id, contract_address, token_id, wallet_address HAVING SUM(delta) > 0), latest AS (SELECT DISTINCT ON (chain_id, contract_address, token_id, wallet_address) chain_id, contract_address, token_id, wallet_address, block_number, block_hash, log_index FROM movements ORDER BY chain_id, contract_address, token_id, wallet_address, block_number DESC, log_index DESC) INSERT INTO ownership_snapshots (chain_id, contract_address, token_id, wallet_address, amount, source_block_number, source_block_hash, synchronization_watermark) SELECT balances.chain_id, balances.contract_address, balances.token_id, balances.wallet_address, balances.amount, latest.block_number, latest.block_hash, latest.block_number::text || ':' || latest.log_index::text FROM balances JOIN latest USING (chain_id, contract_address, token_id, wallet_address)`, [chainId]);
         await client.query("DELETE FROM listing_status_history WHERE listing_id IN (SELECT id FROM listings WHERE chain_id=$1)", [chainId]);
         await client.query("DELETE FROM purchases WHERE chain_id=$1", [chainId]);
+        await client.query("DELETE FROM primary_purchases WHERE chain_id=$1", [chainId]);
+        await client.query("DELETE FROM primary_sale_projections WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM listings WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM marketplace_event_projections WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM transactions WHERE chain_id=$1 AND transaction_type IN ('LISTING_CREATE','LISTING_CANCEL','PURCHASE') AND status NOT IN ('PENDING','SUBMITTED')", [chainId]);
       });
       const { rows: events } = await this.db.query("SELECT event_data FROM blockchain_events WHERE chain_id=$1 AND is_canonical=true AND is_malformed=false AND event_type IN ('ListingCreated','ListingCancelled','ListingExpired','ListingSold') ORDER BY block_number ASC, log_index ASC", [chainId]);
       for (const event of events) await this.applyMarketplaceEvent(event.event_data);
+      const { rows: primaryEvents } = await this.db.query("SELECT event_data FROM blockchain_events WHERE chain_id=$1 AND is_canonical=true AND is_malformed=false AND event_type='Purchased' ORDER BY block_number ASC, log_index ASC", [chainId]);
+      for (const event of primaryEvents) await this.applyPrimaryPurchase(event.event_data, { creditOwnership: false });
       await this.db.query("UPDATE indexer_rebuild_jobs SET state='COMPLETED', completed_at=now(), updated_at=now() WHERE chain_id=$1", [chainId]);
-      return { chainId, replayedMarketplaceEvents: events.length };
+      return { chainId, replayedMarketplaceEvents: events.length, replayedPrimaryPurchases: primaryEvents.length };
     } catch (error) {
       await this.db.query("UPDATE indexer_rebuild_jobs SET state='FAILED', last_error=$2, updated_at=now() WHERE chain_id=$1", [chainId, error.message]).catch(() => {});
       throw error;
@@ -117,10 +122,33 @@ export class IndexerStore {
       const amount = numeric(event.amount, "amount");
       const { rows } = await client.query(`INSERT INTO transfers (chain_id, contract_address, token_id, from_wallet, to_wallet, amount, transaction_hash, block_number, block_hash, log_index, event_type, event_data, block_timestamp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (chain_id, transaction_hash, log_index) DO NOTHING RETURNING *`, [event.chainId, contractAddress, tokenId, from, to, amount, lower(event.transactionHash), event.blockNumber, lower(event.blockHash), event.logIndex, event.eventType, event.raw || {}, event.blockTimestamp]);
       if (!rows[0]) return { duplicate: true };
+      if (event.skipOwnership) return { duplicate: false, transfer: rows[0], ownershipSkipped: true };
       const watermark = `${event.blockNumber}:${event.logIndex}`;
       if (from !== "0x0000000000000000000000000000000000000000") await this.adjustOwnership(client, { chainId: event.chainId, contractAddress, tokenId, wallet: from, delta: -BigInt(amount), blockNumber: event.blockNumber, blockHash: event.blockHash, watermark });
       if (to !== "0x0000000000000000000000000000000000000000") await this.adjustOwnership(client, { chainId: event.chainId, contractAddress, tokenId, wallet: to, delta: BigInt(amount), blockNumber: event.blockNumber, blockHash: event.blockHash, watermark });
       return { duplicate: false, transfer: rows[0] };
+    });
+  }
+
+  async applyPrimaryPurchase(event, { creditOwnership = true } = {}) {
+    return withTransaction(this.db, async (client) => {
+      const saleAddress = address(event.saleAddress, "saleAddress");
+      const tokenAddress = address(event.tokenContractAddress, "tokenContractAddress");
+      const buyer = address(event.buyerWallet, "buyerWallet");
+      const tokenId = numeric(event.tokenId, "tokenId");
+      const quantity = numeric(event.quantity, "quantity", { positive: true });
+      const paidWei = numeric(event.paidWei, "paidWei", { positive: true });
+      const artistCutWei = numeric(event.artistCutWei, "artistCutWei");
+      const platformCutWei = numeric(event.platformCutWei, "platformCutWei");
+      if (BigInt(artistCutWei) + BigInt(platformCutWei) !== BigInt(paidWei)) throw new Error("Primary purchase cuts do not sum to the amount paid.");
+      const marker = await client.query("INSERT INTO primary_sale_projections (chain_id, sale_address, transaction_hash, log_index, token_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING *", [event.chainId, saleAddress, lower(event.transactionHash), event.logIndex, tokenId]);
+      if (!marker.rows[0]) return { duplicate: true };
+      if (creditOwnership) {
+        await this.adjustOwnership(client, { chainId: event.chainId, contractAddress: tokenAddress, tokenId, wallet: buyer, delta: BigInt(quantity), blockNumber: event.blockNumber, blockHash: event.blockHash, watermark: `${event.blockNumber}:${event.logIndex}` });
+      }
+      const transaction = await client.query("INSERT INTO transactions (chain_id, transaction_hash, from_wallet, to_address, transaction_type, status, block_number, block_hash, value_wei, mined_at, updated_at) VALUES ($1,$2,$3,$4,'PURCHASE','CONFIRMED',$5,$6,$7,now(),now()) ON CONFLICT (chain_id, transaction_hash) DO UPDATE SET from_wallet=EXCLUDED.from_wallet, to_address=EXCLUDED.to_address, status=CASE WHEN transactions.status IN ('FINALIZED','RECONCILED') THEN transactions.status ELSE 'CONFIRMED' END, block_number=EXCLUDED.block_number, block_hash=EXCLUDED.block_hash, value_wei=EXCLUDED.value_wei, mined_at=COALESCE(transactions.mined_at, now()), updated_at=now() RETURNING *", [event.chainId, lower(event.transactionHash), buyer, saleAddress, event.blockNumber, lower(event.blockHash), paidWei]);
+      const purchase = await client.query("INSERT INTO primary_purchases (chain_id, sale_contract_address, token_contract_address, transaction_hash, log_index, buyer_wallet, token_id, quantity, paid_wei, artist_cut_wei, platform_cut_wei, block_number, block_hash, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CONFIRMED') ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET status=CASE WHEN primary_purchases.status IN ('FINALIZED','RECONCILED') THEN primary_purchases.status ELSE 'CONFIRMED' END RETURNING *", [event.chainId, saleAddress, tokenAddress, lower(event.transactionHash), event.logIndex, buyer, tokenId, quantity, paidWei, artistCutWei, platformCutWei, event.blockNumber, lower(event.blockHash)]);
+      return { duplicate: false, purchase: purchase.rows[0], transaction: transaction.rows[0], ownershipCredited: creditOwnership };
     });
   }
 

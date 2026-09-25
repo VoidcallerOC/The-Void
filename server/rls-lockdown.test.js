@@ -88,7 +88,7 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
       expect(before.rows[0]).toEqual({ can_select: true, can_insert: true, can_update: true, can_delete: true });
 
       const migrated = await migrate({ pool, config });
-      expect(migrated.applied).toContain("016_rls_lockdown.sql");
+      expect(migrated.applied).toContain("017_rls_lockdown.sql");
 
       const locked = await pool.query(`
         SELECT c.relname AS table_name, c.relrowsecurity, c.relforcerowsecurity

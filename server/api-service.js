@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { checkDatabaseHealth } from "./db.js";
+import { reportIndexedContracts } from "./indexer-contracts.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { isHiddenPublicArtist } from "../src/lib/summit-demo.js";
 
@@ -133,17 +134,18 @@ export class ApiService {
 
   async getOperationalHealth() {
     const database = await checkDatabaseHealth(this.db);
-    if (!database.ok) return { ok: false, database, indexer: { ok: false, reason: "DATABASE_UNAVAILABLE" } };
+    const empty = reportIndexedContracts();
+    const contracts = { release: empty.release, primarySale: empty.primarySale };
+    if (!database.ok) return { ok: false, database, indexer: { ok: false, reason: "DATABASE_UNAVAILABLE" }, contracts };
     try {
       const checkpoints = await this.getIndexerHealth({});
-      const contracts = checkpoints.flatMap((checkpoint) => Array.isArray(checkpoint.contracts) && checkpoint.contracts.length ? checkpoint.contracts : [checkpoint]);
-      const indexer = {
-        ok: checkpoints.length > 0 && contracts.length > 0 && contracts.every((contract) => ["IDLE", "RUNNING"].includes(String(contract.status || "").toUpperCase())) && checkpoints.every((checkpoint) => checkpoint.last_successful_run_at),
-        checkpoints,
-      };
-      return { ok: database.ok && indexer.ok, database, indexer };
+      const indexed = checkpoints.flatMap((checkpoint) => Array.isArray(checkpoint.contracts) && checkpoint.contracts.length ? checkpoint.contracts : [checkpoint]);
+      const reported = reportIndexedContracts({ indexed, configured: this.indexerConfig?.contracts || [] });
+      const checkpointHealthy = checkpoints.length > 0 && indexed.length > 0 && indexed.every((contract) => ["IDLE", "RUNNING"].includes(String(contract.status || "").toUpperCase())) && checkpoints.every((checkpoint) => checkpoint.last_successful_run_at);
+      const indexer = { ok: Boolean(checkpointHealthy && reported.ok), checkpoints };
+      return { ok: database.ok && indexer.ok, database, indexer, contracts: { release: reported.release, primarySale: reported.primarySale } };
     } catch (error) {
-      return { ok: false, database, indexer: { ok: false, reason: error.code || "INDEXER_UNAVAILABLE" } };
+      return { ok: false, database, indexer: { ok: false, reason: error.code || "INDEXER_UNAVAILABLE" }, contracts };
     }
   }
 
@@ -239,7 +241,7 @@ export class ApiService {
     const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, wallet, "wallet");
     const address = walletAddress(wallet);
-    const { rows } = await this.db.query(`SELECT * FROM (SELECT 'TRANSFER' AS activity_type, transaction_hash, block_number, block_timestamp AS occurred_at, contract_address, token_id, amount, from_wallet, to_wallet FROM transfers WHERE (from_wallet=$1 OR to_wallet=$1) AND is_canonical=true UNION ALL SELECT 'PURCHASE' AS activity_type, p.transaction_hash, p.block_number, p.created_at AS occurred_at, p.token_contract_address AS contract_address, p.token_id, p.quantity AS amount, p.seller_wallet AS from_wallet, p.buyer_wallet AS to_wallet FROM purchases p WHERE p.buyer_wallet=$1 AND p.status <> 'REORGED') activity ORDER BY occurred_at DESC LIMIT $2 OFFSET $3`, [address, limitValue(limit), offsetValue(offset)]);
+    const { rows } = await this.db.query(`SELECT * FROM (SELECT 'TRANSFER' AS activity_type, transaction_hash, block_number, block_timestamp AS occurred_at, contract_address, token_id, amount, from_wallet, to_wallet FROM transfers WHERE (from_wallet=$1 OR to_wallet=$1) AND is_canonical=true UNION ALL SELECT 'PURCHASE' AS activity_type, p.transaction_hash, p.block_number, p.created_at AS occurred_at, p.token_contract_address AS contract_address, p.token_id, p.quantity AS amount, p.seller_wallet AS from_wallet, p.buyer_wallet AS to_wallet FROM purchases p WHERE p.buyer_wallet=$1 AND p.status <> 'REORGED' UNION ALL SELECT 'PURCHASE' AS activity_type, p.transaction_hash, p.block_number, p.created_at AS occurred_at, p.token_contract_address AS contract_address, p.token_id, p.quantity AS amount, '0x0000000000000000000000000000000000000000' AS from_wallet, p.buyer_wallet AS to_wallet FROM primary_purchases p WHERE p.buyer_wallet=$1 AND p.status <> 'REORGED') activity ORDER BY occurred_at DESC LIMIT $2 OFFSET $3`, [address, limitValue(limit), offsetValue(offset)]);
     return rows;
   }
 

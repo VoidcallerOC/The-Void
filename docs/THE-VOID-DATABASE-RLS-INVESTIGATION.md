@@ -211,7 +211,7 @@ The following tests are required before production security sign-off:
 
 ## Remediation
 
-Migration `016_rls_lockdown.sql` closes audit item S4 without changing the investigation above.
+Migration `017_rls_lockdown.sql` closes audit item S4 without changing the investigation above.
 
 It enables row level security on every `public` table that does not already have it, including `media_assets`, `schema_migrations`, and any other table present when the migration runs. It does not drop or replace the policies created by `013_artist_rls.sql` and `014_artist_verification.sql`, and it does not set `FORCE ROW LEVEL SECURITY`. The Render API connects as the table owner through `DATABASE_URL` and keeps full access.
 

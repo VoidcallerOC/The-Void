@@ -75,6 +75,8 @@ The configured release environment is:
 
 The current Fuji contract internally supports release IDs, edition IDs, token IDs, finite supply, metadata URIs, artist and issuer roles, minting, transfers, pause controls, and ownership reads. Artist Studio maps the user-facing Release/Track model to that compatibility surface. The configured contract is used by the current Fuji publication workflow; this does **not** mean that the entire platform has completed certification or that production launch readiness has been proven.
 
+Fans cannot pay that certified contract. Its `mint` function is issuer-only and not payable, and it has no ERC-2981 royalty, so `MusicMarketplace` resale royalties against it are zero. `VoidRelease1155V2` and `VoidPrimarySale` are in this repository and keep the collectible as ERC-1155. Fans pay native AVAX to the sale contract, which mints the edition. They are not deployed by the source change, and this repository does not deploy `MusicMarketplace` or change mainnet. The table above stays on the certified V1 address until `npm run deploy:release-v2` is run on Fuji and the resulting config is committed. See [docs/RELEASE-ERC1155.md](docs/RELEASE-ERC1155.md).
+
 The repository contains deployment and verification helpers, but a configured contract address, a deployed contract, a tested contract, a live application integration, certification, and production launch are separate claims. They must not be conflated.
 
 ## Wallet & Authentication
