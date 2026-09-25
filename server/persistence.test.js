@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { withTransaction } from "./db.js";
 import { loadServerConfig } from "./config.js";
@@ -68,12 +69,17 @@ describe("repository contracts", () => {
 
 describe("migration inventory", () => {
   it("discovers numbered SQL migrations in deterministic order", async () => {
-    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql", "004_marketplace_commerce.sql", "005_wallet_auth.sql", "006_private_media.sql", "007_migration_sequence_repair.sql", "008_wallet_auth.sql", "009_wallet_auth.sql", "010_marketplace_reconciliation.sql", "011_indexer_operations.sql", "012_artist_studio.sql", "013_artist_rls.sql", "014_artist_verification.sql", "015_artist_owned_media_assets.sql"]);
+    await expect(listMigrations()).resolves.toEqual(["001_initial_persistence.sql", "002_api_idempotency.sql", "003_indexer_state.sql", "004_marketplace_commerce.sql", "005_wallet_auth.sql", "006_private_media.sql", "007_migration_sequence_repair.sql", "008_wallet_auth.sql", "009_wallet_auth.sql", "010_marketplace_reconciliation.sql", "011_indexer_operations.sql", "012_artist_studio.sql", "013_artist_rls.sql", "014_artist_verification.sql", "015_artist_owned_media_assets.sql", "016_rls_lockdown.sql"]);
   });
 
-  it("keeps migration bookkeeping and SQL body in one transaction boundary", () => {
+  it("keeps migration bookkeeping and SQL body in one transaction boundary", async () => {
     expect(migrationBody("BEGIN;\nCREATE TABLE sample (id text);\nCOMMIT;", "sample.sql")).toBe("CREATE TABLE sample (id text);");
     expect(() => migrationBody("CREATE TABLE sample (id text);", "bad.sql")).toThrow(/outer BEGIN/);
     expect(() => migrationBody("BEGIN; CREATE TABLE sample (id text); COMMIT; COMMIT;", "nested.sql")).toThrow(/nested transaction/);
+    const lockdown = await readFile(new URL("./migrations/016_rls_lockdown.sql", import.meta.url), "utf8");
+    const body = migrationBody(lockdown, "016_rls_lockdown.sql");
+    expect(body).toMatch(/ENABLE ROW LEVEL SECURITY/);
+    expect(body).not.toMatch(/\bFORCE\s+ROW\s+LEVEL\s+SECURITY\b/);
+    expect(body).not.toMatch(/\b(?:BEGIN|COMMIT|ROLLBACK|END)\s*;/);
   });
 });

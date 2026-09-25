@@ -209,6 +209,16 @@ The following tests are required before production security sign-off:
 
 **STATUS: INVESTIGATION COMPLETE**
 
+## Remediation
+
+Migration `016_rls_lockdown.sql` closes audit item S4 without changing the investigation above.
+
+It enables row level security on every `public` table that does not already have it, including `media_assets`, `schema_migrations`, and any other table present when the migration runs. It does not drop or replace the policies created by `013_artist_rls.sql` and `014_artist_verification.sql`, and it does not set `FORCE ROW LEVEL SECURITY`. The Render API connects as the table owner through `DATABASE_URL` and keeps full access.
+
+When the `anon` and `authenticated` roles exist, the migration revokes all privileges on every public table and sequence from those roles, and revokes their default privileges on future tables, sequences, and functions in `public`. No new policies are added. A later public catalog (published experiences, active listings) has to be a safe view, not a table grant.
+
+`scripts/check-rls.sql` is the read-only query for the Supabase SQL editor. It lists `relrowsecurity`, `relforcerowsecurity`, policy count, and anon/authenticated grants for each public table, and it reports whether `chain_blocks` exists beside `chain_block_observations`. It does not drop or rename either table.
+
 ## References
 
 [1]: https://github.com/VoidcallerOC/The-Void "The Void source repository"
