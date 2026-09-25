@@ -83,14 +83,21 @@ export class PersistenceRepository {
     return rows[0];
   }
 
-  async saveMediaAsset({ id, artistId, storageKey, mediaType }) {
+  async saveMediaAsset({ id, artistId, storageKey, mediaType, contentSha256 = null, byteSize = null }) {
     const assetId = requiredText(id, "mediaAsset.id", { max: 128 });
     const key = requiredText(storageKey, "mediaAsset.storageKey", { max: 1024 });
     if (key.includes("..") || key.startsWith("/") || key.includes("\0")) throw new PersistenceValidationError("mediaAsset.storageKey must be a server storage key.", "mediaAsset.storageKey");
     const type = enumValue(String(mediaType || "").toUpperCase(), "mediaAsset.mediaType", ["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "DEMO", "LIVE_RECORDING"]);
     const owner = requiredText(artistId, "mediaAsset.artistId");
+    const metadata = {};
+    if (contentSha256 != null) {
+      const hash = String(contentSha256).trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(hash)) throw new PersistenceValidationError("mediaAsset.contentSha256 must be a SHA-256 hex digest.", "mediaAsset.contentSha256");
+      metadata.contentSha256 = hash;
+      if (byteSize != null) metadata.byteSize = nonNegativeBigInt(byteSize, "mediaAsset.byteSize");
+    }
     try {
-      const { rows } = await this.db.query(`INSERT INTO media_assets (media_key, id, artist_id, storage_key, media_type, visibility) VALUES ($1,$1,$2,$3,$4,'PROTECTED') ON CONFLICT (storage_key) DO UPDATE SET artist_id=media_assets.artist_id WHERE media_assets.artist_id=$2 RETURNING *`, [assetId, owner, key, type]);
+      const { rows } = await this.db.query(`INSERT INTO media_assets (media_key, id, artist_id, storage_key, media_type, visibility, metadata) VALUES ($1,$1,$2,$3,$4,'PROTECTED',$5) ON CONFLICT (storage_key) DO UPDATE SET metadata = CASE WHEN EXCLUDED.metadata ? 'contentSha256' THEN EXCLUDED.metadata ELSE media_assets.metadata END WHERE media_assets.artist_id=$2 RETURNING *`, [assetId, owner, key, type, normalizeJson(metadata)]);
       if (!rows[0]) throw new PersistenceConflictError("Protected media storage key is already owned by another artist.");
       return rows[0];
     } catch (error) { throw normalizeDbError(error, "Protected media asset already exists."); }
