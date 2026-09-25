@@ -137,6 +137,7 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
         "purchases",
         "audit_events",
         "media_assets",
+        "provenance_proofs",
         "chain_blocks",
         "chain_block_observations",
         "artists",
