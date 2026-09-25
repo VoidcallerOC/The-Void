@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publicationResultMessage, validateReleasePublish } from "./studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "./studio-publish.js";
 
 const validInput = {
   release: { title: "Voidcaller Full EP", type: "ep" },
@@ -34,5 +34,18 @@ describe("Release-native Studio publish validation", () => {
     expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false }).message).toMatch(/not fully published/);
     expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_PENDING", fullyPublished: true }).fullyPublished).toBe(false);
     expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true })).toMatchObject({ fullyPublished: true });
+  });
+});
+
+describe("Studio publish route", () => {
+  it("uses the saved release id for the existing metadata and confirm routes", () => {
+    expect(studioPublicationPath("release-a", "metadata")).toBe("/studio/releases/release-a/metadata");
+    expect(studioPublicationPath("release-a", "publication/confirm")).toBe("/studio/releases/release-a/publication/confirm");
+  });
+
+  it("does not build the collapsed path that the API reports as Route not found", () => {
+    expect(() => studioPublicationPath("", "metadata")).toThrow("Save the release before publishing.");
+    expect(() => studioPublicationPath("  ", "publication/confirm")).toThrow("Save the release before publishing.");
+    expect(studioPublicationPath("rel/1", "metadata")).toBe("/studio/releases/rel%2F1/metadata");
   });
 });

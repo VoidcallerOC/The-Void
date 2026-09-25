@@ -9,7 +9,7 @@ import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
-import { publicationResultMessage, validateReleasePublish } from "../lib/studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioFetch } from "../lib/studio-api.js";
 
@@ -118,11 +118,11 @@ export function ArtistStudioPage() {
     }
   };
 
-  const saveDraft = async () => {
+  const saveDraft = async (knownIds = null) => {
     setBusy("draft"); setNotice("");
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      const ids = await ensureArtistAndRelease();
+      const ids = knownIds || await ensureArtistAndRelease();
       const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: editionId ? "PATCH" : "POST",
           payload: {
@@ -139,7 +139,7 @@ export function ArtistStudioPage() {
         });
       setEditionId(record.id);
       setNotice(`Track draft saved: ${form.trackTitle || form.releaseTitle}.`);
-      return record.id;
+      return { releaseId: ids.releaseId, editionId: record.id };
     } catch (error) {
       setNotice(error.message);
       throw error;
@@ -157,8 +157,9 @@ export function ArtistStudioPage() {
         supply: form.quantity,
         metadata: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
       });
-      if (!editionId) await saveDraft();
-      const metadata = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/metadata`, {
+      const ids = await ensureArtistAndRelease();
+      const saved = editionId ? { releaseId: ids.releaseId, editionId } : await saveDraft(ids);
+      const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
         payload: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
@@ -170,7 +171,7 @@ export function ArtistStudioPage() {
         : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
       await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
-      const confirmed = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/publication/confirm`, { method: "POST", payload: { transactionHash: transaction.hash }, headers });
+      const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);
       if (!result.fullyPublished) return;
