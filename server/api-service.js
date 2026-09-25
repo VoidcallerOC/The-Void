@@ -327,12 +327,17 @@ export class ApiService {
     const identity = await requireWalletAuth(this.authenticator, request);
     assertWalletMatches(identity, input.wallet, "wallet");
     if (typeof this.ownershipVerifier !== "function") throw new ApiError(501, "OWNERSHIP_VERIFIER_NOT_CONFIGURED", "Ownership verification is not configured.");
-    const ownership = await this.ownershipVerifier({ wallet: identity.wallet, experienceId: requiredText(input.experienceId, "experienceId") });
+    const experienceId = requiredText(input.experienceId, "experienceId");
+    // Verify against the persisted requirements. Without them the verifier
+    // treats the experience as ungated, and seeded legacy experiences are real.
+    const { rows: experienceRows } = await this.db.query("SELECT id, requirements, media_config FROM experiences WHERE id=$1 AND status=$2 LIMIT 1", [experienceId, PUBLIC_STATUS]);
+    if (!experienceRows[0]) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
+    const ownership = await this.ownershipVerifier({ wallet: identity.wallet, experienceId, requirements: experienceRows[0].requirements, mediaConfig: experienceRows[0].media_config });
     if (!ownership?.owns || ownership.state !== "CONFIRMED" && ownership.state !== "FINALIZED") return { state: ownership?.state || "PENDING", grant: null };
     const grantId = randomUUID();
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + 300_000);
-    const grant = await this.repository.createGrant({ grantId, experienceId: input.experienceId, wallet: identity.wallet, mediaType: requiredText(input.mediaType, "mediaType"), issuedAt, expiresAt, ownershipChainId: ownership.chainId, ownershipWatermark: ownership.watermark, metadata: { state: "CONFIRMED" } });
+    const grant = await this.repository.createGrant({ grantId, experienceId, wallet: identity.wallet, mediaType: requiredText(input.mediaType, "mediaType"), issuedAt, expiresAt, ownershipChainId: ownership.chainId, ownershipWatermark: ownership.watermark, metadata: { state: "CONFIRMED" } });
     return { state: "CONFIRMED", grant };
   }
 

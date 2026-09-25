@@ -2,6 +2,7 @@ import { FUJI_RELEASE_CONFIG, isCertifiedFujiEdition } from "./fuji-release.js";
 import { MARKETPLACE_CONFIG } from "./marketplace.js";
 import { CHAINS, isValidAddress } from "./web3.js";
 import { VOIDCALLER_CATALOG } from "../data.js";
+import { isLegacyMainnetEdition } from "./legacy-genesis.js";
 
 export const MARKETPLACE_STATE = Object.freeze({
   LIVE: "LIVE",
@@ -119,7 +120,9 @@ export function primaryCollectForEdition(edition) {
       certified: true,
     };
   }
-  if (String(edition.status).toLowerCase() === "minted") {
+  // Legacy mainnet editions are minted out and trade on OpenSea/Joepegs. They
+  // never get a Collect button, whatever status the catalog row carries.
+  if (String(edition.status).toLowerCase() === "minted" || isLegacyMainnetEdition(edition)) {
     return {
       availability: "minted",
       status: MARKETPLACE_STATE.LIVE,
