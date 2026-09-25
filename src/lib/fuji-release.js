@@ -106,10 +106,21 @@ export function isFujiEditionNotFoundError(error) {
 export function encodeFujiApproval(operator, approved = true) { return iface.encodeFunctionData("setApprovalForAll", [operator, approved]); }
 export function encodeFujiTransfer(from, to, tokenId, amount = 1) { return iface.encodeFunctionData("safeTransferFrom", [from, to, BigInt(tokenId), BigInt(amount), "0x"]); }
 
-export async function sendFujiTransaction({ provider, from, data, to, value }) {
+export function assertProvenanceAnchorTarget(address) {
+  if (!ethers.isAddress(address)) throw new Error("The provenance anchor contract address is invalid.");
+  const target = ethers.getAddress(address);
+  if (target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) throw new Error("The provenance anchor cannot be the release contract.");
+  const sale = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "");
+  if (ethers.isAddress(sale) && ethers.getAddress(sale) !== ethers.ZeroAddress && target.toLowerCase() === sale.toLowerCase()) throw new Error("The provenance anchor cannot be the sale contract.");
+  return target;
+}
+
+export async function sendFujiTransaction({ provider, from, data, to, value, anchorAddress = null }) {
   await assertFujiProvider(provider);
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
-  const tx = { from, to: assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress), data };
+  const target = anchorAddress ? assertProvenanceAnchorTarget(anchorAddress) : assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress);
+  if (anchorAddress && to && ethers.getAddress(to) !== target) throw new Error("The provenance transaction target does not match the configured anchor.");
+  const tx = { from, to: target, data };
   if (value !== undefined && value !== null && BigInt(value) > 0n) tx.value = ethers.toQuantity(BigInt(value));
   const hash = await provider.request({ method: "eth_sendTransaction", params: [tx] });
   const receipt = await waitForReceipt(provider, hash);

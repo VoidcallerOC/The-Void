@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, assertFujiTransactionTarget, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses the certified address and chain", () => {
@@ -31,6 +31,8 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe(FUJI_RELEASE_CONFIG.contractAddress);
     expect(assertFujiTransactionTarget(FUJI_RELEASE_CONFIG.contractAddress)).toBe(ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress));
     expect(() => assertFujiTransactionTarget("0x0000000000000000000000000000000000000001")).toThrow(/primary sale/);
+    expect(() => assertProvenanceAnchorTarget(FUJI_RELEASE_CONFIG.contractAddress)).toThrow(/release contract/);
+    expect(assertProvenanceAnchorTarget("0x3333333333333333333333333333333333333333")).toBe("0x3333333333333333333333333333333333333333");
   });
 
   it("recognizes only the expected missing-edition provider failures", () => {

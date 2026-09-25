@@ -15,6 +15,9 @@ import { createArtistStudioService } from "./studio-service.js";
 import { createArtistVerificationService } from "./verification-service.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
 import { createPinataMetadataStorage } from "./metadata-storage.js";
+import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./provenance-anchor.js";
+import { createIpfsMetadataFetcher } from "./publication-anchor.js";
+import { ProvenanceRecords } from "./provenance-records.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
   const pool = db || createDatabasePool(config);
@@ -41,10 +44,13 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
       logger.warn?.("api.media.disabled", { error: error.message });
     }
   }
-  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, logger });
+  const provenanceRecords = new ProvenanceRecords({ db: pool });
+  const metadataFetcher = createIpfsMetadataFetcher({ gateway: process.env.IPFS_GATEWAY });
+  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, provenanceRecords, metadataFetcher, logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
-  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, contractOwnerVerification, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
   return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService };
 }

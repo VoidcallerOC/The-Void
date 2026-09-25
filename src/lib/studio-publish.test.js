@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { studioPublicationPath, validateReleasePublish } from "./studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "./studio-publish.js";
 
 const validInput = {
   release: { title: "Voidcaller Full EP", type: "ep" },
@@ -27,6 +27,13 @@ describe("Release-native Studio publish validation", () => {
 
   it("rejects an invalid track", () => {
     expect(() => validateReleasePublish({ ...validInput, tracks: [{ title: "" }] })).toThrow("Track 1 title is required.");
+  });
+
+  it("does not describe a release as fully published while provenance is pending or failed", () => {
+    expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_PENDING", fullyPublished: false }).fullyPublished).toBe(false);
+    expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false }).message).toMatch(/not fully published/);
+    expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_PENDING", fullyPublished: true }).fullyPublished).toBe(false);
+    expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true })).toMatchObject({ fullyPublished: true });
   });
 });
 
