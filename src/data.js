@@ -1,3 +1,4 @@
+import { legacyExperienceId } from "./lib/legacy-genesis.js";
 import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "./domain/models.js";
 
 // Static data for the Voidcaller site.
@@ -87,10 +88,10 @@ export const VC_DATA = {
     },
   ],
   firstEPTracks: [
-    { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
-    { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
-    { n: "03", title: "Complex",          time: "5:08", tokenId: 3, previewSrc: "/assets/audio-preview/ep1-03-complex-preview.mp3",        protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-complex.png",        artVid: "/assets/track-art-vid/ep1-complex" },
-    { n: "04", title: "Enough",           time: "4:46", tokenId: 0, previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" }, art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
+    { n: "01", title: "The Hollow",       time: "3:57", tokenId: 1, previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",     protectedMedia: { experienceId: legacyExperienceId(1), mediaType: "AUDIO" }, art: "/assets/track-art/ep1-the-hollow.png",     artVid: "/assets/track-art-vid/ep1-the-hollow" },
+    { n: "02", title: "Don’t Look Down",  time: "4:20", tokenId: 2, previewSrc: "/assets/audio-preview/ep1-02-dont-look-down-preview.mp3", protectedMedia: { experienceId: legacyExperienceId(2), mediaType: "AUDIO" }, art: "/assets/track-art/ep1-dont-look-down.png", artVid: "/assets/track-art-vid/ep1-dont-look-down" },
+    { n: "03", title: "Complex",          time: "5:08", tokenId: 3, previewSrc: "/assets/audio-preview/ep1-03-complex-preview.mp3",        protectedMedia: { experienceId: legacyExperienceId(3), mediaType: "AUDIO" }, art: "/assets/track-art/ep1-complex.png",        artVid: "/assets/track-art-vid/ep1-complex" },
+    { n: "04", title: "Enough",           time: "4:46", tokenId: 0, previewSrc: "/assets/audio-preview/ep1-04-enough-preview.mp3",         protectedMedia: { experienceId: legacyExperienceId(0), mediaType: "AUDIO" }, art: "/assets/track-art/ep1-enough.png",         artVid: "/assets/track-art-vid/ep1-enough" },
   ],
   tracklist: [
     { n: "01", title: "Warning Signs",   time: "3:38", preview: true, src: "/assets/audio-preview/ep2-01-warning-signs-preview.mp3",   art: "/assets/track-art/ep2-warning-signs.png",   artVid: "/assets/track-art-vid/ep2-warning-signs" },
