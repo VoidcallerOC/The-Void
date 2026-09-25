@@ -75,6 +75,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Cluster-wide roles. Per-database Supabase default privileges are granted
+      # in server/rls-lockdown.test.js immediately before that test migrates 017.
       - name: Create Supabase-compatible roles
         run: psql "$TEST_DATABASE_URL" -c "CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;"
         env:
