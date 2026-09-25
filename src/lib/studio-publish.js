@@ -34,3 +34,11 @@ export function publicationResultMessage({ title, provenanceStatus, fullyPublish
   return { fullyPublished: false, message: `${name} is not fully published. Provenance verification is still pending.` };
 }
 
+/** The publish step must call the existing release routes with the id returned
+ * by the save, not a stale empty state value. An empty id collapses
+ * `/studio/releases//metadata` and the API answers "Route not found." */
+export function studioPublicationPath(releaseId, suffix) {
+  const id = String(releaseId ?? "").trim();
+  if (!id) throw new Error("Save the release before publishing.");
+  return `/studio/releases/${encodeURIComponent(id)}/${suffix}`;
+}

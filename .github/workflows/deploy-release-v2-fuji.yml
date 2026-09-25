@@ -1,0 +1,227 @@
+name: Deploy VoidRelease1155V2 + VoidPrimarySale to Avalanche Fuji
+
+# Separate from .github/workflows/deploy-release-fuji.yml.
+# That V1 workflow calls `npm run deploy:release` and must not be reused.
+# This workflow calls only:
+#   DEPLOY_NETWORK=fuji npm run deploy:release-v2
+# which runs scripts/deploy-release-v2-fuji.mjs.
+#
+# Required inputs to the V2 script:
+#   AVALANCHE_FUJI_RPC_URL     -> secrets.AVALANCHE_FUJI_RPC_URL
+#   DEPLOYER_PRIVATE_KEY       -> secrets.DEPLOYER_PRIVATE_KEY
+#   RELEASE_ADMIN_ADDRESS      -> secrets.RELEASE_ADMIN_ADDRESS
+#   PLATFORM_FEE_RECIPIENT     -> config/fuji-v2-platform-fees.json (reviewed, not a secret)
+#   PLATFORM_FEE_BPS           -> config/fuji-v2-platform-fees.json (reviewed, not a secret)
+#
+# Do not default the fee fields. Do not use MARKETPLACE_FEE_*.
+# This workflow does not run on push/PR. Manual confirmation is required.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_fuji_v2_deploy:
+        description: Type I_CONFIRM_FUJI_V2_PRIMARY_SALE_DEPLOY to allow a Fuji broadcast after fee validation.
+        required: true
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voidrelease1155v2-fuji-deployment
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: fuji
+  EXPECTED_CHAIN_ID: "43113"
+  FEE_CONFIG_PATH: config/fuji-v2-platform-fees.json
+  BPS_DENOMINATOR: "10000"
+
+jobs:
+  validate-fee-config:
+    name: Validate reviewed platform fee config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      platform_fee_recipient: ${{ steps.load.outputs.platform_fee_recipient }}
+      platform_fee_bps: ${{ steps.load.outputs.platform_fee_bps }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load and validate reviewed fee values
+        id: load
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${FEE_CONFIG_PATH}"
+          python3 - <<'PY'
+          import json, os, re, sys
+          path = os.environ["FEE_CONFIG_PATH"]
+          denom = int(os.environ["BPS_DENOMINATOR"])
+          with open(path, encoding="utf-8") as fh:
+              cfg = json.load(fh)
+          recipient = cfg.get("platformFeeRecipient")
+          bps = cfg.get("platformFeeBps")
+          if not isinstance(recipient, str) or not recipient.strip():
+              print("PLATFORM_FEE_RECIPIENT is absent in", path, file=sys.stderr)
+              sys.exit(1)
+          if not re.fullmatch(r"0x[0-9a-fA-F]{40}", recipient):
+              print("PLATFORM_FEE_RECIPIENT is not a 20-byte hex address", file=sys.stderr)
+              sys.exit(1)
+          if recipient.lower() == "0x" + ("00" * 20):
+              print("PLATFORM_FEE_RECIPIENT must not be the zero address", file=sys.stderr)
+              sys.exit(1)
+          if bps is None or isinstance(bps, bool) or not isinstance(bps, int):
+              print("PLATFORM_FEE_BPS is absent or not an integer in", path, file=sys.stderr)
+              sys.exit(1)
+          if bps < 0 or bps > denom:
+              print(f"PLATFORM_FEE_BPS {bps} is outside VoidPrimarySale range 0-{denom}", file=sys.stderr)
+              sys.exit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"platform_fee_recipient={recipient}\n")
+              out.write(f"platform_fee_bps={bps}\n")
+          print("Reviewed fee config accepted")
+          print(f"platformFeeRecipient={recipient}")
+          print(f"platformFeeBps={bps} (cap/range 0-{denom} from VoidPrimarySale.BPS_DENOMINATOR)")
+          PY
+
+  deploy-and-verify:
+    name: Deploy V2 + VoidPrimarySale to Fuji
+    needs: validate-fee-config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
+      PLATFORM_FEE_RECIPIENT: ${{ needs.validate-fee-config.outputs.platform_fee_recipient }}
+      PLATFORM_FEE_BPS: ${{ needs.validate-fee-config.outputs.platform_fee_bps }}
+    steps:
+      - name: Confirmation gate before any broadcast
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="I_CONFIRM_FUJI_V2_PRIMARY_SALE_DEPLOY"
+          if [ "${{ github.event.inputs.confirm_fuji_v2_deploy }}" != "${expected}" ]; then
+            echo "Refusing broadcast. Type ${expected} in the workflow_dispatch input." >&2
+            echo "Fee validation already ran; no transactions were sent." >&2
+            exit 1
+          fi
+          if [ "${DEPLOY_NETWORK}" != "fuji" ]; then
+            echo "DEPLOY_NETWORK must be fuji" >&2
+            exit 1
+          fi
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Confirm V2 script and V1 workflow isolation
+        run: |
+          set -euo pipefail
+          test -f scripts/deploy-release-v2-fuji.mjs
+          test -f .github/workflows/deploy-release-fuji.yml
+          grep -Fq 'npm run deploy:release-v2' package.json
+          grep -Fq 'node scripts/deploy-release-v2-fuji.mjs' package.json
+          ! grep -Fq 'npm run deploy:release' .github/workflows/deploy-release-v2-fuji.yml
+          grep -Fq 'npm run deploy:release' .github/workflows/deploy-release-fuji.yml
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build and test Solidity before any broadcast
+        run: |
+          set -euo pipefail
+          forge build
+          forge test
+
+      - name: Validate Fuji-only preflight and all five V2 inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS PLATFORM_FEE_RECIPIENT PLATFORM_FEE_BPS)
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required V2 input: ${name}" >&2
+              exit 1
+            fi
+          done
+          if [ "${DEPLOY_NETWORK}" != "fuji" ]; then
+            echo "DEPLOY_NETWORK must be fuji" >&2
+            exit 1
+          fi
+          if ! [[ "${RELEASE_ADMIN_ADDRESS}" =~ ^0x[0-9a-fA-F]{40}$ ]] || [ "${RELEASE_ADMIN_ADDRESS}" = "0x0000000000000000000000000000000000000000" ]; then
+            echo "RELEASE_ADMIN_ADDRESS is invalid or zero" >&2
+            exit 1
+          fi
+          if ! [[ "${PLATFORM_FEE_RECIPIENT}" =~ ^0x[0-9a-fA-F]{40}$ ]] || [ "${PLATFORM_FEE_RECIPIENT}" = "0x0000000000000000000000000000000000000000" ]; then
+            echo "PLATFORM_FEE_RECIPIENT is invalid or zero" >&2
+            exit 1
+          fi
+          if ! [[ "${PLATFORM_FEE_BPS}" =~ ^[0-9]+$ ]]; then
+            echo "PLATFORM_FEE_BPS must be an integer" >&2
+            exit 1
+          fi
+          if [ "${PLATFORM_FEE_BPS}" -gt "${BPS_DENOMINATOR}" ]; then
+            echo "PLATFORM_FEE_BPS exceeds VoidPrimarySale.BPS_DENOMINATOR (${BPS_DENOMINATOR})" >&2
+            exit 1
+          fi
+          chain_id="$(cast chain-id --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
+          if [ "${chain_id}" != "43113" ]; then
+            echo "Refusing non-Fuji chain: ${chain_id}" >&2
+            exit 1
+          fi
+          deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
+          deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
+          admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
+          if [ "${deployer_lc}" != "${admin_lc}" ]; then
+            echo "RELEASE_ADMIN_ADDRESS must match the funded deployer so ISSUER_ROLE can be granted" >&2
+            exit 1
+          fi
+          balance_wei="$(cast balance "${deployer}" --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
+          if ! [[ "${balance_wei}" =~ ^[0-9]+$ ]] || [ "${balance_wei}" -le 0 ]; then
+            echo "Deployer has zero or unreadable Fuji AVAX balance" >&2
+            exit 1
+          fi
+          echo "Fuji V2 preflight passed: chain_id=${chain_id}, deployer=${deployer}, balance_wei=${balance_wei}"
+          echo "PLATFORM_FEE_RECIPIENT=${PLATFORM_FEE_RECIPIENT}"
+          echo "PLATFORM_FEE_BPS=${PLATFORM_FEE_BPS}"
+          echo "Secrets present: AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS (values not printed)"
+          grep -Fq 'out/VoidRelease1155V2.sol/VoidRelease1155V2.json' scripts/deploy-release-v2-fuji.mjs
+          grep -Fq 'out/VoidPrimarySale.sol/VoidPrimarySale.json' scripts/deploy-release-v2-fuji.mjs
+          ! grep -Fq 'MusicMarketplace.sol:MusicMarketplace' scripts/deploy-release-v2-fuji.mjs
+          ! grep -Fq 'MARKETPLACE_FEE' scripts/deploy-release-v2-fuji.mjs
+
+      - name: Deploy VoidRelease1155V2 and VoidPrimarySale to Fuji
+        id: deploy
+        run: |
+          set -euo pipefail
+          export DEPLOY_NETWORK=fuji
+          npm run deploy:release-v2
+
+      - name: Final regression suite
+        run: |
+          set -euo pipefail
+          forge build
+          forge test
+          npm test
+          npm run lint
+          npm run build
+
+      - name: Upload rewritten Fuji config if present
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidrelease1155v2-fuji-deployment
+          path: config/fuji-release.json
+          if-no-files-found: error
+          retention-days: 90
