@@ -75,8 +75,11 @@ describe("Artist Studio", () => {
     expect(repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", status: "DRAFT" }));
 
     const published = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "REVIEW", release_metadata: {}, published_at: null }] });
-    await expect(published.instance.updateRelease({ request, releaseId: "release-1", input: { status: "PUBLISHED" } })).resolves.toMatchObject({ status: "PUBLISHED" });
-    expect(published.repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ status: "PUBLISHED", publishedAt: expect.any(Date) }));
+    await expect(published.instance.updateRelease({ request, releaseId: "release-1", input: { status: "PUBLISHED" } })).rejects.toMatchObject({ code: "PUBLICATION_REQUIRES_CONFIRMATION" });
+    expect(published.repo.saveRelease).not.toHaveBeenCalled();
+
+    const review = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "DRAFT", release_metadata: {}, published_at: null }] });
+    await expect(review.instance.updateRelease({ request, releaseId: "release-1", input: { status: "REVIEW" } })).resolves.toMatchObject({ status: "REVIEW" });
 
     const regression = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date() }] });
     await expect(regression.instance.updateRelease({ request, releaseId: "release-1", input: { status: "REVIEW" } })).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
@@ -106,8 +109,16 @@ describe("Artist Studio", () => {
     expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: expect.any(BigInt), metadataUri: null }));
 
     const experienceService = service({ rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] });
+    experienceService.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (text.includes("media_assets")) return { rows: [{ id: "asset-1", artist_id: "artist-1", storage_key: "records/full-record.mp3", media_type: "AUDIO" }] };
+      if (text.includes("FROM tokens")) return { rows: [{ token_id: "7", contract_address: contract, chain_id: 43113 }] };
+      return { rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] };
+    });
     const experience = await experienceService.instance.createExperience({ request, editionId: "edition-1", input: { id: "experience-1", title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["7"] }], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] } } });
     expect(experience).toMatchObject({ id: "experience-1", edition_id: "edition-1", status: "DRAFT" });
+    expect(experienceService.repo.saveExperience).toHaveBeenCalledWith(expect.objectContaining({ mediaConfig: expect.objectContaining({ protectedMedia: [expect.objectContaining({ assetId: "asset-1" })] }) }));
+    expect(JSON.stringify(experienceService.repo.saveExperience.mock.calls[0][0].mediaConfig)).not.toMatch(/storageKey|records\/full-record/);
   });
 
   it("derives the internal compatibility title from the release without editionName", async () => {
@@ -124,5 +135,62 @@ describe("Artist Studio", () => {
 
     const unauthorized = service({ rows: [] });
     await expect(unauthorized.instance.createEdition({ request, releaseId: "release-1", input: { name: "Denied", chainId: 43113, contractAddress: contract, tokenId: "1", quantity: "1", priceWei: "1" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
+  });
+
+  it("rejects protected media with empty requirements, a foreign token, or a foreign storage key", async () => {
+    const ownedToken = [{ token_id: "7", contract_address: contract, chain_id: 43113 }];
+    const ownedAsset = [{ id: "asset-1", artist_id: "artist-1", storage_key: "records/full-record.mp3", media_type: "AUDIO" }];
+    const edition = { id: "edition-1", release_id: "release-1", artist_id: "artist-1" };
+    function experienceService({ tokens = ownedToken, assets = ownedAsset } = {}) {
+      const harness = service({ rows: [edition] });
+      harness.db.query.mockImplementation(async (sql) => {
+        const text = String(sql);
+        if (text.includes("media_assets")) return { rows: assets };
+        if (text.includes("FROM tokens")) return { rows: tokens };
+        return { rows: [edition] };
+      });
+      return harness;
+    }
+    const mediaConfig = { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] };
+    const requirement = { type: "erc1155-balance", contract, tokenIds: ["7"] };
+    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
+    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["9"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
+    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", tokenIds: ["7"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
+    await expect(experienceService({ assets: [] }).instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [requirement], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }] } } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_OWNED" });
+    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [requirement], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", assetId: "asset-foreign", storageKey: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }] } } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_OWNED" });
+
+    const stored = { id: "experience-1", artist_id: "artist-1", release_id: "release-1", edition_id: "edition-1", title: "Full Record", description: null, experience_type: "AUDIO", requirements: [requirement], media_config: { protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO" }] }, version: 1, status: "DRAFT" };
+    const updating = service();
+    updating.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (text.includes("FROM experiences")) return { rows: [stored] };
+      if (text.includes("media_assets")) return { rows: ownedAsset };
+      if (text.includes("FROM tokens")) return { rows: ownedToken };
+      return { rows: [] };
+    });
+    await expect(updating.instance.updateExperience({ request, experienceId: "experience-1", input: { requirements: [] } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
+    await expect(updating.instance.updateExperience({ request, experienceId: "experience-1", input: { status: "PUBLISHED" } })).rejects.toMatchObject({ code: "PUBLICATION_REQUIRES_CONFIRMATION" });
+    expect(updating.repo.saveExperience).not.toHaveBeenCalled();
+  });
+
+  it("blocks PATCH publication on releases and editions", async () => {
+    const release = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "DRAFT", release_metadata: {}, published_at: null }] });
+    await expect(release.instance.updateRelease({ request, releaseId: "release-1", input: { status: "published" } })).rejects.toMatchObject({ code: "PUBLICATION_REQUIRES_CONFIRMATION" });
+    const edition = service({ rows: [{ id: "edition-1", release_id: "release-1", contract_id: "contract-1", title: "Chapter I", description: null, tier: null, supply: "1", status: "REVIEW", application_metadata: {} }] });
+    await expect(edition.instance.updateEdition({ request, editionId: "edition-1", input: { status: "PUBLISHED" } })).rejects.toMatchObject({ code: "PUBLICATION_REQUIRES_CONFIRMATION" });
+    expect(edition.repo.saveEdition).not.toHaveBeenCalled();
+  });
+
+  it("writes media assets only from the upload path and does not echo the storage key", async () => {
+    const { instance, repo } = service({ rows: [{ id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
+    const storageKey = "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234";
+    repo.saveMediaAsset = vi.fn(async (input) => ({ id: input.id, media_type: input.mediaType, created_at: "2026-09-24T00:00:00.000Z" }));
+    instance.mediaUploader = vi.fn(async () => ({ storageKey }));
+    const result = await instance.uploadProtectedMedia({ request, artistId: "artist-1", input: { mediaType: "AUDIO", filename: "track.mp3", data: "YQ==" } });
+    expect(result).toMatchObject({ mediaType: "AUDIO" });
+    expect(result.id).toMatch(/^asset-/);
+    expect(JSON.stringify(result)).not.toContain(storageKey);
+    expect(repo.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", storageKey, mediaType: "AUDIO" }));
+    expect(repo.saveExperience).not.toHaveBeenCalled();
   });
 });

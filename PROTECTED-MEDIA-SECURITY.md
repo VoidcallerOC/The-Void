@@ -5,13 +5,15 @@
 
 ## Storage architecture
 
-Protected masters now live under the server-only `private-media/` storage root and are excluded from the public Vite asset tree and Git history. `server/media-storage.js` provides a path-safe storage abstraction with content-type detection, byte-range parsing, and server-side streaming. `PRIVATE_MEDIA_ROOT` selects a mounted private directory; the abstraction can be replaced by a provider-backed adapter without changing the authorization or player contracts.
+Protected masters are intended to live under the server-only `private-media/` storage root and to stay out of the public Vite asset tree. `server/media-storage.js` provides a path-safe storage abstraction with content-type detection, byte-range parsing, and server-side streaming. `PRIVATE_MEDIA_ROOT` selects a mounted private directory; the abstraction can be replaced by a provider-backed adapter without changing the authorization or player contracts.
 
-Render configuration now documents `PRIVATE_MEDIA_ROOT` and `MEDIA_STORAGE_MODE`. The protected masters are intentionally ignored by Git, so deployment must populate the private storage mount or configure the corresponding provider adapter. Public previews remain under `public/assets/audio-preview/`.
+They were **not** removed from Git history. A history rewrite was never done, so the full-duration masters are still reachable by checking out commit [`d311a612`](https://github.com/VoidcallerOC/The-Void/commit/d311a6128d4104e430539f5adaeb689435f6f658) (`d311a6128d4104e430539f5adaeb689435f6f658`). That tree still contains the masters under both `public/assets/audio/` and `public/assets/audio-preview/`. Deleting the files from later commits does not purge those blobs. Ignoring `private-media/` only stops new commits of that directory.
+
+Render configuration now documents `PRIVATE_MEDIA_ROOT` and `MEDIA_STORAGE_MODE`. Deployment must populate the private storage mount or configure the corresponding provider adapter. Public clips under `public/assets/audio-preview/` are short `*-preview.mp3` files only. Full tracks must be reached through the token-gated protected media flow.
 
 ## Protected asset types
 
-The authorization contract supports `AUDIO`, `VIDEO`, `STEMS`, `DOWNLOAD`, `DEMO`, and `LIVE_RECORDING`. The current catalog protects the four released Chapter I full-resolution audio masters. Existing forthcoming tracks remain preview-only. The old full-resolution files were removed from `public/assets/audio/`; no full-resolution audio remains in the public static tree.
+The authorization contract supports `AUDIO`, `VIDEO`, `STEMS`, `DOWNLOAD`, `DEMO`, and `LIVE_RECORDING`. The current catalog protects the four released Chapter I full-resolution audio masters. Existing forthcoming tracks remain preview-only. The old full-resolution files were removed from the current `public/assets/audio/` tree, and the non-`*-preview` full-length MP3s that were still checked in under `public/assets/audio-preview/` are removed from the current tree as well. That does not delete them from history — they remain reachable at commit `d311a612`.
 
 ## Authorization flow
 
@@ -48,7 +50,7 @@ The former `/assets/audio/*.mp3` files were removed from `public/assets/audio/`,
 - `npm test`: **PASS** — 12 test files, 82 tests passed.
 - `npm run lint`: **PASS**.
 - `npm run build`: **PASS**.
-- Public asset audit: **PASS** — no full-resolution audio remains under `public/assets/`.
+- Public asset audit: the current `public/` tree must not ship full-length audio (CI fails if any audio file under `public/` is longer than 35 seconds). This is not a history purge — the masters are still reachable at commit `d311a612`.
 - Security tests cover owner access, non-owner rejection, wrong wallet, wrong chain, expiration, revocation, wrong experience, traversal rejection, valid ranges, and protected storage behavior.
 
 ## Remaining deployment configuration

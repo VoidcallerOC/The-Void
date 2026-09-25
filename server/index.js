@@ -28,16 +28,19 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const indexerConfig = config.indexer || loadIndexerConfig(process.env, { requireConfiguration: false });
   const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, indexerConfig, rateLimiter, logger });
   let resolvedMediaGateway = mediaGateway;
+  let mediaUploader = null;
   if (!resolvedMediaGateway) {
     try {
       const resolvedMediaConfig = mediaConfig || loadMediaConfig();
-      resolvedMediaGateway = createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage: createPrivateMediaStorage({ config: resolvedMediaConfig }), mediaConfig: resolvedMediaConfig });
+      const storage = createPrivateMediaStorage({ config: resolvedMediaConfig });
+      mediaUploader = (input) => storage.put(input);
+      resolvedMediaGateway = createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage, mediaConfig: resolvedMediaConfig });
     } catch (error) {
       if (String(process.env.VERCEL || "") !== "1") throw error;
       logger.warn?.("api.media.disabled", { error: error.message });
     }
   }
-  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, logger });
+  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);

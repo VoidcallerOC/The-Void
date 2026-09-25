@@ -1,5 +1,7 @@
 import { createReadStream, promises as fs } from "node:fs";
 import { extname, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -54,6 +56,34 @@ export class PrivateMediaStorage {
       if (typeof payload?.data !== "string") throw new Error("Pinata private download-link response was invalid.");
       return payload.data;
     };
+  }
+
+  async put({ body, filename = "upload.bin", contentType = "application/octet-stream" }) {
+    const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body || []);
+    if (!bytes.length) throw Object.assign(new Error("Protected media upload was empty."), { status: 400, code: "MEDIA_UPLOAD_EMPTY" });
+    if (bytes.length > this.config.maxBytes) throw Object.assign(new Error("Protected media upload is too large."), { status: 413, code: "MEDIA_UPLOAD_TOO_LARGE" });
+    if (this.config.driver === "filesystem") {
+      const extension = extname(String(filename || "")).toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 8);
+      const storageKey = `uploads/${randomUUID()}${CONTENT_TYPES[extension] ? extension : ""}`;
+      const root = resolve(this.config.privateRoot);
+      const path = resolve(root, storageKey);
+      if (path !== root && !path.startsWith(`${root}${sep}`)) throw new Error("Protected media storage key escapes the private media root.");
+      await fs.mkdir(resolve(path, ".."), { recursive: true });
+      await fs.writeFile(path, bytes);
+      return { storageKey };
+    }
+    if (this.config.driver === "pinata") {
+      const form = new FormData();
+      form.append("network", "private");
+      form.append("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), String(filename || "upload.bin"));
+      const response = await fetch("https://uploads.pinata.cloud/v3/files", { method: "POST", headers: { authorization: `Bearer ${this.config.pinata.jwt}` }, body: form });
+      if (!response.ok) throw Object.assign(new Error("Protected media upload failed."), { status: 502, code: "MEDIA_UPLOAD_FAILED" });
+      const payload = await response.json();
+      const cid = payload?.data?.cid || payload?.cid;
+      if (!cid || typeof cid !== "string") throw Object.assign(new Error("Protected media upload did not return a storage key."), { status: 502, code: "MEDIA_UPLOAD_FAILED" });
+      return { storageKey: cid };
+    }
+    throw Object.assign(new Error("Protected media upload is not available for this storage driver."), { status: 501, code: "MEDIA_UPLOAD_UNSUPPORTED" });
   }
 
   async open({ storageKey, range = null, contentType = null }) {
