@@ -39,30 +39,31 @@ function CovenantPage() {
 function ReliquaryPage() {
   return <Reliquary />;
 }
-function ArtistRoutePage() {
+export function ArtistRoutePage() {
   const { artist } = useParams();
+  // Render inside the page shell so the control sits below the fixed nav
+  // (the shell's top padding clears it). Rendering it above the shell put the
+  // button underneath the 77px fixed <nav>, leaving only a thin red strip.
   return (
-    <>
+    <ArtistPage>
       {artist === "voidcaller" && (
-        <div style={{ maxWidth: 1100, margin: "24px auto 0", padding: "0 24px" }}>
+        <div style={{ marginBottom: 32 }}>
           <VerifyArtistControl slug="voidcaller" />
         </div>
       )}
-      <ArtistPage />
-    </>
+    </ArtistPage>
   );
 }
-function ReleaseRoutePage() {
+export function ReleaseRoutePage() {
   const { release } = useParams();
   return (
-    <>
+    <ReleasePage>
       {release === "voidcaller-self-titled" && (
-        <div style={{ maxWidth: 1100, margin: "24px auto 0", padding: "0 24px" }}>
+        <div style={{ marginBottom: 32 }}>
           <VerifyArtistControl slug="voidcaller" />
         </div>
       )}
-      <ReleasePage />
-    </>
+    </ReleasePage>
   );
 }
 
