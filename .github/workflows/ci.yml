@@ -23,6 +23,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ffprobe
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Reject public audio longer than 35 seconds
+        run: |
+          set -euo pipefail
+          fail=0
+          found=0
+          while IFS= read -r -d '' f; do
+            found=1
+            dur=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$f" || true)
+            if [ -z "$dur" ] || [ "$dur" = "N/A" ]; then
+              echo "FAIL: could not read duration: $f"
+              fail=1
+              continue
+            fi
+            over=$(awk -v d="$dur" 'BEGIN { print (d+0 > 35) ? 1 : 0 }')
+            if [ "$over" = "1" ]; then
+              echo "FAIL: $f is ${dur}s (limit 35s)"
+              fail=1
+            else
+              echo "ok: $f ${dur}s"
+            fi
+          done < <(find public -type f \( \
+            -iname '*.mp3' -o -iname '*.wav' -o -iname '*.flac' -o -iname '*.m4a' \
+            -o -iname '*.ogg' -o -iname '*.aac' -o -iname '*.opus' -o -iname '*.aif' \
+            -o -iname '*.aiff' -o -iname '*.wma' \
+          \) -print0)
+          if [ "$found" = "0" ]; then
+            echo "No audio files under public/"
+          fi
+          exit "$fail"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
