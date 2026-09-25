@@ -32,6 +32,16 @@ export function isLegacyMainnetRequirement(requirement) {
   return chainId === LEGACY_CHAIN_ID && contract === LEGACY_CONTRACT;
 }
 
+// True for an edition (catalog model or API row) on the legacy mainnet
+// contract. These editions are never sold through the Fuji primary sale.
+export function isLegacyMainnetEdition(edition) {
+  if (!edition || typeof edition !== "object") return false;
+  return isLegacyMainnetRequirement({
+    chainId: edition.chainId ?? edition.chain_id,
+    contract: edition.contractAddress ?? edition.contract_address,
+  });
+}
+
 export function publicLegacyTracks() {
   return LEGACY_TOKENS.map((track) => ({
     n: track.n,

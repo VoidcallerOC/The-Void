@@ -11,6 +11,7 @@ import {
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
+import { isLegacyMainnetEdition } from "./legacy-genesis.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -126,18 +127,23 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     const contractAddress = row.contract_address || fuji.contractAddress || FUJI_RELEASE_CONFIG.contractAddress;
     const chainId = Number(row.chain_id || fuji.chainId || FUJI_RELEASE_CONFIG.chainId);
     const tokenId = fuji.tokenId || meta.tokenId || row.token_id;
+    // Legacy mainnet editions (the original Voidcaller collection) are minted
+    // out: never "available" for primary collect, and they list every token.
+    const legacy = isLegacyMainnetEdition({ chainId, contractAddress });
+    const legacyTokenIds = legacy ? asArray(meta.tokenIds).map(String) : [];
     return createEdition({
       id: row.id,
       releaseId: row.release_id || row.releaseId,
       title: row.title || row.name || row.id,
       description: row.description || "",
       includes: asArray(meta.includes),
-      tokenIds: tokenId !== undefined && tokenId !== null && tokenId !== "" ? [String(tokenId)] : [],
+      tokenIds: legacyTokenIds.length ? legacyTokenIds : tokenId !== undefined && tokenId !== null && tokenId !== "" ? [String(tokenId)] : [],
       contractAddress,
       chainId,
       chain: chainId === FUJI_RELEASE_CONFIG.chainId ? FUJI_RELEASE_CONFIG.networkName : "AVALANCHE",
       supply: row.supply != null ? String(row.supply) : null,
-      status: String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),
+      status: legacy ? "minted" : String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),
+      ...(legacy ? { legacy: true, marketplaces: asArray(meta.marketplaces) } : {}),
       metadataUri: fuji.metadataUri || meta.metadataUri || "",
       experienceIds: asArray(meta.experienceIds),
       tier: row.tier || "standard",
@@ -172,6 +178,32 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     editions: mappedEditions,
     tokens: mappedTokens,
     experiences: mappedExperiences,
+  });
+}
+
+// src/data.js already renders the original Voidcaller collection
+// (voidcaller-self-titled / voidcaller-chapter-i). When the API also returns
+// the seeded legacy release and edition for the same mainnet contract, keep
+// the static entry and drop the published duplicate from the storefront.
+// Published experiences stay, so /experience/voidcaller-legacy-track-N resolves.
+export function withoutShadowedLegacyAlbum(published, base = baseCatalogs()) {
+  if (!published) return published;
+  const staticLegacy = asArray(base).some((catalog) => asArray(catalog?.editions).some((edition) => isLegacyMainnetEdition(edition)));
+  if (!staticLegacy) return published;
+  const editions = asArray(published.editions);
+  const legacyEditionIds = new Set(editions.filter((edition) => isLegacyMainnetEdition(edition)).map((edition) => edition.id));
+  if (!legacyEditionIds.size) return published;
+  const shadowedReleaseIds = new Set(
+    editions
+      .filter((edition) => legacyEditionIds.has(edition.id))
+      .map((edition) => edition.releaseId)
+      .filter((releaseId) => editions.every((edition) => edition.releaseId !== releaseId || legacyEditionIds.has(edition.id))),
+  );
+  return createCatalog({
+    ...published,
+    releases: asArray(published.releases).filter((release) => !shadowedReleaseIds.has(release.id)),
+    editions: editions.filter((edition) => !legacyEditionIds.has(edition.id)),
+    tokens: asArray(published.tokens).filter((token) => !legacyEditionIds.has(token.editionId)),
   });
 }
 
@@ -225,7 +257,7 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   return useMemo(
-    () => collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, published])),
+    () => collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, withoutShadowedLegacyAlbum(published)])),
     [overlay, published],
   );
 }
