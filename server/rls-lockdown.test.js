@@ -48,18 +48,32 @@ async function attemptAs(client, role, sql) {
   }
 }
 
+function ignoreAdminTerminate(error) {
+  // DROP DATABASE ... WITH (FORCE) and pg_terminate_backend emit 57P01 on any
+  // still-open pooled client. Swallow it so teardown cannot fail the suite.
+  if (error?.code === "57P01") return;
+}
+
 describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
   let adminPool;
   const created = [];
+  const scratchPools = [];
 
   beforeAll(async () => {
     adminPool = new pg.Pool({ connectionString: testDatabaseUrl, ssl: false, max: 2 });
+    adminPool.on("error", ignoreAdminTerminate);
     await ensureApiRoles(adminPool);
   });
 
   afterAll(async () => {
-    for (const name of created) await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)} WITH (FORCE)`).catch(() => {});
-    await adminPool.end();
+    for (const pool of scratchPools) {
+      pool.removeAllListeners("error");
+      pool.on("error", ignoreAdminTerminate);
+      await pool.end().catch(() => {});
+    }
+    scratchPools.length = 0;
+    for (const name of created) await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)}`).catch(() => {});
+    await adminPool.end().catch(() => {});
   });
 
   async function scratchDatabase() {
@@ -70,6 +84,8 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
     url.pathname = `/${name}`;
     const config = loadServerConfig({ DATABASE_URL: url.toString(), DATABASE_SSL: "false" });
     const pool = new pg.Pool({ connectionString: url.toString(), ssl: false, max: 4 });
+    pool.on("error", ignoreAdminTerminate);
+    scratchPools.push(pool);
     return { pool, config };
   }
 
@@ -242,8 +258,8 @@ describe.skipIf(!testDatabaseUrl)("row level security lockdown", () => {
       expect((await pool.query(sequences)).rows).toEqual([]);
       expect((await pool.query(defaultAcls)).rows).toEqual([]);
     } finally {
-      client.release();
-      await pool.end();
+      try { client.release(); } catch { /* already released or terminated */ }
+      await pool.end().catch(() => {});
     }
   }, 120000);
 });
