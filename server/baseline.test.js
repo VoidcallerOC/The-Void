@@ -66,10 +66,10 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
     const { pool, config } = await scratchDatabase();
     try {
       const result = await migrate({ pool, config });
-      expect(result.applied).toHaveLength(19);
+      expect(result.applied).toHaveLength(20);
       const validation = await validateDatabase({ pool, config });
       expect(validation.ok).toBe(true);
-      expect(validation.migrations).toHaveLength(19);
+      expect(validation.migrations).toHaveLength(20);
       expect(validation.schema.verifiedTables).toContain("artists");
       expect(validation.schema.exactMatch).toBe(true);
     } finally { await pool.end(); }
@@ -92,10 +92,10 @@ describe.skipIf(!testDatabaseUrl)("database recovery paths", () => {
       expect(baseline).toMatchObject({ baselined: true, reason: "recorded", name: baselineMigrationName });
       expect(await appliedMigrationNames(pool)).toEqual([baselineMigrationName]);
       const migrated = await migrate({ pool, config });
-      expect(migrated.applied).toHaveLength(19);
+      expect(migrated.applied).toHaveLength(20);
       const validation = await validateDatabase({ pool, config });
       expect(validation.ok).toBe(true);
-      expect(validation.migrations.map((item) => item.name)).toHaveLength(19);
+      expect(validation.migrations.map((item) => item.name)).toHaveLength(20);
     } finally { await pool.end(); }
   }, 120000);
 
