@@ -41,6 +41,14 @@ export function verifyPersonalSign({ address, message, signature }) {
   return recovered.toLowerCase() === String(address).toLowerCase();
 }
 
+function signatureMatchesChallenge({ address, message, signature }) {
+  try {
+    return verifyPersonalSign({ address, message, signature });
+  } catch {
+    return false;
+  }
+}
+
 export class MainnetOwnerReader {
   constructor({ rpcUrl, fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
     this.rpcUrl = String(rpcUrl || "").trim();
@@ -133,9 +141,9 @@ export class ContractOwnerVerificationService {
     if (!live) throw new ApiError(401, "INVALID_SIGNATURE", "Signature does not match a live challenge for this artist.");
     if (live.used_at) throw new ApiError(409, "NONCE_REUSED", "This verification challenge was already used.");
     if (new Date(live.expires_at).getTime() <= this.now().getTime()) throw new ApiError(401, "CHALLENGE_EXPIRED", "Verification challenge has expired.");
-    let matches = false;
-    try { matches = verifyPersonalSign({ address: wallet, message: live.message, signature: sig }); } catch { matches = false; }
-    if (!matches) throw new ApiError(401, "INVALID_SIGNATURE", "Signature does not match a live challenge for this artist.");
+    if (!signatureMatchesChallenge({ address: wallet, message: live.message, signature: sig })) {
+      throw new ApiError(401, "INVALID_SIGNATURE", "Signature does not match a live challenge for this artist.");
+    }
     const consumed = await this.db.query(
       "UPDATE artist_contract_verify_challenges SET used_at=$1 WHERE nonce=$2 AND used_at IS NULL RETURNING nonce",
       [this.now().toISOString(), live.nonce],
