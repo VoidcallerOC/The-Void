@@ -25,5 +25,10 @@ dist-ssr
 
 .vercel
 
+# Foundry build output. Deploy scripts compile locally; artifacts are not source.
+cache/
+out/
+broadcast/
+
 # Protected masters are deployment assets, never static web or repository content.
 private-media/

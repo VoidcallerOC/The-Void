@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, assertFujiTransactionTarget, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses the certified address and chain", () => {
@@ -21,11 +21,16 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(edition.data.slice(0, 10)).toBe(ethers.id("createEdition(bytes32,bytes32,uint256,string)").slice(0, 10));
     const mint = encodeFujiMint({ to: "0x0000000000000000000000000000000000000001", tokenId: edition.tokenId, amount: 1 });
     expect(mint.slice(0, 10)).toBe(ethers.id("mint(address,uint256,uint256,bytes)").slice(0, 10));
+    const withRoyalty = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: 10, metadataUri: "ipfs://test", payout: "0x0000000000000000000000000000000000000001", royaltyBps: 500 });
+    expect(withRoyalty.data.slice(0, 10)).toBe(ethers.id("createEdition(bytes32,bytes32,uint256,string,address,uint96)").slice(0, 10));
+    expect(withRoyalty.tokenId).toBe(edition.tokenId);
   });
 
   it("rejects arbitrary contract injection", () => {
     expect(() => assertFujiAddress("0x0000000000000000000000000000000000000001")).toThrow(/certified Fuji/);
     expect(assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe(FUJI_RELEASE_CONFIG.contractAddress);
+    expect(assertFujiTransactionTarget(FUJI_RELEASE_CONFIG.contractAddress)).toBe(ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress));
+    expect(() => assertFujiTransactionTarget("0x0000000000000000000000000000000000000001")).toThrow(/primary sale/);
   });
 
   it("recognizes only the expected missing-edition provider failures", () => {
