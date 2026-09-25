@@ -153,6 +153,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
 
   const experienceHref = experiences[0] ? `/experience/${experiences[0].id}` : "/reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);
+  const primaryOpensExperience = !owned && !notCreated && !certified && primary.availability === "minted";
   const action = owned ? (
     <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
   ) : notCreated ? (
@@ -183,7 +184,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}
-        {variant === "hero" && experiences[0] && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
+        {variant === "hero" && experiences[0] && !primaryOpensExperience && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
         {variant !== "hero" && owned && (
           <>
             <Link to={experienceHref} style={ghostBtn}>Open experience</Link>
