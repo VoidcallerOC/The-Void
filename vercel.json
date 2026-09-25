@@ -8,12 +8,6 @@
     { "source": "/api/:path*", "destination": "https://the-void-api-fuji.onrender.com/api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
-  "crons": [
-    {
-      "path": "/api/indexer/tick",
-      "schedule": "* * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/assets/(.*)",
