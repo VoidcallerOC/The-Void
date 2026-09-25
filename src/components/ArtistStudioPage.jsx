@@ -8,6 +8,7 @@ import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
 import { validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioFetch } from "../lib/studio-api.js";
@@ -22,6 +23,7 @@ const STEPS = [
   ["supply", "Supply"],
   ["preview", "Preview"],
   ["publish", "Publish"],
+  ["sale", "Set up sale"],
 ];
 
 function TextField({ title, value, onChange, multiline = false, required = false, placeholder = "", readOnly = false }) {
@@ -47,6 +49,12 @@ function initialState() {
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "10000000000000000",
+    royaltyBps: "500",
+    saleSupply: "",
+    perWalletLimit: "1",
+    saleStart: "",
+    saleEnd: "",
+    salePaused: false,
     experienceTitle: "",
     experienceDescription: "",
     productType: "FULL_RECORD",
@@ -65,6 +73,7 @@ export function ArtistStudioPage() {
   const [artistId, setArtistId] = useState("");
   const [releaseId, setReleaseId] = useState("");
   const [editionId, setEditionId] = useState("");
+  const [publishedTokenId, setPublishedTokenId] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const canUseStudio = wallet.connected && wallet.authenticated;
@@ -156,12 +165,42 @@ export function ArtistStudioPage() {
       });
       const provider = wallet.getProvider?.();
       if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This authenticated artist wallet is not authorized to publish releases on Fuji.");
-      const encoded = encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
+      const encoded = fujiReleaseIsV2()
+        ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
+        : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
       await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
       await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/publication/confirm`, { method: "POST", payload: { transactionHash: transaction.hash }, headers });
+      setPublishedTokenId(encoded.tokenId.toString());
       setNotice(`Published ${form.releaseTitle}. Transaction confirmed: ${transaction.hash}`);
-      setStep("publish");
+      setStep("sale");
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const configureSale = async () => {
+    setBusy("sale");
+    setNotice("");
+    try {
+      const sale = fujiPrimarySaleAddress();
+      if (!sale) throw new Error("VoidPrimarySale is not deployed on Fuji yet. The collectible stays ERC-1155, but fans cannot pay until the sale contract is configured.");
+      if (!publishedTokenId) throw new Error("Publish the release before setting up the sale.");
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const provider = wallet.getProvider?.();
+      const data = encodeConfigureSale({
+        tokenId: publishedTokenId,
+        priceWei: form.priceWei,
+        maxSupply: form.saleSupply || form.quantity,
+        perWalletLimit: form.perWalletLimit,
+        startTime: form.saleStart || 0,
+        endTime: form.saleEnd || 0,
+        paused: form.salePaused,
+      });
+      const transaction = await sendFujiTransaction({ provider, from: wallet.account, data, to: sale });
+      setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -232,7 +271,7 @@ export function ArtistStudioPage() {
         ))}
       </nav>
 
-      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: notice.includes("saved") ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
+      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
 
       {step === "release" && (
         <section style={card} id="create-release">
@@ -316,7 +355,8 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>How many relics</h2>
           <TextField title="Quantity" value={form.quantity} onChange={(value) => set("quantity", value)} required />
           <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-          <p style={{ color: "var(--vc-bone-dim)" }}>Set the number of collectors this release is made for.</p>
+          <TextField title="Resale royalty (basis points, max 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
+          <p style={{ color: "var(--vc-bone-dim)" }}>Quantity is the ERC-1155 edition supply. Royalty is stored on VoidRelease1155V2 at publish and paid on later marketplace resales. It is ignored on the current V1 deployment, which has no ERC-2981.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("experience")}>Back</button>
             <button type="button" style={primaryBtn} onClick={() => setStep("preview")}>Continue</button>
@@ -362,6 +402,44 @@ export function ArtistStudioPage() {
               {busy === "publish" ? "Publishing…" : "Publish release"}
             </button>
           </div>
+        </section>
+      )}
+
+      {step === "sale" && (
+        <section style={card}>
+          <Eyebrow red>Set up sale</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Set up sale</h2>
+          {!fujiPrimarySaleAddress() ? (
+            <>
+              <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
+                VoidPrimarySale is not on this Fuji config yet. The collectible remains an ERC-1155. Fans pay native AVAX to the sale contract, which mints the edition. Until that contract is deployed, this step cannot open a public sale and Collect will not send an issuer mint.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+                <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
+                Only the artist wallet recorded on this edition can configure its sale. Price is exact AVAX wei. Payment splits on-chain between the edition payout and the platform fee. Tokens are minted to the buyer. Nothing here is an ERC-20.
+              </p>
+              <TextField title="Token id" value={publishedTokenId} onChange={setPublishedTokenId} readOnly={false} />
+              <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+              <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={form.quantity || "Edition supply"} />
+              <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} />
+              <TextField title="Start time (unix seconds, optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} />
+              <TextField title="End time (unix seconds, optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} />
+              <label style={label}>
+                <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
+              </label>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+                <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>
+                <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !publishedTokenId} onClick={configureSale}>
+                  {busy === "sale" ? "Configuring…" : "Set up sale"}
+                </button>
+              </div>
+            </>
+          )}
         </section>
       )}
     </section>

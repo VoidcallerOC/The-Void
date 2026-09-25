@@ -37,6 +37,37 @@ export function decodeTransferLog(log, { chainId, blockTimestamp, eventTopics = 
   return [];
 }
 
+export function decodePurchasedLog(log, { chainId, blockTimestamp, tokenAddress, eventTopic }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  const expected = String(eventTopic || "").toLowerCase();
+  if (!expected || topic !== expected) return null;
+  if (!Array.isArray(log.topics) || log.topics.length < 3) throw new Error("Purchased requires tokenId and buyer topics.");
+  if (!/^0x[0-9a-f]{40}$/i.test(String(tokenAddress || ""))) throw new Error("Primary sale indexing requires the ERC1155 token address.");
+  const quantity = uintWord(word(log.data, 0));
+  const paidWei = uintWord(word(log.data, 1));
+  const artistCutWei = uintWord(word(log.data, 2));
+  const platformCutWei = uintWord(word(log.data, 3));
+  if (BigInt(quantity) <= 0n || BigInt(paidWei) <= 0n) throw new Error("Purchased quantity and payment must be positive.");
+  if (BigInt(artistCutWei) + BigInt(platformCutWei) !== BigInt(paidWei)) throw new Error("Purchased cuts do not sum to the amount paid.");
+  return {
+    chainId,
+    eventType: "Purchased",
+    saleAddress: String(log.address || "").toLowerCase(),
+    tokenContractAddress: String(tokenAddress).toLowerCase(),
+    transactionHash: String(log.transactionHash || "").toLowerCase(),
+    blockNumber: Number(log.blockNumber),
+    blockHash: String(log.blockHash || "").toLowerCase(),
+    logIndex: Number(log.logIndex),
+    blockTimestamp,
+    buyerWallet: topicAddress(log.topics[2]),
+    tokenId: BigInt(log.topics[1]).toString(),
+    quantity,
+    paidWei,
+    artistCutWei,
+    platformCutWei,
+  };
+}
+
 export function classifyMarketplaceLog(log, topics = {}) {
   const topic = String(log?.topics?.[0] || "").toLowerCase();
   const entries = Object.entries(topics).find(([, value]) => String(value).toLowerCase() === topic);
@@ -181,6 +212,28 @@ export class BlockchainIndexer {
     const chainId = Number(config.chainId);
     const base = { chainId, contractAddress: String(log.address || config.address).toLowerCase(), transactionHash: String(log.transactionHash || "").toLowerCase(), blockNumber: Number(log.blockNumber), blockHash: String(log.blockHash || block.hash).toLowerCase(), logIndex: Number(log.logIndex), blockTimestamp: new Date(Number(block.timestamp) * 1000) };
     if (!base.transactionHash || !Number.isInteger(base.logIndex) || base.logIndex < 0) return this.store.recordIndexerError({ ...base, errorType: "MALFORMED_LOG", message: "Missing transaction hash or log index." });
+    if (config.contractType === "PRIMARY_SALE") {
+      let purchased;
+      try {
+        purchased = decodePurchasedLog(log, { chainId, blockTimestamp: base.blockTimestamp, tokenAddress: config.tokenAddress, eventTopic: config.eventTopics?.Purchased });
+      } catch (error) {
+        await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
+        await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_PRIMARY_SALE_EVENT", message: error.message, payload: log });
+        return { duplicate: false, malformed: true };
+      }
+      if (!purchased) {
+        const inserted = await this.store.recordEvent({ ...base, eventType: "UNKNOWN", eventData: {}, isMalformed: false });
+        return { duplicate: !inserted, eventType: "UNKNOWN" };
+      }
+      const inserted = await this.store.recordEvent({ ...base, eventType: "Purchased", eventData: purchased, isMalformed: false });
+      try {
+        const projection = await this.store.applyPrimaryPurchase(purchased);
+        return { duplicate: !inserted, eventType: "Purchased", projectionApplied: !projection?.duplicate, projection };
+      } catch (error) {
+        await this.store.recordIndexerError({ ...base, errorType: "PRIMARY_SALE_PROJECTION_FAILED", message: error.message, payload: purchased });
+        throw error;
+      }
+    }
     if (config.contractType === "MARKETPLACE") {
       let marketplaceEvent;
       try {
@@ -213,7 +266,11 @@ export class BlockchainIndexer {
     }
     const eventType = transferItems.length ? transferItems[0].eventType : "UNKNOWN";
     const inserted = await this.store.recordEvent({ ...base, eventType, eventData: { transferCount: transferItems.length }, isMalformed: false });
-    for (const item of transferItems) await this.store.applyTransfer(item);
+    for (const item of transferItems) {
+      const operators = new Set((config.skipMintOperators || []).map((value) => String(value).toLowerCase()));
+      const skipOwnership = item.eventType === "MINT" && operators.has(item.operator);
+      await this.store.applyTransfer(skipOwnership ? { ...item, skipOwnership: true } : item);
+    }
     return { duplicate: !inserted, eventType, transferCount: transferItems.length };
   }
 }
