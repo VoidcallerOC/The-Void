@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
@@ -6,6 +6,7 @@ import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import deployment from "../config/fuji-release.json" with { type: "json" };
 import { canonicalMetadata } from "./metadata-storage.js";
+import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -50,6 +51,27 @@ function contractAddress(value, field) {
 
 const CERTIFIED_CHAIN_ID = deployment.chainId;
 const CERTIFIED_CONTRACT = deployment.contractAddress.toLowerCase();
+function hashedAsset(value, assetType) {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") return { sha256: value, assetType, version: 1 };
+  return value;
+}
+
+function provenanceForPublication({ release, edition, wallet, metadataDigest, experiences, mediaAssets, input, previous }) {
+  const fields = {
+    releaseId: release.id,
+    editionId: edition.id,
+    creator: { artistId: release.artist_id, wallet },
+    metadataDigest,
+    artwork: hashedAsset(input.artworkSha256, "IMAGE"),
+    audio: hashedAsset(input.audioSha256, "AUDIO"),
+    protectedMedia: protectedMediaCommitments(experiences, mediaAssets),
+  };
+  const draft = canonicalProvenanceManifest({ ...fields, createdAt: new Date().toISOString() });
+  const createdAt = previous && provenanceCommitment(previous) === provenanceCommitment(draft.record) ? previous.createdAt : draft.manifest.createdAt;
+  return createdAt === draft.manifest.createdAt ? draft : canonicalProvenanceManifest({ ...fields, createdAt });
+}
+
 function certifiedTokenId(releaseSlug, editionSlug) {
   const releaseId = ethers.encodeBytes32String(requiredText(releaseSlug, "release.slug", { max: 31 }));
   const editionId = ethers.encodeBytes32String(requiredText(editionSlug, "edition.slug", { max: 31 }));
@@ -173,14 +195,17 @@ export class ArtistStudioService {
     const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
-    const experiences = await this.db.query("SELECT title, description, experience_type FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
+    const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
+    const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
     const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: input.releaseType, tier: edition.tier });
-    const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest ? { uri: edition.metadata_uri } : null;
-    const stored = previous || await this.metadataStorage.write({ metadata: { ...generated.metadata, _void: { version: 1, digest: generated.digest } }, name: `${release.slug}-${edition.id}` });
-    await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")), metadataUri: stored.uri, metadata: { ...generated.metadata, _void: { version: 1, digest: generated.digest } }, metadataVersion: generated.digest });
-    await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest } });
+    const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
+    const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
+    const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
+    const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
+    await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")), metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
+    await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest };
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root };
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -353,11 +378,12 @@ export class ArtistStudioService {
     const encoded = requiredText(input.data, "data", { max: 20_000_000 });
     const body = Buffer.from(encoded, "base64");
     if (!body.length) throw new ApiError(400, "MEDIA_UPLOAD_EMPTY", "Protected media upload was empty.");
+    const contentSha256 = createHash("sha256").update(body).digest("hex");
     const stored = await this.mediaUploader({ artistId: artist.id, body, filename: optionalText(input.filename, "filename", { max: 256 }) || "upload.bin", contentType: optionalText(input.contentType, "contentType", { max: 128 }) || "application/octet-stream", mediaType });
     const storageKey = requiredText(stored?.storageKey, "storageKey", { max: 1024 });
     const id = `asset-${randomUUID()}`;
-    const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey, mediaType });
-    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType } });
+    const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey, mediaType, contentSha256, byteSize: body.length });
+    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256 } });
     return { id: asset.id, mediaType: asset.media_type || mediaType, createdAt: asset.created_at || null };
   }
 }
