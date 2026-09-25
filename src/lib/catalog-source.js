@@ -10,6 +10,7 @@ import {
 } from "../domain/models.js";
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
+import { ipfsToHttp } from "./web3.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
 import { isLegacyMainnetEdition } from "./legacy-genesis.js";
 
@@ -116,7 +117,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       description: row.description || "",
       story: meta.story || row.description || "",
       status: String(row.status || "published").toLowerCase(),
-      artwork: meta.artwork || "/assets/voidcaller_art_4.png",
+      artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
     });
@@ -147,7 +148,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       metadataUri: fuji.metadataUri || meta.metadataUri || "",
       experienceIds: asArray(meta.experienceIds),
       tier: row.tier || "standard",
-      artwork: meta.artwork || "",
+      artwork: ipfsToHttp(meta.artwork),
     });
   });
   const mappedExperiences = asArray(experiences).filter((row) => row?.id).map((row) => {
