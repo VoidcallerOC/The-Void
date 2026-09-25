@@ -8,13 +8,19 @@ const other = Wallet.createRandom();
 const slug = "voidcaller";
 
 function harness({ rows = [], updateRows = [{ nonce: "n" }], insert = true, ownerAddress = owner.address, now = new Date("2026-09-25T16:00:00.000Z") } = {}) {
+  const persistRow = { id: "id-1", wallet_address: String(ownerAddress).toLowerCase(), verified_at: now.toISOString() };
   const db = {
-    query: vi.fn(async (sql) => {
+    query: vi.fn(async (sql, params = []) => {
       const text = String(sql);
       if (text.includes("FROM artist_contract_verifications") && text.includes("SELECT wallet_address")) return { rows };
-      if (text.includes("FROM artist_contract_verifications") && text.includes("SELECT id")) return { rows: [] };
+      if (text.includes("FROM artist_contract_verifications") && text.includes("SELECT id")) {
+        return { rows: insert ? [persistRow] : [] };
+      }
       if (text.includes("INSERT INTO artist_contract_verify_challenges")) return { rows: [] };
-      if (text.includes("FROM artist_contract_verify_challenges")) return { rows };
+      if (text.includes("FROM artist_contract_verify_challenges")) {
+        if (params[0] && rows[0] && rows[0].nonce && params[0] !== rows[0].nonce) return { rows: [] };
+        return { rows };
+      }
       if (text.includes("UPDATE artist_contract_verify_challenges")) return { rows: updateRows };
       if (text.includes("INSERT INTO artist_contract_verifications")) return { rows: insert ? [{ id: "id-1" }] : [] };
       return { rows: [] };
@@ -44,14 +50,16 @@ describe("contract owner claim", () => {
     const message = createClaimMessage({ slug, contract: LEGACY_CONTRACT, chainId: LEGACY_CHAIN_ID, nonce, expiresAt });
     const signature = await owner.signMessage(message);
     expect(verifyPersonalSign({ address: owner.address, message, signature })).toBe(true);
-    const { service, ownerReader } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }] });
-    await expect(service.verifyClaim({ slug, address: owner.address, signature })).resolves.toMatchObject({
+    const { service, ownerReader, db } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }] });
+    await expect(service.verifyClaim({ slug, address: owner.address, signature, nonce })).resolves.toMatchObject({
       verified: true,
       wallet: owner.address.toLowerCase(),
       chainId: 43114,
       contract: LEGACY_CONTRACT,
     });
     expect(ownerReader.ownerOf).toHaveBeenCalledWith(LEGACY_CONTRACT);
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining("WHERE nonce=$1 AND artist_slug=$2"), [nonce, slug]);
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining("ON CONFLICT (artist_slug, contract_address, chain_id) DO NOTHING"), expect.any(Array));
   });
 
   it("rejects a signer who is not owner()", async () => {
@@ -60,7 +68,7 @@ describe("contract owner claim", () => {
     const message = createClaimMessage({ slug, contract: LEGACY_CONTRACT, chainId: LEGACY_CHAIN_ID, nonce, expiresAt });
     const signature = await other.signMessage(message);
     const { service } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }] });
-    await expect(service.verifyClaim({ slug, address: other.address, signature })).rejects.toMatchObject({ code: "NOT_CONTRACT_OWNER", status: 403 });
+    await expect(service.verifyClaim({ slug, address: other.address, signature, nonce })).rejects.toMatchObject({ code: "NOT_CONTRACT_OWNER", status: 403 });
   });
 
   it("rejects a reused nonce", async () => {
@@ -69,7 +77,7 @@ describe("contract owner claim", () => {
     const message = createClaimMessage({ slug, contract: LEGACY_CONTRACT, chainId: LEGACY_CHAIN_ID, nonce, expiresAt });
     const signature = await owner.signMessage(message);
     const { service } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }], updateRows: [] });
-    await expect(service.verifyClaim({ slug, address: owner.address, signature })).rejects.toMatchObject({ code: "NONCE_REUSED", status: 409 });
+    await expect(service.verifyClaim({ slug, address: owner.address, signature, nonce })).rejects.toMatchObject({ code: "NONCE_REUSED", status: 409 });
   });
 
   it("rejects an expired nonce", async () => {
@@ -78,7 +86,7 @@ describe("contract owner claim", () => {
     const message = createClaimMessage({ slug, contract: LEGACY_CONTRACT, chainId: LEGACY_CHAIN_ID, nonce, expiresAt });
     const signature = await owner.signMessage(message);
     const { service } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }], now: new Date("2026-09-25T16:00:00.000Z") });
-    await expect(service.verifyClaim({ slug, address: owner.address, signature })).rejects.toMatchObject({ code: "CHALLENGE_EXPIRED", status: 401 });
+    await expect(service.verifyClaim({ slug, address: owner.address, signature, nonce })).rejects.toMatchObject({ code: "CHALLENGE_EXPIRED", status: 401 });
   });
 
   it("fails closed when owner() RPC errors", async () => {
@@ -88,7 +96,7 @@ describe("contract owner claim", () => {
     const signature = await owner.signMessage(message);
     const { service } = harness({ rows: [{ nonce, message, expires_at: expiresAt, used_at: null }] });
     service.ownerReader.ownerOf = vi.fn(async () => { throw Object.assign(new Error("rpc"), { code: "MAINNET_RPC_UNAVAILABLE", status: 503 }); });
-    await expect(service.verifyClaim({ slug, address: owner.address, signature })).rejects.toMatchObject({ code: "MAINNET_RPC_UNAVAILABLE", status: 503 });
+    await expect(service.verifyClaim({ slug, address: owner.address, signature, nonce })).rejects.toMatchObject({ code: "MAINNET_RPC_UNAVAILABLE", status: 503 });
   });
 
   it("exposes a badge payload only when a verification record exists", async () => {
