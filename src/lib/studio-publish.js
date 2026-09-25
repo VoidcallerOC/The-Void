@@ -20,3 +20,17 @@ export function validateReleasePublish({ release, tracks, supply, metadata } = {
   requiredText(metadata.artwork, "Release artwork");
   return { title, tracks, supply: quantity, metadata };
 }
+
+/** The Studio may advance only when the catalog is published and provenance
+ * was independently verified. Pending and failed anchors are not success. */
+export function publicationResultMessage({ title, provenanceStatus, fullyPublished }) {
+  const name = String(title || "This release").trim();
+  if (fullyPublished === true && provenanceStatus === "PROVENANCE_VERIFIED") {
+    return { fullyPublished: true, message: `Published ${name}. Provenance verified. This does not establish legal copyright ownership.` };
+  }
+  if (provenanceStatus === "PROVENANCE_FAILED") {
+    return { fullyPublished: false, message: `${name} is not fully published. Provenance verification failed and can be retried.` };
+  }
+  return { fullyPublished: false, message: `${name} is not fully published. Provenance verification is still pending.` };
+}
+
