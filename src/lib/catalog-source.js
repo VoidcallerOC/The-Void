@@ -146,13 +146,17 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
   });
   const mappedExperiences = asArray(experiences).filter((row) => row?.id).map((row) => {
     const type = String(row.experience_type || row.experienceType || row.type || "AUDIO").toUpperCase();
+    const gated = row.gated === true || asArray(row.requirements).length > 0;
+    const declared = metadataOf(row, "media");
+    const leaked = metadataOf(row, "media_config");
+    const protectedMedia = row.protected === true || declared.protected === true || leaked.protected === true || (Array.isArray(leaked.protectedMedia) && leaked.protectedMedia.length > 0);
     return createExperience({
       id: row.id,
       experienceType: EXPERIENCE_TYPES[type] || EXPERIENCE_TYPES.AUDIO,
       title: row.title || row.id,
       description: row.description || "",
-      requirements: asArray(row.requirements),
-      media: metadataOf(row, "media_config", "media"),
+      requirements: gated ? [{ type: "erc1155-balance" }] : [],
+      media: protectedMedia ? { protected: true, type } : {},
       editionId: row.edition_id || row.editionId || null,
     });
   });
