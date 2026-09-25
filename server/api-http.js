@@ -38,7 +38,7 @@ async function sendMedia(response, media, cors = {}) {
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
-export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, contractOwnerVerification = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
+export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, contractOwnerVerification = null, provenanceAnchor = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
   if (!service) throw new TypeError("createApiHandler requires an ApiService.");
   return async function handle(request, response) {
     const requestId = request.headers["x-request-id"] || createRequestId();
@@ -170,6 +170,13 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "PATCH" && base[0] === "studio" && base[1] === "experiences" && base.length === 3) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.updateExperience({ request: apiRequest, experienceId: base[2], input: body });
+        }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "provenance" && base[4] === "anchor" && base.length === 6) {
+          if (!provenanceAnchor) throw new ApiError(503, "PROVENANCE_ANCHOR_UNAVAILABLE", "Provenance anchoring is unavailable.");
+          if (base[5] === "prepare") data = await provenanceAnchor.prepare({ request: apiRequest, releaseId: base[2] });
+          else if (base[5] === "submit") data = await provenanceAnchor.submit({ request: apiRequest, releaseId: base[2], input: body });
+          else if (base[5] === "confirm") data = await provenanceAnchor.confirm({ request: apiRequest, releaseId: base[2], input: body });
+          else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
         }
         else if (base[0] === "verification") {
           if (!verificationService) throw new ApiError(503, "VERIFICATION_UNAVAILABLE", "Artist verification is unavailable.");
