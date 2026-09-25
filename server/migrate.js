@@ -18,7 +18,11 @@ export function migrationBody(sql, name = "migration") {
   const withoutBegin = source.replace(/^\s*BEGIN\s*;\s*/i, "");
   const body = withoutBegin.replace(/\s*COMMIT\s*;\s*$/i, "");
   if (body === source || !body.trim()) throw new Error(`Migration must contain one outer BEGIN/COMMIT transaction: ${name}`);
-  if (/\b(?:BEGIN|COMMIT|ROLLBACK)\b/i.test(body)) throw new Error(`Migration contains nested transaction control: ${name}`);
+  // PL/pgSQL `BEGIN` opens a block and is not transaction control. Only reject
+  // statements that would nest or end the transaction the runner opens.
+  if (/\b(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|COMMIT(?:\s+WORK)?|ROLLBACK(?:\s+(?:WORK|TRANSACTION))?|END)\s*;/i.test(body)) {
+    throw new Error(`Migration contains nested transaction control: ${name}`);
+  }
   return body;
 }
 
