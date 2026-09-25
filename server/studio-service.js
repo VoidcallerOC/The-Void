@@ -53,6 +53,7 @@ function contractAddress(value, field) {
 
 const CERTIFIED_CHAIN_ID = deployment.chainId;
 const CERTIFIED_CONTRACT = deployment.contractAddress.toLowerCase();
+export const EDITION_ABI = "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))";
 function hashedAsset(value, assetType) {
   if (value == null || value === "") return null;
   if (typeof value === "string") return { sha256: value, assetType, version: 1 };
@@ -242,7 +243,7 @@ export class ArtistStudioService {
       if (!event) throw new Error("expected EditionCreated event was not found");
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
-        : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, "function edition(uint256) view returns (bytes32, bytes32, address, uint256, uint256, string, bool)"], provider).edition(expectedTokenId);
+        : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
       if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
       let proof = currentProof;
       if (this.metadataFetcher && proof?.verification_status !== "VERIFIED") {
