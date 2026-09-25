@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArtistStudioService } from "./studio-service.js";
+import { ethers } from "ethers";
+import { ArtistStudioService, EDITION_ABI } from "./studio-service.js";
 
 const owner = "0x1111111111111111111111111111111111111111";
 const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -25,6 +26,25 @@ function service({ rows = [], authenticated = true, authenticatedWallet = owner,
   return { instance: new ArtistStudioService({ db, repository: repo, metadataStorage, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: authenticatedWallet }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
 }
 const request = { requestId: "request-1", headers: {} };
+
+describe("Fuji edition ABI", () => {
+  it("decodes the deployed Solidity struct return without shifting the address field", () => {
+    const releaseId = ethers.encodeBytes32String("voidcaller");
+    const editionId = ethers.encodeBytes32String("the-feet");
+    const metadataUri = "ipfs://QmWT4u3APAUHCSDXfQiozcgEJgKQGJmUaTi1cLqaiLiTmt";
+    const iface = new ethers.Interface([EDITION_ABI]);
+    const tupleType = "tuple(bytes32 releaseId,bytes32 editionId,address artist,uint256 maxSupply,uint256 mintedSupply,string metadataUri,bool exists)";
+    const raw = ethers.AbiCoder.defaultAbiCoder().encode([tupleType], [[releaseId, editionId, owner, 25n, 0n, metadataUri, true]]);
+    const [edition] = iface.decodeFunctionResult("edition", raw);
+
+    expect(edition[0]).toBe(releaseId);
+    expect(edition[1]).toBe(editionId);
+    expect(edition[2]).toBe(owner);
+    expect(edition[3]).toBe(25n);
+    expect(edition[5]).toBe(metadataUri);
+    expect(edition[6]).toBe(true);
+  });
+});
 
 describe("Artist Studio", () => {
   it("creates an artist profile only for the verified owner wallet", async () => {
