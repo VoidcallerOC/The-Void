@@ -6,6 +6,7 @@ import { checkDatabaseHealth } from "./db.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { isHiddenPublicArtist } from "../src/lib/summit-demo.js";
+import { isPublicLegacyArtwork } from "../src/lib/legacy-genesis.js";
 
 const PUBLIC_STATUS = "PUBLISHED";
 const ACTIVE_LISTING = "ACTIVE";
@@ -55,6 +56,8 @@ const CID_EMBEDDED = /(?:ipfs:\/\/)?(?:baf[a-z2-7]{20,}|qm[1-9a-hj-np-za-km-z]{4
 
 function sanitizePublicValue(value) {
   if (typeof value === "string") {
+    // The legacy tokens' on-chain images are public by design; keep exactly those.
+    if (isPublicLegacyArtwork(value)) return value;
     if (CID_VALUE.test(value.trim())) return undefined;
     const redacted = value.replace(CID_EMBEDDED, "").trim();
     return redacted ? redacted : undefined;

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { VOIDCALLER_CATALOG } from "../data.js";
+import { VC_DATA, VOIDCALLER_CATALOG } from "../data.js";
 import { createCatalog } from "../domain/models.js";
 import { mapPublishedCatalog, mergeCatalogs, withoutShadowedLegacyAlbum } from "./catalog-source.js";
-import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT, LEGACY_EDITION_ID, isLegacyMainnetEdition, legacyExperienceId } from "./legacy-genesis.js";
+import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT, LEGACY_EDITION_ID, LEGACY_IPFS_GATEWAY, LEGACY_IPFS_MEDIA, LEGACY_URI_TEMPLATE, LEGACY_METADATA_BASE, isLegacyMainnetEdition, isPublicLegacyArtwork, legacyAudioTokenId, legacyExperienceId, legacyIpfsToHttp, legacyMetadataUri } from "./legacy-genesis.js";
+import { DEFAULT_COLLECTION_CONFIG, FALLBACK_METADATA, ipfsToHttp } from "./web3.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import { marketplaceCatalog, primaryCollectForEdition } from "./marketplace-surface.js";
 
@@ -71,5 +72,39 @@ describe("legacy mainnet catalog rows", () => {
     const published = mapPublishedCatalog(apiRows);
     const empty = createCatalog({ artists: [], releases: [], editions: [], tokens: [], collections: [], experiences: [] });
     expect(withoutShadowedLegacyAlbum(published, [empty])).toBe(published);
+  });
+});
+
+describe("legacy public IPFS media", () => {
+  it("matches the on-chain metadata the frontend already knows and resolves through the same gateway", () => {
+    expect(LEGACY_URI_TEMPLATE).toBe(`${LEGACY_METADATA_BASE}/{id}`);
+    expect(legacyMetadataUri(2)).toBe(`${LEGACY_METADATA_BASE}/2`);
+    expect(LEGACY_IPFS_GATEWAY).toBe(DEFAULT_COLLECTION_CONFIG.metadata.gateway);
+    for (const item of FALLBACK_METADATA) {
+      const media = LEGACY_IPFS_MEDIA[item.tokenId];
+      expect(media.image).toBe(item.image);
+      expect(media.animationUrl).toBe(item.animation_url);
+      expect(legacyIpfsToHttp(media.image)).toBe(ipfsToHttp(media.image));
+      expect(legacyIpfsToHttp(media.animationUrl)).toBe(ipfsToHttp(media.animationUrl));
+      expect(legacyAudioTokenId(item.animation_url)).toBe(item.tokenId);
+      expect(isPublicLegacyArtwork(item.image)).toBe(true);
+      expect(isPublicLegacyArtwork(ipfsToHttp(item.image))).toBe(true);
+      expect(isPublicLegacyArtwork(item.animation_url)).toBe(false);
+    }
+    expect(legacyAudioTokenId("ipfs://bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234/1.mp3")).toBeNull();
+    expect(isPublicLegacyArtwork("ipfs://QmfCKKX55HdmKw6cFiM1qCFeLhXc3UNrs3rmHfG8CjMbJP/9.gif")).toBe(false);
+  });
+
+  it("requests full audio for each EP track from that token's legacy experience", () => {
+    for (const track of VC_DATA.firstEPTracks) expect(track.protectedMedia).toEqual({ experienceId: legacyExperienceId(track.tokenId), mediaType: "AUDIO" });
+  });
+
+  it("renders published IPFS artwork through the gateway whether stored as ipfs:// or gateway URL", () => {
+    const image = LEGACY_IPFS_MEDIA[1].image;
+    for (const artwork of [image, ipfsToHttp(image)]) {
+      const catalog = mapPublishedCatalog({ ...apiRows, releases: [{ ...apiRows.releases[0], release_metadata: { artwork } }], editions: [{ ...apiRows.editions[0], application_metadata: { ...apiRows.editions[0].application_metadata, artwork } }] });
+      expect(catalog.releases[0].artwork).toBe(ipfsToHttp(image));
+      expect(catalog.editions[0].artwork).toBe(ipfsToHttp(image));
+    }
   });
 });
