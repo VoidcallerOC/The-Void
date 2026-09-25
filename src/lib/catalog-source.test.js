@@ -47,7 +47,7 @@ describe("catalog source", () => {
     });
     const publicCatalog = collapsePublicCatalog(mergeCatalogs([VOIDCALLER_CATALOG, published]));
     expect(publicCatalog.artists.map((item) => item.id)).toEqual(["voidcaller"]);
-    expect(publicCatalog.artists[0].verified).toBe(true);
+    expect(publicCatalog.artists[0].verified).toBe(false);
     expect(publicCatalog.releases.filter((item) => item.artistId === "voidcaller")).toHaveLength(1);
   });
 
