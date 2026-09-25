@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { id } from "ethers";
 import { BlockchainIndexer, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
-import { createIndexerWorker } from "./indexer-worker.js";
+import { createIndexerWorker, ProductionIndexerWorker } from "./indexer-worker.js";
 
 const singleTopic = "0xsingle";
 const batchTopic = "0xbatch";
@@ -101,6 +101,29 @@ describe("Fuji worker startup", () => {
     });
     expect(worker).toHaveProperty("syncOnce");
     expect(logger.info).toHaveBeenCalledWith("indexer.marketplace", { status: "not_configured", address: null, chainId: null });
+  });
+
+  it("waits for an existing lease instead of exiting fatally during restart", async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const store = {
+      acquireWorkerLease: vi.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ owner_id: "new-worker" }),
+      releaseWorkerLease: vi.fn().mockResolvedValue(undefined),
+    };
+    const worker = new ProductionIndexerWorker({
+      indexer: { syncAll: vi.fn() },
+      store,
+      rpc: {},
+      config: { chainId: 43113, contracts: [], leaseTtlMs: 90, pollIntervalMs: 1, ownershipReconciliationIntervalMs: 90 },
+      logger,
+    });
+    worker.cycle = vi.fn(async () => { worker.stop(); return { stopped: true }; });
+
+    await expect(worker.start()).resolves.toBeUndefined();
+    expect(store.acquireWorkerLease).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith("indexer.worker.lease.waiting", expect.objectContaining({ chainId: 43113 }));
+    expect(store.releaseWorkerLease).toHaveBeenCalledWith(expect.objectContaining({ ownerId: worker.ownerId }));
   });
 });
 
