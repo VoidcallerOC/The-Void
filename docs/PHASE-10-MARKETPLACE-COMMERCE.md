@@ -4,7 +4,7 @@
 
 The marketplace now fails closed unless a valid environment-specific address and chain ID are configured. The browser reads listings from `/api/listings`, which is backed by database projections of finalized blockchain events; it no longer requires users to discover listings by manually entering numeric IDs. Purchase receipts are validated against the listing, buyer, seller, token, quantity, and settlement amount before the collector state is refreshed.
 
-The `MusicMarketplace` contract retains approval-based ERC-1155 custody semantics, reentrancy protection, exact native-currency payment, fee bounds, and ERC-2981 royalty support. Royalty responses that exceed the amount remaining after the platform fee now revert rather than silently changing settlement economics. ERC-1155 receiver and ERC-165 support are explicit.
+The `MusicMarketplace` contract retains approval-based ERC-1155 custody semantics, reentrancy protection, exact native-currency payment, fee bounds, and ERC-2981 royalty support. Royalty responses that exceed the amount remaining after the platform fee now revert rather than silently changing settlement economics. ERC-1155 receiver and ERC-165 support are explicit. Resale royalties stay zero while the supported token is the certified Fuji `VoidRelease1155`, because that contract does not implement ERC-2981. Point marketplace configuration at `VoidRelease1155V2` before expecting a non-zero royalty. V2 is still ERC-1155. This repository change does not deploy `MusicMarketplace` and does not change mainnet configuration.
 
 The indexer decodes `ListingCreated`, `ListingCancelled`, `ListingExpired`, and `ListingSold` events. Event identity remains `(chain_id, contract_address, transaction_hash, log_index)`. Successful decoded events are projected into listings, listing history, and purchases in the same database transaction; duplicate event insertion does not repeat the projection. Missing contract metadata or inconsistent sale quantities produce reconciliation-required outcomes rather than allowing the database to invent state.
 
@@ -33,7 +33,7 @@ The marketplace is **not yet production-ready** despite the code and test improv
 
 1. A real Fuji deployment has not been executed or independently verified in this task.
 2. Mainnet deployment, explorer source verification, and supported-token allowlisting have not been executed.
-3. No Solidity test runner is present in this repository or sandbox, so the contract test matrix must still be run in a Foundry/Hardhat environment against malicious ERC-1155 receivers, reentrancy attempts, royalty/fee bounds, stale approvals, balance changes, and settlement event correctness.
+3. Foundry tests cover `VoidRelease1155`, `VoidRelease1155V2`, and `VoidPrimarySale` (`forge test` in CI). `MusicMarketplace` still needs the same adversarial pass before it is deployed. No marketplace deployment is part of the primary-sale change.
 4. The production indexer still needs an operational worker, RPC credentials, configured marketplace/token contract UUIDs, monitoring, retry alerting, and a reconciliation schedule. The database is not authoritative; the blockchain remains authoritative by design.
 5. The API needs production wallet authentication and a deployed blockchain verifier before purchase confirmation can be trusted server-side. The existing injectable trust boundary is preserved, but a missing verifier returns `501`.
 6. The dependency audit reports unresolved React Router vulnerabilities and must be remediated or risk-accepted before launch.

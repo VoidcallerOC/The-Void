@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { BlockchainIndexer, decodeTransferLog, retry } from "./indexer.js";
+import { id } from "ethers";
+import { BlockchainIndexer, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
 import { createIndexerWorker } from "./indexer-worker.js";
 
@@ -42,6 +43,43 @@ describe("ERC-1155 event decoding", () => {
     const data = `0x${word(64)}${word(160)}${word(2)}${word(7)}${word(8)}${word(2)}${word(3)}${word(4)}`;
     const result = decodeTransferLog({ ...singleLog({}), topics: [batchTopic, addrTopic(alice), addrTopic(alice), addrTopic(bob)], data }, { chainId: 43114, blockTimestamp: new Date(), eventTopics: { TransferBatch: batchTopic } });
     expect(result.map((item) => [item.tokenId, item.amount])).toEqual([["7", "3"], ["8", "4"]]);
+  });
+});
+
+describe("primary sale purchase indexing", () => {
+  const purchasedTopic = id("Purchased(uint256,address,uint256,uint256,uint256,uint256)");
+  const token = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const sale = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const purchasedLog = () => ({
+    address: sale,
+    topics: [purchasedTopic, `0x${word(1)}`, addrTopic(bob)],
+    data: `0x${word(2)}${word(1000)}${word(750)}${word(250)}`,
+    transactionHash: `0x${"ab".repeat(32)}`,
+    blockNumber: 1,
+    blockHash: "0xblock1",
+    logIndex: 1,
+  });
+
+  it("decodes a Purchased event into the ERC1155 buyer, price, and fee split", () => {
+    expect(decodePurchasedLog(purchasedLog(), { chainId: 43113, blockTimestamp: new Date("2026-01-01T00:00:00Z"), tokenAddress: token, eventTopic: purchasedTopic })).toMatchObject({
+      eventType: "Purchased", buyerWallet: bob, tokenContractAddress: token, tokenId: "1", quantity: "2", paidWei: "1000", artistCutWei: "750", platformCutWei: "250",
+    });
+    expect(decodePurchasedLog(purchasedLog(), { chainId: 43113, blockTimestamp: new Date(), tokenAddress: token, eventTopic: "0x" + "11".repeat(32) })).toBeNull();
+  });
+
+  it("records the purchase and credits ownership from Purchased while the paired ERC1155 mint does not credit twice", async () => {
+    const store = storeDouble();
+    store.applyPrimaryPurchase = vi.fn().mockResolvedValue({ duplicate: false, ownershipCredited: true });
+    const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [{ chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: token, eventTopics: { Purchased: purchasedTopic } }] });
+    await expect(indexer.processLog({ chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: token, eventTopics: { Purchased: purchasedTopic } }, purchasedLog(), block(1))).resolves.toMatchObject({ eventType: "Purchased", projectionApplied: true });
+    expect(store.applyPrimaryPurchase).toHaveBeenCalledWith(expect.objectContaining({ buyerWallet: bob, quantity: "2", tokenContractAddress: token }));
+
+    const releaseStore = storeDouble();
+    const mint = singleLog({ from: zero, to: bob, address: token, logIndex: 0 });
+    mint.topics[1] = addrTopic(sale);
+    const releaseIndexer = new BlockchainIndexer({ rpc: {}, store: releaseStore, configs: [{ chainId: 43113, address: token, contractType: "ERC1155", eventTopics: { TransferSingle: singleTopic }, skipMintOperators: [sale] }] });
+    await releaseIndexer.processLog({ chainId: 43113, address: token, contractType: "ERC1155", eventTopics: { TransferSingle: singleTopic }, skipMintOperators: [sale] }, mint, block(1));
+    expect(releaseStore.calls.applied[0]).toMatchObject({ eventType: "MINT", to: bob, skipOwnership: true });
   });
 });
 

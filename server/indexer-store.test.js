@@ -69,11 +69,12 @@ describe("marketplace event projection storage", () => {
     const db = { connect: vi.fn().mockResolvedValue(client), query: vi.fn()
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ event_data: canonicalEvent }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] }) };
     const store = new IndexerStore(db);
     const replay = vi.spyOn(store, "applyMarketplaceEvent").mockResolvedValue({ state: "ACTIVE" });
-    await expect(store.rebuildDerivedState({ chainId: 43114 })).resolves.toEqual({ chainId: 43114, replayedMarketplaceEvents: 1 });
-    expect(client.query.mock.calls.map(([sql]) => String(sql))).toEqual(expect.arrayContaining([expect.stringContaining("DELETE FROM ownership_snapshots"), expect.stringContaining("DELETE FROM purchases"), expect.stringContaining("DELETE FROM listings"), expect.stringContaining("DELETE FROM marketplace_event_projections") ]));
+    await expect(store.rebuildDerivedState({ chainId: 43114 })).resolves.toEqual({ chainId: 43114, replayedMarketplaceEvents: 1, replayedPrimaryPurchases: 0 });
+    expect(client.query.mock.calls.map(([sql]) => String(sql))).toEqual(expect.arrayContaining([expect.stringContaining("DELETE FROM ownership_snapshots"), expect.stringContaining("DELETE FROM purchases"), expect.stringContaining("DELETE FROM primary_purchases"), expect.stringContaining("DELETE FROM listings"), expect.stringContaining("DELETE FROM marketplace_event_projections") ]));
     expect(db.query).toHaveBeenCalledWith(expect.stringContaining("is_canonical=true"), [43114]);
     expect(replay).toHaveBeenCalledWith(canonicalEvent);
   });
@@ -95,6 +96,17 @@ describe("ERC1155 transfer projection storage", () => {
     const result = await new IndexerStore(pool).applyTransfer({ chainId: 43113, contractAddress: token, transactionHash, blockNumber: 100, blockHash, logIndex: 4, eventType: "MINT", from: "0x0000000000000000000000000000000000000000", to: buyer, tokenId: "12", amount: "2", blockTimestamp: new Date(), raw: {} });
     expect(result).toMatchObject({ duplicate: false, transfer: { id: "transfer-1" } });
     expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO transfers"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO ownership_snapshots"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
+  });
+
+  it("projects a primary purchase onto the ERC1155 ownership record", async () => {
+    const sale = "0xcccccccccccccccccccccccccccccccccccccccc";
+    const { pool, client } = poolWith([
+      {}, { rows: [{ id: "marker" }] }, { rows: [] }, {}, {}, { rows: [{ id: "tx" }] }, { rows: [{ id: "purchase", status: "CONFIRMED" }] }, {},
+    ]);
+    const result = await new IndexerStore(pool).applyPrimaryPurchase({ chainId: 43113, saleAddress: sale, tokenContractAddress: token, transactionHash, blockNumber: 100, blockHash, logIndex: 4, buyerWallet: buyer, tokenId: "12", quantity: "2", paidWei: "1000", artistCutWei: "750", platformCutWei: "250" });
+    expect(result).toMatchObject({ duplicate: false, ownershipCredited: true, purchase: { status: "CONFIRMED" } });
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO primary_purchases"), expect.arrayContaining([43113, sale, token, buyer, "12", "2", "1000", "750", "250"]));
     expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO ownership_snapshots"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
   });
 });
