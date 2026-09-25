@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "routes": [
-    { "src": "/assets/audio(?:/.*)?", "status": 404 }
+    { "src": "/assets/audio(?:/.*)?", "status": 404 },
+    { "src": "/assets/audio-preview/(?!.*-preview\\.mp3$).*", "status": 404 }
   ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://the-void-api-fuji.onrender.com/api/:path*" },
