@@ -99,6 +99,12 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== 43113)) {
     throw new ConfigurationError("Production wallet authentication requires HTTPS and Avalanche Fuji (43113) only.");
   }
+  // MAINNET_RPC_URL is optional and read ONLY for live Avalanche C-Chain (43114)
+  // reads against the original Voidcaller collection (legacy balanceOf and
+  // contract owner() verification). It is distinct from INDEXER_RPC_URL (Fuji).
+  const mainnetRpcUrlValue = String(env.MAINNET_RPC_URL || "").trim();
+  const mainnetRpcUrl = mainnetRpcUrlValue ? normalizedUrl(mainnetRpcUrlValue, "MAINNET_RPC_URL") : null;
+  if (mainnetRpcUrl && appEnvironment === "production" && mainnetRpcUrl.protocol !== "https:") throw new ConfigurationError("Production MAINNET_RPC_URL must use HTTPS.");
   return Object.freeze({
     databaseUrl: databaseUrl || null,
     databaseSsl: String(env.DATABASE_SSL || "true").toLowerCase() !== "false",
@@ -118,6 +124,7 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
     authAllowedChainIds,
     authChallengeTtlSeconds: boundedPositiveInteger(env.AUTH_CHALLENGE_TTL_SECONDS, 300, "AUTH_CHALLENGE_TTL_SECONDS", { min: 60, max: 900 }),
     authSessionTtlSeconds: boundedPositiveInteger(env.AUTH_SESSION_TTL_SECONDS, 3600, "AUTH_SESSION_TTL_SECONDS", { min: 300, max: 86400 }),
+    mainnetRpcUrl: mainnetRpcUrl ? mainnetRpcUrl.toString() : "",
   });
 }
 
