@@ -3,6 +3,6 @@
   "chainId": 43113,
   "contract": "VoidPrimarySale",
   "notes": "Reviewable constructor fee inputs for scripts/deploy-release-v2-fuji.mjs. Do not invent values here. Replace the empty recipient and null BPS with the approved pair before any workflow_dispatch deploy. The V2 workflow refuses to broadcast while either field is unset, zero-address, non-address, or outside VoidPrimarySale BPS_DENOMINATOR (0-10000). These are not GitHub secrets and are not MARKETPLACE_FEE_*.",
-  "platformFeeRecipient": "",
-  "platformFeeBps": null
+  "platformFeeRecipient": "0x284c09a7cc187e096cbbdc88d99defe6df32180a",
+  "platformFeeBps": 500
 }
