@@ -19,6 +19,11 @@ name: Deploy VoidRelease1155V2 + VoidPrimarySale to Avalanche Fuji
 on:
   workflow_dispatch:
     inputs:
+      preflight_only:
+        description: Run the read-only credential and funding preflight only.
+        required: true
+        type: boolean
+        default: true
       confirm_fuji_v2_deploy:
         description: Type I_CONFIRM_FUJI_V2_PRIMARY_SALE_DEPLOY to allow a Fuji broadcast after fee validation.
         required: true
@@ -89,9 +94,98 @@ jobs:
           print(f"platformFeeBps={bps} (cap/range 0-{denom} from VoidPrimarySale.BPS_DENOMINATOR)")
           PY
 
+  read-only-preflight:
+    name: Read-only Fuji V2 credential and funding preflight
+    needs: validate-fee-config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+      RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
+      PLATFORM_FEE_RECIPIENT: ${{ needs.validate-fee-config.outputs.platform_fee_recipient }}
+      PLATFORM_FEE_BPS: ${{ needs.validate-fee-config.outputs.platform_fee_bps }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build artifacts for non-broadcast estimates
+        run: forge build
+
+      - name: Verify credentials, Fuji, balance, and gas without broadcasting
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { ethers } from "ethers";
+
+          for (const name of ["AVALANCHE_FUJI_RPC_URL", "DEPLOYER_PRIVATE_KEY", "RELEASE_ADMIN_ADDRESS"]) {
+            if (!process.env[name]) throw new Error(`${name} is unavailable`);
+          }
+          const address = (value, name) => {
+            if (!ethers.isAddress(value) || ethers.getAddress(value) === ethers.ZeroAddress) throw new Error(`${name} is invalid or zero`);
+            return ethers.getAddress(value);
+          };
+          const admin = address(process.env.RELEASE_ADMIN_ADDRESS, "RELEASE_ADMIN_ADDRESS");
+          const recipient = address(process.env.PLATFORM_FEE_RECIPIENT, "PLATFORM_FEE_RECIPIENT");
+          const feeBps = Number(process.env.PLATFORM_FEE_BPS);
+          if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 10_000) throw new Error("PLATFORM_FEE_BPS is invalid");
+
+          const provider = new ethers.JsonRpcProvider(process.env.AVALANCHE_FUJI_RPC_URL, 43113, { staticNetwork: true });
+          const network = await provider.getNetwork();
+          if (network.chainId !== 43113n) throw new Error(`Refusing non-Fuji chain: ${network.chainId}`);
+          const wallet = new ethers.Wallet(process.env.DEPLOYER_PRIVATE_KEY, provider);
+          if (wallet.address.toLowerCase() !== admin.toLowerCase()) throw new Error("DEPLOYER_PRIVATE_KEY does not match RELEASE_ADMIN_ADDRESS");
+
+          const releaseArtifact = JSON.parse(await readFile("out/VoidRelease1155V2.sol/VoidRelease1155V2.json", "utf8"));
+          const saleArtifact = JSON.parse(await readFile("out/VoidPrimarySale.sol/VoidPrimarySale.json", "utf8"));
+          const releaseFactory = new ethers.ContractFactory(releaseArtifact.abi, releaseArtifact.bytecode.object, wallet);
+          const saleFactory = new ethers.ContractFactory(saleArtifact.abi, saleArtifact.bytecode.object, wallet);
+          const nonce = await provider.getTransactionCount(wallet.address, "pending");
+          const predictedRelease = ethers.getCreateAddress({ from: wallet.address, nonce });
+          const predictedSale = ethers.getCreateAddress({ from: wallet.address, nonce: nonce + 1 });
+          const releaseTx = await releaseFactory.getDeployTransaction(admin);
+          const saleTx = await saleFactory.getDeployTransaction(predictedRelease, recipient, feeBps);
+          const grantInterface = new ethers.Interface(["function grantRole(bytes32 role, address account)"]);
+          const grantTx = { from: wallet.address, to: predictedRelease, data: grantInterface.encodeFunctionData("grantRole", [ethers.id("ISSUER_ROLE"), predictedSale]) };
+          const [releaseGas, saleGas, gasPrice, balance] = await Promise.all([
+            provider.estimateGas({ from: wallet.address, data: releaseTx.data }),
+            provider.estimateGas({ from: wallet.address, data: saleTx.data }),
+            provider.getFeeData().then((fee) => fee.gasPrice ?? fee.maxFeePerGas),
+            provider.getBalance(wallet.address),
+          ]);
+          if (gasPrice === null) throw new Error("Fuji gas price unavailable");
+          // The grant cannot be estimated against a not-yet-deployed predicted address.
+          const grantGas = 150_000n;
+          const estimatedRequired = (releaseGas + saleGas + grantGas) * gasPrice;
+          const safetyMargin = (estimatedRequired * 25n) / 100n;
+          const threshold = estimatedRequired + safetyMargin;
+          const format = (value) => `${ethers.formatEther(value)} AVAX`;
+          console.log(`RPC: PRESENT; FUJI CHAIN: ${network.chainId}; DEPLOYER/ADMIN MATCH: YES`);
+          console.log(`DEPLOYER ADDRESS: ${wallet.address}`);
+          console.log(`FUJI BALANCE: ${format(balance)}`);
+          console.log(`GAS: release=${releaseGas} sale=${saleGas} grant-reserve=${grantGas} gasPriceWei=${gasPrice}`);
+          console.log(`ESTIMATED REQUIRED: ${format(estimatedRequired)}`);
+          console.log(`SAFETY MARGIN: ${format(safetyMargin)} (25%)`);
+          console.log(`FUNDING: ${balance >= threshold ? "SUFFICIENT" : "INSUFFICIENT"}`);
+          if (balance < threshold) throw new Error("Fuji funding is below the estimated requirement plus safety margin");
+          NODE
+
   deploy-and-verify:
     name: Deploy V2 + VoidPrimarySale to Fuji
-    needs: validate-fee-config
+    needs: [validate-fee-config, read-only-preflight]
+    if: ${{ inputs.preflight_only != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
