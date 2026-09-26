@@ -80,6 +80,18 @@ describe("marketplace event projection storage", () => {
   });
 });
 
+describe("indexer checkpoint persistence", () => {
+  it("only lets a verified reorg move next_block backward and fails loudly otherwise", async () => {
+    const pool = { query: vi.fn().mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ next_block: "90" }] }) };
+    const store = new IndexerStore(pool);
+    await expect(store.setCheckpoint({ chainId: 43113, address: token, contractType: "ERC1155", nextBlock: 90, status: "RUNNING" })).rejects.toMatchObject({ name: "CheckpointRegressionError", code: "INDEXER_CHECKPOINT_REGRESSION" });
+    expect(pool.query.mock.calls[0][0]).toContain("WHERE $21 OR EXCLUDED.next_block >= indexer_checkpoints.next_block");
+    expect(pool.query.mock.calls[0][1][20]).toBe(false);
+    await expect(store.setCheckpoint({ chainId: 43113, address: token, contractType: "ERC1155", nextBlock: 90, status: "REORGING", allowRewind: true })).resolves.toEqual({ next_block: "90" });
+    expect(pool.query.mock.calls[1][1][20]).toBe(true);
+  });
+});
+
 describe("indexer health contract filtering", () => {
   it("filters health aggregation to configured contract addresses", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [] }) };
