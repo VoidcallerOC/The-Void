@@ -222,7 +222,7 @@ jobs:
           test -f .github/workflows/deploy-release-fuji.yml
           grep -Fq 'npm run deploy:release-v2' package.json
           grep -Fq 'node scripts/deploy-release-v2-fuji.mjs' package.json
-          ! grep -Fq 'npm run deploy:release' .github/workflows/deploy-release-v2-fuji.yml
+          ! grep -Eq '(^|[[:space:]])npm run deploy:release([[:space:]]|$)' .github/workflows/deploy-release-v2-fuji.yml
           grep -Fq 'npm run deploy:release' .github/workflows/deploy-release-fuji.yml
 
       - name: Install Node dependencies

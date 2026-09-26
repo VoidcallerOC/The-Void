@@ -37,4 +37,16 @@ describe("Fuji V2 workflow dispatch safety", () => {
     expect(deployment).toContain('if [ "${{ github.event.inputs.confirm_fuji_v2_deploy }}" != "${expected}" ]');
     expect(deployment).toContain("npm run deploy:release-v2");
   });
+
+  it("uses command boundaries so V1 is forbidden but V2 is allowed", async () => {
+    const workflow = await readFile(workflowPath, "utf8");
+    const isolation = sectionBetween(workflow, "Confirm V2 script and V1 workflow isolation", "Deploy VoidRelease1155V2 and VoidPrimarySale to Fuji");
+    const exactV1Command = /(^|\s)npm run deploy:release(\s|$)/;
+
+    expect(exactV1Command.test("npm run deploy:release")).toBe(true);
+    expect(exactV1Command.test("npm run deploy:release-v2")).toBe(false);
+    expect(isolation).toContain("grep -Eq '(^|[[:space:]])npm run deploy:release([[:space:]]|$)'");
+    expect(isolation).toContain("npm run deploy:release-v2");
+    expect(isolation).not.toContain("! grep -Fq 'npm run deploy:release'");
+  });
 });
