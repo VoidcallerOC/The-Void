@@ -26,7 +26,7 @@ export function isCertifiedFujiEdition(edition) {
 
 const iface = new ethers.Interface(FUJI_RELEASE_ABI);
 const editionIface = new ethers.Interface([
-  "function edition(uint256) view returns (bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists)",
+  "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))",
   "error EditionNotFound(uint256 tokenId)",
   "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)",
 ]);
@@ -154,8 +154,8 @@ export async function readFujiEdition(provider, tokenId) {
   const data = editionIface.encodeFunctionData("edition", [BigInt(tokenId)]);
   try {
     const result = await provider.request({ method: "eth_call", params: [{ to: assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress), data }, "latest"] });
-    const decoded = editionIface.decodeFunctionResult("edition", result);
-    return { releaseId: decoded[0], editionId: decoded[1], artist: decoded[2], maxSupply: decoded[3], mintedSupply: decoded[4], metadataUri: decoded[5], exists: Boolean(decoded[6]) };
+    const [edition] = editionIface.decodeFunctionResult("edition", result);
+    return { releaseId: edition.releaseId, editionId: edition.editionId, artist: edition.artist, maxSupply: edition.maxSupply, mintedSupply: edition.mintedSupply, metadataUri: edition.metadataUri, exists: Boolean(edition.exists) };
   } catch (error) {
     const revertData = error?.data || error?.originalError?.data || error?.cause?.data;
     if (revertData) {

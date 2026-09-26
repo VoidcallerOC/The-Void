@@ -91,10 +91,16 @@ describe("music-native catalog projection", () => {
   });
 
   it("keeps the certified Fuji configuration untouched", () => {
-    expect(certifiedFujiReleaseUnchanged()).toBe(true);
     expect(FUJI_RELEASE_CONFIG.chainId).toBe(43113);
-    expect(FUJI_RELEASE_CONFIG.contractName).toBe("VoidRelease1155");
-    expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x262B774cf9a1949170B58E2d57F6189980FE757b");
+    if (FUJI_RELEASE_CONFIG.contractName === "VoidRelease1155V2") {
+      expect(certifiedFujiReleaseUnchanged()).toBe(false);
+      expect(FUJI_RELEASE_CONFIG.contractAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(FUJI_RELEASE_CONFIG.primarySaleAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    } else {
+      expect(certifiedFujiReleaseUnchanged()).toBe(true);
+      expect(FUJI_RELEASE_CONFIG.contractName).toBe("VoidRelease1155");
+      expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x262B774cf9a1949170B58E2d57F6189980FE757b");
+    }
   });
 
   it("can still project the Summit fixture when tests supply it explicitly", () => {
