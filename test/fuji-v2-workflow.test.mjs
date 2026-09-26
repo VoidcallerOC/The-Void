@@ -10,6 +10,9 @@ function sectionBetween(source, startMarker, endMarker) {
   if (start < 0 || end < 0) throw new Error(`Workflow section not found: ${startMarker}`);
   return source.slice(start, end);
 }
+function hasExpectedV2Script(packageJson) {
+  return packageJson?.scripts?.["deploy:release-v2"] === "node scripts/deploy-release-v2-fuji.mjs";
+}
 
 describe("Fuji V2 workflow dispatch safety", () => {
   it("allows read-only preflight dispatch without making deployment confirmation required", async () => {
@@ -46,7 +49,21 @@ describe("Fuji V2 workflow dispatch safety", () => {
     expect(exactV1Command.test("npm run deploy:release")).toBe(true);
     expect(exactV1Command.test("npm run deploy:release-v2")).toBe(false);
     expect(isolation).toContain("grep -Eq '(^|[[:space:]])npm run deploy:release([[:space:]]|$)'");
-    expect(isolation).toContain("npm run deploy:release-v2");
     expect(isolation).not.toContain("! grep -Fq 'npm run deploy:release'");
+  });
+  it("validates the structured V2 package script before the broadcast section", async () => {
+    const workflow = await readFile(workflowPath, "utf8");
+    const isolation = sectionBetween(workflow, "Confirm V2 script and V1 workflow isolation", "Deploy VoidRelease1155V2 and VoidPrimarySale to Fuji");
+    const deploymentStart = workflow.indexOf("Deploy VoidRelease1155V2 and VoidPrimarySale to Fuji");
+    const isolationStart = workflow.indexOf("Confirm V2 script and V1 workflow isolation");
+    expect(hasExpectedV2Script({ scripts: { "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs" } })).toBe(true);
+    expect(hasExpectedV2Script({ scripts: {} })).toBe(false);
+    expect(hasExpectedV2Script({ scripts: { "deploy:release-v2": "node scripts/deploy-release.mjs" } })).toBe(false);
+    expect(isolation).toContain("JSON.parse(readFileSync(\"package.json\", \"utf8\"))");
+    expect(isolation).toContain('packageJson.scripts?.["deploy:release-v2"]');
+    expect(isolation).toContain('"node scripts/deploy-release-v2-fuji.mjs"');
+    expect(isolation).toContain("set -euo pipefail");
+    expect(isolationStart).toBeGreaterThanOrEqual(0);
+    expect(deploymentStart).toBeGreaterThan(isolationStart);
   });
 });
