@@ -6,6 +6,14 @@ export { retry } from "./indexer-utils.js";
 
 function cleanHex(value) { return String(value || "0x").replace(/^0x/, ""); }
 function lowerHash(value) { return String(value || "").toLowerCase(); }
+// Postgres rows expose next_block (bigint, returned as a string); in-memory stores may use nextBlock.
+function storedNextBlock(checkpoint, config) {
+  const value = checkpoint?.nextBlock ?? checkpoint?.next_block;
+  if (value === null || value === undefined) return Number(config.startBlock ?? 0);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error("Stored indexer checkpoint next_block is invalid.");
+  return parsed;
+}
 function word(data, index) { const value = cleanHex(data).slice(index * 64, index * 64 + 64); if (value.length !== 64) throw new Error("ABI word is incomplete."); return value; }
 function uintWord(value) { return BigInt(`0x${value}`).toString(); }
 function topicAddress(value) { const hex = cleanHex(value); if (hex.length < 40) throw new Error("Indexed address is malformed."); return `0x${hex.slice(-40)}`.toLowerCase(); }
@@ -106,14 +114,15 @@ export class BlockchainIndexer {
       throw error;
     }
     const target = Math.max(-1, latest - Number(config.confirmations ?? this.confirmations));
-    let nextBlock = checkpoint?.nextBlock ?? Number(config.startBlock ?? 0);
-    try { nextBlock = await this.verifyCanonicalCheckpoint(config, checkpoint, nextBlock); } catch (error) {
+    let nextBlock = storedNextBlock(checkpoint, config);
+    let rewound;
+    try { ({ nextBlock, rewound } = await this.verifyCanonicalCheckpoint(config, checkpoint, nextBlock)); } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: true });
       throw error;
     }
     operation = "database";
     try {
-      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, latestKnownBlock: latest, status: "RUNNING", lastError: null, markRunStarted: true });
+      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, latestKnownBlock: latest, ...(rewound ? { lastProcessedBlock: nextBlock - 1, allowRewind: true } : {}), status: "RUNNING", lastError: null, markRunStarted: true });
     } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, databaseFailure: true });
       throw error;
@@ -165,7 +174,7 @@ export class BlockchainIndexer {
 
   async persistFailure({ chainId, address, config, checkpoint, error, rpcFailure = false, databaseFailure = false }) {
     try {
-      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: checkpoint?.nextBlock ?? Number(config.startBlock ?? 0), status: "FAILED", lastError: error.message, rpcFailure, databaseFailure, markRunCompleted: true });
+      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: storedNextBlock(checkpoint, config), status: "FAILED", lastError: error.message, rpcFailure, databaseFailure, markRunCompleted: true });
     } catch (persistenceError) {
       this.logger.error?.("indexer.failure.persistence.failed", { chainId, address, error: persistenceError.message, originalError: error.message });
     }
@@ -173,28 +182,27 @@ export class BlockchainIndexer {
 
   async verifyCanonicalCheckpoint(config, checkpoint, fallbackNextBlock) {
     const chainId = Number(config.chainId);
-    if (checkpoint?.last_processed_block === null || checkpoint?.last_processed_block === undefined || !this.store.getBlock) return fallbackNextBlock;
+    if (checkpoint?.last_processed_block === null || checkpoint?.last_processed_block === undefined || !this.store.getBlock) return { nextBlock: fallbackNextBlock, rewound: false };
     const firstBlock = Number(config.startBlock ?? 0);
     let cursor = Number(checkpoint.last_processed_block);
     let commonAncestor = cursor;
     let replacementHash = null;
     while (cursor >= firstBlock) {
       const indexed = await this.store.getBlock({ chainId, blockNumber: cursor });
+      // A block that was never recorded is not evidence of divergence; only a hash mismatch is.
       if (!indexed) { cursor -= 1; continue; }
       const canonical = await retry(() => this.rpc.getBlock(chainId, cursor), this.retryOptions);
+      if (!canonical?.hash) throw new Error(`RPC returned no canonical hash for block ${cursor} during checkpoint verification.`);
       if (lowerHash(indexed.block_hash) === lowerHash(canonical.hash)) { commonAncestor = cursor; break; }
       replacementHash = canonical.hash;
       cursor -= 1;
       commonAncestor = cursor;
     }
-    if (commonAncestor === Number(checkpoint.last_processed_block)) return fallbackNextBlock;
+    if (!replacementHash) return { nextBlock: fallbackNextBlock, rewound: false };
     const fromBlock = Math.max(firstBlock, commonAncestor + 1);
-    if (!replacementHash) {
-      const replacement = await retry(() => this.rpc.getBlock(chainId, fromBlock), this.retryOptions);
-      replacementHash = replacement.hash;
-    }
     await this.store.handleReorg({ chainId, fromBlock, replacementHash });
-    return fromBlock;
+    this.logger.warn?.("indexer.reorg.rewind", { chainId, address: String(config.address).toLowerCase(), fromBlock, lastProcessedBlock: Number(checkpoint.last_processed_block) });
+    return { nextBlock: fromBlock, rewound: true };
   }
 
   async ensureCanonical(config, block) {
@@ -203,7 +211,7 @@ export class BlockchainIndexer {
     const previous = await this.store.getBlock({ chainId, blockNumber: Number(block.number) });
     if (previous && previous.block_hash !== block.hash) {
       await this.store.handleReorg({ chainId, fromBlock: Number(block.number), replacementHash: block.hash });
-      await this.store.setCheckpoint({ chainId, address: String(config.address).toLowerCase(), contractType: config.contractType, nextBlock: Number(block.number), status: "REORGING", lastError: "Canonical block hash changed." });
+      await this.store.setCheckpoint({ chainId, address: String(config.address).toLowerCase(), contractType: config.contractType, nextBlock: Number(block.number), lastProcessedBlock: Number(block.number) - 1, allowRewind: true, status: "REORGING", lastError: "Canonical block hash changed." });
     }
     await this.store.recordBlock({ chainId, blockNumber: Number(block.number), blockHash: block.hash, parentHash: block.parentHash, blockTimestamp: block.timestamp });
   }

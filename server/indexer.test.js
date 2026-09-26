@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { id } from "ethers";
 import { BlockchainIndexer, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
+import { CheckpointRegressionError } from "./indexer-store.js";
 import { createIndexerWorker, ProductionIndexerWorker } from "./indexer-worker.js";
 
 const singleTopic = "0xsingle";
@@ -219,6 +220,115 @@ describe("durable index synchronization", () => {
     const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }] });
     await expect(indexer.syncAll()).resolves.toHaveLength(1);
     expect(store.calls.errors[0].errorType).toBe("MALFORMED_EVENT");
+  });
+});
+
+// Mirrors what IndexerStore returns from Postgres: snake_case rows with bigint columns as strings,
+// and the forward-only next_block guard enforced by setCheckpoint.
+function pgRowStore({ row = null, blocks = new Map() } = {}) {
+  let checkpoint = row;
+  const history = [];
+  const calls = { reorgs: [], writes: [] };
+  return {
+    calls, history, blocks,
+    get row() { return checkpoint; },
+    async getCheckpoint() { return checkpoint ? { ...checkpoint } : null; },
+    async setCheckpoint(value) {
+      calls.writes.push(value);
+      if (checkpoint && !value.allowRewind && value.nextBlock < Number(checkpoint.next_block)) throw new CheckpointRegressionError({ chainId: value.chainId, contractAddress: value.address, nextBlock: value.nextBlock });
+      checkpoint = {
+        ...checkpoint,
+        chain_id: String(value.chainId), contract_address: value.address, contract_type: value.contractType, next_block: String(value.nextBlock), status: value.status,
+        ...(value.lastProcessedBlock !== undefined ? { last_processed_block: String(value.lastProcessedBlock) } : {}),
+        ...(value.lastError !== undefined ? { last_error: value.lastError } : {}),
+        rpc_failures: (checkpoint?.rpc_failures ?? 0) + (value.rpcFailure ? 1 : 0),
+      };
+      history.push(Number(checkpoint.next_block));
+      return checkpoint;
+    },
+    async getBlock({ chainId, blockNumber }) { const stored = blocks.get(`${chainId}:${blockNumber}`); return stored ? { block_hash: stored } : null; },
+    async recordBlock(value) { blocks.set(`${value.chainId}:${value.blockNumber}`, value.blockHash); },
+    async handleReorg(value) { calls.reorgs.push(value); for (const key of [...blocks.keys()]) if (Number(key.split(":")[1]) >= value.fromBlock) blocks.delete(key); },
+    async recordEvent(value) { return value; },
+    async applyTransfer(value) { return value; },
+    async recordIndexerError() {},
+  };
+}
+
+describe("checkpoint rewind regression (Fuji 43113)", () => {
+  const address = "0x262b774cf9a1949170b58e2d57f6189980fe757b";
+  const startBlock = 58_428_586;
+  const config = { chainId: 43113, address, contractType: "ERC1155", startBlock, eventTopics: { TransferSingle: singleTopic } };
+  const chainRpc = (head, hashOf = (n) => `0xblock${n}`) => ({
+    head,
+    getBlockNumber: vi.fn(function () { return Promise.resolve(this.head); }),
+    getLogs: vi.fn().mockResolvedValue([]),
+    getBlock: vi.fn((_, n) => Promise.resolve(block(n, hashOf(n)))),
+  });
+
+  it("resumes from the persisted next_block instead of restarting at startBlock", async () => {
+    const store = pgRowStore({ row: { chain_id: "43113", contract_address: address, next_block: "58647586", last_processed_block: "58647585" }, blocks: new Map([["43113:58647585", "0xblock58647585"]]) });
+    const rpc = chainRpc(58_648_000);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 12, chunkSize: 500, configs: [config] });
+    const [result] = await indexer.syncAll();
+    expect(rpc.getLogs.mock.calls[0][0].fromBlock).toBe(58_647_586);
+    expect(rpc.getLogs.mock.calls.every(([range]) => range.fromBlock >= 58_647_586)).toBe(true);
+    expect(store.calls.reorgs).toHaveLength(0);
+    expect(result.nextBlock).toBe(58_648_000 - 12 + 1);
+    expect(Math.min(...store.history)).toBeGreaterThanOrEqual(58_647_586);
+  });
+
+  it("keeps the checkpoint monotonic across repeated cycles while the head advances", async () => {
+    const store = pgRowStore();
+    const rpc = chainRpc(startBlock + 1_000);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 12, chunkSize: 500, configs: [config] });
+    const observed = [];
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      await indexer.syncAll();
+      observed.push(Number(store.row.last_processed_block));
+      rpc.head += 700;
+    }
+    for (let i = 1; i < observed.length; i += 1) expect(observed[i]).toBeGreaterThan(observed[i - 1]);
+    for (let i = 1; i < store.history.length; i += 1) expect(store.history[i]).toBeGreaterThanOrEqual(store.history[i - 1]);
+    expect(store.calls.reorgs).toHaveLength(0);
+  });
+
+  it("does not treat a missing stored block hash as a reorg", async () => {
+    const store = pgRowStore({ row: { next_block: "1001", last_processed_block: "1000" }, blocks: new Map([["43113:990", "0xblock990"]]) });
+    const rpc = chainRpc(1_100);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, chunkSize: 500, configs: [{ ...config, startBlock: 900 }] });
+    await indexer.syncAll();
+    expect(store.calls.reorgs).toHaveLength(0);
+    expect(rpc.getLogs.mock.calls[0][0].fromBlock).toBe(1_001);
+  });
+
+  it("rewinds to the common ancestor on a genuine hash mismatch and then converges forward", async () => {
+    const store = pgRowStore({ row: { next_block: "1001", last_processed_block: "1000" }, blocks: new Map([["43113:998", "0xblock998"], ["43113:999", "0xorphan999"], ["43113:1000", "0xorphan1000"]]) });
+    const rpc = chainRpc(1_010);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, chunkSize: 500, configs: [{ ...config, startBlock: 900 }] });
+    await indexer.syncAll();
+    expect(store.calls.reorgs).toEqual([expect.objectContaining({ chainId: 43113, fromBlock: 999, replacementHash: "0xblock999" })]);
+    expect(rpc.getLogs.mock.calls[0][0].fromBlock).toBe(999);
+    expect(Number(store.row.next_block)).toBe(1_011);
+    rpc.head = 1_020;
+    await indexer.syncAll();
+    expect(store.calls.reorgs).toHaveLength(1);
+    expect(Number(store.row.next_block)).toBe(1_021);
+  });
+
+  it("refuses an older checkpoint write that is not a verified reorg", async () => {
+    const store = pgRowStore({ row: { next_block: "58647586", last_processed_block: "58647585" } });
+    await expect(store.setCheckpoint({ chainId: 43113, address, contractType: "ERC1155", nextBlock: 58_433_086, status: "RUNNING" })).rejects.toBeInstanceOf(CheckpointRegressionError);
+    expect(store.row.next_block).toBe("58647586");
+  });
+
+  it("reports a meaningful error and keeps the checkpoint when verification cannot read the chain", async () => {
+    const store = pgRowStore({ row: { next_block: "1001", last_processed_block: "1000" }, blocks: new Map([["43113:1000", "0xblock1000"]]) });
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(1_100), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn().mockResolvedValue(null) };
+    const indexer = new BlockchainIndexer({ rpc, store, logger: { error: vi.fn() }, confirmations: 0, retryOptions: { retries: 0 }, configs: [{ ...config, startBlock: 900 }] });
+    await expect(indexer.syncAll()).rejects.toThrow("RPC returned no canonical hash for block 1000 during checkpoint verification.");
+    expect(store.row).toMatchObject({ next_block: "1001", status: "FAILED", rpc_failures: 1 });
+    expect(store.calls.reorgs).toHaveLength(0);
   });
 });
 
