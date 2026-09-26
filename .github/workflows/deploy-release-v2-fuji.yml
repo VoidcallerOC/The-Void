@@ -26,7 +26,7 @@ on:
         default: true
       confirm_fuji_v2_deploy:
         description: Type I_CONFIRM_FUJI_V2_PRIMARY_SALE_DEPLOY to allow a Fuji broadcast after fee validation.
-        required: true
+        required: false
         type: string
         default: ""
 
