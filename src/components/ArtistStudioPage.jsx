@@ -198,8 +198,8 @@ export function ArtistStudioPage() {
         priceWei: form.priceWei,
         maxSupply: form.saleSupply || form.quantity,
         perWalletLimit: form.perWalletLimit,
-        startTime: form.saleStart || 0,
-        endTime: form.saleEnd || 0,
+        startTime: form.saleStart,
+        endTime: form.saleEnd,
         paused: form.salePaused,
       });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data, to: sale });
@@ -430,8 +430,8 @@ export function ArtistStudioPage() {
               <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
               <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={form.quantity || "Edition supply"} />
               <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} />
-              <TextField title="Start time (unix seconds, optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} />
-              <TextField title="End time (unix seconds, optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} />
+              <TextField title="Start time (e.g. 6:00am, an ISO datetime, or unix seconds — optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave blank for no start" />
+              <TextField title="End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder="Leave blank for no end" />
               <label style={label}>
                 <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
               </label>
