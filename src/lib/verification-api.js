@@ -41,6 +41,10 @@ export function fetchReviewQueue({ headers, fetchImpl } = {}) {
   return request("/verification/review", { headers, fetchImpl });
 }
 
+export function fetchReviewCount({ headers, fetchImpl } = {}) {
+  return request("/verification/review/count", { headers, fetchImpl });
+}
+
 export function fetchReviewApplication({ publicId, headers, fetchImpl } = {}) {
   return request(`/verification/review/${encodeURIComponent(publicId)}`, { headers, fetchImpl });
 }

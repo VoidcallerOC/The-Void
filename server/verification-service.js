@@ -176,6 +176,18 @@ export function createArtistVerificationService({
     return rows.map(reviewerApplicationDto);
   }
 
+  // Number of applications the review queue treats as actionable. Same
+  // status set as listReviewQueue, but not capped by its LIMIT, so the header
+  // badge never disagrees with the queue about what needs a reviewer.
+  async function countReviewQueue({ request } = {}) {
+    await requireReviewer(request);
+    const { rows } = await db.query(
+      `SELECT count(*)::int AS count FROM artist_verification_applications WHERE status = ANY($1)`,
+      [PENDING_REVIEW_STATUSES],
+    );
+    return { count: Number(rows[0]?.count || 0) };
+  }
+
   async function getReviewApplication({ request, publicId: idOrPublic }) {
     await requireReviewer(request);
     const { rows } = await db.query(`SELECT * FROM artist_verification_applications WHERE public_id=$1 LIMIT 1`, [idOrPublic]);
@@ -226,6 +238,7 @@ export function createArtistVerificationService({
     respond,
     listVerified,
     listReviewQueue,
+    countReviewQueue,
     getReviewApplication,
     decide,
     isReviewer,

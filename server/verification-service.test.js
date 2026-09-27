@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createArtistVerificationService } from "./verification-service.js";
+import { PENDING_REVIEW_STATUSES } from "../src/lib/verification.js";
 
 const wallet = "0xd1b4367dd9f235f9ee61878019d66e31511e98ee";
 const reviewer = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -89,6 +90,58 @@ describe("artist verification service", () => {
       reviewerWallets: reviewer,
     });
     await expect(service.listReviewQueue({ request: requestFor(wallet) })).rejects.toMatchObject({ code: "REVIEWER_REQUIRED" });
+  });
+
+  it("returns the pending-review count to an authorized reviewer wallet", async () => {
+    const query = vi.fn(async (sql) => {
+      if (sql.includes("count(*)")) return { rows: [{ count: 3 }] };
+      return { rows: [] };
+    });
+    const service = createArtistVerificationService({
+      db: { query },
+      authenticator: async () => ({ wallet: reviewer }),
+      reviewerWallets: reviewer,
+    });
+    await expect(service.countReviewQueue({ request: requestFor(reviewer) })).resolves.toEqual({ count: 3 });
+    const countCall = query.mock.calls.find(([sql]) => sql.includes("count(*)"));
+    expect(countCall[0]).toContain("artist_verification_applications");
+    expect(countCall[1]).toEqual([PENDING_REVIEW_STATUSES]);
+    // Count only — never application rows.
+    expect(query.mock.calls.some(([sql]) => sql.includes("SELECT *"))).toBe(false);
+  });
+
+  it("recognizes a reviewer from the verification_reviewers table for the count", async () => {
+    const query = vi.fn(async (sql, params) => {
+      if (sql.includes("verification_reviewers")) return { rows: params[0] === wallet ? [{ wallet_address: wallet }] : [] };
+      if (sql.includes("count(*)")) return { rows: [{ count: 0 }] };
+      return { rows: [] };
+    });
+    const service = createArtistVerificationService({
+      db: { query },
+      authenticator: async () => ({ wallet }),
+      reviewerWallets: "",
+    });
+    await expect(service.countReviewQueue({ request: requestFor(wallet) })).resolves.toEqual({ count: 0 });
+  });
+
+  it("refuses the pending-review count for a non-reviewer wallet", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    const service = createArtistVerificationService({
+      db: { query },
+      authenticator: async () => ({ wallet }),
+      reviewerWallets: reviewer,
+    });
+    await expect(service.countReviewQueue({ request: requestFor(wallet) })).rejects.toMatchObject({ status: 403, code: "REVIEWER_REQUIRED" });
+    expect(query.mock.calls.some(([sql]) => sql.includes("count(*)"))).toBe(false);
+  });
+
+  it("refuses the pending-review count without wallet authentication", async () => {
+    const service = createArtistVerificationService({
+      db: { query: vi.fn(async () => ({ rows: [] })) },
+      authenticator: async () => null,
+      reviewerWallets: reviewer,
+    });
+    await expect(service.countReviewQueue({ request: requestFor(wallet) })).rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
   });
 
   it("marks whether the authenticated wallet is a reviewer without leaking PII", async () => {
