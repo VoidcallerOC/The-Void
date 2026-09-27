@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_ROLES, encodeCreateFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -75,6 +75,9 @@ export function ArtistStudioPage() {
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
   const [notice, setNotice] = useState("");
+  // On a failed Fuji transaction, hold the hash + explorer link so the user can
+  // recover and inspect the exact transaction instead of losing it.
+  const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
@@ -149,7 +152,7 @@ export function ArtistStudioPage() {
   };
 
   const publishEdition = async () => {
-    setBusy("publish"); setNotice("");
+    setBusy("publish"); setNotice(""); setTxEvidence(null);
     try {
       validateReleasePublish({
         release: { title: form.releaseTitle, type: "ep" },
@@ -183,6 +186,9 @@ export function ArtistStudioPage() {
       setStep("sale");
     } catch (error) {
       setNotice(error.message);
+      if (error?.transactionHash) {
+        setTxEvidence({ transactionHash: error.transactionHash, explorerUrl: error.explorerUrl || fujiExplorerUrl("tx", error.transactionHash), contractAddress: error.contractAddress, chainId: error.chainId, code: error.code });
+      }
     } finally {
       setBusy("");
     }
@@ -279,6 +285,13 @@ export function ArtistStudioPage() {
       </nav>
 
       {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
+      {txEvidence && (
+        <div role="status" style={{ ...card, margin: "20px 0", borderColor: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
+          <div>Failed transaction {txEvidence.code ? `(${txEvidence.code})` : ""} — inspect the exact revert on Snowtrace:</div>
+          <a href={txEvidence.explorerUrl} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{txEvidence.transactionHash}</a>
+          <div style={{ marginTop: 6 }}>Contract {txEvidence.contractAddress} · chain {txEvidence.chainId}</div>
+        </div>
+      )}
 
       {step === "release" && (
         <section style={card} id="create-release">
