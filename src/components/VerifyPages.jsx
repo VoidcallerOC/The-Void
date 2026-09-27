@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Eyebrow, Tag } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
+import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
 import { ARTIST_TYPES, canApplicantReapply, canApplicantRespond, validateApplication } from "../lib/verification.js";
 import {
   decideVerificationApplication,
@@ -426,6 +427,7 @@ export function VerifyReviewQueuePage() {
   const wallet = useWallet();
   const ready = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
+  const { refresh: refreshReviewCount } = useReviewerNotifications();
   const [apps, setApps] = useState([]);
   const [error, setError] = useState("");
   const [restricted, setRestricted] = useState(false);
@@ -439,6 +441,8 @@ export function VerifyReviewQueuePage() {
         setApps(Array.isArray(rows) ? rows : []);
         setRestricted(false);
         setError("");
+        // Returning to the queue re-syncs the header badge with the server.
+        void refreshReviewCount();
       })
       .catch((err) => {
         if (cancelled) return;
@@ -446,7 +450,7 @@ export function VerifyReviewQueuePage() {
         else setError(err.message);
       });
     return () => { cancelled = true; };
-  }, [ready, headers]);
+  }, [ready, headers, refreshReviewCount]);
 
   return (
     <section style={shell}>
@@ -496,6 +500,7 @@ export function VerifyReviewApplicationPage() {
   const wallet = useWallet();
   const ready = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
+  const { refresh: refreshReviewCount } = useReviewerNotifications();
   const [app, setApp] = useState(null);
   const [error, setError] = useState("");
   const [notes, setNotes] = useState("");
@@ -529,6 +534,9 @@ export function VerifyReviewApplicationPage() {
         headers,
       });
       setApp(result);
+      // A decision may move the application out of (or keep it in) the
+      // actionable set; re-read the header count from the server.
+      void refreshReviewCount();
     } catch (err) {
       setError(err.message);
     } finally {

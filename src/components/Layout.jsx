@@ -6,6 +6,7 @@ import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { MintModal } from "./MintModal.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
+import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
 
 // Minimal in-theme placeholder shown while a lazily-loaded section chunk
@@ -47,21 +48,23 @@ export function Layout() {
   const onMint = () => setMintOpen(true);
   return (
     <WalletProvider>
-      <PreviewHostBridge />
-      <ScrollToTop />
-      <Grain />
-      <Scanlines />
-      <Nav onMint={onMint} />
-      {/* Each route fills the viewport so short pages don't expose the footer
-          on load — content centers vertically; taller pages just grow. */}
-      <main className="vc-main">
-        <Suspense fallback={<SectionFallback />}>
-          <Outlet context={{ onMint }} />
-        </Suspense>
-      </main>
-      <Footer />
-      <StickyPlayer />
-      <MintModal open={mintOpen} onClose={() => setMintOpen(false)} />
+      <ReviewerNotificationsProvider>
+        <PreviewHostBridge />
+        <ScrollToTop />
+        <Grain />
+        <Scanlines />
+        <Nav onMint={onMint} />
+        {/* Each route fills the viewport so short pages don't expose the footer
+            on load — content centers vertically; taller pages just grow. */}
+        <main className="vc-main">
+          <Suspense fallback={<SectionFallback />}>
+            <Outlet context={{ onMint }} />
+          </Suspense>
+        </main>
+        <Footer />
+        <StickyPlayer />
+        <MintModal open={mintOpen} onClose={() => setMintOpen(false)} />
+      </ReviewerNotificationsProvider>
     </WalletProvider>
   );
 }
