@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ApiError } from "./api-errors.js";
 import { walletAddress } from "./validation.js";
+import { CANONICAL_FUJI_CHAIN_ID, CANONICAL_FUJI_RELEASE, C_CHAIN_VOIDCALLER_COLLECTION, LEGACY_FUJI_V1_RELEASE } from "./fuji-contract-scope.js";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const FIELDS = [
@@ -81,9 +82,33 @@ function blockNumber(value, { required = false } = {}) {
   return parsed;
 }
 
+/** The two on-chain events this table may record as a provenance anchor.
+ *
+ * - `EditionCreated` is the Studio publication anchor: the certified Fuji
+ *   release's own `createEdition` transaction commits the immutable metadata
+ *   CID, and `verifyEditionPublication` (publication-anchor.js) is the only
+ *   producer of that verification. It is valid solely on the canonical V2
+ *   release contract on Fuji; historical V1 rows are never rewritten by it.
+ * - `ProvenanceAnchored` belongs to the separate VoidProvenanceAnchor
+ *   subsystem (provenance-anchor.js) and must point at that dedicated
+ *   contract, never at a release collection.
+ *
+ * Anything else is rejected. */
+export const ANCHOR_EVENTS = Object.freeze({
+  EDITION_CREATED: "EditionCreated",
+  PROVENANCE_ANCHORED: "ProvenanceAnchored",
+});
+export const ANCHOR_MECHANISMS = Object.freeze({
+  [ANCHOR_EVENTS.EDITION_CREATED]: "edition-metadata-cid",
+  [ANCHOR_EVENTS.PROVENANCE_ANCHORED]: "provenance-anchor",
+});
+const RECOGNIZED_EVENTS = new Set(Object.values(ANCHOR_EVENTS));
+const RELEASE_COLLECTIONS = new Set([CANONICAL_FUJI_RELEASE, LEGACY_FUJI_V1_RELEASE, C_CHAIN_VOIDCALLER_COLLECTION]);
+const CID = /^(?:bafy|Qm)[A-Za-z0-9]+$/;
+
 function anchorEventName(value) {
   const name = String(value ?? "").trim();
-  if (name !== "ProvenanceAnchored") invalid("anchorEvent must be ProvenanceAnchored.");
+  if (!RECOGNIZED_EVENTS.has(name)) invalid(`anchorEvent must be one of ${[...RECOGNIZED_EVENTS].join(", ")}.`);
   return name;
 }
 
@@ -91,6 +116,29 @@ function anchorContract(value) {
   const address = String(value ?? "").trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(address)) invalid("anchorContract must be the configured contract address.");
   return address;
+}
+
+/** Binds the anchor event to the contract that may legitimately emit it. */
+function anchorContractFor(eventName, value) {
+  const address = anchorContract(value);
+  if (eventName === ANCHOR_EVENTS.EDITION_CREATED) {
+    if (address === LEGACY_FUJI_V1_RELEASE) invalid("EditionCreated on the historical Fuji V1 release is not a V2 publication anchor.");
+    if (address !== CANONICAL_FUJI_RELEASE) invalid("EditionCreated must come from the canonical Fuji release contract.");
+    return address;
+  }
+  if (RELEASE_COLLECTIONS.has(address)) invalid("ProvenanceAnchored must come from the dedicated anchor contract, not a release collection.");
+  return address;
+}
+
+/** A VERIFIED row must carry the evidence the matching verifier produces. */
+function verifiedAnchorEvidence(eventName, { chainKey: key, chainId: chain, mechanism, metadataCid }) {
+  const expectedMechanism = ANCHOR_MECHANISMS[eventName];
+  if (mechanism != null && mechanism !== "" && mechanism !== expectedMechanism) invalid(`mechanism must be ${expectedMechanism} for ${eventName}.`);
+  if (eventName !== ANCHOR_EVENTS.EDITION_CREATED) return;
+  if (mechanism !== expectedMechanism) invalid("A Studio publication anchor requires the edition-metadata-cid verification result.");
+  if (!CID.test(String(metadataCid ?? "").trim())) invalid("A Studio publication anchor requires the verified metadata CID.");
+  if (chain !== CANONICAL_FUJI_CHAIN_ID) invalid(`EditionCreated must be anchored on chain ${CANONICAL_FUJI_CHAIN_ID}.`);
+  if (key !== "fuji") invalid("EditionCreated must be anchored on the fuji network.");
 }
 
 function failureCode(value) {
@@ -185,6 +233,7 @@ export class ProvenanceRecords {
     const key = chainKey(network);
     const chain = optionalChainId(chainId);
     if (!key || !chain) invalid("A submitted anchor requires chainKey and chainId.");
+    const event = anchorEventName(eventName);
     try {
       const { rows } = await this.db.query(
         `UPDATE provenance_proofs
@@ -193,7 +242,7 @@ export class ProvenanceRecords {
              block_number = NULL, block_timestamp = NULL, failure_code = NULL, failure_detail = NULL, next_retry_at = NULL, updated_at = now()
          WHERE id = $1 AND anchor_status IN ('PENDING', 'SUBMITTED') AND verification_status <> 'VERIFIED'
          RETURNING ${RETURNING}`,
-        [current.id, key, chain, transactionHash(txHash, { required: true }), anchorContract(contract), anchorEventName(eventName)],
+        [current.id, key, chain, transactionHash(txHash, { required: true }), anchorContractFor(event, contract), event],
       );
       if (!rows[0]) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before submitting another transaction.");
       return rows[0];
@@ -279,13 +328,16 @@ export class ProvenanceRecords {
     }
   }
 
-  async recordVerifiedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, blockNumber: block, blockTimestamp = null, anchorContract: contract, anchorEvent: eventName, verifiedAt = new Date() }) {
+  async recordVerifiedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, blockNumber: block, blockTimestamp = null, anchorContract: contract, anchorEvent: eventName, mechanism = null, metadataCid = null, verifiedAt = new Date() }) {
     const current = await this.loadOwned(id, creatorWallet);
     if (current.verification_status === "VERIFIED") throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance record is already verified.");
     if (!OPENABLE.has(current.anchor_status)) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before verifying it.");
     const key = chainKey(network);
     const chain = optionalChainId(chainId);
     if (!key || !chain) invalid("A verified anchor requires chainKey and chainId.");
+    const event = anchorEventName(eventName);
+    const anchoredAt = anchorContractFor(event, contract);
+    verifiedAnchorEvidence(event, { chainKey: key, chainId: chain, mechanism, metadataCid });
     try {
       const { rows } = await this.db.query(
         `UPDATE provenance_proofs
@@ -295,7 +347,7 @@ export class ProvenanceRecords {
              failure_code = NULL, failure_detail = NULL, next_retry_at = NULL, updated_at = now()
          WHERE id = $1 AND anchor_status IN ('PENDING', 'SUBMITTED') AND verification_status <> 'VERIFIED'
          RETURNING ${RETURNING}`,
-        [current.id, proofTimestamp(verifiedAt), key, chain, transactionHash(txHash, { required: true }), blockNumber(block, { required: true }), proofTimestamp(blockTimestamp), anchorContract(contract), anchorEventName(eventName)],
+        [current.id, proofTimestamp(verifiedAt), key, chain, transactionHash(txHash, { required: true }), blockNumber(block, { required: true }), proofTimestamp(blockTimestamp), anchoredAt, event],
       );
       if (!rows[0]) throw new ApiError(409, "PROVENANCE_ANCHOR_NOT_OPENABLE", "Retry the failed anchor before verifying it.");
       return rows[0];
