@@ -192,7 +192,16 @@ describe("sendFujiTransaction failure preserves evidence", () => {
       },
     };
     await expect(sendFujiTransaction({ provider, from: CONNECTED_WALLET, data: VALID_CREATE() }))
-      .rejects.toMatchObject({ code: "AlreadyInitialized", transactionHash: failingHash, message: expect.stringMatching(/already exists on Fuji/i) });
+      .rejects.toMatchObject({
+        code: "AlreadyInitialized",
+        transactionHash: failingHash,
+        message: expect.stringMatching(/already exists on Fuji/i),
+        contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
+        chainId: 43113,
+        receiptStatus: "0x0",
+        blockNumber: 16,
+        explorerUrl: expect.stringContaining(failingHash),
+      });
   });
 
   it("still preserves the tx hash with the generic message when the reason cannot be decoded", async () => {
@@ -207,6 +216,13 @@ describe("sendFujiTransaction failure preserves evidence", () => {
       },
     };
     await expect(sendFujiTransaction({ provider, from: CONNECTED_WALLET, data: VALID_CREATE() }))
-      .rejects.toMatchObject({ code: "TX_REVERTED", transactionHash: failingHash });
+      .rejects.toMatchObject({
+        code: "TX_REVERTED",
+        transactionHash: failingHash,
+        contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
+        chainId: 43113,
+        explorerUrl: expect.stringContaining(failingHash),
+        blockNumber: null,
+      });
   });
 });
