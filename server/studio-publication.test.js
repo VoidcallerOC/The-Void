@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 import fujiRelease from "../config/fuji-release.json" with { type: "json" };
+import { ApiError } from "./api-errors.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceAnchorService } from "./provenance-anchor.js";
@@ -72,6 +73,17 @@ describe("publication provenance states", () => {
     expect(provenancePublicationStatus({ anchor_status: "ANCHORED", verification_status: "VERIFIED" })).toBe("PROVENANCE_VERIFIED");
     expect(publicationView({ releaseStatus: "PUBLISHED", proof: { anchor_status: "SUBMITTED", verification_status: "UNVERIFIED" } }).fullyPublished).toBe(false);
     expect(publicationView({ releaseStatus: "PUBLISHED", proof: { anchor_status: "ANCHORED", verification_status: "VERIFIED" } }).fullyPublished).toBe(true);
+  });
+
+  it("marks fullyPublished only when the catalog is PUBLISHED and the proof is both ANCHORED and VERIFIED", () => {
+    const verified = { anchor_status: "ANCHORED", verification_status: "VERIFIED" };
+    expect(publicationView({ releaseStatus: "PUBLISHED", proof: verified })).toEqual({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true });
+    expect(publicationView({ releaseStatus: "DRAFT", proof: verified }).fullyPublished).toBe(false);
+    expect(publicationView({ releaseStatus: "REVIEW", proof: verified }).fullyPublished).toBe(false);
+    expect(publicationView({ releaseStatus: "PUBLISHED", proof: { anchor_status: "SUBMITTED", verification_status: "VERIFIED" } }).fullyPublished).toBe(false);
+    expect(publicationView({ releaseStatus: "PUBLISHED", proof: { anchor_status: "ANCHORED", verification_status: "UNVERIFIED" } }).fullyPublished).toBe(false);
+    expect(publicationView({ releaseStatus: "PUBLISHED", proof: { anchor_status: "FAILED", verification_status: "UNVERIFIED" } })).toMatchObject({ provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
+    expect(publicationView({ releaseStatus: "PUBLISHED", proof: null })).toMatchObject({ provenanceStatus: "PROVENANCE_PENDING", fullyPublished: false });
     expect(() => assertProvenanceConsistency({ releaseId: "release-1", editionId: "edition-1", metadata: metadataFor("c".repeat(64)), provenanceRoot: "b".repeat(64) })).toThrow(/same release edition/);
   });
 });
@@ -176,7 +188,17 @@ describe("Artist Studio publication pipeline", () => {
       return { rows: [releaseRow()] };
     });
     await expect(verified.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true, copyrightOwnership: false });
-    expect(records.recordVerifiedAnchor).toHaveBeenCalledWith(expect.objectContaining({ transactionHash: tx, blockNumber: 90, anchorEvent: "EditionCreated", blockTimestamp: "2025-09-25T21:20:00.000Z" }));
+    expect(records.recordVerifiedAnchor).toHaveBeenCalledWith(expect.objectContaining({
+      transactionHash: tx,
+      blockNumber: 90,
+      blockTimestamp: "2025-09-25T21:20:00.000Z",
+      anchorEvent: "EditionCreated",
+      mechanism: "edition-metadata-cid",
+      metadataCid: "metadata",
+      anchorContract: fujiRelease.contractAddress.toLowerCase(),
+      chainId: 43113,
+      chainKey: "fuji",
+    }));
 
     const mismatched = studio({ records, chain, metadataFetcher: async () => Buffer.from(JSON.stringify({ ...document, description: "not the pinned bytes" })) });
     mismatched.db.query.mockImplementation(async (sql) => {
@@ -186,6 +208,32 @@ describe("Artist Studio publication pipeline", () => {
     });
     await expect(mismatched.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
     expect(records.recordAnchorFailure).toHaveBeenCalled();
+  });
+
+  it("records a failed anchor, not a pending or verified one, when the record layer rejects the publication anchor", async () => {
+    const generated = canonicalMetadata({ release: releaseRow(), edition: { title: "Chapter I", description: null, supply: "10" }, artist: { name: "Voidcaller" }, releaseType: "EP" });
+    const provenance = canonicalProvenanceManifest({ releaseId: "release-1", editionId: "edition-1", creator: { artistId: "artist-1", wallet: owner }, metadataDigest: generated.digest, createdAt: "2026-09-25T20:00:00.000Z", artwork: "11".repeat(32) });
+    const document = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
+    const identity = ids("the-record", "chapter-i");
+    const chain = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ ...editionCreatedReceipt(), blockNumber: 90 }),
+      edition: vi.fn().mockResolvedValue([identity.releaseId, identity.editionId, owner, 10n, 0n, "ipfs://metadata", true]),
+      getBlock: vi.fn().mockResolvedValue({ timestamp: 1_758_835_200 }),
+    };
+    const records = {
+      findOwnedByRoot: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" }),
+      recordVerifiedAnchor: vi.fn().mockRejectedValue(new ApiError(400, "PROVENANCE_RECORD_INVALID", "anchorEvent must be one of EditionCreated, ProvenanceAnchored.")),
+      recordAnchorFailure: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "FAILED", verification_status: "UNVERIFIED", failure_code: "PROVENANCE_RECORD_INVALID" }),
+    };
+    const rejected = studio({ records, chain, metadataFetcher: async () => Buffer.from(JSON.stringify(document)) });
+    rejected.db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("FROM experiences")) return { rows: [] };
+      if (String(sql).includes("FROM editions")) return { rows: [editionRow(document)] };
+      return { rows: [releaseRow()] };
+    });
+    await expect(rejected.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
+    expect(records.recordAnchorFailure).toHaveBeenCalledWith(expect.objectContaining({ id: "proof-1", failureCode: "PROVENANCE_RECORD_INVALID" }));
+    expect(records.recordAnchorFailure.mock.calls[0][0].failureDetail).not.toMatch(/ipfs:\/\//);
   });
 });
 
