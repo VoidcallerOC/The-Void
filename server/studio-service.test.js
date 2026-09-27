@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { ethers } from "ethers";
+import { FUJI_RELEASE_CONFIG } from "../src/lib/fuji-release.js";
 import { ArtistStudioService, EDITION_ABI } from "./studio-service.js";
+
+const certifiedFujiRelease = FUJI_RELEASE_CONFIG.contractAddress.toLowerCase();
 
 const owner = "0x1111111111111111111111111111111111111111";
 const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -130,7 +133,8 @@ describe("Artist Studio", () => {
     const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     const edition = await instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", chainId: 43113, contractAddress: contract, tokenId: "7", quantity: "100", priceWei: "1000000000000000000" } });
     expect(edition).toMatchObject({ id: "edition-1", status: "DRAFT" });
-    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: "0x262b774cf9a1949170b58e2d57f6189980fe757b", contractType: "ERC1155", chainId: 43113 }));
+    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: certifiedFujiRelease, contractType: "ERC1155", chainId: 43113 }));
+    expect(certifiedFujiRelease).toBe("0x82b26da27136935454bdf1e40801190b521b82e5");
     expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: expect.any(BigInt), metadataUri: null }));
 
     const experienceService = service({ rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] });
@@ -155,7 +159,7 @@ describe("Artist Studio", () => {
   it("ignores artist blockchain fields and derives the certified contract and token", async () => {
     const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", slug: "bad", chainId: 1, contractAddress: "not-an-address", tokenId: "-1", quantity: "1", priceWei: "1" } })).resolves.toMatchObject({ id: expect.stringMatching(/^edition-/) });
-    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ chainId: 43113, address: "0x262b774cf9a1949170b58e2d57f6189980fe757b" }));
+    expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ chainId: 43113, address: certifiedFujiRelease }));
     expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ tokenId: expect.any(BigInt), metadataUri: null }));
 
     const unauthorized = service({ rows: [] });
