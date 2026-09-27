@@ -42,3 +42,22 @@ export function studioPublicationPath(releaseId, suffix) {
   if (!id) throw new Error("Save the release before publishing.");
   return `/studio/releases/${encodeURIComponent(id)}/${suffix}`;
 }
+
+export function transactionEvidenceFromError(error, fallbackExplorerUrl = null) {
+  if (!error?.transactionHash) return null;
+  return {
+    transactionHash: error.transactionHash,
+    explorerUrl: error.explorerUrl || fallbackExplorerUrl || null,
+    contractAddress: error.contractAddress,
+    chainId: error.chainId,
+    code: error.code,
+  };
+}
+
+/** Current-operation evidence is replaced by the latest failure and cleared
+ * by any successful transaction. Historical records remain backend data. */
+export function transactionEvidenceForOutcome({ status, error = null, evidence = null, fallbackExplorerUrl = null } = {}) {
+  if (status === "success") return null;
+  if (status === "failure") return evidence || transactionEvidenceFromError(error, fallbackExplorerUrl);
+  return null;
+}
