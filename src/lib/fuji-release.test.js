@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, encodeCreateFujiEdition, encodeFujiMint, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiEdition } from "./fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiMint, explainFujiEditionError, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses a valid certified Fuji release configuration", () => {
@@ -82,5 +82,131 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(() => fujiSlug("this-identifier-is-definitely-too-long-for-bytes32")).toThrow(/31/);
     expect(isCertifiedFujiEdition({ contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43113 })).toBe(true);
     expect(isCertifiedFujiEdition({ contractAddress: FUJI_RELEASE_CONFIG.contractAddress, chainId: 43114 })).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// createEdition revert diagnosis (regression for the generic
+// "Fuji transaction reverted or did not receive a successful receipt." error)
+// ---------------------------------------------------------------------------
+
+const V2_ERRORS = new ethers.Interface([
+  "error AccessDenied(bytes32 role, address account)",
+  "error AlreadyInitialized(uint256 tokenId)",
+  "error ContractPaused()",
+  "error InvalidSupply()",
+  "error RoyaltyTooHigh(uint96 bps, uint96 cap)",
+]);
+const CONNECTED_WALLET = "0x00000000000000000000000000000000000000A1";
+const VALID_CREATE = () => encodeCreateFujiEdition({
+  releaseId: "voidcaller",
+  editionId: "self-titled",
+  maxSupply: 25,
+  metadataUri: "ipfs://QmMeta",
+  payout: CONNECTED_WALLET,
+  royaltyBps: 500,
+}).data;
+
+// eth_call provider double that reverts with the given custom-error calldata.
+function revertingProvider(errorName, args = []) {
+  const data = V2_ERRORS.encodeErrorResult(errorName, args);
+  return {
+    request: async ({ method }) => {
+      if (method === "eth_chainId") return "0xa869";
+      if (method === "eth_call") { const err = new Error("execution reverted"); err.data = data; throw err; }
+      throw new Error(`unexpected provider method: ${method}`);
+    },
+  };
+}
+
+describe("createEdition revert decoding", () => {
+  it("decodes each deployed V2 custom error to a specific, actionable message", () => {
+    const already = explainFujiEditionError({ data: V2_ERRORS.encodeErrorResult("AlreadyInitialized", [123n]) });
+    expect(already).toMatchObject({ code: "AlreadyInitialized" });
+    expect(already.message).toMatch(/already exists on Fuji/i);
+    expect(already.revertData).toMatch(/^0x/);
+
+    expect(explainFujiEditionError({ data: V2_ERRORS.encodeErrorResult("AccessDenied", [FUJI_ROLES.ARTIST_ROLE, CONNECTED_WALLET]) }))
+      .toMatchObject({ code: "AccessDenied", message: expect.stringMatching(/not authorized to create Fuji editions/i) });
+    expect(explainFujiEditionError({ data: V2_ERRORS.encodeErrorResult("ContractPaused", []) }))
+      .toMatchObject({ code: "ContractPaused", message: expect.stringMatching(/paused/i) });
+    expect(explainFujiEditionError({ data: V2_ERRORS.encodeErrorResult("InvalidSupply", []) }))
+      .toMatchObject({ code: "InvalidSupply", message: expect.stringMatching(/greater than zero/i) });
+  });
+
+  it("preserves raw revert data and reports a wallet rejection distinctly", () => {
+    const decoded = decodeFujiRevert({ data: V2_ERRORS.encodeErrorResult("AlreadyInitialized", [7n]) });
+    expect(decoded.name).toBe("AlreadyInitialized");
+    expect(decoded.args[0]).toBe(7n);
+    expect(explainFujiEditionError({ code: 4001, message: "user rejected the request" }))
+      .toMatchObject({ code: "ACTION_REJECTED", message: expect.stringMatching(/rejected in the wallet/i) });
+  });
+
+  it("returns a null message for an unknown revert so callers keep their fallback", () => {
+    expect(explainFujiEditionError({ message: "execution reverted" }).message).toBeNull();
+  });
+});
+
+describe("simulateCreateFujiEdition (pre-broadcast)", () => {
+  it("throws 'already exists' and never broadcasts when the edition is initialized", async () => {
+    const provider = revertingProvider("AlreadyInitialized", [fujiTokenId("voidcaller", "self-titled")]);
+    await expect(simulateCreateFujiEdition(provider, { from: CONNECTED_WALLET, data: VALID_CREATE() }))
+      .rejects.toMatchObject({ code: "AlreadyInitialized", message: expect.stringMatching(/already exists on Fuji/i) });
+  });
+
+  it("throws the ARTIST_ROLE message when the wallet lacks the role", async () => {
+    const provider = revertingProvider("AccessDenied", [FUJI_ROLES.ARTIST_ROLE, CONNECTED_WALLET]);
+    await expect(simulateCreateFujiEdition(provider, { from: CONNECTED_WALLET, data: VALID_CREATE() }))
+      .rejects.toMatchObject({ code: "AccessDenied", message: expect.stringMatching(/not authorized/i) });
+  });
+
+  it("throws the paused message when the contract is paused", async () => {
+    const provider = revertingProvider("ContractPaused", []);
+    await expect(simulateCreateFujiEdition(provider, { from: CONNECTED_WALLET, data: VALID_CREATE() }))
+      .rejects.toMatchObject({ code: "ContractPaused" });
+  });
+
+  it("resolves quietly when the simulation succeeds (valid, non-existent edition)", async () => {
+    const provider = {
+      request: async ({ method }) => {
+        if (method === "eth_chainId") return "0xa869";
+        if (method === "eth_call") return "0x"; // createEdition returns tokenId; empty is fine for the sim
+        throw new Error(`unexpected provider method: ${method}`);
+      },
+    };
+    await expect(simulateCreateFujiEdition(provider, { from: CONNECTED_WALLET, data: VALID_CREATE() })).resolves.toBeUndefined();
+  });
+});
+
+describe("sendFujiTransaction failure preserves evidence", () => {
+  it("keeps the tx hash and decodes the revert reason on a failed receipt", async () => {
+    const failingHash = `0x${"ab".repeat(32)}`;
+    const provider = {
+      request: async ({ method }) => {
+        if (method === "eth_chainId") return "0xa869";
+        if (method === "eth_sendTransaction") return failingHash;
+        if (method === "eth_getTransactionReceipt") return { status: "0x0", blockNumber: "0x10" };
+        if (method === "eth_call") { const err = new Error("execution reverted"); err.data = V2_ERRORS.encodeErrorResult("AlreadyInitialized", [9n]); throw err; }
+        throw new Error(`unexpected provider method: ${method}`);
+      },
+    };
+    await expect(sendFujiTransaction({ provider, from: CONNECTED_WALLET, data: VALID_CREATE() }))
+      .rejects.toMatchObject({ code: "AlreadyInitialized", transactionHash: failingHash, message: expect.stringMatching(/already exists on Fuji/i) });
+  });
+
+  it("still preserves the tx hash with the generic message when the reason cannot be decoded", async () => {
+    const failingHash = `0x${"cd".repeat(32)}`;
+    const provider = {
+      request: async ({ method }) => {
+        if (method === "eth_chainId") return "0xa869";
+        if (method === "eth_sendTransaction") return failingHash;
+        if (method === "eth_getTransactionReceipt") return { status: "0x0" };
+        if (method === "eth_call") return "0x"; // replay does not revert
+        throw new Error(`unexpected provider method: ${method}`);
+      },
+    };
+    await expect(sendFujiTransaction({ provider, from: CONNECTED_WALLET, data: VALID_CREATE() }))
+      .rejects.toMatchObject({ code: "TX_REVERTED", transactionHash: failingHash });
   });
 });

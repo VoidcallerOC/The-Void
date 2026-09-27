@@ -73,6 +73,98 @@ const v2CreateIface = new ethers.Interface([
   "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
 ]);
 
+// Every custom error the deployed VoidRelease1155V2 can revert createEdition with,
+// so a revert (from a pre-broadcast eth_call simulation or a failed receipt) can be
+// decoded to a specific, actionable reason instead of a generic "reverted".
+const fujiErrorIface = new ethers.Interface([
+  "error AccessDenied(bytes32 role, address account)",
+  "error AlreadyInitialized(uint256 tokenId)",
+  "error InvalidAddress()",
+  "error InvalidSupply()",
+  "error InvalidIdentifier()",
+  "error RoyaltyTooHigh(uint96 bps, uint96 cap)",
+  "error ContractPaused()",
+  "error EditionNotFound(uint256 tokenId)",
+  "error InactiveEdition(uint256 tokenId)",
+  "error ExceedsSupply(uint256 tokenId, uint256 available, uint256 requested)",
+  "error InsufficientBalance(address account, uint256 tokenId, uint256 available, uint256 requested)",
+  "error LengthMismatch()",
+  "error ZeroQuantity()",
+  "error UnsafeRecipient()",
+]);
+
+function extractFujiRevertData(error) {
+  const candidates = [error?.data, error?.error?.data, error?.info?.error?.data, error?.cause?.data, error?.data?.data, error?.cause?.error?.data];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^0x[0-9a-fA-F]{8,}$/.test(candidate)) return candidate;
+  }
+  const match = String(error?.shortMessage || error?.message || error || "").match(/0x[0-9a-fA-F]{8,}/);
+  return match ? match[0] : null;
+}
+
+// Decode a revert into { name, args, data }. name is null when the selector is
+// unknown or no revert data is present.
+export function decodeFujiRevert(error) {
+  const data = extractFujiRevertData(error);
+  if (data) {
+    try {
+      const parsed = fujiErrorIface.parseError(data);
+      if (parsed) return { name: parsed.name, args: parsed.args, data };
+    } catch { /* Unknown selector: fall through to a generic result. */ }
+  }
+  return { name: null, args: null, data: data || null };
+}
+
+// Map a createEdition revert (or wallet rejection) to a user-facing message while
+// preserving the decoded error code and raw revert data for debugging. Returns a
+// null message when the reason is unknown, so callers keep their generic fallback.
+export function explainFujiEditionError(error) {
+  const { name, data } = decodeFujiRevert(error);
+  const base = { code: name, revertData: data || null };
+  switch (name) {
+    case "AccessDenied":
+      return { ...base, message: "Connected wallet is not authorized to create Fuji editions (missing ARTIST_ROLE)." };
+    case "AlreadyInitialized":
+      return { ...base, message: "This edition already exists on Fuji. Load the existing edition instead of publishing it again." };
+    case "ContractPaused":
+      return { ...base, message: "The Fuji release contract is currently paused. Publishing is disabled until an admin unpauses it." };
+    case "InvalidSupply":
+      return { ...base, message: "Maximum supply must be greater than zero." };
+    case "InvalidIdentifier":
+      return { ...base, message: "Release and edition identifiers must each be non-empty." };
+    case "InvalidAddress":
+      return { ...base, message: "The edition payout address is invalid." };
+    case "RoyaltyTooHigh":
+      return { ...base, message: "Royalty exceeds the 10% (1000 basis points) cap." };
+    default: {
+      const code = error?.code ?? error?.info?.error?.code ?? error?.cause?.code;
+      const message = String(error?.shortMessage || error?.message || "");
+      if (code === 4001 || code === "ACTION_REJECTED" || /user rejected|user denied|rejected the request/i.test(message)) {
+        return { code: "ACTION_REJECTED", revertData: null, message: "Transaction rejected in the wallet. Nothing was published." };
+      }
+      return { code: name || "REVERTED", revertData: data || null, message: null };
+    }
+  }
+}
+
+// Static, read-only simulation of the exact createEdition calldata from the exact
+// connected wallet, BEFORE broadcasting. On revert it decodes the custom error and
+// throws a specific message, so a doomed transaction is never sent to the wallet.
+export async function simulateCreateFujiEdition(provider, { from, data }) {
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
+  const to = assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress);
+  try {
+    await provider.request({ method: "eth_call", params: [{ from, to, data }, "latest"] });
+  } catch (error) {
+    const explained = explainFujiEditionError(error);
+    if (explained.message) {
+      throw Object.assign(new Error(explained.message), { code: explained.code, revertData: explained.revertData, cause: error });
+    }
+    throw error;
+  }
+}
+
 export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps }) {
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (BigInt(maxSupply) <= 0n) throw new Error("Edition supply must be greater than zero.");
@@ -124,7 +216,22 @@ export async function sendFujiTransaction({ provider, from, data, to, value, anc
   if (value !== undefined && value !== null && BigInt(value) > 0n) tx.value = ethers.toQuantity(BigInt(value));
   const hash = await provider.request({ method: "eth_sendTransaction", params: [tx] });
   const receipt = await waitForReceipt(provider, hash);
-  if (!receipt || receipt.status !== "0x1") throw new Error("Fuji transaction reverted or did not receive a successful receipt.");
+  if (!receipt || receipt.status !== "0x1") {
+    // Best-effort: replay the same call read-only to recover the revert reason, and
+    // always preserve the transaction hash so the failure can be inspected on-chain.
+    let message = "Fuji transaction reverted or did not receive a successful receipt.";
+    let code = "TX_REVERTED";
+    let revertData = null;
+    try {
+      await provider.request({ method: "eth_call", params: [{ ...tx }, "latest"] });
+    } catch (callError) {
+      const explained = explainFujiEditionError(callError);
+      if (explained.message) message = explained.message;
+      if (explained.code) code = explained.code;
+      revertData = explained.revertData;
+    }
+    throw Object.assign(new Error(message), { code, revertData, transactionHash: hash, receipt });
+  }
   return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };
 }
 
