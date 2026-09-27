@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "./studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "./studio-publish.js";
 
 const validInput = {
   release: { title: "Voidcaller Full EP", type: "ep" },
@@ -47,5 +47,38 @@ describe("Studio publish route", () => {
     expect(() => studioPublicationPath("", "metadata")).toThrow("Save the release before publishing.");
     expect(() => studioPublicationPath("  ", "publication/confirm")).toThrow("Save the release before publishing.");
     expect(studioPublicationPath("rel/1", "metadata")).toBe("/studio/releases/rel%2F1/metadata");
+  });
+});
+
+describe("Studio current transaction diagnostics", () => {
+  const oldFailure = { transactionHash: "0xold", code: "REVERTED" };
+  const newFailure = { transactionHash: "0xnew", code: "AccessDenied" };
+
+  it("shows the diagnostic for a failed transaction", () => {
+    expect(transactionEvidenceForOutcome({ status: "failure", evidence: oldFailure })).toEqual(oldFailure);
+  });
+
+  it("clears a previous failure after a successful transaction", () => {
+    expect(transactionEvidenceForOutcome({ status: "success", evidence: oldFailure })).toBeNull();
+  });
+
+  it("shows only the latest failure after failure, success, failure", () => {
+    const afterFirstFailure = transactionEvidenceForOutcome({ status: "failure", evidence: oldFailure });
+    const afterSuccess = transactionEvidenceForOutcome({ status: "success", evidence: afterFirstFailure });
+    const afterLatestFailure = transactionEvidenceForOutcome({ status: "failure", evidence: newFailure });
+    expect(afterSuccess).toBeNull();
+    expect(afterLatestFailure).toEqual(newFailure);
+  });
+
+  it("has no diagnostic after a successful transaction with no previous failure", () => {
+    expect(transactionEvidenceForOutcome({ status: "success" })).toBeNull();
+  });
+
+  it("derives current evidence from the latest failed transaction error", () => {
+    expect(transactionEvidenceForOutcome({
+      status: "failure",
+      error: { transactionHash: "0xlatest", code: "AlreadyInitialized", contractAddress: "0xcontract", chainId: 43113 },
+      fallbackExplorerUrl: "https://explorer/tx/0xlatest",
+    })).toEqual({ transactionHash: "0xlatest", explorerUrl: "https://explorer/tx/0xlatest", contractAddress: "0xcontract", chainId: 43113, code: "AlreadyInitialized" });
   });
 });

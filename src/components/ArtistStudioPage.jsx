@@ -9,7 +9,7 @@ import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
-import { publicationResultMessage, studioPublicationPath, validateReleasePublish } from "../lib/studio-publish.js";
+import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioFetch } from "../lib/studio-api.js";
 
@@ -186,16 +186,14 @@ export function ArtistStudioPage() {
       setStep("sale");
     } catch (error) {
       setNotice(error.message);
-      if (error?.transactionHash) {
-        setTxEvidence({ transactionHash: error.transactionHash, explorerUrl: error.explorerUrl || fujiExplorerUrl("tx", error.transactionHash), contractAddress: error.contractAddress, chainId: error.chainId, code: error.code });
-      }
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
     } finally {
       setBusy("");
     }
   };
 
   const configureSale = async () => {
-    setBusy("sale");
+    setBusy("sale"); setTxEvidence(null);
     setNotice("");
     try {
       const sale = fujiPrimarySaleAddress();
@@ -216,6 +214,7 @@ export function ArtistStudioPage() {
       setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
     } catch (error) {
       setNotice(error.message);
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
     } finally {
       setBusy("");
     }
