@@ -274,17 +274,19 @@ export class ArtistStudioService {
               blockNumber: receipt.blockNumber,
               blockTimestamp: anchor.anchorBlockTimestamp,
               anchorContract: CERTIFIED_CONTRACT,
-              anchorEvent: "EditionCreated",
+              anchorEvent: anchor.anchorEvent,
+              mechanism: anchor.mechanism,
+              metadataCid: anchor.metadataCid,
             });
           }
         } catch (error) {
-          if (error?.code === "PROVENANCE_INCONSISTENT" || error?.code === "PROVENANCE_ASSET_MISMATCH") {
+          if (error?.code === "PROVENANCE_INCONSISTENT" || error?.code === "PROVENANCE_ASSET_MISMATCH" || error?.code === "PROVENANCE_RECORD_INVALID") {
             if (this.provenanceRecords && proof && proof.anchor_status !== "ANCHORED") {
               proof = await this.provenanceRecords.recordAnchorFailure({
                 id: proof.id,
                 creatorWallet: identity.wallet,
                 failureCode: error.code,
-                failureDetail: "The publication metadata CID did not match the canonical provenance.",
+                failureDetail: error.code === "PROVENANCE_RECORD_INVALID" ? "The verified publication anchor was rejected by the provenance record." : "The publication metadata CID did not match the canonical provenance.",
               }).catch(() => proof);
             }
           } else if (error instanceof ApiError && error.code === "PUBLICATION_NOT_CONFIRMED") {
