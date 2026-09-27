@@ -230,7 +230,20 @@ export async function sendFujiTransaction({ provider, from, data, to, value, anc
       if (explained.code) code = explained.code;
       revertData = explained.revertData;
     }
-    throw Object.assign(new Error(message), { code, revertData, transactionHash: hash, receipt });
+    const blockNumber = receipt?.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null;
+    // Preserve every piece of on-chain evidence so the failure can be inspected
+    // later (the hash was previously discarded, leaving nothing to look up).
+    throw Object.assign(new Error(message), {
+      code,
+      revertData,
+      transactionHash: hash,
+      contractAddress: target,
+      chainId: FUJI_RELEASE_CONFIG.chainId,
+      receiptStatus: receipt?.status ?? null,
+      blockNumber,
+      explorerUrl: fujiExplorerUrl("tx", hash),
+      receipt,
+    });
   }
   return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };
 }
