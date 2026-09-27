@@ -43,6 +43,21 @@ export function encodeConfigureSale({ tokenId, priceWei, maxSupply, perWalletLim
   return saleIface.encodeFunctionData("configureSale", [BigInt(tokenId), price, supply, limit, start, end, Boolean(paused)]);
 }
 
+export function validateSaleSupply(requestedSaleSupply, editionSupply) {
+  const requested = BigInt(requestedSaleSupply);
+  const maximum = BigInt(editionSupply);
+  if (requested > maximum) throw new Error(`Sale supply exceeds edition supply. This edition contains ${maximum.toString()} copies. Set the sale supply to ${maximum.toString()} or fewer.`);
+  return requested;
+}
+
+export async function simulateConfigureSale(provider, { from, data, value = 0 } = {}) {
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
+  const sale = fujiPrimarySaleAddress();
+  if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
+  return provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)) }, "latest"] });
+}
+
 export function encodePurchase(tokenId, qty = 1) {
   const quantity = BigInt(qty);
   if (quantity <= 0n) throw new Error("Collect quantity must be greater than zero.");

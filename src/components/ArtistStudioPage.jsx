@@ -7,8 +7,8 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
-import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2 } from "../lib/primary-sale.js";
+import { FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioFetch } from "../lib/studio-api.js";
@@ -201,6 +201,9 @@ export function ArtistStudioPage() {
       if (!publishedTokenId) throw new Error("Publish the release before setting up the sale.");
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const provider = wallet.getProvider?.();
+      const edition = await readFujiEdition(provider, publishedTokenId);
+      if (!edition?.exists) throw new Error("The published edition could not be found on Fuji. Refresh the edition before configuring its sale.");
+      validateSaleSupply(form.saleSupply || form.quantity, edition.maxSupply);
       const data = encodeConfigureSale({
         tokenId: publishedTokenId,
         priceWei: form.priceWei,
@@ -210,6 +213,7 @@ export function ArtistStudioPage() {
         endTime: form.saleEnd,
         paused: form.salePaused,
       });
+      await simulateConfigureSale(provider, { from: wallet.account, data });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data, to: sale });
       setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
     } catch (error) {
