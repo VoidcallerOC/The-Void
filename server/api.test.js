@@ -144,6 +144,35 @@ describe("HTTP API boundary", () => {
   });
 });
 
+describe("reviewer notification count route", () => {
+  it("routes GET /api/verification/review/count to the reviewer count, not the application lookup", async () => {
+    const verificationService = {
+      countReviewQueue: vi.fn().mockResolvedValue({ count: 3 }),
+      getReviewApplication: vi.fn(),
+    };
+    const handler = createApiHandler({ service: {}, verificationService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "GET", url: "/api/verification/review/count", headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toEqual({ count: 3 });
+    expect(verificationService.countReviewQueue).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer opaque" }) }) }));
+    expect(verificationService.getReviewApplication).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 REVIEWER_REQUIRED from the count route for unauthorized wallets", async () => {
+    const verificationService = {
+      countReviewQueue: vi.fn().mockRejectedValue(new ApiError(403, "REVIEWER_REQUIRED", "This wallet is not authorized to review artist verification applications.")),
+    };
+    const handler = createApiHandler({ service: {}, verificationService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "GET", url: "/api/verification/review/count", headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(403);
+    const body = JSON.parse(response.body);
+    expect(body.error.code).toBe("REVIEWER_REQUIRED");
+    expect(body.data).toBeUndefined();
+  });
+});
+
 describe("API service trust boundaries", () => {
   it("does not trust browser seller identity and leaves listing state pending", async () => {
     const repository = { upsertTransaction: vi.fn().mockResolvedValue({ status: "SUBMITTED", transaction_hash: "0xlisting" }) };

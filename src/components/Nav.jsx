@@ -4,6 +4,7 @@ import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
+import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
 
 const LINKS = [
   ["DISCOVER", "/discover"],
@@ -14,8 +15,24 @@ const LINKS = [
   ["STUDIO", "/studio"],
 ];
 
+export const REVIEWER_NAV_LABEL = "REVIEW APPLICATIONS";
+export const REVIEWER_NAV_PATH = "/verify/review";
+
+// Count badge beside the reviewer link. Hidden at zero so the header stays
+// quiet when nothing needs attention.
+function ReviewerBadge({ count }) {
+  if (!Number.isFinite(count) || count <= 0) return null;
+  const label = `${count} ${count === 1 ? "application" : "applications"} awaiting review`;
+  return (
+    <span className="vc-nav-badge" role="status" aria-label={label} title={label} data-testid="reviewer-badge">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 export function Nav({ onMint }) {
   const [scrolled, setScrolled] = useState(false);
+  const notifications = useReviewerNotifications();
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -26,7 +43,10 @@ export function Nav({ onMint }) {
   const links = [
     ...LINKS,
     ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
+    // Only an authorized artist-verification reviewer wallet sees this.
+    ...(notifications.reviewer ? [[REVIEWER_NAV_LABEL, REVIEWER_NAV_PATH]] : []),
   ];
+  const badge = (path) => (path === REVIEWER_NAV_PATH ? <ReviewerBadge count={notifications.count} /> : null);
 
   return (
     <nav
@@ -55,6 +75,7 @@ export function Nav({ onMint }) {
           {links.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
               {label}
+              {badge(path)}
             </NavLink>
           ))}
         </div>
@@ -112,6 +133,7 @@ export function Nav({ onMint }) {
               style={{ padding: "14px 0", minHeight: 48, borderBottom: "1px solid var(--vc-ash)", fontSize: 18 }}
             >
               {label}
+              {badge(path)}
             </NavLink>
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
