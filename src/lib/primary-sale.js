@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG, assertFujiProvider, fujiExplorerUrl, sendFujiTransaction } from "./fuji-release.js";
+import { normalizeSaleTimeToUnixSeconds } from "./sale-time.js";
 
 const configuredSaleAbi = Array.isArray(FUJI_RELEASE_CONFIG.primarySaleAbi) ? FUJI_RELEASE_CONFIG.primarySaleAbi : [];
 export const PRIMARY_SALE_ABI = Object.freeze(configuredSaleAbi.length ? configuredSaleAbi : [
@@ -33,8 +34,8 @@ export function encodeConfigureSale({ tokenId, priceWei, maxSupply, perWalletLim
   const price = BigInt(priceWei);
   const supply = BigInt(maxSupply);
   const limit = BigInt(perWalletLimit);
-  const start = BigInt(startTime || 0);
-  const end = BigInt(endTime || 0);
+  const start = BigInt(normalizeSaleTimeToUnixSeconds(startTime));
+  const end = BigInt(normalizeSaleTimeToUnixSeconds(endTime));
   if (price <= 0n) throw new Error("Sale price must be greater than zero.");
   if (supply <= 0n) throw new Error("Sale supply must be greater than zero.");
   if (limit <= 0n || limit > supply) throw new Error("Per-wallet limit must be between 1 and the sale supply.");

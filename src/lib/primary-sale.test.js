@@ -22,6 +22,44 @@ describe("Fuji ERC-1155 primary sale", () => {
     expect(formatAvax("10000000000000000")).toBe("0.01 AVAX");
   });
 
+  it("configures a sale from a human-readable 6:00am start without a BigInt error", () => {
+    // Production regression: entering "6:00am" in the sale form threw
+    // "Cannot convert 6:00am to a BigInt". It must now encode cleanly.
+    const iface = new ethers.Interface([
+      "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
+    ]);
+    let encoded;
+    expect(() => {
+      encoded = encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n, startTime: "6:00am", endTime: "11:59pm" });
+    }).not.toThrow();
+    const [tokenId, price, supply, limit, start, end, paused] = iface.decodeFunctionData("configureSale", encoded);
+    const today = new Date();
+    const expectedStart = BigInt(Math.floor(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 6, 0, 0, 0).getTime() / 1000));
+    const expectedEnd = BigInt(Math.floor(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 0, 0).getTime() / 1000));
+    expect(tokenId).toBe(1n);
+    expect(price).toBe(10n);
+    expect(supply).toBe(4n);
+    expect(limit).toBe(2n);
+    expect(start).toBe(expectedStart);
+    expect(end).toBe(expectedEnd);
+    expect(paused).toBe(false);
+  });
+
+  it("still accepts numeric unix-second timestamps and an unset (blank) time", () => {
+    const iface = new ethers.Interface([
+      "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
+    ]);
+    const encoded = encodeConfigureSale({ tokenId: 2n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n, startTime: "1790000000", endTime: "" });
+    const [, , , , start, end] = iface.decodeFunctionData("configureSale", encoded);
+    expect(start).toBe(1790000000n);
+    expect(end).toBe(0n);
+  });
+
+  it("surfaces a clear error for an unparseable sale time rather than a BigInt exception", () => {
+    expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n, startTime: "not-a-time" }))
+      .toThrow(/valid sale time/);
+  });
+
   it("explains rejected transactions, the wrong network, and a sold-out sale", () => {
     expect(explainCollectError({ code: 4001 })).toMatchObject({ state: "rejected" });
     expect(explainCollectError(new Error("Switch your wallet to Avalanche Fuji (chain 43113)."))).toMatchObject({ state: "wrong-network" });
