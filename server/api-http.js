@@ -94,6 +94,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         if (base.length === 2 && base[1] === "me") data = await verificationService.getMine({ request: apiRequest });
         else if (base.length === 2 && base[1] === "artists") data = await verificationService.listVerified({ ...Object.fromEntries(url.searchParams) });
         else if (base.length === 2 && base[1] === "review") data = await verificationService.listReviewQueue({ request: apiRequest, status: url.searchParams.get("status") });
+        else if (base.length === 3 && base[1] === "review" && base[2] === "count") data = await verificationService.countReviewQueue({ request: apiRequest });
         else if (base.length === 3 && base[1] === "review") data = await verificationService.getReviewApplication({ request: apiRequest, publicId: base[2] });
         else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
       }
