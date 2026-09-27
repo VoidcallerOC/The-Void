@@ -8,8 +8,8 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(ethers.isAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe(true);
     expect(FUJI_RELEASE_ABI.join(" ")).toContain("createEdition");
     if (FUJI_RELEASE_CONFIG.contractName === "VoidRelease1155V2") {
-      expect(ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress)).not.toBe(ethers.ZeroAddress);
-      expect(ethers.isAddress(FUJI_RELEASE_CONFIG.primarySaleAddress)).toBe(true);
+      expect(ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress)).toBe("0x82b26Da27136935454Bdf1e40801190B521b82e5");
+      expect(ethers.getAddress(FUJI_RELEASE_CONFIG.primarySaleAddress)).toBe("0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1");
       const expectedV2Address = globalThis.process?.env?.EXPECTED_FUJI_V2_RELEASE_ADDRESS;
       if (expectedV2Address) expect(FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()).toBe(expectedV2Address.toLowerCase());
     } else {
