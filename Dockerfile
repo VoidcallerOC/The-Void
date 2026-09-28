@@ -4,7 +4,7 @@ ARG FOUNDRY_SHA256=baad3e1b06d6f310d210c93e95258a03d923fe610f8d0742138f2245f94ab
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION#v}_linux_amd64.tar.gz" -o /tmp/foundry.tar.gz \
+    && curl -fsSL "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz" -o /tmp/foundry.tar.gz \
     && echo "${FOUNDRY_SHA256}  /tmp/foundry.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/foundry \
     && tar -xzf /tmp/foundry.tar.gz -C /opt/foundry forge \
