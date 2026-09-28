@@ -18,7 +18,8 @@
     "start:api": "npm run db:migrate && node server/index.js",
     "start:indexer": "node server/indexer-worker.js",
     "deploy:release": "node scripts/deploy-release.mjs",
-    "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs"
+    "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs",
+    "deploy:marketplace": "node scripts/deploy-marketplace.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",
