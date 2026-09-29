@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, encodeFujiE2EMint, fujiExplorerUrl, readFujiEdition, readFujiE2EMintPreflight, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -79,9 +79,35 @@ export function ArtistStudioPage() {
   // recover and inspect the exact transaction instead of losing it.
   const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
+  const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
+  const isE2EAdmin = wallet.account?.toLowerCase() === FUJI_E2E_MINT.wallet;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isE2EAdmin || !wallet.connected) { setE2eMintStatus({ state: "hidden", message: "" }); return undefined; }
+    setE2eMintStatus({ state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" });
+    const provider = wallet.getProvider?.();
+    readFujiE2EMintPreflight(provider, wallet.account)
+      .then((result) => { if (!cancelled) setE2eMintStatus({ state: "ready", message: "Preflight passed. One copy is available to mint." , result }); })
+      .catch((error) => { if (!cancelled) setE2eMintStatus({ state: "blocked", message: error.message }); });
+    return () => { cancelled = true; };
+  }, [isE2EAdmin, wallet.connected, wallet.account]);
+
+  const mintE2ETestCopy = async () => {
+    setBusy("e2e-mint"); setE2eMintStatus({ state: "confirming", message: "Rabby confirmation required for exactly one E2E mint…" });
+    try {
+      const provider = wallet.getProvider?.();
+      await readFujiE2EMintPreflight(provider, wallet.account);
+      const result = await sendFujiTransaction({ provider, from: wallet.account, data: encodeFujiE2EMint() });
+      const verified = await verifyFujiE2EMint(provider, { transactionHash: result.hash });
+      setE2eMintStatus({ state: "complete", message: `Mint confirmed. Seller balance verified at ${verified.balance.toString()}.`, hash: result.hash });
+    } catch (error) {
+      setE2eMintStatus({ state: "blocked", message: error.message, hash: error.transactionHash || "" });
+    } finally { setBusy(""); }
+  };
 
 
   const ensureArtistAndRelease = async () => {
@@ -277,6 +303,18 @@ export function ArtistStudioPage() {
           </div>
           <WalletButton />
         </div>
+      )}
+
+      {isE2EAdmin && wallet.connected && (
+        <section style={{ ...card, marginBottom: 24, borderColor: "var(--vc-crimson)" }} aria-label="Temporary Fuji E2E mint control">
+          <Eyebrow red>Temporary Fuji E2E control</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 30, margin: "10px 0 8px" }}>Mint E2E Test Copy</h2>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>Admin-only test control. It submits no transaction until you click and approve the normal Rabby confirmation.</p>
+          <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.7, wordBreak: "break-all" }}>Token ID: {FUJI_E2E_MINT.tokenId.toString()}<br />Quantity: 1<br />Contract: {FUJI_RELEASE_CONFIG.contractAddress}</p>
+          {e2eMintStatus.message && <p role="status" style={{ color: e2eMintStatus.state === "complete" || e2eMintStatus.state === "ready" ? "var(--vc-bone-dim)" : "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{e2eMintStatus.message}</p>}
+          {e2eMintStatus.hash && <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}>TX: <a href={fujiExplorerUrl("tx", e2eMintStatus.hash)} target="_blank" rel="noreferrer">{e2eMintStatus.hash}</a></p>}
+          <button type="button" style={primaryBtn} disabled={busy !== "" || e2eMintStatus.state !== "ready"} onClick={mintE2ETestCopy}>{busy === "e2e-mint" ? "Confirming…" : "Mint E2E Test Copy"}</button>
+        </section>
       )}
 
       <nav aria-label="Studio workflow" className="vc-studio-steps">
