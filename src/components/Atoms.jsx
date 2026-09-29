@@ -70,6 +70,7 @@ export function Btn({ kind = "primary", children, onClick, style, disabled }) {
     : {};
   return (
     <button
+      disabled={disabled}
       style={{ ...base, ...variants[kind], ...dis }}
       onClick={disabled ? undefined : onClick}
       onMouseEnter={(e) => {

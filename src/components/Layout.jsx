@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
 import { Nav } from "./Nav.jsx";
@@ -6,6 +6,8 @@ import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { MintModal } from "./MintModal.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
+import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
 import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
 
@@ -46,8 +48,10 @@ function ScrollToTop() {
 export function Layout() {
   const [mintOpen, setMintOpen] = useState(false);
   const onMint = () => setMintOpen(true);
+  const catalog = useMarketplaceCatalogs();
+  const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(catalog.editions), [catalog.editions]);
   return (
-    <WalletProvider>
+    <WalletProvider collectionConfig={ownershipConfig}>
       <ReviewerNotificationsProvider>
         <PreviewHostBridge />
         <ScrollToTop />
