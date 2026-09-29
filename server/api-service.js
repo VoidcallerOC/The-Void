@@ -4,6 +4,7 @@ import { ARTIST_SELECT } from "./artist-verified-select.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { checkDatabaseHealth } from "./db.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
+import { certifiedContractParams, certifiedTokenJoinSql } from "./fuji-contract-scope.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { isHiddenPublicArtist } from "../src/lib/summit-demo.js";
 import { isPublicLegacyArtwork } from "../src/lib/legacy-genesis.js";
@@ -86,10 +87,10 @@ function toPublicRow(row, fields) {
 
 const EXPERIENCE_PUBLIC_FIELDS = ["id", "artist_id", "release_id", "edition_id", "title", "description", "experience_type", "version", "status", "created_at", "updated_at", "gated", "protected"];
 const RELEASE_PUBLIC_FIELDS = ["id", "artist_id", "slug", "title", "description", "status", "release_metadata", "published_at", "created_at", "updated_at", "artist_slug", "artist_name"];
-const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description", "supply", "status", "application_metadata", "created_at", "updated_at", "release_title", "artist_id", "chain_id", "contract_address"];
+const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description", "supply", "status", "application_metadata", "created_at", "updated_at", "release_title", "artist_id", "chain_id", "contract_address", "token_id"];
 const EXPERIENCE_PUBLIC_SELECT = `id, artist_id, release_id, edition_id, title, description, experience_type, version, status, created_at, updated_at, (jsonb_typeof(requirements) = 'array' AND jsonb_array_length(requirements) > 0) AS gated, (COALESCE(media_config->>'protected', '') = 'true' OR (jsonb_typeof(media_config->'protectedMedia') = 'array' AND jsonb_array_length(media_config->'protectedMedia') > 0)) AS protected`;
 const RELEASE_PUBLIC_SELECT = `r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata, r.published_at, r.created_at, r.updated_at, a.slug AS artist_slug, a.display_name AS artist_name`;
-const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address`;
+const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address, t.token_id::text AS token_id`;
 
 export class ApiService {
   constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {
@@ -175,13 +176,15 @@ export class ApiService {
 
   async getEdition({ id }) {
     const key = requiredText(id, "edition");
-    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
+    const [canonicalContract, canonicalChain] = certifiedContractParams();
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN tokens ${certifiedTokenJoinSql({ contractParam: 3, chainParam: 4 })} WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key, canonicalContract, canonicalChain]);
     if (!rows[0]) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
     return toPublicRow(rows[0], EDITION_PUBLIC_FIELDS);
   }
 
   async listEditions({ releaseId = null, limit, offset }) {
-    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE e.status=$1 AND ($2::text IS NULL OR e.release_id=$2) ORDER BY e.created_at DESC LIMIT $3 OFFSET $4`, [PUBLIC_STATUS, releaseId, limitValue(limit), offsetValue(offset)]);
+    const [canonicalContract, canonicalChain] = certifiedContractParams();
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN tokens ${certifiedTokenJoinSql({ contractParam: 2, chainParam: 3 })} WHERE e.status=$1 AND ($4::text IS NULL OR e.release_id=$4) ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`, [PUBLIC_STATUS, canonicalContract, canonicalChain, releaseId, limitValue(limit), offsetValue(offset)]);
     return rows.map((row) => toPublicRow(row, EDITION_PUBLIC_FIELDS));
   }
 
