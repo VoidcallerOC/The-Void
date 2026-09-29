@@ -23,8 +23,8 @@ export function isOutOfScopeCChainCollection(address) {
  * Fuji release contract. V1 and C-Chain rows stay in the table but are not
  * selected as the active Studio publication token.
  */
-export function certifiedTokenJoinSql({ tokenAlias = "t", editionAlias = "e" } = {}) {
-  return `${tokenAlias} ON ${tokenAlias}.edition_id=${editionAlias}.id AND ${tokenAlias}.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$2 AND chain_id=$3)`;
+export function certifiedTokenJoinSql({ tokenAlias = "t", editionAlias = "e", contractParam = 2, chainParam = 3 } = {}) {
+  return `${tokenAlias} ON ${tokenAlias}.edition_id=${editionAlias}.id AND ${tokenAlias}.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$${contractParam} AND chain_id=$${chainParam})`;
 }
 
 export function certifiedContractParams() {
