@@ -70,6 +70,15 @@ describe("catalog source", () => {
     expect(catalog.artists[0].verified).toBe(false);
   });
 
+  it("does not infer Fuji identity for published rows missing chain and contract fields", () => {
+    const catalog = mapPublishedCatalog({
+      artists: [{ id: "a1", display_name: "Forge" }],
+      releases: [{ id: "r1", artist_id: "a1", title: "Repair" }],
+      editions: [{ id: "e1", release_id: "r1", title: "Chapter I", status: "PUBLISHED", application_metadata: {} }],
+    });
+    expect(catalog.editions[0]).toMatchObject({ contractAddress: "", chainId: 0, tokenIds: [] });
+  });
+
   it("only marks published artists verified when the API row is verified", () => {
     const unverified = mapPublishedCatalog({ artists: [{ id: "a1", display_name: "Forge", slug: "forge" }] });
     const verified = mapPublishedCatalog({ artists: [{ id: "a1", display_name: "Forge", slug: "forge", verified: true }] });

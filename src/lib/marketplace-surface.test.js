@@ -121,6 +121,18 @@ describe("music-native catalog projection", () => {
     expect(flattenMarketplaceEditions().some((item) => item.edition.id === "voidcaller-chapter-i")).toBe(true);
   });
 
+  it("does not expose a wallet collect action when a Fuji edition has no token ID", () => {
+    const primary = primaryCollectForEdition({
+      contractAddress: FUJI_RELEASE_CONFIG.contractAddress,
+      chainId: FUJI_RELEASE_CONFIG.chainId,
+      status: "available",
+      tokenIds: [],
+      id: "unpublished-token",
+    });
+    expect(primary.availability).toBe("unavailable");
+    expect(primary.label).toBe("View edition");
+  });
+
   it("surfaces a studio overlay edition in the marketplace catalog without fabricating listings", () => {
     const overlay = {
       artists: [{ type: "artist", id: "forge", name: "Forge", handle: "forge", releases: [], collectionIds: [], experiences: [], socials: [], verified: true, verification: { status: "verified" }, wallet: "", address: "", bio: "", avatar: "", banner: "" }],
