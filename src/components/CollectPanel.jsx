@@ -154,14 +154,17 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const experienceHref = experiences[0] ? `/experience/${experiences[0].id}` : "/reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);
   const primaryOpensExperience = !owned && !notCreated && !certified && primary.availability === "minted";
+  const primaryCollectReady = certified && primary.availability === "available" && tokenId !== undefined && tokenId !== null;
   const action = owned ? (
     <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
   ) : notCreated ? (
     <span style={ghostBtn}>Not yet available</span>
-  ) : certified ? (
+  ) : primaryCollectReady ? (
     <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected || blocked || !saleAddress} onClick={collect}>
       {collectLabel(sale, busy === "collect")}
     </button>
+  ) : certified ? (
+    <span style={ghostBtn}>Not yet available</span>
   ) : primary.availability === "minted" ? (
     <Link to={experienceHref} style={primaryBtn}>Open experience</Link>
   ) : (
