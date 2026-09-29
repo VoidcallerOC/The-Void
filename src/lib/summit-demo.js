@@ -72,6 +72,7 @@ export function collapsePublicCatalog(catalog) {
   if (!catalog) return catalog;
   const stripped = stripSummitDemoCatalog(catalog);
   if (isSummitDemoEnabled()) return stripped;
+  const hiddenAliasIds = new Set((stripped.artists || []).filter(isVoidcallerPublicAlias).map((artist) => artist.id));
   const artists = [];
   let canonical = null;
   for (const artist of stripped.artists || []) {
@@ -83,5 +84,10 @@ export function collapsePublicCatalog(catalog) {
     artists.push(artist);
   }
   if (canonical) artists.unshift(canonical);
-  return { ...stripped, artists };
+  const releases = (stripped.releases || []).map((release) => {
+    const alias = hiddenAliasIds.has(release.artistId)
+      || isVoidcallerPublicAlias({ id: release.artistId, name: release.artistName, slug: release.artistSlug });
+    return canonical && alias ? { ...release, artistId: canonical.id } : release;
+  });
+  return { ...stripped, artists, releases };
 }
