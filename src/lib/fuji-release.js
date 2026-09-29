@@ -11,6 +11,12 @@ export const FUJI_ROLES = Object.freeze({
   ISSUER_ROLE: ethers.keccak256(ethers.toUtf8Bytes("ISSUER_ROLE")),
 });
 
+export const FUJI_E2E_MINT = Object.freeze({
+  wallet: "0xabd3746e8b852f55be52fc44fab6cab908b1c174",
+  tokenId: 69621777096996404494569967715110965261109496187347335164928263396549073080909n,
+  quantity: 1n,
+});
+
 export function fujiSlug(value, name = "id") {
   const slug = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (!slug) throw new Error(name.toLowerCase().includes("release") ? "Enter a release title before publishing." : "A name is required before publishing.");
@@ -29,6 +35,9 @@ const editionIface = new ethers.Interface([
   "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))",
   "error EditionNotFound(uint256 tokenId)",
   "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)",
+]);
+const mintIface = new ethers.Interface([
+  "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)",
 ]);
 const bytes32 = (value, name) => {
   const text = String(value || "").trim();
@@ -183,6 +192,44 @@ export function encodeFujiMint({ to, tokenId, amount = 1 }) {
   if (!ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("A valid recipient wallet is required.");
   if (BigInt(amount) <= 0n) throw new Error("Mint amount must be greater than zero.");
   return iface.encodeFunctionData("mint", [to, BigInt(tokenId), BigInt(amount), "0x"]);
+}
+
+export function encodeFujiE2EMint() {
+  return encodeFujiMint({ to: FUJI_E2E_MINT.wallet, tokenId: FUJI_E2E_MINT.tokenId, amount: FUJI_E2E_MINT.quantity });
+}
+
+export async function readFujiE2EMintPreflight(provider, account) {
+  await assertFujiProvider(provider);
+  const connected = ethers.getAddress(account || ethers.ZeroAddress);
+  if (connected.toLowerCase() !== FUJI_E2E_MINT.wallet) throw new Error("The E2E mint control is restricted to the authorized Fuji admin wallet.");
+  const [authorized, paused, balance, maxSupply] = await Promise.all([
+    readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, connected),
+    readFujiPaused(provider),
+    readFujiBalance(provider, connected, FUJI_E2E_MINT.tokenId),
+    (async () => {
+      const data = iface.encodeFunctionData("maxSupplyOf", [FUJI_E2E_MINT.tokenId]);
+      const result = await provider.request({ method: "eth_call", params: [{ to: assertFujiAddress(FUJI_RELEASE_CONFIG.contractAddress), data }, "latest"] });
+      return BigInt(iface.decodeFunctionResult("maxSupplyOf", result)[0]);
+    })(),
+  ]);
+  if (!authorized) throw new Error("The connected wallet does not have ISSUER_ROLE on the Fuji V2 contract.");
+  if (paused) throw new Error("The Fuji V2 contract is paused.");
+  if (maxSupply !== 1n) throw new Error(`The E2E token max supply is ${maxSupply}, expected 1.`);
+  if (balance !== 0n) throw new Error(`The E2E token already has seller balance ${balance}; mint is disabled to prevent a duplicate copy.`);
+  return { chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress, account: connected, tokenId: FUJI_E2E_MINT.tokenId, quantity: FUJI_E2E_MINT.quantity, maxSupply, balance, authorized, paused };
+}
+
+export async function verifyFujiE2EMint(provider, { transactionHash }) {
+  await assertFujiProvider(provider);
+  const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
+  if (!receipt || receipt.status !== "0x1") throw new Error("The E2E mint did not receive a successful Fuji receipt.");
+  const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()).map((log) => {
+    try { return mintIface.parseLog(log); } catch { return null; }
+  }).find((parsed) => parsed?.name === "TransferSingle" && parsed.args.from === ethers.ZeroAddress && parsed.args.to.toLowerCase() === FUJI_E2E_MINT.wallet && parsed.args.id === FUJI_E2E_MINT.tokenId && parsed.args.value === FUJI_E2E_MINT.quantity);
+  if (!event) throw new Error("The successful E2E mint receipt did not contain the expected TransferSingle event.");
+  const balance = await readFujiBalance(provider, FUJI_E2E_MINT.wallet, FUJI_E2E_MINT.tokenId);
+  if (balance !== FUJI_E2E_MINT.quantity) throw new Error(`E2E mint receipt succeeded, but seller balance is ${balance} instead of 1.`);
+  return { receipt, event, balance };
 }
 
 export function isFujiEditionNotFoundError(error) {
