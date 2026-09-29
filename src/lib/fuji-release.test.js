@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiMint, explainFujiEditionError, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition } from "./fuji-release.js";
+import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiE2EMint, encodeFujiMint, explainFujiEditionError, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses a valid certified Fuji release configuration", () => {
@@ -33,6 +33,19 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     const withRoyalty = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: 10, metadataUri: "ipfs://test", payout: "0x0000000000000000000000000000000000000001", royaltyBps: 500 });
     expect(withRoyalty.data.slice(0, 10)).toBe(ethers.id("createEdition(bytes32,bytes32,uint256,string,address,uint96)").slice(0, 10));
     expect(withRoyalty.tokenId).toBe(edition.tokenId);
+  });
+
+  it("locks the temporary E2E mint to the exact wallet, token, quantity, and contract call", () => {
+    const data = encodeFujiE2EMint();
+    const mintIface = new ethers.Interface(["function mint(address,uint256,uint256,bytes)"]);
+    const decoded = mintIface.decodeFunctionData("mint", data);
+    expect(FUJI_E2E_MINT.wallet).toBe("0xabd3746e8b852f55be52fc44fab6cab908b1c174");
+    expect(decoded[0].toLowerCase()).toBe(FUJI_E2E_MINT.wallet);
+    expect(decoded[1]).toBe(FUJI_E2E_MINT.tokenId);
+    expect(decoded[2]).toBe(FUJI_E2E_MINT.quantity);
+    expect(decoded[3]).toBe("0x");
+    expect(data.slice(0, 10)).toBe("0x731133e9");
+    expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x82b26Da27136935454Bdf1e40801190B521b82e5");
   });
 
   it("decodes every field from the deployed Edition struct return", async () => {
