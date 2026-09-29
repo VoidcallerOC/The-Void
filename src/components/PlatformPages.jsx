@@ -264,6 +264,7 @@ export function ExperiencePage() {
   const experience = catalog.experiences.find((item) => item.id === experienceId);
   const audio = useAudio();
   const wallet = useWallet();
+  const [playbackError, setPlaybackError] = useState("");
   if (!experience) return <Navigate to="/discover" replace />;
   const edition = catalog.editions.find((item) => (item.experienceIds || []).includes(experience.id) || experience.editionId === item.id);
   const release = catalog.releases.find((item) => item.id === edition?.releaseId || (item.experiences || []).includes(experience.id));
@@ -273,10 +274,24 @@ export function ExperiencePage() {
   const owned = Boolean(library.editions.some((item) => item.edition.id === edition?.id) || (edition && String(edition.status).toLowerCase() === "minted" && !isCertifiedFujiEdition(edition)));
   const tracks = tracksForRelease(release);
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
-  const hear = () => {
-    if (!tracks.length) return;
-    audio.setQueue(tracks, release?.id || experience.id);
-    audio.play(0);
+  const queueId = release?.id || experience.id;
+  const isPlaying = audio.queueId === queueId && audio.playing;
+  const hear = async () => {
+    if (!tracks.length) {
+      setPlaybackError("No playable tracks are attached to this experience yet.");
+      return;
+    }
+    setPlaybackError("");
+    if (isPlaying) {
+      audio.pause();
+      return;
+    }
+    audio.setQueue(tracks, queueId);
+    try {
+      await audio.play(0);
+    } catch {
+      setPlaybackError("Playback could not start. Check the browser’s audio permission and try again.");
+    }
   };
   return (
     <section style={shell}>
@@ -310,13 +325,14 @@ export function ExperiencePage() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
             {tracks.length > 0 && (
               <button type="button" style={primaryBtn} onClick={hear}>
-                {owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}
+                {isPlaying ? "Pause experience" : owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}
               </button>
             )}
             {edition && !owned && <Link to={`/edition/${edition.id}`} style={tracks.length ? ghostBtn : primaryBtn}>Collect</Link>}
             {edition && owned && <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>}
             <Link to="/collection" style={ghostBtn}>My collection</Link>
           </div>
+          {playbackError && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6 }}>{playbackError}</p>}
         </div>
       </div>
     </section>
