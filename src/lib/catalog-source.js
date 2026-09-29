@@ -112,6 +112,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     return createRelease({
       id: row.id,
       artistId: row.artist_id || row.artistId,
+      artistName: row.artist_name || row.artistName || "",
+      artistSlug: row.artist_slug || row.artistSlug || "",
       title: row.title || row.id,
       subtitle: meta.subtitle || "",
       description: row.description || "",
