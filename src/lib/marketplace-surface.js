@@ -109,13 +109,16 @@ export function primaryCollectForEdition(edition) {
   }
   if (isCertifiedFujiEdition(edition)) {
     const minted = String(edition.status).toLowerCase() === "minted";
+    const hasTokenId = Array.isArray(edition.tokenIds) && edition.tokenIds.length > 0;
     return {
-      availability: minted ? "minted" : "available",
+      availability: minted ? "minted" : hasTokenId ? "available" : "unavailable",
       status: MARKETPLACE_STATE.LIVE,
-      label: minted ? "Owned" : "Collect",
+      label: minted ? "Owned" : hasTokenId ? "Collect" : "View edition",
       href: `/edition/${edition.id}`,
       note: minted
         ? "You already hold this certified Fuji edition. Open the collector experience."
+        : !hasTokenId
+          ? "This published edition is missing its on-chain Fuji token ID and cannot be collected yet."
         : "Primary collect on certified Fuji. Secondary trading is a separate, not-yet-live layer.",
       certified: true,
     };
@@ -134,11 +137,11 @@ export function primaryCollectForEdition(edition) {
   }
   if (String(edition.status).toLowerCase() === "available") {
     return {
-      availability: "available",
+      availability: "unavailable",
       status: MARKETPLACE_STATE.LIVE,
-      label: "Collect",
+      label: "View edition",
       href: `/edition/${edition.id}`,
-      note: "Primary collection is the music-native Collect path. It is not a secondary marketplace trade.",
+      note: "Primary collection is available only for editions published on the certified Fuji contract.",
       certified: false,
     };
   }
