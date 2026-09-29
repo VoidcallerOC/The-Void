@@ -1,19 +1,18 @@
-import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { JsonRpcProvider } from "ethers";
 import { extractForgeJson } from "./deploy-marketplace-output.mjs";
 
-const execFileAsync = promisify(execFile);
+const MAX_FORGE_OUTPUT_BYTES = 10 * 1024 * 1024;
 const networks = Object.freeze({
   fuji: { chainId: 43113, rpcEnv: "AVALANCHE_FUJI_RPC_URL" },
   mainnet: { chainId: 43114, rpcEnv: "AVALANCHE_CCHAIN_RPC_URL" },
 });
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const TRANSACTION_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const BYTECODE_PATTERN = /^(?:[0-9a-fA-F]{2})+$/;
 
@@ -25,21 +24,17 @@ export function resolveMarketplaceConfig(env = process.env) {
   if (!target) throw new DeploymentError("Unsupported deployment network. Use fuji or mainnet.");
 
   const rpcUrl = env[target.rpcEnv];
-  const keystorePath = env.DEPLOYER_KEYSTORE_PATH;
-  const passwordFilePath = env.DEPLOYER_KEYSTORE_PASSWORD_FILE;
   const feeRecipient = env.MARKETPLACE_FEE_RECIPIENT;
   const feeBpsText = env.MARKETPLACE_FEE_BPS;
   const feeBps = Number(feeBpsText);
 
   if (
     typeof rpcUrl !== "string" || rpcUrl.length === 0 ||
-    typeof keystorePath !== "string" || !isAbsolute(keystorePath) ||
-    typeof passwordFilePath !== "string" || !isAbsolute(passwordFilePath) ||
     !ADDRESS_PATTERN.test(feeRecipient || "") ||
     !/^\d+$/.test(feeBpsText || "") || !Number.isSafeInteger(feeBps) || feeBps > 10000
   ) {
     throw new DeploymentError(
-      `Missing or invalid deployment configuration. Required: ${target.rpcEnv}, DEPLOYER_KEYSTORE_PATH, DEPLOYER_KEYSTORE_PASSWORD_FILE, MARKETPLACE_FEE_RECIPIENT, MARKETPLACE_FEE_BPS (0-10000).`,
+      `Missing or invalid deployment configuration. Required: ${target.rpcEnv}, MARKETPLACE_FEE_RECIPIENT, MARKETPLACE_FEE_BPS (0-10000).`,
     );
   }
 
@@ -51,13 +46,23 @@ export function resolveMarketplaceConfig(env = process.env) {
     network,
     chainId: target.chainId,
     rpcUrl,
-    keystorePath,
-    passwordFilePath,
     feeRecipient,
     feeBps,
     feeBpsText,
     bytecodePath: env.MARKETPLACE_BYTECODE_PATH || "out/MusicMarketplace.sol/MusicMarketplace.json",
   };
+}
+
+function privateKeyInputFromEnvironment(value) {
+  if (typeof value !== "string") {
+    throw new DeploymentError("A valid DEPLOYER_PRIVATE_KEY environment credential is required.");
+  }
+  const trimmed = value.trim();
+  const normalized = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+  if (!PRIVATE_KEY_PATTERN.test(normalized)) {
+    throw new DeploymentError("A valid DEPLOYER_PRIVATE_KEY environment credential is required.");
+  }
+  return Buffer.from(`${normalized}\n`, "utf8");
 }
 
 export function buildForgeCreateArgs(config) {
@@ -66,10 +71,7 @@ export function buildForgeCreateArgs(config) {
     "contracts/MusicMarketplace.sol:MusicMarketplace",
     "--chain",
     String(config.chainId),
-    "--keystore",
-    config.keystorePath,
-    "--password-file",
-    config.passwordFilePath,
+    "--interactive",
     "--constructor-args",
     config.feeRecipient,
     config.feeBpsText,
@@ -80,24 +82,61 @@ export function buildForgeCreateArgs(config) {
 
 export function buildForgeEnvironment(env, rpcUrl) {
   const forgeEnv = { ...env, ETH_RPC_URL: rpcUrl };
-  // Never forward raw or inline signer passwords to the Forge child process.
-  for (const key of ["DEPLOYER_PRIVATE_KEY", "ETH_PASSWORD", "DEPLOYER_KEYSTORE_PASSWORD"]) {
+  // Forge receives the key only through its hidden PTY prompt, never via argv or environment.
+  for (const key of [
+    "DEPLOYER_PRIVATE_KEY",
+    "ETH_PRIVATE_KEY",
+    "ETH_PASSWORD",
+    "ETH_KEYSTORE",
+    "ETH_KEYSTORE_ACCOUNT",
+    "DEPLOYER_KEYSTORE_PATH",
+    "DEPLOYER_KEYSTORE_PASSWORD_FILE",
+    "DEPLOYER_KEYSTORE_PASSWORD",
+  ]) {
     delete forgeEnv[key];
   }
   return forgeEnv;
 }
 
-export async function runForgeCreate(execute = execFileAsync, config, env = process.env) {
-  const args = buildForgeCreateArgs(config);
-  const childEnv = buildForgeEnvironment(env, config.rpcUrl);
+function quoteShellArgument(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function executeForgeWithPty(args, { env, input, cwd, maxBuffer = MAX_FORGE_OUTPUT_BYTES }) {
+  const command = ["forge", ...args].map(quoteShellArgument).join(" ");
+  const stdout = execFileSync(
+    "script",
+    ["--quiet", "--return", "--command", command, "/dev/null"],
+    { cwd, env, input, encoding: "utf8", maxBuffer },
+  );
+  return { stdout, stderr: "" };
+}
+
+export async function runForgeCreate(
+  execute = executeForgeWithPty,
+  config,
+  env = process.env,
+  privateKeyInput,
+  cwd = process.cwd(),
+) {
+  if (!Buffer.isBuffer(privateKeyInput) || privateKeyInput.length === 0) {
+    throw new DeploymentError("A deployer wallet credential is required.");
+  }
+
   let stdout;
   try {
-    ({ stdout } = await execute("forge", args, {
+    const args = buildForgeCreateArgs(config);
+    const childEnv = buildForgeEnvironment(env, config.rpcUrl);
+    ({ stdout } = await execute(args, {
       env: childEnv,
-      maxBuffer: 10 * 1024 * 1024,
+      input: privateKeyInput,
+      cwd,
+      maxBuffer: MAX_FORGE_OUTPUT_BYTES,
     }));
   } catch {
     throw new DeploymentError("Forge create failed; sensitive process output was suppressed.");
+  } finally {
+    privateKeyInput.fill(0);
   }
 
   try {
@@ -155,75 +194,79 @@ export function hashDeploymentBytecode(bytecode) {
   return bytecodeHash;
 }
 
-async function assertReadableSignerFiles(config) {
-  try {
-    await access(config.keystorePath, fsConstants.R_OK);
-    await access(config.passwordFilePath, fsConstants.R_OK);
-  } catch {
-    throw new DeploymentError("The configured signer keystore and password files must be readable.");
-  }
-}
-
 export async function runMarketplaceDeployment({
   env = process.env,
   cwd = process.cwd(),
-  execute = execFileAsync,
+  execute = executeForgeWithPty,
   Provider = JsonRpcProvider,
 } = {}) {
-  const config = resolveMarketplaceConfig(env);
-  await assertReadableSignerFiles(config);
+  const runtimeEnv = { ...env };
+  let rawPrivateKey = runtimeEnv.DEPLOYER_PRIVATE_KEY;
+  if (env === process.env) delete process.env.DEPLOYER_PRIVATE_KEY;
+  delete runtimeEnv.DEPLOYER_PRIVATE_KEY;
 
-  const forgeResult = await runForgeCreate(execute, config, env);
-  const rawTransactionHash = forgeResult.transactionHash || forgeResult.txHash;
-  if (!TRANSACTION_HASH_PATTERN.test(rawTransactionHash || "")) {
-    throw new DeploymentError("Deployment output did not include a valid transaction hash.");
-  }
-
-  let receipt;
+  let privateKeyInput;
   try {
-    const provider = new Provider(config.rpcUrl, config.chainId, { staticNetwork: true });
-    receipt = await provider.waitForTransaction(rawTransactionHash, 1, 60_000);
-  } catch {
-    throw new DeploymentError("Could not verify a mined deployment receipt.");
-  }
-  const verified = verifyForgeDeployment(forgeResult, receipt);
+    const config = resolveMarketplaceConfig(runtimeEnv);
+    privateKeyInput = privateKeyInputFromEnvironment(rawPrivateKey);
+    rawPrivateKey = "";
 
-  const artifactPath = isAbsolute(config.bytecodePath)
-    ? config.bytecodePath
-    : resolve(cwd, config.bytecodePath);
-  let artifact;
-  try {
-    artifact = JSON.parse(await readFile(artifactPath, "utf8"));
-  } catch {
-    throw new DeploymentError("The deployment bytecode artifact could not be read.");
-  }
-  const bytecodeHash = hashDeploymentBytecode(artifact?.bytecode?.object);
-  const record = {
-    network: config.network,
-    chainId: config.chainId,
-    contractAddress: verified.contractAddress,
-    deploymentTransaction: verified.transactionHash,
-    deploymentBlock: verified.deploymentBlock,
-    bytecodeHash,
-    sourceVerificationStatus: "NOT_REQUESTED",
-    feeRecipient: config.feeRecipient.toLowerCase(),
-    feeBasisPoints: config.feeBps,
-    supportedTokenContracts: [],
-    recordedAt: new Date().toISOString(),
-  };
+    const forgeResult = await runForgeCreate(execute, config, runtimeEnv, privateKeyInput, cwd);
+    privateKeyInput = undefined;
+    const rawTransactionHash = forgeResult.transactionHash || forgeResult.txHash;
+    if (!TRANSACTION_HASH_PATTERN.test(rawTransactionHash || "")) {
+      throw new DeploymentError("Deployment output did not include a valid transaction hash.");
+    }
 
-  try {
-    const deploymentDirectory = resolve(cwd, "deployments");
-    await mkdir(deploymentDirectory, { recursive: true });
-    await writeFile(
-      resolve(deploymentDirectory, `marketplace-${config.network}.json`),
-      `${JSON.stringify(record, null, 2)}\n`,
-    );
-  } catch {
-    throw new DeploymentError("Deployment metadata could not be written.");
-  }
+    let receipt;
+    try {
+      const provider = new Provider(config.rpcUrl, config.chainId, { staticNetwork: true });
+      receipt = await provider.waitForTransaction(rawTransactionHash, 1, 60_000);
+    } catch {
+      throw new DeploymentError("Could not verify a mined deployment receipt.");
+    }
+    const verified = verifyForgeDeployment(forgeResult, receipt);
 
-  return record;
+    const artifactPath = isAbsolute(config.bytecodePath)
+      ? config.bytecodePath
+      : resolve(cwd, config.bytecodePath);
+    let artifact;
+    try {
+      artifact = JSON.parse(await readFile(artifactPath, "utf8"));
+    } catch {
+      throw new DeploymentError("The deployment bytecode artifact could not be read.");
+    }
+    const bytecodeHash = hashDeploymentBytecode(artifact?.bytecode?.object);
+    const record = {
+      network: config.network,
+      chainId: config.chainId,
+      contractAddress: verified.contractAddress,
+      deploymentTransaction: verified.transactionHash,
+      deploymentBlock: verified.deploymentBlock,
+      bytecodeHash,
+      sourceVerificationStatus: "NOT_REQUESTED",
+      feeRecipient: config.feeRecipient.toLowerCase(),
+      feeBasisPoints: config.feeBps,
+      supportedTokenContracts: [],
+      recordedAt: new Date().toISOString(),
+    };
+
+    try {
+      const deploymentDirectory = resolve(cwd, "deployments");
+      await mkdir(deploymentDirectory, { recursive: true });
+      await writeFile(
+        resolve(deploymentDirectory, `marketplace-${config.network}.json`),
+        `${JSON.stringify(record, null, 2)}\n`,
+      );
+    } catch {
+      throw new DeploymentError("Deployment metadata could not be written.");
+    }
+
+    return record;
+  } finally {
+    rawPrivateKey = "";
+    privateKeyInput?.fill(0);
+  }
 }
 
 const invokedScriptPath = process.argv[1] ? resolve(process.argv[1]) : "";
