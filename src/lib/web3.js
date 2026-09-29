@@ -45,12 +45,13 @@ export async function fetchTokenMetadata({ tokenIds = RELIC_TOKEN_IDS, gateway =
 }
 export const fetchAllMetadata = (options = {}) => fetchTokenMetadata({ tokenIds: RELIC_TOKEN_IDS, gateway: IPFS_GATEWAY, baseCid: IPFS_BASE_CID, fallback: FALLBACK_METADATA, ...options });
 
-export async function checkCollectionOwnership(account, { chains = CHAINS, tokenIds = RELIC_TOKEN_IDS } = {}) {
+export async function checkCollectionOwnership(account, { chains = CHAINS, tokenIds = RELIC_TOKEN_IDS, rpc = rpcCall } = {}) {
   const owned = Object.fromEntries(Object.keys(chains).map((key) => [key, new Set()]));
   if (!account) return owned;
   await Promise.all(Object.entries(chains).map(async ([key, chain]) => {
-    await Promise.all(tokenIds.map(async (id) => {
-      try { const result = await rpcCall(chain.rpc, chain.contract, SEL.balanceOf + padAddr(account) + padUint(id)); if (decodeUint(result.slice(2)) > 0n) owned[key].add(id); } catch { /* an unavailable chain is non-fatal */ }
+    const chainTokenIds = Array.isArray(chain.tokenIds) ? chain.tokenIds : tokenIds;
+    await Promise.all(chainTokenIds.map(async (id) => {
+      try { const result = await rpc(chain.rpc, chain.contract, SEL.balanceOf + padAddr(account) + padUint(id)); if (decodeUint(result.slice(2)) > 0n) owned[key].add(id); } catch { /* an unavailable chain is non-fatal */ }
     }));
   }));
   return owned;
@@ -61,7 +62,8 @@ export async function checkCollectionOwnershipRecords(account, { chains = CHAINS
   const records = [];
   await Promise.all(Object.entries(chains).map(async ([key, chain]) => {
     const contract = contracts?.[key] || chain.contract;
-    await Promise.all(tokenIds.map(async (id) => {
+    const chainTokenIds = Array.isArray(chain.tokenIds) ? chain.tokenIds : tokenIds;
+    await Promise.all(chainTokenIds.map(async (id) => {
       try {
         const result = await rpc(chain.rpc, contract, SEL.balanceOf + padAddr(account) + padUint(id));
         const amount = decodeUint(result.slice(2));
