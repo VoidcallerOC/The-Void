@@ -72,11 +72,11 @@ export function buildForgeCreateArgs(config) {
     "--chain",
     String(config.chainId),
     "--interactive",
+    "--broadcast",
+    "--json",
     "--constructor-args",
     config.feeRecipient,
     config.feeBpsText,
-    "--broadcast",
-    "--json",
   ];
 }
 
