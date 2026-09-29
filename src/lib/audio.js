@@ -147,7 +147,10 @@ export const VC_AUDIO = {
       this.ensure();
       if (!this.el.src) this.setTrack(this.idx);
     }
-    this.el.play().catch(() => {});
+    return this.el.play().catch((error) => {
+      this.notify();
+      throw error;
+    });
   },
 
   pause() { if (this.el) this.el.pause(); },
