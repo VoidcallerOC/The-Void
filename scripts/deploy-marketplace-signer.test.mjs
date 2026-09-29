@@ -102,6 +102,8 @@ describe("marketplace deployment signer hardening", () => {
       expect(observedCall.args).toContain("43113");
       expect(observedCall.args).toContain("--broadcast");
       expect(observedCall.args).toContain("--json");
+      expect(observedCall.args.indexOf("--broadcast")).toBeLessThan(observedCall.args.indexOf("--constructor-args"));
+      expect(observedCall.args.indexOf("--json")).toBeLessThan(observedCall.args.indexOf("--constructor-args"));
       expect(observedCall.args).toContain(FEE_RECIPIENT);
       expect(observedCall.args).toContain("250");
       expect(observedCall.args).not.toContain("--private-key");
