@@ -125,8 +125,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
   const mappedEditions = asArray(editions).filter((row) => row?.id).map((row) => {
     const meta = metadataOf(row, "application_metadata", "metadata");
     const fuji = meta.fuji || {};
-    const contractAddress = row.contract_address || fuji.contractAddress || FUJI_RELEASE_CONFIG.contractAddress;
-    const chainId = Number(row.chain_id || fuji.chainId || FUJI_RELEASE_CONFIG.chainId);
+    const contractAddress = row.contract_address || fuji.contractAddress || "";
+    const chainId = Number(row.chain_id || fuji.chainId || 0);
     const tokenId = fuji.tokenId || meta.tokenId || row.token_id;
     // Legacy mainnet editions (the original Voidcaller collection) are minted
     // out: never "available" for primary collect, and they list every token.
@@ -238,6 +238,7 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
 export function useMarketplaceCatalogs() {
   const [overlay, setOverlay] = useState(() => readStudioOverlay());
   const [published, setPublished] = useState(emptyCatalog());
+  const [publishedLoading, setPublishedLoading] = useState(true);
 
   useEffect(() => {
     const sync = () => setOverlay(readStudioOverlay());
@@ -253,14 +254,15 @@ export function useMarketplaceCatalogs() {
     const controller = new AbortController();
     fetchPublishedCatalog({ signal: controller.signal })
       .then((catalog) => setPublished(catalog))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPublishedLoading(false));
     return () => controller.abort();
   }, []);
 
-  return useMemo(
-    () => collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, withoutShadowedLegacyAlbum(published)])),
-    [overlay, published],
-  );
+  return useMemo(() => ({
+    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, withoutShadowedLegacyAlbum(published)])),
+    publishedLoading,
+  }), [overlay, published, publishedLoading]);
 }
 
 export function notifyStudioOverlay() {

@@ -196,6 +196,9 @@ export function EditionPage() {
   const catalog = useMarketplaceCatalogs();
   const { edition: editionId } = useParams();
   const result = getEditionCatalog(catalog, editionId);
+  if (!result && catalog.publishedLoading) {
+    return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading edition…</p></section>;
+  }
   if (!result) return <Navigate to="/marketplace" replace />;
   const { edition, release, artist, experiences } = result;
   const secondary = resolveSecondaryStatus();
