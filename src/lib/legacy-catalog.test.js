@@ -48,7 +48,7 @@ describe("legacy mainnet catalog rows", () => {
   it("never offers primary collect for the legacy contract even if a row claims to be available", () => {
     const primary = primaryCollectForEdition({ id: "x", contractAddress: LEGACY_CONTRACT.toUpperCase().replace("0X", "0x"), chainId: LEGACY_CHAIN_ID, status: "available" });
     expect(primary.availability).toBe("minted");
-    expect(primary.label).toBe("Open experience");
+    expect(primary.label).toBe("View edition");
   });
 
   it("keeps Fuji editions collectable exactly as before", () => {

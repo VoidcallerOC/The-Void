@@ -37,6 +37,12 @@ export function resolveSecondaryStatus({ infrastructure = resolveInfrastructureS
   return MARKETPLACE_STATE.LIVE;
 }
 
+export function marketplaceSecondaryAvailability(status) {
+  if (status === MARKETPLACE_STATE.LIVE) return "Live index";
+  if (status === MARKETPLACE_STATE.UNAVAILABLE) return "Index unavailable";
+  return "Not yet live";
+}
+
 export function marketplaceCopy(status = resolveInfrastructureStatus()) {
   if (status === MARKETPLACE_STATE.LIVE) {
     return {
@@ -77,6 +83,14 @@ export function parseAvaxToWei(avax) {
 
 export function editionPriceLabel(edition) {
   return formatWeiAsAvax(edition?.priceWei || edition?.price || null);
+}
+
+export function listingIsDisplayable(listing) {
+  return listing?.authority === "INDEXED"
+    && String(listing.status || "").toUpperCase() === "ACTIVE"
+    && Number(listing.amount) > 0
+    && Boolean(listing.seller)
+    && Boolean(formatWeiAsAvax(listing.price));
 }
 
 export function resolveEditionChain(edition) {
@@ -129,9 +143,9 @@ export function primaryCollectForEdition(edition) {
     return {
       availability: "minted",
       status: MARKETPLACE_STATE.LIVE,
-      label: "Open experience",
+      label: "View edition",
       href: `/edition/${edition.id}`,
-      note: "Primary mint for this edition is complete. Open the collector experience. Secondary collection is not yet live.",
+      note: "Primary mint for this edition is complete. View the edition or use its linked experience. Secondary collection is not yet live.",
       certified: false,
     };
   }
