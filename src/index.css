@@ -278,7 +278,7 @@ body { padding-bottom: 72px; }
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 120px clamp(16px, 4vw, 56px) 56px;
+  padding: 120px clamp(16px, 4vw, 56px) clamp(180px, 20vh, 220px);
   display: flex;
   flex-direction: column;
   gap: 16px;
