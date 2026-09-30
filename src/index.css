@@ -250,7 +250,7 @@ body { padding-bottom: 72px; }
 
 .vc-market-hero-bleed {
   position: relative;
-  min-height: min(92vh, 920px);
+  min-height: clamp(560px, 72vh, 760px);
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -278,7 +278,7 @@ body { padding-bottom: 72px; }
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 120px clamp(16px, 4vw, 56px) clamp(180px, 20vh, 220px);
+  padding: 96px clamp(16px, 4vw, 56px) 72px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -297,6 +297,20 @@ body { padding-bottom: 72px; }
   line-height: 1.7;
   font-size: 17px;
   margin: 0;
+}
+.vc-market-volume {
+  display: grid;
+  gap: 5px;
+  width: fit-content;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--vc-ash);
+}
+.vc-market-volume strong {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 .vc-market-hero-feature {
   max-width: 620px;

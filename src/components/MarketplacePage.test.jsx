@@ -6,9 +6,10 @@ import { baseCatalogs, mapPublishedCatalog, mergeCatalogs } from "../lib/catalog
 import { EditionCard } from "./MarketplaceCards.jsx";
 import { MarketplacePage } from "./MarketplacePage.jsx";
 
-const { catalogState, fetchListings, walletState } = vi.hoisted(() => ({
+const { catalogState, fetchListings, fetchVolume, walletState } = vi.hoisted(() => ({
   catalogState: { current: null },
   fetchListings: vi.fn(),
+  fetchVolume: vi.fn(),
   walletState: { current: { connected: false, owned: {} } },
 }));
 
@@ -19,7 +20,7 @@ vi.mock("../lib/catalog-source.js", async (importOriginal) => {
 
 vi.mock("../lib/marketplace-api.js", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchIndexedListings: (...args) => fetchListings(...args) };
+  return { ...actual, fetchIndexedListings: (...args) => fetchListings(...args), fetchMarketplaceVolume: (...args) => fetchVolume(...args) };
 });
 
 vi.mock("../lib/marketplace.js", async (importOriginal) => {
@@ -76,6 +77,8 @@ beforeEach(() => {
   walletState.current = { connected: false, owned: {} };
   fetchListings.mockReset();
   fetchListings.mockResolvedValue([]);
+  fetchVolume.mockReset();
+  fetchVolume.mockResolvedValue({ currency: "AVAX", overallVolumeWei: "30000000000000000" });
 });
 
 afterEach(() => cleanup());
@@ -89,10 +92,12 @@ describe("public marketplace inventory", () => {
     expect(screen.getByRole("heading", { name: "Secondary collector listings" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "VOIDCALLER" })).toBeTruthy();
     expect(screen.getByText("Full self-titled EP")).toBeTruthy();
+    expect(screen.getByLabelText("Overall volume").textContent).toMatch(/Overall volume\s*0\.03 AVAX/i);
     expect(container.textContent).toMatch(/Avalanche Fuji.*43113|Fuji.*43113/i);
     expect(container.textContent).toContain("0.01 AVAX");
     expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION|\bwer\b|\bqwe\b/i);
     expect(container.textContent).not.toMatch(/Recently listed|Add tracks|Open artist studio|From the artists/i);
+    expect(container.textContent).not.toMatch(/Overall Mint Volume|Floor over mint|25x|25×/i);
     expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
     expect(container.querySelectorAll("[data-edition-id='edition-b87f40b1-9419-4e90-8e2f-5b8986df043c']")).toHaveLength(0);
     expect(screen.getByRole("link", { name: "Collect" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);

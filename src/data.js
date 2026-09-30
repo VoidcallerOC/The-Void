@@ -43,7 +43,6 @@ export const VC_DATA = {
   heroStats: [
     ["477", "BEARERS"],
     ["1,620", "RELICS FORGED"],
-    ["17–25×", "FLOOR OVER MINT"],
   ],
   block: "47,118,302",
   gas: "26 nAVAX",
