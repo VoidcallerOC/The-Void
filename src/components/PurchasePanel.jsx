@@ -219,6 +219,7 @@ export function PurchasePanel({ edition }) {
       setMessage(refreshedListings && refreshedSoldListing
         ? "Purchase confirmed by the marketplace index. Listing is SOLD with zero remaining; wallet ownership was refreshed where supported."
         : "Purchase confirmed by the marketplace index. Some indexed display data could not be refreshed; no additional transaction was sent.");
+      window.dispatchEvent(new Event("void:marketplace-volume-updated"));
     };
 
     void refreshIndexedState();

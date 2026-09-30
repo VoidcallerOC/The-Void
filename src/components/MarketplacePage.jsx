@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { EditionCard, EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
-import { fetchIndexedListings } from "../lib/marketplace-api.js";
+import { fetchIndexedListings, fetchMarketplaceVolume } from "../lib/marketplace-api.js";
 import { MARKETPLACE_CONFIG } from "../lib/marketplace.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { useWallet } from "../lib/wallet-context.js";
@@ -11,6 +11,7 @@ import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import {
   MARKETPLACE_STATE,
   flattenMarketplaceEditions,
+  formatWeiAsAvax,
   listingIsDisplayable,
   listingsForEdition,
   marketplaceSecondaryAvailability,
@@ -50,6 +51,7 @@ export function MarketplacePage() {
     .filter((item) => !focusRelease || item.release.id === focusRelease)
     .filter((item) => !focusEdition || item.edition.id === focusEdition), [catalog, focusEdition, focusRelease]);
   const [listingRequest, setListingRequest] = useState(null);
+  const [volume, setVolume] = useState(null);
   const requestKey = `${infrastructure}:${MARKETPLACE_CONFIG.chainId}:${String(MARKETPLACE_CONFIG.address || "").toLowerCase()}`;
   const currentRequest = listingRequest?.key === requestKey ? listingRequest : null;
   const listingsState = infrastructure === MARKETPLACE_STATE.LIVE ? currentRequest?.status || "loading" : "idle";
@@ -69,6 +71,29 @@ export function MarketplacePage() {
       });
     return () => controller.abort();
   }, [infrastructure, requestKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const loadVolume = async () => {
+      try {
+        const next = await fetchMarketplaceVolume({ signal: controller.signal });
+        if (active) setVolume(next);
+      } catch (error) {
+        if (error?.name !== "AbortError" && active) setVolume(null);
+      }
+    };
+    const refreshOnAuthoritativeEvent = () => { void loadVolume(); };
+    void loadVolume();
+    window.addEventListener("void:marketplace-volume-updated", refreshOnAuthoritativeEvent);
+    document.addEventListener("visibilitychange", refreshOnAuthoritativeEvent);
+    return () => {
+      active = false;
+      controller.abort();
+      window.removeEventListener("void:marketplace-volume-updated", refreshOnAuthoritativeEvent);
+      document.removeEventListener("visibilitychange", refreshOnAuthoritativeEvent);
+    };
+  }, []);
 
   const secondary = resolveSecondaryStatus({ infrastructure, listingsState });
   const liveListings = useMemo(
@@ -94,6 +119,10 @@ export function MarketplacePage() {
           <Eyebrow red>† {copy.eyebrow}</Eyebrow>
           <h1 className="vc-market-hero-title">{copy.title}</h1>
           <p className="vc-market-hero-lede">{copy.body}</p>
+          {volume && <div className="vc-market-volume" aria-label="Overall volume">
+            <Eyebrow>Overall volume</Eyebrow>
+            <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
+          </div>}
           <QuietStatus primary="Published catalog" secondary={marketplaceSecondaryAvailability(secondary)} />
         </div>
       </header>

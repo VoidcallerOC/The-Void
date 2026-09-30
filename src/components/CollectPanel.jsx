@@ -137,6 +137,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       setNotice("Collect confirmed. This edition is now in your collection.");
       setNoticeState("confirmed");
       await wallet.refreshOwnership?.(wallet.account);
+      window.dispatchEvent(new Event("void:marketplace-volume-updated"));
     } catch (error) {
       console.error("Collect preflight failed", error);
       if (isFujiEditionNotFoundError(error)) {
