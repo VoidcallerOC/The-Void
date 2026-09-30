@@ -1,15 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./web3.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, waitForReceipt: vi.fn(), switchChain: vi.fn() };
+});
+
+import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, submitPurchase, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
+import { waitForReceipt } from "./web3.js";
 
 const seller = "0x1111111111111111111111111111111111111111";
 const buyer = "0x3333333333333333333333333333333333333333";
 const contract = "0x2222222222222222222222222222222222222222";
+const marketplace = "0x4444444444444444444444444444444444444444";
 const topic = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const address = (value) => value.slice(2).padStart(64, "0");
 function active(overrides = {}) { return createListingRecord({ listingId: "7", seller, chain: 43114, contract, tokenId: 1, amount: 10, price: "100", ...overrides }); }
 
- describe("marketplace listing validation", () => {
+describe("marketplace listing validation", () => {
   it("accepts a valid multi-unit native listing", () => expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 2, price: "100" })).toBeNull());
   it("rejects invalid quantity, price, currency, and stale expiry", () => {
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 0, price: "100" })).toMatch(/quantity/i);
@@ -17,7 +25,7 @@ function active(overrides = {}) { return createListingRecord({ listingId: "7", s
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", currency: "USDC" })).toMatch(/native/i);
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", expiresAt: 10, now: 11 })).toMatch(/future/i);
   });
- });
+});
 
 describe("purchase validation and payment", () => {
   it("calculates native payment from unit price and quantity", () => expect(requiredPayment(active(), 3)).toBe("300"));
@@ -47,9 +55,23 @@ describe("marketplace ABI, receipt verification, and lifecycle", () => {
   it("verifies buyer, seller, token, quantity, and total payment from settlement", () => {
     const listing = active();
     const data = `0x${address(contract)}${word(1)}${word(3)}${word(300)}`;
-    const receipt = { status: "0x1", to: "0x4444444444444444444444444444444444444444", logs: [{ topics: [topic, `0x${word(7)}`, `0x${address(buyer)}`, `0x${address(seller)}`], data }] };
-    expect(verifyPurchaseReceipt(receipt, { listing, buyer, marketplace: receipt.to, quantity: 3 })).toMatchObject({ listingId: "7", buyer, seller, tokenId: "1", amount: "3", price: "300" });
-    expect(() => verifyPurchaseReceipt(receipt, { listing, buyer: seller, marketplace: receipt.to, quantity: 3 })).toThrow(/buyer/i);
+    const receipt = { status: "0x1", to: marketplace, logs: [{ topics: [topic, `0x${word(7)}`, `0x${address(buyer)}`, `0x${address(seller)}`], data }] };
+    expect(verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity: 3 })).toMatchObject({ listingId: "7", buyer, seller, tokenId: "1", amount: "3", price: "300" });
+    expect(() => verifyPurchaseReceipt(receipt, { listing, buyer: seller, marketplace, quantity: 3 })).toThrow(/buyer/i);
+  });
+  it("does not emit CONFIRMED from a successful local wallet receipt", async () => {
+    const listing = active();
+    const receipt = {
+      status: "0x1",
+      to: marketplace,
+      logs: [{ topics: [topic, `0x${word(7)}`, `0x${address(buyer)}`, `0x${address(seller)}`], data: `0x${address(contract)}${word(1)}${word(1)}${word(100)}` }],
+    };
+    waitForReceipt.mockResolvedValueOnce(receipt);
+    const onState = vi.fn();
+    const provider = { request: vi.fn().mockResolvedValue(`0x${"c".repeat(64)}`) };
+    await submitPurchase({ provider, buyer, marketplace, listing, quantity: 1, chain: { id: 43114, key: "avalanche" }, chainId: 43114, onState });
+    expect(onState.mock.calls.map(([state]) => state)).toEqual([PURCHASE_STATE.WALLET_CONFIRMATION, PURCHASE_STATE.SUBMITTED, PURCHASE_STATE.PENDING, PURCHASE_STATE.OBSERVED]);
+    expect(onState).not.toHaveBeenCalledWith(PURCHASE_STATE.CONFIRMED);
   });
   it("supports ACTIVE to SOLD, CANCELLED, and EXPIRED", () => {
     expect(transitionListing(active(), LISTING_STATUS.SOLD).status).toBe("SOLD");
