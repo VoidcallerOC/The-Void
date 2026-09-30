@@ -84,6 +84,16 @@ describe("HTTP API boundary", () => {
     expect(service.getIndexerHealth).toHaveBeenCalledWith({ chainId: "43114" });
   });
 
+  it("routes the authoritative aggregate Marketplace volume read", async () => {
+    const service = { getMarketplaceVolume: vi.fn().mockResolvedValue({ currency: "AVAX", primaryMintVolumeWei: "10", secondaryMarketVolumeWei: "20", overallVolumeWei: "30" }) };
+    const handler = createApiHandler({ service });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/marketplace/volume" }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toMatchObject({ currency: "AVAX", overallVolumeWei: "30" });
+    expect(service.getMarketplaceVolume).toHaveBeenCalledOnce();
+  });
+
   it("routes Artist Studio writes only through the configured service", async () => {
     const studioService = { createArtist: vi.fn().mockResolvedValue({ id: "artist-1" }) };
     const handler = createApiHandler({ service: {}, studioService });
@@ -174,6 +184,26 @@ describe("reviewer notification count route", () => {
 });
 
 describe("API service trust boundaries", () => {
+  it("aggregates indexed primary and secondary monetary volume while excluding non-public catalog rows", async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ primary_mint_volume_wei: "100", secondary_market_volume_wei: "250", overall_volume_wei: "350" }] }) };
+    const service = new ApiService({ db, repository: {} });
+    await expect(service.getMarketplaceVolume()).resolves.toEqual({
+      currency: "AVAX",
+      primaryMintVolumeWei: "100",
+      secondaryMarketVolumeWei: "250",
+      overallVolumeWei: "350",
+      secondaryMarkets: "indexed marketplace contracts",
+    });
+    const sql = db.query.mock.calls[0][0];
+    expect(sql).toMatch(/FROM primary_purchases pp/i);
+    expect(sql).toMatch(/SUM\(pp\.paid_wei\)/i);
+    expect(sql).toMatch(/FROM purchases p/i);
+    expect(sql).toMatch(/SUM\(p\.sale_price_wei\)/i);
+    expect(sql).toMatch(/status IN \('CONFIRMED', 'FINALIZED', 'RECONCILED'\)/i);
+    expect(sql).toMatch(/e\.status='PUBLISHED'[\s\S]*r\.status='PUBLISHED'[\s\S]*a\.status='ACTIVE'/i);
+    expect(sql).toMatch(/mc\.contract_type='MARKETPLACE'/i);
+  });
+
   it("does not trust browser seller identity and leaves listing state pending", async () => {
     const repository = { upsertTransaction: vi.fn().mockResolvedValue({ status: "SUBMITTED", transaction_hash: "0xlisting" }) };
     const service = new ApiService({ db: { query: vi.fn().mockResolvedValue({ rows: [{ id: "marketplace-contract", address: marketplace }] }) }, repository, authenticator: () => ({ wallet }) });

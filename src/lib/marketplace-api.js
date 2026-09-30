@@ -66,6 +66,10 @@ export async function fetchAuthoritativeMarketplaceTransaction({ chainId, transa
   return request(`/api/marketplace/transactions/${encodeURIComponent(chainId)}/${encodeURIComponent(transactionHash)}`, { fetchImpl, signal });
 }
 
+export async function fetchMarketplaceVolume({ fetchImpl = fetch, signal } = {}) {
+  return request("/api/marketplace/volume", { fetchImpl, signal });
+}
+
 const SETTLED_STATUSES = new Set(["CONFIRMED", "FINALIZED", "RECONCILED"]);
 const FAILURE_STATES = Object.freeze({
   FAILED: { state: PURCHASE_STATE.FAILED, message: "The authoritative backend marked this purchase failed. Check the transaction record before taking further action." },

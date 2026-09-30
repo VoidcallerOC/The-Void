@@ -30,6 +30,14 @@ const apiRows = {
 };
 
 describe("legacy mainnet catalog rows", () => {
+  it("does not expose stale floor-over-mint hype in shared public stats", () => {
+    expect(VC_DATA.heroStats).toEqual([
+      ["477", "BEARERS"],
+      ["1,620", "RELICS FORGED"],
+    ]);
+    expect(JSON.stringify(VC_DATA.heroStats)).not.toMatch(/floor over mint|25x|25×/i);
+  });
+
   it("maps the seeded legacy edition as minted with OpenSea/Joepegs links, never as a Collect path", () => {
     const catalog = mapPublishedCatalog(apiRows);
     const edition = catalog.editions.find((item) => item.id === LEGACY_EDITION_ID);
