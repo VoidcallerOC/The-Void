@@ -151,6 +151,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       experienceIds: asArray(meta.experienceIds),
       tier: row.tier || "standard",
       artwork: ipfsToHttp(meta.artwork),
+      priceWei: meta.priceWei ?? meta.primaryPriceWei ?? meta.marketplace?.priceWei ?? null,
     });
   });
   const mappedExperiences = asArray(experiences).filter((row) => row?.id).map((row) => {

@@ -151,7 +151,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     }
   };
 
-  const experienceHref = experiences[0] ? `/experience/${experiences[0].id}` : "/reliquary";
+  const linkedExperience = experiences.find((experience) => experience?.id);
+  const experienceHref = linkedExperience ? `/experience/${linkedExperience.id}` : "/reliquary";
+  const experienceLabel = linkedExperience ? "Open experience" : "Open reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);
   const primaryOpensExperience = !owned && !notCreated && !certified && primary.availability === "minted";
   const primaryCollectReady = certified && primary.availability === "available" && tokenId !== undefined && tokenId !== null;
@@ -166,7 +168,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   ) : certified ? (
     <span style={ghostBtn}>Not yet available</span>
   ) : primary.availability === "minted" ? (
-    <Link to={experienceHref} style={primaryBtn}>Open experience</Link>
+    <Link to={experienceHref} style={primaryBtn}>{experienceLabel}</Link>
   ) : (
     <span style={ghostBtn}>Collect unavailable</span>
   );
@@ -187,10 +189,10 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}
-        {variant === "hero" && experiences[0] && !primaryOpensExperience && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
+        {variant === "hero" && linkedExperience && !primaryOpensExperience && <Link to={`/experience/${linkedExperience.id}`} style={ghostBtn}>Open experience</Link>}
         {variant !== "hero" && owned && (
           <>
-            <Link to={experienceHref} style={ghostBtn}>Open experience</Link>
+            <Link to={experienceHref} style={ghostBtn}>{experienceLabel}</Link>
             <Link to="/collection" style={ghostBtn}>My collection</Link>
           </>
         )}

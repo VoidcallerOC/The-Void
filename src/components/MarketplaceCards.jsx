@@ -1,19 +1,14 @@
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
-import {
-  editionPriceLabel,
-  editionTypeLabel,
-  MARKETPLACE_STATE,
-} from "../lib/marketplace-surface.js";
+import { editionPriceLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
-import { experienceCategoryLabel } from "../domain/models.js";
 
-export function SectionHead({ eyebrow, title, children, action }) {
+export function SectionHead({ id, eyebrow, title, children, action }) {
   return (
-    <div className="vc-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, margin: "64px 0 22px", flexWrap: "wrap" }}>
+    <div className="vc-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, margin: "50px 0 22px", flexWrap: "wrap" }}>
       <div>
         {eyebrow && <Eyebrow red>{eyebrow}</Eyebrow>}
-        <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 52px)", lineHeight: 0.95, textTransform: "uppercase", margin: "10px 0 0" }}>{title}</h2>
+        <h2 id={id} style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 52px)", lineHeight: 0.95, textTransform: "uppercase", margin: "10px 0 0" }}>{title}</h2>
         {children && <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65, margin: "12px 0 0" }}>{children}</p>}
       </div>
       {action}
@@ -24,7 +19,7 @@ export function SectionHead({ eyebrow, title, children, action }) {
 export function QuietStatus({ primary, secondary }) {
   return (
     <p className="vc-quiet-status" style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)", margin: 0 }}>
-      Primary collect · {primary} · Secondary · {secondary}
+      Official editions · {primary} · Secondary index · {secondary}
     </p>
   );
 }
@@ -41,113 +36,88 @@ function Includes({ items = [] }) {
   );
 }
 
-function CollectCta({ primary, owned }) {
-  const collectable = primary.availability === "available";
-  return (
-    <Link to={primary.href} style={collectable || owned ? primaryBtn : ghostBtn}>
-      {owned ? "Open experience" : collectable ? "Collect" : "View edition"}
-    </Link>
-  );
+function experienceAction(item) {
+  const experience = item.experiences?.find((candidate) => candidate?.id);
+  if (experience) {
+    return <Link to={`/experience/${experience.id}`} style={primaryBtn}>Open experience</Link>;
+  }
+  return <Link to={`/edition/${item.edition.id}`} style={ghostBtn}>View edition</Link>;
 }
 
-export function EditionCard({ item, listings = [], secondaryStatus }) {
-  const { edition, artist, release, experiences, primary } = item;
+export function EditionCard({ item, owned = false }) {
+  const { edition, artist, release, primary, chain } = item;
   const image = artworkFor(edition, release);
-  const owned = primary.availability === "minted";
-  const liveSecondary = secondaryStatus === MARKETPLACE_STATE.LIVE && listings.length > 0;
+  const chainName = chain?.name || edition.chain || "Avalanche";
+  const chainId = chain?.id || edition.chainId;
   const price = editionPriceLabel(edition);
+  const action = owned ? experienceAction(item) : primary.availability === "available"
+    ? <Link to={primary.href} style={primaryBtn}>Collect</Link>
+    : <Link to={`/edition/${edition.id}`} style={ghostBtn}>View edition</Link>;
+
   return (
-    <article className="vc-market-card">
-      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }}>
+    <article className="vc-market-card" data-edition-id={edition.id}>
+      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${edition.title} edition`}>
         <img src={image} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-        <p className="vc-card-kicker">{artist?.name}</p>
-        <p className="vc-card-release">{release?.title}</p>
+        <p className="vc-card-kicker">{artist?.name || "The Void"}</p>
+        <p className="vc-card-release">{release?.title || "Official release"}</p>
         <h3 className="vc-card-title">{edition.title}</h3>
-        <p className="vc-card-body">{edition.description}</p>
+        {edition.description && <p className="vc-card-body">{edition.description}</p>}
         <p className="vc-card-meta">
-          {editionTypeLabel(edition)} · {edition.supply || "Open supply"} · {owned ? "Minted" : edition.status}
+          {chainName} · Chain {chainId} · {editionTypeLabel(edition)} · {edition.supply || "Open supply"}
+        </p>
+        <p className="vc-card-meta">
+          {primary.availability === "available" ? "Available to collect" : primary.availability === "minted" ? "Primary mint complete" : "View edition details"}
           {price ? ` · ${price}` : ""}
         </p>
         <Includes items={edition.includes} />
-        <div>
-          <Eyebrow>Experience</Eyebrow>
-          <p className="vc-card-body" style={{ marginTop: 8 }}>
-            {experiences.length ? experiences.map((experience) => `${experience.title || experienceCategoryLabel(experience.productType) || "Experience"} · ${experienceCategoryLabel(experience.productType || experience.experienceType)}`).join(" · ") : "No attached experiences."}
-          </p>
-        </div>
-        <p className="vc-card-meta">
-          {owned ? "Owned" : primary.availability === "available" ? "Available to collect" : "Unavailable"}
-          {liveSecondary ? ` · ${listings.length} secondary listing${listings.length === 1 ? "" : "s"}` : ""}
-        </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
-          <CollectCta primary={primary} owned={owned} />
-          <Link to={`/release/${release?.id}`} style={ghostBtn}>Release</Link>
+          {action}
         </div>
       </div>
     </article>
   );
 }
 
-export function FeaturedReleaseCard({ record }) {
-  const { release, artist, editions } = record;
-  const featured = editions.find((item) => item.primary.availability === "available") || editions[0];
-  if (!featured) return null;
-  const { edition, experiences, primary } = featured;
-  const owned = primary.availability === "minted";
-  const price = editionPriceLabel(edition);
+function shortWallet(wallet) {
+  const value = String(wallet || "");
+  return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value || "Seller unavailable";
+}
+
+export function SecondaryListingCard({ item, listings = [], owned = false }) {
+  const { edition, artist, release, primary, chain } = item;
+  const chainName = chain?.name || edition.chain || "Avalanche";
+  const chainId = chain?.id || edition.chainId;
+  const active = listings.filter((listing) => listing?.authority === "INDEXED" && String(listing.status).toUpperCase() === "ACTIVE");
+
   return (
-    <article className="vc-featured-release">
-      <Link to={`/release/${release.id}`} style={{ display: "block", minHeight: 280 }}>
-        <img src={artworkFor(edition, release)} alt={`${release.title} artwork`} />
+    <article className="vc-market-card" data-edition-id={edition.id}>
+      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${edition.title} secondary listings`}>
+        <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
-      <div className="vc-featured-release-copy">
-        <p className="vc-card-kicker">{artist?.name}</p>
-        <h3 className="vc-card-title" style={{ fontSize: "clamp(32px, 4vw, 48px)" }}>{release.title}</h3>
-        <p className="vc-card-release">{edition.title}</p>
-        <p className="vc-card-body">{edition.description || release.description}</p>
-        <p className="vc-card-meta">
-          {editionTypeLabel(edition)} · {edition.supply || "Open supply"} · {owned ? "Minted" : edition.status}
-          {price ? ` · ${price}` : ""}
-        </p>
+      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+        <p className="vc-card-kicker">{artist?.name || "The Void"} · Index-confirmed secondary</p>
+        <p className="vc-card-release">{release?.title || "Official release"}</p>
+        <h3 className="vc-card-title">{edition.title}</h3>
+        <p className="vc-card-meta">{chainName} · Chain {chainId} · {active.length} active indexed offer{active.length === 1 ? "" : "s"}</p>
         <Includes items={edition.includes} />
-        <p className="vc-card-body">
-          What it unlocks · {experiences.length ? experiences.map((experience) => `${experience.title || experienceCategoryLabel(experience.productType) || "Experience"} · ${experienceCategoryLabel(experience.productType || experience.experienceType)}`).join(" · ") : "No attached experiences."}
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          <CollectCta primary={primary} owned={owned} />
-          <Link to={`/release/${release.id}`} style={ghostBtn}>Open release</Link>
+        <div aria-label="Active indexed offers" style={{ display: "grid", gap: 10 }}>
+          {active.map((listing) => (
+            <div key={listing.id || listing.listingId} style={{ borderTop: "1px solid var(--vc-ash)", paddingTop: 10 }}>
+              <p className="vc-card-meta" style={{ margin: "0 0 4px" }}>Seller · {shortWallet(listing.seller)}</p>
+              <p className="vc-card-meta" style={{ margin: 0 }}>
+                Available · {listing.amount || "—"} · {formatWeiAsAvax(listing.price) || "Price unavailable"}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
+          <Link to={`/edition/${edition.id}`} style={primaryBtn}>View edition</Link>
+          {primary.availability === "available" && <Link to={primary.href} style={ghostBtn}>Collect</Link>}
+          {owned && item.experiences?.[0]?.id && <Link to={`/experience/${item.experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
         </div>
       </div>
-    </article>
-  );
-}
-
-export function ReleaseCard({ record }) {
-  const { release, artist, editions } = record;
-  const available = editions.filter((item) => item.primary.availability === "available").length;
-  const featured = editions.find((item) => item.primary.availability === "available") || editions[0];
-  return (
-    <article className="vc-market-card">
-      <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none", display: "flex", flexDirection: "column", flex: 1 }}>
-        <img src={release.artwork} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
-        <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
-          <p className="vc-card-kicker">{artist?.name}</p>
-          <h3 className="vc-card-title">{release.title}</h3>
-          <p className="vc-card-release">{featured?.edition?.title || release.subtitle}</p>
-          <p className="vc-card-body">{release.description}</p>
-          <p className="vc-card-meta">
-            {editions.length} edition{editions.length === 1 ? "" : "s"} · {available ? `${available} available` : release.status}
-          </p>
-        </div>
-      </Link>
-      {featured && (
-        <div style={{ padding: "0 22px 22px", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <CollectCta primary={featured.primary} owned={featured.primary.availability === "minted"} />
-          <Link to={`/release/${release.id}`} style={ghostBtn}>Release</Link>
-        </div>
-      )}
     </article>
   );
 }
@@ -171,7 +141,7 @@ export function ArtistCard({ artist, releases = [] }) {
 
 export function EmptyRail({ title, children }) {
   return (
-    <div className="vc-empty-rail">
+    <div className="vc-empty-rail" role="status">
       <Eyebrow>{title}</Eyebrow>
       <p className="vc-card-body" style={{ marginTop: 10 }}>{children}</p>
     </div>
