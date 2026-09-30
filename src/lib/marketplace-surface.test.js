@@ -11,8 +11,10 @@ import {
   findMarketplaceEdition,
   flattenMarketplaceEditions,
   formatWeiAsAvax,
+  listingIsDisplayable,
   listingMatchesEdition,
   listingsForEdition,
+  marketplaceSecondaryAvailability,
   marketplaceCatalog,
   marketplaceCopy,
   marketplaceStatusLabel,
@@ -60,6 +62,8 @@ describe("marketplace infrastructure status", () => {
     expect(resolveInfrastructureStatus({ enabled: true, address: "not-an-address", chainId: 43113 })).toBe(MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE);
     expect(resolveSecondaryStatus({ infrastructure: MARKETPLACE_STATE.LIVE, listingsState: "error" })).toBe(MARKETPLACE_STATE.UNAVAILABLE);
     expect(resolveSecondaryStatus({ infrastructure: MARKETPLACE_STATE.LIVE, listingsState: "ready" })).toBe(MARKETPLACE_STATE.LIVE);
+    expect(marketplaceSecondaryAvailability(MARKETPLACE_STATE.LIVE)).toBe("Live index");
+    expect(marketplaceSecondaryAvailability(MARKETPLACE_STATE.UNAVAILABLE)).toBe("Index unavailable");
   });
 
   it("keeps product copy free of engineering certification banners", () => {
@@ -115,6 +119,7 @@ describe("music-native catalog projection", () => {
   it("labels minted Voidcaller relics as primary-complete, not as live secondary listings", () => {
     const primary = primaryCollectForEdition(VOIDCALLER_CATALOG.editions[0]);
     expect(primary.availability).toBe("minted");
+    expect(primary.label).toBe("View edition");
     expect(primary.href).toBe("/edition/voidcaller-chapter-i");
     expect(listingMatchesEdition({ tokenContract: VOIDCALLER_CATALOG.editions[0].contractAddress, chain: 43114, tokenId: "1" }, VOIDCALLER_CATALOG.editions[0])).toBe(true);
     expect(listingMatchesEdition({ tokenContract: VOIDCALLER_CATALOG.editions[0].contractAddress, chain: 43113, tokenId: "1" }, VOIDCALLER_CATALOG.editions[0])).toBe(false);
@@ -149,6 +154,14 @@ describe("music-native catalog projection", () => {
 });
 
 describe("indexed listing attachment", () => {
+  it("displays only active authoritative listings with a seller, quantity, and valid AVAX price", () => {
+    expect(listingIsDisplayable(indexedListing)).toBe(true);
+    expect(listingIsDisplayable({ ...indexedListing, authority: "LOCAL" })).toBe(false);
+    expect(listingIsDisplayable({ ...indexedListing, amount: "0" })).toBe(false);
+    expect(listingIsDisplayable({ ...indexedListing, price: "invalid" })).toBe(false);
+    expect(listingIsDisplayable({ ...indexedListing, seller: "" })).toBe(false);
+  });
+
   it("attaches only indexed listings that match an edition contract, chain, and token", () => {
     const attached = attachIndexedListings({ catalogs: [FUJI_INTEGRATION_CATALOG], listings: [indexedListing] });
     expect(attached).toHaveLength(1);
