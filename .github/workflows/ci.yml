@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Exact application commit SHA to certify"
+        required: true
+        type: string
 
 jobs:
   build-and-test:
@@ -22,6 +28,22 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify certification target
+        env:
+          TARGET_SHA: ${{ inputs.commit_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          echo "TARGET_SHA=${TARGET_SHA}"
+          echo "CHECKED_OUT_SHA=${checked_out_sha}"
+          if [ "${TARGET_SHA}" != "${checked_out_sha}" ]; then
+            echo "Certification target mismatch" >&2
+            exit 1
+          fi
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
