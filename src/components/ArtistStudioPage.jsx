@@ -90,7 +90,9 @@ export function ArtistStudioPage() {
   const isE2EAdmin = walletAccount?.toLowerCase() === FUJI_E2E_MINT.wallet;
   const visibleE2eMintStatus = !isE2EAdmin || !walletConnected
     ? { state: "hidden", message: "" }
-    : e2eMintStatus.state === "hidden" ? E2E_MINT_CHECKING_STATUS : e2eMintStatus;
+    : e2eMintStatus.state === "hidden"
+      ? E2E_MINT_CHECKING_STATUS
+      : e2eMintStatus;
 
   useEffect(() => {
     let cancelled = false;
