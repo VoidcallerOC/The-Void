@@ -25,6 +25,10 @@ vi.mock("../lib/marketplace.js", async (importOriginal) => {
       chainId: 43113,
       enabled: true,
     }),
+    FUJI_LISTING_CONFIG: actual.resolveFujiListingConfig({
+      VITE_FUJI_LISTING_MARKETPLACE_ADDRESS: "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b",
+      VITE_FUJI_LISTING_CHAIN_ID: "43113",
+    }),
   };
 });
 

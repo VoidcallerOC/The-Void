@@ -11,11 +11,9 @@ vi.mock("../lib/marketplace.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    MARKETPLACE_CONFIG: Object.freeze({
-      ...actual.MARKETPLACE_CONFIG,
-      address: "0x982b28352fd612fe934c5e1ad8fea399689190d2",
-      chainId: 43113,
-      enabled: true,
+    FUJI_LISTING_CONFIG: actual.resolveFujiListingConfig({
+      VITE_FUJI_LISTING_MARKETPLACE_ADDRESS: "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b",
+      VITE_FUJI_LISTING_CHAIN_ID: "43113",
     }),
   };
 });
@@ -33,18 +31,18 @@ const zeroWord = `0x${"0".repeat(64)}`;
 const oneWord = `0x${"0".repeat(63)}1`;
 const ownershipConfig = buildMarketplaceOwnershipConfig([edition]);
 
-function markupFor(owned) {
+function markupFor(owned, selectedEdition = edition, chainId = FUJI_RELEASE_CONFIG.chainId) {
   const wallet = {
     account: seller,
     authenticated: false,
     authHeaders: {},
-    chainId: FUJI_RELEASE_CONFIG.chainId,
+    chainId,
     connected: true,
     getProvider: () => null,
     owned,
   };
   return renderToStaticMarkup(
-    React.createElement(WalletCtx.Provider, { value: wallet }, React.createElement(ListingPanel, { edition })),
+    React.createElement(WalletCtx.Provider, { value: wallet }, React.createElement(ListingPanel, { edition: selectedEdition })),
   );
 }
 
@@ -52,8 +50,8 @@ function listingButton(markup) {
   return markup.match(/<button\b[^>]*>LIST EDITION<\/button>/)?.[0] || null;
 }
 
-describe("ListingPanel Fuji ownership gating", () => {
-  it("enables the normal listing control only after the canonical Fuji balance check succeeds", async () => {
+describe("ListingPanel Fuji ownership and target gating", () => {
+  it("enables the normal listing control only for an owned canonical Fuji edition on Fuji", async () => {
     const owned = await checkCollectionOwnership(seller, {
       ...ownershipConfig,
       rpc: async (_rpcUrl, target) => target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase() ? oneWord : zeroWord,
@@ -69,5 +67,37 @@ describe("ListingPanel Fuji ownership gating", () => {
 
     expect(owned.fuji.has(tokenId)).toBe(false);
     expect(button).toContain("disabled");
+  });
+
+  it("rejects the current C-Chain edition even when the wallet owns it", () => {
+    const cchainEdition = {
+      ...edition,
+      id: "legacy-cchain-edition",
+      chainId: 43114,
+      contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
+      tokenIds: [1],
+    };
+    const owned = { cchain: new Set([1]) };
+    const markup = markupFor(owned, cchainEdition, 43114);
+
+    expect(listingButton(markup)).toContain("disabled");
+    expect(markup).toMatch(/C-Chain listing is disabled|only for editions on Avalanche Fuji/i);
+  });
+
+  it("rejects a noncanonical token even on Fuji", () => {
+    const wrongTokenEdition = { ...edition, contractAddress: "0x262b774cf9a1949170b58e2d57f6189980fe757b" };
+    const owned = { fuji: new Set([tokenId]) };
+    const markup = markupFor(owned, wrongTokenEdition);
+
+    expect(listingButton(markup)).toContain("disabled");
+    expect(markup).toMatch(/canonical Fuji ERC-1155/i);
+  });
+
+  it("rejects a canonical edition while the connected wallet is on C-Chain", () => {
+    const owned = { fuji: new Set([tokenId]) };
+    const markup = markupFor(owned, edition, 43114);
+
+    expect(listingButton(markup)).toContain("disabled");
+    expect(markup).toMatch(/Connect your wallet to Avalanche Fuji/i);
   });
 });

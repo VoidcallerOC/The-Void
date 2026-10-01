@@ -5,8 +5,8 @@ vi.mock("./web3.js", async (importOriginal) => {
   return { ...actual, waitForReceipt: vi.fn(), switchChain: vi.fn() };
 });
 
-import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, submitPurchase, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
-import { waitForReceipt } from "./web3.js";
+import { FUJI_LISTING_TARGET, LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, submitApproval, submitCancel, submitListing, submitPurchase, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
+import { switchChain, waitForReceipt } from "./web3.js";
 
 const seller = "0x1111111111111111111111111111111111111111";
 const buyer = "0x3333333333333333333333333333333333333333";
@@ -24,6 +24,33 @@ describe("marketplace listing validation", () => {
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "0" })).toMatch(/price/i);
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", currency: "USDC" })).toMatch(/native/i);
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", expiresAt: 10, now: 11 })).toMatch(/future/i);
+  });
+});
+
+describe("fail-closed Fuji listing transactions", () => {
+  const cchain = { key: "cchain", id: 43114 };
+  const legacyMarketplace = "0x982b28352fd612fe934c5e1ad8fea399689190d2";
+  const cchainToken = "0xd1b4367dd9f235f9ee61878019d66e31511e98ee";
+
+  it("rejects legacy marketplace approval on C-Chain before any wallet request or chain switch", async () => {
+    const provider = { request: vi.fn() };
+    await expect(submitApproval({ provider, owner: seller, tokenContract: cchainToken, marketplace: legacyMarketplace, chain: cchain, chainId: 43114 })).rejects.toThrow();
+    expect(provider.request).not.toHaveBeenCalled();
+    expect(switchChain).not.toHaveBeenCalled();
+  });
+
+  it("rejects a C-Chain edition/token passed to the listing helper before any wallet request", async () => {
+    const provider = { request: vi.fn() };
+    const edition = { chainId: 43114, contractAddress: cchainToken, tokenIds: [1] };
+    await expect(submitListing({ provider, owner: seller, edition, marketplace: FUJI_LISTING_TARGET.marketplaceAddress, chain: cchain, chainId: 43114, tokenId: 1, amount: 1, price: "100", expiresAt: 0 })).rejects.toThrow();
+    expect(provider.request).not.toHaveBeenCalled();
+    expect(switchChain).not.toHaveBeenCalled();
+  });
+
+  it("rejects cancellation on the legacy marketplace or wrong chain before any wallet request", async () => {
+    const provider = { request: vi.fn() };
+    await expect(submitCancel({ provider, owner: seller, marketplace: legacyMarketplace, listingId: "1", chain: cchain, chainId: 43114 })).rejects.toThrow();
+    expect(provider.request).not.toHaveBeenCalled();
   });
 });
 

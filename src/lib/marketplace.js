@@ -16,6 +16,88 @@ export const MARKETPLACE_CONFIG = Object.freeze({
   enabled: isValidAddress(configuredAddress) && Number.isInteger(configuredChainId) && configuredChainId > 0,
 });
 
+export const FUJI_LISTING_TARGET = Object.freeze({
+  marketplaceAddress: "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b",
+  chainId: 43113,
+  tokenAddress: "0x82b26Da27136935454Bdf1e40801190B521b82e5",
+});
+
+export function resolveFujiListingConfig(values = env) {
+  const address = String(values?.VITE_FUJI_LISTING_MARKETPLACE_ADDRESS || "").trim();
+  const rawChainId = String(values?.VITE_FUJI_LISTING_CHAIN_ID ?? "").trim();
+  const chainId = rawChainId ? Number(rawChainId) : 0;
+  const validAddress = isValidAddress(address);
+  const addressMatches = validAddress && address.toLowerCase() === FUJI_LISTING_TARGET.marketplaceAddress.toLowerCase();
+  const validChainId = /^\d+$/.test(rawChainId) && Number.isInteger(chainId);
+  const enabled = addressMatches && validChainId && chainId === FUJI_LISTING_TARGET.chainId;
+  let reason = "";
+  if (!address) reason = "Fuji marketplace listing is disabled: marketplace address configuration is missing.";
+  else if (!validAddress) reason = "Fuji marketplace listing is disabled: marketplace address configuration is malformed.";
+  else if (!addressMatches) reason = "Fuji marketplace listing is disabled: configured marketplace is not the certified Fuji marketplace.";
+  else if (!rawChainId) reason = "Fuji marketplace listing is disabled: chain configuration is missing.";
+  else if (!validChainId) reason = "Fuji marketplace listing is disabled: chain configuration is malformed.";
+  else if (chainId !== FUJI_LISTING_TARGET.chainId) reason = "Fuji marketplace listing is disabled: configured chain is not Avalanche Fuji (43113).";
+
+  return Object.freeze({
+    address: enabled ? FUJI_LISTING_TARGET.marketplaceAddress : "",
+    chainId: enabled ? FUJI_LISTING_TARGET.chainId : 0,
+    tokenAddress: FUJI_LISTING_TARGET.tokenAddress,
+    enabled,
+    reason,
+  });
+}
+
+export const FUJI_LISTING_CONFIG = resolveFujiListingConfig(env);
+
+function numericChainId(value) {
+  if (typeof value === "string" && /^0x[\da-f]+$/i.test(value)) return Number.parseInt(value, 16);
+  return Number(value);
+}
+
+export function fujiListingTargetError({
+  config = FUJI_LISTING_CONFIG,
+  marketplace = config?.address,
+  chain,
+  chainId,
+  editionChainId,
+  tokenContract,
+} = {}) {
+  const configIsExact = config?.enabled === true
+    && isValidAddress(config.address)
+    && config.address.toLowerCase() === FUJI_LISTING_TARGET.marketplaceAddress.toLowerCase()
+    && numericChainId(config.chainId) === FUJI_LISTING_TARGET.chainId
+    && isValidAddress(config.tokenAddress)
+    && config.tokenAddress.toLowerCase() === FUJI_LISTING_TARGET.tokenAddress.toLowerCase();
+  if (!configIsExact) return config?.reason || "Fuji marketplace listing is disabled because its target configuration is invalid.";
+  if (!isValidAddress(marketplace) || marketplace.toLowerCase() !== FUJI_LISTING_TARGET.marketplaceAddress.toLowerCase()) {
+    return "Listing is disabled: only the certified Fuji marketplace is allowed.";
+  }
+  if (!chain || chain.key !== "fuji" || numericChainId(chain.id) !== FUJI_LISTING_TARGET.chainId) {
+    return "Listing is available only for editions on Avalanche Fuji (chain 43113).";
+  }
+  if (editionChainId !== undefined && numericChainId(editionChainId) !== FUJI_LISTING_TARGET.chainId) {
+    return "This edition is not on Avalanche Fuji; C-Chain listing is disabled.";
+  }
+  if (numericChainId(chainId) !== FUJI_LISTING_TARGET.chainId) {
+    return "Connect your wallet to Avalanche Fuji (chain 43113) before listing.";
+  }
+  if (tokenContract !== undefined
+    && (!isValidAddress(tokenContract) || tokenContract.toLowerCase() !== FUJI_LISTING_TARGET.tokenAddress.toLowerCase())) {
+    return "Listing is disabled: only the canonical Fuji ERC-1155 token is allowed.";
+  }
+  return null;
+}
+
+export function assertFujiListingTarget(target) {
+  const error = fujiListingTargetError(target);
+  if (error) throw Object.assign(new Error(error), { code: "FUJI_LISTING_TARGET_MISMATCH" });
+  return true;
+}
+
+export function fujiEditionHasTokenId(edition, tokenId) {
+  return Array.isArray(edition?.tokenIds) && edition.tokenIds.some((item) => String(item) === String(tokenId));
+}
+
 const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
 const LISTING_CREATED_TOPIC = "0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19";
 const LISTING_SOLD_TOPIC = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
@@ -44,10 +126,27 @@ export function encodeApprovalCheck(owner, marketplace) { return SELECTORS.appro
 export function requiredPayment(listing, quantity = listing?.amount) { if (!listing || !/^[0-9]+$/.test(String(listing.price)) || !Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return null; return (BigInt(listing.price) * BigInt(quantity)).toString(); }
 
 export async function fetchListings({ signal, filters = {} } = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== "")); const response = await fetch(`${MARKETPLACE_CONFIG.apiBaseUrl}/listings?${query}`, { signal }); if (!response.ok) throw new Error("Marketplace listings could not be loaded."); const payload = await response.json(); return payload.data || []; }
-export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) { if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] }); return waitForReceipt(provider, txHash); }
-export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) { const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 }); if (error) throw new Error(error); if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] }); return waitForReceipt(provider, txHash); }
+export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) {
+  assertFujiListingTarget({ marketplace, chain, chainId, tokenContract });
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] });
+  return waitForReceipt(provider, txHash);
+}
+export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) {
+  assertFujiListingTarget({ marketplace, chain, chainId, editionChainId: edition?.chainId, tokenContract: edition?.contractAddress });
+  const error = validateListingDraft({ seller: owner, contract: edition?.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 });
+  if (error) throw new Error(error);
+  if (!fujiEditionHasTokenId(edition, tokenId)) {
+    throw new Error("Token ID is not part of this canonical Fuji edition.");
+  }
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] });
+  return waitForReceipt(provider, txHash);
+}
 export function listingIdFromReceipt(receipt) { const log = receipt?.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_CREATED_TOPIC); return log?.topics?.[1] ? BigInt(log.topics[1]).toString() : null; }
-export async function submitCancel({ provider, owner, marketplace, listingId }) { const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCancelListing(listingId) }] }); return waitForReceipt(provider, txHash); }
+export async function submitCancel({ provider, owner, marketplace, listingId, chain, chainId }) {
+  assertFujiListingTarget({ marketplace, chain, chainId });
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCancelListing(listingId) }] });
+  return waitForReceipt(provider, txHash);
+}
 export async function readListing({ provider, marketplace, listingId }) { const result = await provider.request({ method: "eth_call", params: [{ to: marketplace, data: SELECTORS.getListing + word(listingId) }, "latest"] }); const words = result.replace(/^0x/, "").match(/.{64}/g) || []; if (words.length < 9) throw new Error("Marketplace returned an invalid listing."); const tokenContract = decodeAddress(words[2]); return { listingId: decodeUint(words[0]).toString(), seller: decodeAddress(words[1]), tokenContract, contract: tokenContract, tokenId: decodeUint(words[3]).toString(), amount: decodeUint(words[4]).toString(), price: decodeUint(words[5]).toString(), createdAt: Number(decodeUint(words[6])), expiresAt: Number(decodeUint(words[7])), status: [LISTING_STATUS.ACTIVE, LISTING_STATUS.SOLD, LISTING_STATUS.CANCELLED, LISTING_STATUS.EXPIRED][Number(decodeUint(words[8]))] || "UNKNOWN" }; }
 export function validatePurchase({ listing, buyer, quantity = listing?.amount, now = Math.floor(Date.now() / 1000) }) { if (!listing || listing.status !== LISTING_STATUS.ACTIVE) return "This listing is no longer active."; if (listing.expiresAt && now > listing.expiresAt) return "This listing has expired."; if (!isValidAddress(buyer)) return "Connect a valid buyer wallet."; if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return "Purchase quantity must be a positive integer."; if (BigInt(quantity) > BigInt(listing.amount)) return "The requested quantity is not available."; if (!/^[0-9]+$/.test(String(listing.price)) || BigInt(listing.price) <= 0n) return "The listing has an invalid price."; return null; }
 export function verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity = listing.amount }) { if (!receipt || receipt.status !== "0x1") throw new Error("Purchase transaction did not succeed."); if (receipt.to && receipt.to.toLowerCase() !== marketplace.toLowerCase()) throw new Error("Receipt target did not match the marketplace."); const log = receipt.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_SOLD_TOPIC); if (!log) throw new Error("Purchase receipt did not contain a marketplace settlement event."); const data = log.data.replace(/^0x/, "").match(/.{64}/g) || []; if (log.topics.length < 4 || data.length < 4) throw new Error("Settlement event was incomplete."); const actual = { listingId: BigInt(log.topics[1]).toString(), buyer: decodeAddress(log.topics[2]), seller: decodeAddress(log.topics[3]), tokenContract: decodeAddress(data[0]), tokenId: decodeUint(data[1]).toString(), amount: decodeUint(data[2]).toString(), price: decodeUint(data[3]).toString() }; const expected = { listingId: String(listing.listingId), buyer, seller: listing.seller, tokenContract: listing.tokenContract || listing.contract, tokenId: String(listing.tokenId), amount: String(quantity), price: requiredPayment(listing, quantity) }; for (const [key, value] of Object.entries(expected)) { const normalized = typeof value === "string" && value.startsWith("0x") ? value.toLowerCase() : String(value); if (String(actual[key]).toLowerCase() !== normalized) throw new Error(`Settlement verification failed for ${key}.`); } return actual; }
