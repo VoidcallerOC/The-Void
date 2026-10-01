@@ -185,6 +185,15 @@ export const VOIDCALLER_CATALOG = createCatalog({
   experiences: [voidcallerExperience],
 });
 
+// Main-page volume is scoped to this existing canonical edition identity.
+export const SELF_TITLED_EP_IDENTITY = Object.freeze({
+  releaseId: voidcallerRelease.id,
+  editionId: voidcallerEdition.id,
+  chainId: voidcallerEdition.chainId,
+  tokenContractAddress: voidcallerEdition.contractAddress,
+  tokenIds: Object.freeze(voidcallerEdition.tokenIds.map(String)),
+});
+
 export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions"];
 export const DISCOVERY = {
   featured: [voidcallerRelease.id],
