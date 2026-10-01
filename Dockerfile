@@ -30,7 +30,8 @@ COPY scripts ./scripts
 COPY private-media ./private-media
 COPY contracts ./contracts
 COPY .env.example ./
-RUN mkdir -p /app/out /app/cache && chown node:node /app/out /app/cache
+RUN mkdir -p /app/out /app/cache /app/deployments \
+    && chown node:node /app/out /app/cache /app/deployments
 USER node
 EXPOSE 8787
 CMD ["npm", "run", "start:api"]
