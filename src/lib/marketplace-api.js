@@ -70,6 +70,18 @@ export async function fetchMarketplaceVolume({ fetchImpl = fetch, signal } = {})
   return request("/api/marketplace/volume", { fetchImpl, signal });
 }
 
+export async function fetchSelfTitledEpVolume({ identity, fetchImpl = fetch, signal } = {}) {
+  if (!identity?.chainId || !identity?.tokenContractAddress || !Array.isArray(identity.tokenIds) || identity.tokenIds.length === 0) {
+    throw new Error("Self-titled EP marketplace identity is unavailable.");
+  }
+  const query = new URLSearchParams({
+    chainId: String(identity.chainId),
+    tokenContractAddress: identity.tokenContractAddress,
+    tokenIds: identity.tokenIds.map(String).join(","),
+  });
+  return request(`/api/marketplace/volume/self-titled-ep?${query}`, { fetchImpl, signal });
+}
+
 const SETTLED_STATUSES = new Set(["CONFIRMED", "FINALIZED", "RECONCILED"]);
 const FAILURE_STATES = Object.freeze({
   FAILED: { state: PURCHASE_STATE.FAILED, message: "The authoritative backend marked this purchase failed. Check the transaction record before taking further action." },

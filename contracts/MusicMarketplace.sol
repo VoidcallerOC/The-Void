@@ -16,7 +16,7 @@ interface IERC1155ReceiverMarketplace {
     function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata) external pure returns (bytes4);
 }
 
-/// @notice Approval-based, non-custodial native-currency listings for arbitrary ERC-1155 contracts.
+/// @notice Approval-based, non-custodial native-currency listings for the configured ERC-1155 contract.
 /// @dev Listing price is the native-currency unit price. A listing may be filled partially.
 contract MusicMarketplace is IERC1155ReceiverMarketplace {
     enum Status { ACTIVE, SOLD, CANCELLED, EXPIRED }
@@ -37,6 +37,8 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
     uint256 public nextListingId = 1;
     address public immutable feeRecipient;
     uint256 public immutable platformFeeBps;
+    address public immutable canonicalToken;
+    uint256 public immutable deploymentChainId;
     mapping(uint256 => Listing) private listings;
     bool private entered;
 
@@ -61,16 +63,22 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
     error RoyaltyTooHigh();
     error TransferFailed();
     error Reentrancy();
+    error UnsupportedToken();
+    error WrongDeploymentChain(uint256 expected, uint256 actual);
 
-    constructor(address feeRecipient_, uint256 platformFeeBps_) {
+    constructor(address feeRecipient_, uint256 platformFeeBps_, address canonicalToken_) {
         if (feeRecipient_ == address(0)) revert InvalidAddress();
         if (platformFeeBps_ > BPS_DENOMINATOR) revert FeeTooHigh();
+        if (canonicalToken_ == address(0)) revert InvalidAddress();
         feeRecipient = feeRecipient_;
         platformFeeBps = platformFeeBps_;
+        canonicalToken = canonicalToken_;
+        deploymentChainId = block.chainid;
     }
 
-    function createListing(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt) external returns (uint256 listingId) {
+    function createListing(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt) external onlyDeploymentChain returns (uint256 listingId) {
         if (seller != msg.sender || seller == address(0) || tokenContract == address(0)) revert InvalidAddress();
+        _requireCanonicalToken(tokenContract);
         if (amount == 0) revert InvalidAmount();
         if (price == 0) revert InvalidPrice();
         if (expiresAt != 0 && expiresAt <= block.timestamp) revert InvalidExpiry();
@@ -82,24 +90,27 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
         emit ListingCreated(listingId, seller, tokenContract, tokenId, amount, price, expiresAt);
     }
 
-    function cancelListing(uint256 listingId) external {
+    function cancelListing(uint256 listingId) external onlyDeploymentChain {
         Listing storage listing = listings[listingId];
+        _requireCanonicalToken(listing.tokenContract);
         if (listing.status != Status.ACTIVE) revert ListingNotActive();
         if (listing.seller != msg.sender) revert NotSeller();
         listing.status = Status.CANCELLED;
         emit ListingCancelled(listingId);
     }
 
-    function expireListing(uint256 listingId) external {
+    function expireListing(uint256 listingId) external onlyDeploymentChain {
         Listing storage listing = listings[listingId];
+        _requireCanonicalToken(listing.tokenContract);
         if (listing.status != Status.ACTIVE) revert ListingNotActive();
         if (listing.expiresAt == 0 || block.timestamp <= listing.expiresAt) revert InvalidExpiry();
         listing.status = Status.EXPIRED;
         emit ListingExpired(listingId);
     }
 
-    function buy(uint256 listingId, uint256 quantity) external payable nonReentrant {
+    function buy(uint256 listingId, uint256 quantity) external payable nonReentrant onlyDeploymentChain {
         Listing storage listing = listings[listingId];
+        _requireCanonicalToken(listing.tokenContract);
         if (listing.status != Status.ACTIVE) revert ListingNotActive();
         if (listing.expiresAt != 0 && block.timestamp > listing.expiresAt) revert Expired();
         if (quantity == 0 || quantity > listing.amount) revert InsufficientQuantity();
@@ -124,6 +135,15 @@ contract MusicMarketplace is IERC1155ReceiverMarketplace {
 
     function getListing(uint256 listingId) external view returns (Listing memory) { return listings[listingId]; }
     function listingStatus(uint256 listingId) external view returns (Status) { return listings[listingId].status; }
+
+    function _requireCanonicalToken(address tokenContract) private view {
+        if (tokenContract != canonicalToken) revert UnsupportedToken();
+    }
+
+    modifier onlyDeploymentChain() {
+        if (block.chainid != deploymentChainId) revert WrongDeploymentChain(deploymentChainId, block.chainid);
+        _;
+    }
 
     function _royalty(address tokenContract, uint256 tokenId, uint256 salePrice) private view returns (address receiver, uint256 amount) {
         try IERC2981Marketplace(tokenContract).royaltyInfo(tokenId, salePrice) returns (address receiver_, uint256 amount_) {
