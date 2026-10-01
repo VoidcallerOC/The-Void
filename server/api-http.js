@@ -86,6 +86,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       else if (method === "GET" && base[0] === "experiences" && base.length === 2) data = await service.getExperience({ id: base[1] });
       else if (method === "GET" && base[0] === "listings" && base.length === 1) data = await service.listListings({ ...Object.fromEntries(url.searchParams) });
       else if (method === "GET" && base[0] === "listings" && base.length === 4) data = await service.getIndexedListing({ chainId: base[1], marketplaceAddress: base[2], listingId: base[3] });
+      else if (method === "GET" && base[0] === "marketplace" && base[1] === "volume" && base[2] === "self-titled-ep" && base.length === 3) data = await service.getSelfTitledEpVolume({ chainId: url.searchParams.get("chainId"), tokenContractAddress: url.searchParams.get("tokenContractAddress"), tokenIds: url.searchParams.get("tokenIds")?.split(",") || [] });
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "volume" && base.length === 2) data = await service.getMarketplaceVolume();
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "transactions" && base.length === 4) data = await service.getMarketplaceTransaction({ chainId: base[2], transactionHash: base[3] });
       else if (method === "GET" && base[0] === "collectors" && base.length === 2) data = await service.getCollector({ request: apiRequest, wallet: base[1] });

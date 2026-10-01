@@ -8,8 +8,8 @@ import { extractForgeJson } from "./deploy-marketplace-output.mjs";
 
 const MAX_FORGE_OUTPUT_BYTES = 10 * 1024 * 1024;
 const networks = Object.freeze({
-  fuji: { chainId: 43113, rpcEnv: "AVALANCHE_FUJI_RPC_URL" },
-  mainnet: { chainId: 43114, rpcEnv: "AVALANCHE_CCHAIN_RPC_URL" },
+  fuji: { chainId: 43113, rpcEnv: "AVALANCHE_FUJI_RPC_URL", canonicalTokenEnv: "FUJI_CANONICAL_TOKEN", canonicalToken: "0x82b26Da27136935454Bdf1e40801190B521b82e5" },
+  mainnet: { chainId: 43114, rpcEnv: "AVALANCHE_CCHAIN_RPC_URL", canonicalTokenEnv: "CCHAIN_CANONICAL_TOKEN" },
 });
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
@@ -26,16 +26,23 @@ export function resolveMarketplaceConfig(env = process.env) {
   const rpcUrl = env[target.rpcEnv];
   const feeRecipient = env.MARKETPLACE_FEE_RECIPIENT;
   const feeBpsText = env.MARKETPLACE_FEE_BPS;
+  const canonicalToken = env[target.canonicalTokenEnv];
   const feeBps = Number(feeBpsText);
 
   if (
     typeof rpcUrl !== "string" || rpcUrl.length === 0 ||
     !ADDRESS_PATTERN.test(feeRecipient || "") ||
+    !ADDRESS_PATTERN.test(canonicalToken || "") ||
+    canonicalToken.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
     !/^\d+$/.test(feeBpsText || "") || !Number.isSafeInteger(feeBps) || feeBps > 10000
   ) {
     throw new DeploymentError(
-      `Missing or invalid deployment configuration. Required: ${target.rpcEnv}, MARKETPLACE_FEE_RECIPIENT, MARKETPLACE_FEE_BPS (0-10000).`,
+      `Missing or invalid deployment configuration. Required: ${target.rpcEnv}, ${target.canonicalTokenEnv}, MARKETPLACE_FEE_RECIPIENT, MARKETPLACE_FEE_BPS (0-10000).`,
     );
+  }
+
+  if (target.canonicalToken && canonicalToken.toLowerCase() !== target.canonicalToken.toLowerCase()) {
+    throw new DeploymentError(`Fuji canonical token must be ${target.canonicalToken}.`);
   }
 
   if (network === "mainnet" && env.CONFIRM_MAINNET_DEPLOY !== "yes") {
@@ -49,6 +56,7 @@ export function resolveMarketplaceConfig(env = process.env) {
     feeRecipient,
     feeBps,
     feeBpsText,
+    canonicalToken,
     bytecodePath: env.MARKETPLACE_BYTECODE_PATH || "out/MusicMarketplace.sol/MusicMarketplace.json",
   };
 }
@@ -77,6 +85,7 @@ export function buildForgeCreateArgs(config) {
     "--constructor-args",
     config.feeRecipient,
     config.feeBpsText,
+    config.canonicalToken,
   ];
 }
 
@@ -247,7 +256,7 @@ export async function runMarketplaceDeployment({
       sourceVerificationStatus: "NOT_REQUESTED",
       feeRecipient: config.feeRecipient.toLowerCase(),
       feeBasisPoints: config.feeBps,
-      supportedTokenContracts: [],
+      supportedTokenContracts: [config.canonicalToken.toLowerCase()],
       recordedAt: new Date().toISOString(),
     };
 

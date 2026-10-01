@@ -1,16 +1,43 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { VC_DATA } from "../data.js";
+import { SELF_TITLED_EP_IDENTITY, VC_DATA } from "../data.js";
 import { Eyebrow, Btn, Tag } from "./Atoms.jsx";
 import { WordmarkGlitch } from "./Overlays.jsx";
 import { useAudio } from "../lib/audio.js";
+import { fetchSelfTitledEpVolume } from "../lib/marketplace-api.js";
+import { formatWeiAsAvax } from "../lib/marketplace-surface.js";
 
 // ---------------- Hero ----------------
 export function Hero({ onMint }) {
   const audio = useAudio();
+  const [volume, setVolume] = useState(null);
   const hearEP = () => {
     audio.setQueue(VC_DATA.firstEPTracks, "self-titled");
     audio.play(0);
   };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const loadVolume = async () => {
+      try {
+        const next = await fetchSelfTitledEpVolume({ identity: SELF_TITLED_EP_IDENTITY, signal: controller.signal });
+        if (active) setVolume(next);
+      } catch (error) {
+        if (error?.name !== "AbortError" && active) setVolume(null);
+      }
+    };
+    const refresh = () => { void loadVolume(); };
+    void loadVolume();
+    window.addEventListener("void:marketplace-volume-updated", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      controller.abort();
+      window.removeEventListener("void:marketplace-volume-updated", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
 
   return (
     <section
@@ -133,7 +160,7 @@ export function Hero({ onMint }) {
           </Link>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
-          {VC_DATA.heroStats.map(([v, k]) => (
+          {[...VC_DATA.heroStats, [volume ? formatWeiAsAvax(volume.overallVolumeWei) : "—", "OVERALL VOLUME"]].map(([v, k]) => (
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--vc-bone)", letterSpacing: "0.04em" }}>{v}</span>
               <Eyebrow>{k}</Eyebrow>

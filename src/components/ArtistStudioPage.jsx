@@ -25,6 +25,7 @@ const STEPS = [
   ["publish", "Publish"],
   ["sale", "Set up sale"],
 ];
+const E2E_MINT_CHECKING_STATUS = { state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" };
 
 function TextField({ title, value, onChange, multiline = false, required = false, placeholder = "", readOnly = false }) {
   const Tag = multiline ? "textarea" : "input";
@@ -87,7 +88,11 @@ export function ArtistStudioPage() {
   const walletConnected = wallet.connected;
   const walletProvider = wallet.provider;
   const isE2EAdmin = walletAccount?.toLowerCase() === FUJI_E2E_MINT.wallet;
-  const visibleE2eMintStatus = !isE2EAdmin || !walletConnected ? { state: "hidden", message: "" } : e2eMintStatus;
+  const visibleE2eMintStatus = !isE2EAdmin || !walletConnected
+    ? { state: "hidden", message: "" }
+    : e2eMintStatus.state === "hidden"
+      ? E2E_MINT_CHECKING_STATUS
+      : e2eMintStatus;
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +100,6 @@ export function ArtistStudioPage() {
     void Promise.resolve()
       .then(() => {
         if (cancelled) return undefined;
-        setE2eMintStatus({ state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" });
         return readFujiE2EMintPreflight(walletProvider, walletAccount);
       })
       .then((result) => {

@@ -21,6 +21,8 @@ const FEE_RECIPIENT = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
 const DEPLOYED_CONTRACT_ADDRESS = `0x${"cd".repeat(20)}`;
 const PRIVATE_KEY_SENTINEL = `0x${"11".repeat(32)}`;
 const RPC_URL_SENTINEL = "https://rpc.example.invalid/fuji?token=TEST_ONLY_RPC_SENTINEL";
+const FUJI_CANONICAL_TOKEN = "0x82b26da27136935454bdf1e40801190b521b82e5";
+const CCHAIN_CANONICAL_TOKEN = "0x1111111111111111111111111111111111111111";
 
 function makeEnv(overrides = {}) {
   return {
@@ -30,6 +32,8 @@ function makeEnv(overrides = {}) {
     DEPLOYER_PRIVATE_KEY: PRIVATE_KEY_SENTINEL,
     MARKETPLACE_FEE_RECIPIENT: FEE_RECIPIENT,
     MARKETPLACE_FEE_BPS: "250",
+    FUJI_CANONICAL_TOKEN,
+    CCHAIN_CANONICAL_TOKEN,
     ...overrides,
   };
 }
@@ -106,6 +110,7 @@ describe("marketplace deployment signer hardening", () => {
       expect(observedCall.args.indexOf("--json")).toBeLessThan(observedCall.args.indexOf("--constructor-args"));
       expect(observedCall.args).toContain(FEE_RECIPIENT);
       expect(observedCall.args).toContain("250");
+      expect(observedCall.args).toContain(FUJI_CANONICAL_TOKEN);
       expect(observedCall.args).not.toContain("--private-key");
       expect(observedCall.args).not.toContain("--keystore");
       expect(observedCall.args).not.toContain("--password-file");
@@ -255,8 +260,11 @@ describe("marketplace deployment signer hardening", () => {
     expect(resolveMarketplaceConfig(makeEnv({
       DEPLOY_NETWORK: "mainnet",
       AVALANCHE_CCHAIN_RPC_URL: "https://mainnet.rpc.example.invalid",
+      CCHAIN_CANONICAL_TOKEN,
       CONFIRM_MAINNET_DEPLOY: "yes",
-    }))).toMatchObject({ network: "mainnet", chainId: 43114 });
+    }))).toMatchObject({ network: "mainnet", chainId: 43114, canonicalToken: CCHAIN_CANONICAL_TOKEN });
+    expect(() => resolveMarketplaceConfig(makeEnv({ FUJI_CANONICAL_TOKEN: CCHAIN_CANONICAL_TOKEN })))
+      .toThrow("Fuji canonical token must be 0x82b26Da27136935454Bdf1e40801190B521b82e5.");
   });
 
   it("preserves fail-closed transaction, receipt, contract, and deployment-block checks", () => {
