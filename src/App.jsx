@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
@@ -99,6 +100,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      <Analytics />
     </BrowserRouter>
   );
 }
