@@ -18,7 +18,18 @@ describe("collector ownership model", () => {
     expect(library.artists.map((item) => item.id)).toEqual(["voidcaller"]);
     expect(library.releases.map((item) => item.id)).toEqual(["voidcaller-self-titled"]);
     expect(library.editions[0].quantity).toBe(3);
+    expect(library.tokens.map((item) => [item.tokenId, item.amount])).toEqual([["0", 2], ["1", 1]]);
     expect(library.experiences[0].id).toBe("voidcaller-full-ep");
+  });
+  it("does not create a token record for an unowned token or an unowned collection", () => {
+    expect(getCollectorLibrary(VOIDCALLER_CATALOG, []).tokens).toEqual([]);
+    expect(getCollectorLibrary(VOIDCALLER_CATALOG, [record(1, 1)]).tokens.map((item) => item.tokenId)).toEqual(["1"]);
+  });
+  it("keeps different token IDs and contract identities separate", () => {
+    const otherContract = record(0, 5, { contract: "0x2222222222222222222222222222222222222222", chain: { key: "other", id: 999 } });
+    const library = getCollectorLibrary(VOIDCALLER_CATALOG, [record(1, 1), otherContract]);
+    expect(library.tokens.map((item) => item.tokenId)).toEqual(["1"]);
+    expect(library.ownership).toHaveLength(2);
   });
   it("supports multiple contracts and chains without conflating balances", () => {
     const other = record(0, 5, { contract: "0x2222222222222222222222222222222222222222", chain: { key: "other", id: 999 } });
