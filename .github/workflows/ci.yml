@@ -109,5 +109,8 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
 
+      - name: Validate migrations
+        run: npm run db:validate:migrations
+
       - name: Build
         run: npm run build
