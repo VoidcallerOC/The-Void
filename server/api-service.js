@@ -245,6 +245,40 @@ export class ApiService {
     };
   }
 
+  async getSelfTitledEpVolume({ chainId: rawChainId, tokenContractAddress: rawTokenContractAddress, tokenIds: rawTokenIds = [] } = {}) {
+    const selectedChainId = chainId(rawChainId, "chainId");
+    const selectedTokenContract = contractAddress(rawTokenContractAddress, "tokenContractAddress");
+    if (!Array.isArray(rawTokenIds) || rawTokenIds.length === 0) throw new ApiError(400, "INVALID_TOKEN_IDS", "tokenIds must contain at least one token ID.");
+    const selectedTokenIds = rawTokenIds.map((value) => nonNegativeBigInt(value, "tokenId").toString());
+    const { rows } = await this.db.query(`
+      WITH public_primary AS (
+        SELECT COALESCE(SUM(pp.paid_wei), 0)::text AS volume_wei
+        FROM primary_purchases pp
+        JOIN contracts tc ON tc.chain_id=pp.chain_id AND LOWER(tc.address)=LOWER(pp.token_contract_address)
+        JOIN tokens tok ON tok.contract_id=tc.id AND tok.token_id=pp.token_id
+        JOIN editions e ON e.id=tok.edition_id AND e.status='PUBLISHED'
+        JOIN releases r ON r.id=e.release_id AND r.status='PUBLISHED'
+        JOIN artists a ON a.id=r.artist_id AND a.status='ACTIVE'
+        WHERE pp.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED') AND tc.chain_id=$1 AND LOWER(tc.address)=LOWER($2) AND tok.token_id = ANY($3::numeric[])
+      ), public_secondary AS (
+        SELECT COALESCE(SUM(p.sale_price_wei), 0)::text AS volume_wei
+        FROM purchases p
+        JOIN listings l ON l.id=p.listing_id
+        JOIN contracts mc ON mc.id=l.marketplace_contract_id AND mc.contract_type='MARKETPLACE'
+        JOIN contracts tc ON tc.id=l.token_contract_id AND tc.chain_id=p.chain_id AND LOWER(tc.address)=LOWER(p.token_contract_address)
+        JOIN tokens tok ON tok.contract_id=tc.id AND tok.token_id=p.token_id
+        JOIN editions e ON e.id=tok.edition_id AND e.status='PUBLISHED'
+        JOIN releases r ON r.id=e.release_id AND r.status='PUBLISHED'
+        JOIN artists a ON a.id=r.artist_id AND a.status='ACTIVE'
+        WHERE p.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED') AND tc.chain_id=$1 AND LOWER(tc.address)=LOWER($2) AND tok.token_id = ANY($3::numeric[])
+      )
+      SELECT public_primary.volume_wei AS primary_mint_volume_wei, public_secondary.volume_wei AS secondary_market_volume_wei, (public_primary.volume_wei::numeric + public_secondary.volume_wei::numeric)::text AS overall_volume_wei
+      FROM public_primary CROSS JOIN public_secondary LIMIT 1
+    `, [selectedChainId, selectedTokenContract, selectedTokenIds]);
+    const row = rows[0] || { primary_mint_volume_wei: "0", secondary_market_volume_wei: "0", overall_volume_wei: "0" };
+    return { currency: "AVAX", primaryMintVolumeWei: String(row.primary_mint_volume_wei || "0"), secondaryMarketVolumeWei: String(row.secondary_market_volume_wei || "0"), overallVolumeWei: String(row.overall_volume_wei || "0"), secondaryMarkets: "indexed marketplace contracts" };
+  }
+
   async getIndexedListing({ chainId: rawChainId, marketplaceAddress, listingId }) {
     const selectedChainId = chainId(rawChainId, "chainId");
     const selectedMarketplace = contractAddress(marketplaceAddress, "marketplaceAddress");
