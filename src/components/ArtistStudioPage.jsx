@@ -25,6 +25,7 @@ const STEPS = [
   ["publish", "Publish"],
   ["sale", "Set up sale"],
 ];
+const E2E_MINT_CHECKING_STATUS = { state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" };
 
 function TextField({ title, value, onChange, multiline = false, required = false, placeholder = "", readOnly = false }) {
   const Tag = multiline ? "textarea" : "input";
@@ -83,18 +84,28 @@ export function ArtistStudioPage() {
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
-  const isE2EAdmin = wallet.account?.toLowerCase() === FUJI_E2E_MINT.wallet;
+  const walletAccount = wallet.account;
+  const walletConnected = wallet.connected;
+  const walletProvider = wallet.provider;
+  const isE2EAdmin = walletAccount?.toLowerCase() === FUJI_E2E_MINT.wallet;
+  const visibleE2eMintStatus = !isE2EAdmin || !walletConnected
+    ? { state: "hidden", message: "" }
+    : e2eMintStatus.state === "hidden" ? E2E_MINT_CHECKING_STATUS : e2eMintStatus;
 
   useEffect(() => {
     let cancelled = false;
-    if (!isE2EAdmin || !wallet.connected) { setE2eMintStatus({ state: "hidden", message: "" }); return undefined; }
-    setE2eMintStatus({ state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" });
-    const provider = wallet.getProvider?.();
-    readFujiE2EMintPreflight(provider, wallet.account)
-      .then((result) => { if (!cancelled) setE2eMintStatus({ state: "ready", message: "Preflight passed. One copy is available to mint." , result }); })
+    if (!isE2EAdmin || !walletConnected) return undefined;
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return undefined;
+        return readFujiE2EMintPreflight(walletProvider, walletAccount);
+      })
+      .then((result) => {
+        if (!cancelled && result) setE2eMintStatus({ state: "ready", message: "Preflight passed. One copy is available to mint." , result });
+      })
       .catch((error) => { if (!cancelled) setE2eMintStatus({ state: "blocked", message: error.message }); });
     return () => { cancelled = true; };
-  }, [isE2EAdmin, wallet.connected, wallet.account]);
+  }, [isE2EAdmin, walletConnected, walletAccount, walletProvider]);
 
   const mintE2ETestCopy = async () => {
     setBusy("e2e-mint"); setE2eMintStatus({ state: "confirming", message: "Rabby confirmation required for exactly one E2E mint…" });
@@ -311,9 +322,9 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 30, margin: "10px 0 8px" }}>Mint E2E Test Copy</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>Admin-only test control. It submits no transaction until you click and approve the normal Rabby confirmation.</p>
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.7, wordBreak: "break-all" }}>Token ID: {FUJI_E2E_MINT.tokenId.toString()}<br />Quantity: 1<br />Contract: {FUJI_RELEASE_CONFIG.contractAddress}</p>
-          {e2eMintStatus.message && <p role="status" style={{ color: e2eMintStatus.state === "complete" || e2eMintStatus.state === "ready" ? "var(--vc-bone-dim)" : "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{e2eMintStatus.message}</p>}
-          {e2eMintStatus.hash && <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}>TX: <a href={fujiExplorerUrl("tx", e2eMintStatus.hash)} target="_blank" rel="noreferrer">{e2eMintStatus.hash}</a></p>}
-          <button type="button" style={primaryBtn} disabled={busy !== "" || e2eMintStatus.state !== "ready"} onClick={mintE2ETestCopy}>{busy === "e2e-mint" ? "Confirming…" : "Mint E2E Test Copy"}</button>
+          {visibleE2eMintStatus.message && <p role="status" style={{ color: visibleE2eMintStatus.state === "complete" || visibleE2eMintStatus.state === "ready" ? "var(--vc-bone-dim)" : "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{visibleE2eMintStatus.message}</p>}
+          {visibleE2eMintStatus.hash && <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}>TX: <a href={fujiExplorerUrl("tx", visibleE2eMintStatus.hash)} target="_blank" rel="noreferrer">{visibleE2eMintStatus.hash}</a></p>}
+          <button type="button" style={primaryBtn} disabled={busy !== "" || visibleE2eMintStatus.state !== "ready"} onClick={mintE2ETestCopy}>{busy === "e2e-mint" ? "Confirming…" : "Mint E2E Test Copy"}</button>
         </section>
       )}
 
