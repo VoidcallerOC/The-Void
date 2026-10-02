@@ -21,7 +21,6 @@ import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
 import { playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
-import { VoidStarfield } from "./VoidStarfield.jsx";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
 function PlatformHeader({ eyebrow, title, children }) {
@@ -413,8 +412,7 @@ export function CollectionDetailPage() {
 export function CollectionPage() {
   const catalog = useMarketplaceCatalogs();
   return (
-    <section style={shell} className="vc-starfield-host">
-      <VoidStarfield />
+    <section style={shell}>
       <PlatformHeader eyebrow="† Catalog" title="The Void">
         <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>A music catalog of collections, releases, songs, and the experiences attached to each token.</p>
       </PlatformHeader>

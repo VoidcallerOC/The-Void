@@ -549,7 +549,7 @@ body { padding-bottom: 72px; }
   }
 }
 
-/* ---------- Collection ambient starfield (components/VoidStarfield.jsx) ---------- */
+/* ---------- Ambient starfield behind every page (components/VoidStarfield.jsx, mounted in Layout) ---------- */
 /* The host becomes its own stacking context so the field (z-index: -1) paints
    above the black page ground but beneath every element of the page itself.
    No existing z-index changes. */
