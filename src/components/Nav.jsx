@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
-import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
 
@@ -31,7 +30,7 @@ function ReviewerBadge({ count }) {
   );
 }
 
-export function Nav({ onMint }) {
+export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const notifications = useReviewerNotifications();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -85,7 +84,6 @@ export function Nav({ onMint }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span className="vc-nav-cta" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <WalletButton />
-          <Btn onClick={onMint} style={{ whiteSpace: "nowrap" }}>CLAIM A RELIC</Btn>
         </span>
         <button
           className="vc-nav-burger"
@@ -139,7 +137,6 @@ export function Nav({ onMint }) {
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
             <WalletButton compact />
-            <Btn onClick={() => { setMenuOpen(false); onMint(); }} style={{ whiteSpace: "nowrap" }}>CLAIM A RELIC</Btn>
           </div>
         </div>
       )}
