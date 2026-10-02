@@ -94,13 +94,13 @@ describe("HTTP API boundary", () => {
     expect(service.getMarketplaceVolume).toHaveBeenCalledOnce();
   });
 
-  it("routes Main-page volume through the self-titled EP scope without changing the global route", async () => {
+  it("routes Main-page volume through the canonical Fuji VOIDCALLER scope without changing the global route", async () => {
     const service = { getSelfTitledEpVolume: vi.fn().mockResolvedValue({ currency: "AVAX", overallVolumeWei: "7" }), getMarketplaceVolume: vi.fn() };
     const handler = createApiHandler({ service });
     const response = responseDouble();
-    await handler(requestDouble({ url: "/api/marketplace/volume/self-titled-ep?chainId=43114&tokenContractAddress=0xd1b4367dd9f235f9ee61878019d66e31511e98ee&tokenIds=0,1,2,3" }), response);
+    await handler(requestDouble({ url: "/api/marketplace/volume/self-titled-ep?chainId=43113&tokenContractAddress=0x82b26Da27136935454Bdf1e40801190B521b82e5&tokenIds=33778802922810732976408591241428358474475553907731009337085064305512658576739" }), response);
     expect(response.status).toBe(200);
-    expect(service.getSelfTitledEpVolume).toHaveBeenCalledWith({ chainId: "43114", tokenContractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenIds: ["0", "1", "2", "3"] });
+    expect(service.getSelfTitledEpVolume).toHaveBeenCalledWith({ chainId: "43113", tokenContractAddress: "0x82b26Da27136935454Bdf1e40801190B521b82e5", tokenIds: ["33778802922810732976408591241428358474475553907731009337085064305512658576739"] });
     expect(service.getMarketplaceVolume).not.toHaveBeenCalled();
   });
 
@@ -214,15 +214,17 @@ describe("API service trust boundaries", () => {
     expect(sql).toMatch(/mc\.contract_type='MARKETPLACE'/i);
   });
 
-  it("scopes Main-page volume to the requested self-titled EP token identity", async () => {
+  it("scopes Main-page volume to the requested Fuji VOIDCALLER token identity", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [{ primary_mint_volume_wei: "100", secondary_market_volume_wei: "250", overall_volume_wei: "350" }] }) };
     const service = new ApiService({ db, repository: {} });
-    await expect(service.getSelfTitledEpVolume({ chainId: "43114", tokenContractAddress: wallet, tokenIds: ["0", "1", "2", "3"] })).resolves.toMatchObject({ overallVolumeWei: "350" });
+    const fujiTokenContract = "0x82b26Da27136935454Bdf1e40801190B521b82e5";
+    const fujiTokenId = "33778802922810732976408591241428358474475553907731009337085064305512658576739";
+    await expect(service.getSelfTitledEpVolume({ chainId: "43113", tokenContractAddress: fujiTokenContract, tokenIds: [fujiTokenId] })).resolves.toMatchObject({ overallVolumeWei: "350" });
     const [sql, params] = db.query.mock.calls[0];
     expect(sql).toMatch(/tc\.chain_id=\$1/i);
     expect(sql).toMatch(/LOWER\(tc\.address\)=LOWER\(\$2\)/i);
     expect(sql).toMatch(/tok\.token_id = ANY\(\$3::numeric\[\]\)/i);
-    expect(params).toEqual([43114, wallet, ["0", "1", "2", "3"]]);
+    expect(params).toEqual([43113, fujiTokenContract.toLowerCase(), [fujiTokenId]]);
   });
 
   it("does not trust browser seller identity and leaves listing state pending", async () => {

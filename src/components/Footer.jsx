@@ -84,14 +84,11 @@ export function Footer() {
             { label: "Artist studio", to: "/studio" },
           ]],
           ["THE RELIC", [
-            { label: "I · Voidcaller (EP)", href: VC_DATA.marketplaces.find(m => m.name === "OPENSEA").href },
+            { label: "I · Voidcaller (EP)", to: "/edition/edition-ecf27444-94b7-40d5-bace-5f061792f55e" },
             { label: "II · Forthcoming" },
           ]],
           ["THE CHOIR", VC_DATA.socials.map(s => ({ label: s.name, href: s.href }))],
-          ["THE LEDGER", VC_DATA.marketplaces.map(m => ({
-            label: m.name === "SNOWTRACE" ? "Snowtrace" : m.name === "OPENSEA" ? "OpenSea (Avalanche)" : "Joepegs",
-            href: m.href,
-          }))],
+          ["THE LEDGER", [{ label: "Snowtrace", href: `https://snowtrace.io/address/${VC_DATA.contract}` }]],
         ].map(([head, items]) => (
           <div key={head}>
             <Eyebrow>{head}</Eyebrow>

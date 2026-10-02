@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useEffect, useMemo, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
 import { Nav } from "./Nav.jsx";
 import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
-import { MintModal } from "./MintModal.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
@@ -43,11 +42,9 @@ function ScrollToTop() {
   return null;
 }
 
-// Persistent shell — Nav, Footer, the sticky audio bar and mint modal stay
-// mounted across route changes so playback continues as you navigate.
+// Persistent shell — Nav, Footer, and the sticky audio bar stay mounted across
+// route changes so playback continues as you navigate.
 export function Layout() {
-  const [mintOpen, setMintOpen] = useState(false);
-  const onMint = () => setMintOpen(true);
   const catalog = useMarketplaceCatalogs();
   const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(catalog.editions), [catalog.editions]);
   return (
@@ -57,17 +54,16 @@ export function Layout() {
         <ScrollToTop />
         <Grain />
         <Scanlines />
-        <Nav onMint={onMint} />
+        <Nav />
         {/* Each route fills the viewport so short pages don't expose the footer
             on load — content centers vertically; taller pages just grow. */}
         <main className="vc-main">
           <Suspense fallback={<SectionFallback />}>
-            <Outlet context={{ onMint }} />
+            <Outlet context={{ catalog }} />
           </Suspense>
         </main>
         <Footer />
         <StickyPlayer />
-        <MintModal open={mintOpen} onClose={() => setMintOpen(false)} />
       </ReviewerNotificationsProvider>
     </WalletProvider>
   );
