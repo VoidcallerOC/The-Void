@@ -4,7 +4,9 @@ function apiBase() {
 
 export async function studioFetch(path, { method = "GET", payload, headers, fetchImpl = fetch } = {}) {
   const endpoint = `${apiBase()}/api${path}`;
-  const response = await fetchImpl(endpoint, { method, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(payload) });
+  const options = { method, headers: { "content-type": "application/json", ...headers } };
+  if (method !== "GET") options.body = JSON.stringify(payload);
+  const response = await fetchImpl(endpoint, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(body.error?.message || (response.status === 404 ? `Artist Studio API route not found: ${method} ${path} (${response.status}).` : `Artist Studio request failed (${response.status}).`));

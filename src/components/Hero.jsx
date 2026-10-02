@@ -120,7 +120,7 @@ export function Hero() {
             margin: 0,
           }}
         >
-          The first call. The first relic. The chain remembers.
+          The first call. A relic forged. The chain remembers.
         </p>
         <p
           style={{
@@ -159,7 +159,7 @@ export function Hero() {
           </Link>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
-          {[...VC_DATA.heroStats, [volume ? formatWeiAsAvax(volume.overallVolumeWei) : "—", "OVERALL VOLUME"]].map(([v, k]) => (
+          {[...VC_DATA.heroStats, [volume ? formatWeiAsAvax(volume.overallVolumeWei) : "—", "FUJI CERTIFIED VOLUME"]].map(([v, k]) => (
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--vc-bone)", letterSpacing: "0.04em" }}>{v}</span>
               <Eyebrow>{k}</Eyebrow>

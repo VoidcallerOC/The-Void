@@ -4,10 +4,9 @@ import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
-import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
-import { marketplaceCatalog } from "../lib/marketplace-surface.js";
+import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, encodeFujiE2EMint, fujiExplorerUrl, readFujiEdition, readFujiE2EMintPreflight, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiE2EMint, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiE2EMintPreflight, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -20,10 +19,6 @@ const STEPS = [
   ["release", "Your release"],
   ["track", "Tracks"],
   ["experience", "Experiences"],
-  ["supply", "Supply"],
-  ["preview", "Preview"],
-  ["publish", "Publish"],
-  ["sale", "Set up sale"],
 ];
 const E2E_MINT_CHECKING_STATUS = { state: "checking", message: "Checking Fuji chain, issuer role, token supply, and seller balance…" };
 
@@ -65,9 +60,9 @@ function initialState() {
 export function ArtistStudioPage() {
   const wallet = useWallet();
   const [params] = useSearchParams();
-  const catalog = useMarketplaceCatalogs();
-  const existingReleases = useMemo(() => marketplaceCatalog([catalog]), [catalog]);
-  const createIntent = params.get("create") === "release" ? "release" : "track";
+  const [ownedStudioCatalog, setOwnedStudioCatalog] = useState(null);
+  const createIntent = params.get("create") === "track" ? "track" : "release";
+  const [workflow, setWorkflow] = useState(createIntent === "track" ? "mint" : "catalog");
   const [form, setForm] = useState(initialState);
   const [step, setStep] = useState("release");
   const [selectedReleaseId, setSelectedReleaseId] = useState("");
@@ -81,6 +76,11 @@ export function ArtistStudioPage() {
   const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
   const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
+  const [mintReleaseId, setMintReleaseId] = useState("");
+  const [mintTrackIds, setMintTrackIds] = useState([]);
+  const [mintEditionId, setMintEditionId] = useState("");
+  const [mintAmount, setMintAmount] = useState("1");
+  const [mintTxHashes, setMintTxHashes] = useState([]);
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
@@ -93,6 +93,27 @@ export function ArtistStudioPage() {
     : e2eMintStatus.state === "hidden"
       ? E2E_MINT_CHECKING_STATUS
       : e2eMintStatus;
+  const existingReleases = useMemo(() => (ownedStudioCatalog?.releases || []).map((release) => ({
+    release,
+    artist: (ownedStudioCatalog.artists || []).find((artist) => artist.id === release.artistId) || null,
+  })), [ownedStudioCatalog]);
+  const selectedMintRelease = ownedStudioCatalog?.releases?.find((release) => release.id === mintReleaseId) || null;
+  const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
+  const selectedMintEdition = mintEditions.find((edition) => edition.id === mintEditionId) || null;
+  const mintTracks = useMemo(() => {
+    if (!selectedMintRelease) return [];
+    if (Array.isArray(selectedMintRelease.tracks) && selectedMintRelease.tracks.length) return selectedMintRelease.tracks;
+    return mintEditions.flatMap((edition) => (edition.tokenIds || []).map((tokenId) => ({ title: edition.title, tokenId: String(tokenId), experienceId: edition.experienceIds?.[0] || "" })));
+  }, [selectedMintRelease, mintEditions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canUseStudio) return undefined;
+    studioFetch("/studio/catalog", { headers })
+      .then((payload) => { if (!cancelled) setOwnedStudioCatalog(mapPublishedCatalog(payload)); })
+      .catch((error) => { if (!cancelled) setNotice(error.message); });
+    return () => { cancelled = true; };
+  }, [canUseStudio, headers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,6 +211,31 @@ export function ArtistStudioPage() {
     }
   };
 
+  const saveCatalogStructure = async () => {
+    setBusy("catalog"); setNotice("");
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const ids = editionId ? { releaseId, editionId } : await saveDraft();
+      if (!ids.editionId) throw new Error("Save the track draft before configuring its experience.");
+      await studioFetch(`/studio/editions/${encodeURIComponent(ids.editionId)}/experiences`, {
+        method: "POST",
+        payload: {
+          title: form.experienceTitle || experienceCategoryLabel(form.productType),
+          description: form.experienceDescription,
+          experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
+          productType: form.productType,
+          requirements: [],
+          mediaConfig: {},
+        },
+        headers,
+      });
+      setNotice(`Catalog saved: ${form.releaseTitle || "Untitled release"} now contains its track and experience relationship.`);
+      setStep("release");
+    } catch (error) {
+      setNotice(error.message);
+    } finally { setBusy(""); }
+  };
+
   const publishEdition = async () => {
     setBusy("publish"); setNotice(""); setTxEvidence(null);
     try {
@@ -263,10 +309,29 @@ export function ArtistStudioPage() {
     }
   };
 
-  const goCreateEdition = () => {
-    if (!form.releaseTitle) setStep("release");
-    else setStep("track");
-    setNotice(form.releaseTitle ? "" : "Select or create a release, then continue to Tracks.");
+  const mintSelectedTracks = async () => {
+    setBusy("mint-tracks"); setNotice(""); setMintTxHashes([]); setTxEvidence(null);
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate the artist wallet before minting.");
+      if (!selectedMintRelease) throw new Error("Select an existing album or collection first.");
+      if (!selectedMintEdition) throw new Error("Select the target contract for this catalog.");
+      if (!mintTrackIds.length) throw new Error("Select at least one existing track.");
+      const target = assertFujiAddress(selectedMintEdition.contractAddress);
+      const provider = wallet.getProvider?.();
+      if (!(await readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account))) throw new Error("This authenticated artist wallet is not authorized to mint on the selected Fuji contract.");
+      const selected = mintTracks.filter((track) => mintTrackIds.includes(String(track.tokenId)));
+      const hashes = [];
+      for (const track of selected) {
+        if (track.tokenId === undefined || track.tokenId === null || track.tokenId === "") throw new Error(`Track ${track.title || "(untitled)"} has no token relationship yet.`);
+        const transaction = await sendFujiTransaction({ provider, from: wallet.account, to: target, data: encodeFujiMint({ to: wallet.account, tokenId: track.tokenId, amount: mintAmount }) });
+        hashes.push({ title: track.title, hash: transaction.hash });
+      }
+      setMintTxHashes(hashes);
+      setNotice(`${hashes.length} token mint${hashes.length === 1 ? "" : "s"} confirmed on Fuji for ${selectedMintRelease.title}.`);
+    } catch (error) {
+      setNotice(error.message);
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally { setBusy(""); }
   };
 
   const selectExistingRelease = (record) => {
@@ -291,15 +356,15 @@ export function ArtistStudioPage() {
       </header>
 
       <div className="vc-studio-actions">
-        <button type="button" className={`vc-studio-action${createIntent === "release" ? " is-primary" : ""}`} onClick={() => { setSelectedReleaseId(""); setStep("release"); }}>
+        <button type="button" className={`vc-studio-action${workflow === "catalog" ? " is-primary" : ""}`} onClick={() => { setWorkflow("catalog"); setSelectedReleaseId(""); setStep("release"); }}>
           <Eyebrow>01</Eyebrow>
           <h2>Create release</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Name the artist and the record.</p>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Build and edit your musical catalog.</p>
         </button>
-        <button type="button" className={`vc-studio-action${createIntent === "track" ? " is-primary" : ""}`} onClick={goCreateEdition}>
+        <button type="button" className={`vc-studio-action${workflow === "mint" ? " is-primary" : ""}`} onClick={() => { setWorkflow("mint"); setStep("mint"); setNotice(""); }}>
           <Eyebrow red>02</Eyebrow>
           <h2>Add tracks</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Track details, experiences, supply, preview, publish.</p>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Select existing tracks and mint them on-chain.</p>
         </button>
       </div>
 
@@ -330,13 +395,13 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      <nav aria-label="Studio workflow" className="vc-studio-steps">
+      {workflow === "catalog" && <nav aria-label="Catalog editor workflow" className="vc-studio-steps">
         {STEPS.map(([id, title], index) => (
           <button key={id} type="button" onClick={() => setStep(id)} className={step === id ? "is-active" : ""}>
             <span>0{index + 1}</span> {title}
           </button>
         ))}
-      </nav>
+      </nav>}
 
       {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
       {txEvidence && (
@@ -347,7 +412,47 @@ export function ArtistStudioPage() {
         </div>
       )}
 
-      {step === "release" && (
+      {workflow === "mint" && step === "mint" && (
+        <section style={card} aria-label="Mint existing tracks">
+          <Eyebrow red>Token minting / deployment</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Add tracks</h2>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Your catalog is already defined. Select an existing album or collection, choose its tracks, select an authorized contract, then mint the token copies.</p>
+          {!canUseStudio ? <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to load your catalog.</p> : ownedStudioCatalog && !existingReleases.length ? <p style={{ color: "var(--vc-bone-dim)" }}>No albums or collections are available for this authenticated artist.</p> : null}
+          <label style={label}>
+            Select album / collection
+            <select value={mintReleaseId} onChange={(event) => { setMintReleaseId(event.target.value); setMintEditionId(""); setMintTrackIds([]); }} style={field} disabled={!existingReleases.length}>
+              <option value="">Choose an existing catalog record</option>
+              {existingReleases.map(({ release, artist }) => <option key={release.id} value={release.id}>{artist?.name ? `${artist.name} — ` : ""}{release.title}</option>)}
+            </select>
+          </label>
+          {selectedMintRelease && <>
+            <label style={label}>Select tracks</label>
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+              {mintTracks.length ? mintTracks.map((track) => {
+                const id = String(track.tokenId ?? track.id ?? track.title);
+                return <label key={id} style={{ ...label, marginTop: 0, display: "flex", gap: 10, alignItems: "center", textTransform: "none", letterSpacing: 0, fontSize: 14 }}><input type="checkbox" checked={mintTrackIds.includes(id)} onChange={() => setMintTrackIds((prior) => prior.includes(id) ? prior.filter((item) => item !== id) : [...prior, id])} /> {track.title || "Untitled track"}{track.experienceId ? ` · ${track.experienceId}` : ""}</label>;
+              }) : <p style={{ color: "var(--vc-bone-dim)" }}>This catalog record has no track/token relationships yet. Define them in Create release first.</p>}
+            </div>
+            <label style={label}>
+              Select target contract
+              <select value={mintEditionId} onChange={(event) => setMintEditionId(event.target.value)} style={field}>
+                <option value="">Choose a contract</option>
+                {mintEditions.map((edition) => <option key={edition.id} value={edition.id} disabled={String(edition.contractAddress || "").toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()}>{edition.contractAddress || "Contract not configured"} · chain {edition.chainId || "—"}</option>)}
+              </select>
+            </label>
+            {selectedMintEdition && String(selectedMintEdition.contractAddress || "").toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase() && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>This contract is not the certified Fuji mint target and is read-only in Artist Studio.</p>}
+            <TextField title="Mint quantity per selected track" value={mintAmount} onChange={setMintAmount} required />
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+              <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !mintTrackIds.length || !selectedMintEdition} onClick={mintSelectedTracks}>{busy === "mint-tracks" ? "Minting…" : "Mint token(s)"}</button>
+              <button type="button" style={ghostBtn} onClick={() => { setWorkflow("catalog"); setStep("release"); }}>Back to catalog editor</button>
+            </div>
+            {mintTxHashes.length > 0 && <div style={{ marginTop: 20, fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}><strong>On-chain result</strong>{mintTxHashes.map((tx) => <div key={tx.hash}>{tx.title}: <a href={fujiExplorerUrl("tx", tx.hash)} target="_blank" rel="noreferrer">{tx.hash}</a></div>)}</div>}
+          </>
+          }
+        </section>
+      )}
+
+      {workflow === "catalog" && step === "release" && (
         <section style={card} id="create-release">
           <Eyebrow red>Your release</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>The record</h2>
@@ -384,7 +489,7 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      {step === "track" && (
+      {workflow === "catalog" && step === "track" && (
         <section style={card}>
           <Eyebrow red>Tracks</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Track details</h2>
@@ -400,7 +505,7 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      {step === "experience" && (
+      {workflow === "catalog" && step === "experience" && (
         <section style={card}>
           <Eyebrow red>Experiences</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>What it unlocks</h2>
@@ -418,12 +523,12 @@ export function ArtistStudioPage() {
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
-            <button type="button" style={primaryBtn} onClick={() => setStep("supply")}>Continue</button>
+            <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={saveCatalogStructure}>{busy === "catalog" ? "Saving catalog…" : "Save catalog structure"}</button>
           </div>
         </section>
       )}
 
-      {step === "supply" && (
+      {workflow === "catalog" && step === "supply" && (
         <section style={card}>
           <Eyebrow red>Supply</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>How many relics</h2>
@@ -438,7 +543,7 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      {step === "preview" && (
+      {workflow === "catalog" && step === "preview" && (
         <section style={card}>
           <Eyebrow red>Review</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>{form.releaseTitle || "Untitled release"}</h2>
@@ -461,7 +566,7 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      {step === "publish" && (
+      {workflow === "catalog" && step === "publish" && (
         <section style={card}>
           <Eyebrow red>Publish</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Publish release</h2>
@@ -479,7 +584,7 @@ export function ArtistStudioPage() {
         </section>
       )}
 
-      {step === "sale" && (
+      {workflow === "catalog" && step === "sale" && (
         <section style={card}>
           <Eyebrow red>Set up sale</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Set up sale</h2>

@@ -194,7 +194,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
         {variant !== "hero" && owned && (
           <>
             <Link to={experienceHref} style={ghostBtn}>{experienceLabel}</Link>
-            <Link to="/collection" style={ghostBtn}>My collection</Link>
+            <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </>
         )}
       </div>

@@ -115,4 +115,11 @@ describe("site header · reviewer notifications", () => {
     await normalStore.sync({ ready: false, wallet: null, headers: {} });
     expect(renderNav({ account: null, store: normalStore })).not.toContain(">4");
   });
+
+  it("keeps Artist Studio as the only catalog-management destination", () => {
+    const html = renderNav({ account: null, store: storeFor({ reviewer: false, count: 0 }) });
+    expect(html).toContain('href="/studio"');
+    expect(html).not.toContain("ADD TRACKS");
+    expect(html).not.toContain("/studio?create=track");
+  });
 });
