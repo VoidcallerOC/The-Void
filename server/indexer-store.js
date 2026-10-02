@@ -162,6 +162,21 @@ export class IndexerStore {
     });
   }
 
+  // A collection discovered from VoidCollectionFactory.CollectionCreated. It is an
+  // ordinary ERC1155 contract row, tagged with its factory so restarts find it.
+  async registerCollection({ chainId, factoryAddress, collectionAddress, artistWallet, name = null, symbol = null, contractUri = null, collectionIndex = null, blockNumber, transactionHash }) {
+    const collection = address(collectionAddress, "collectionAddress");
+    const factory = address(factoryAddress, "factoryAddress");
+    const metadata = { source: "COLLECTION_FACTORY", factory, artist: address(artistWallet, "artistWallet"), symbol, contractURI: contractUri, collectionIndex, createdTx: lower(transactionHash) };
+    const { rows } = await this.db.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name, deployment_tx_hash, deployment_block_number, metadata) VALUES ($1, $1::text, $2, 'ERC1155', $3, $4, $5, $6) ON CONFLICT (chain_id, address) DO UPDATE SET metadata = contracts.metadata || EXCLUDED.metadata, name = COALESCE(contracts.name, EXCLUDED.name), deployment_block_number = COALESCE(contracts.deployment_block_number, EXCLUDED.deployment_block_number), updated_at = now() RETURNING *", [chainId, collection, name, lower(transactionHash), blockNumber, metadata]);
+    return rows[0];
+  }
+
+  async listFactoryCollections({ chainId, factoryAddress }) {
+    const { rows } = await this.db.query("SELECT address, deployment_block_number FROM contracts WHERE chain_id=$1 AND contract_type='ERC1155' AND metadata->>'factory'=$2 ORDER BY deployment_block_number ASC NULLS LAST, address ASC", [chainId, address(factoryAddress, "factoryAddress")]);
+    return rows;
+  }
+
   async applyMarketplaceEvent(event) {
     return withTransaction(this.db, async (client) => {
       const marker = await client.query(`INSERT INTO marketplace_event_projections (chain_id, marketplace_address, transaction_hash, log_index, listing_id, event_type) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING *`, [event.chainId, address(event.marketplaceAddress, "marketplaceAddress"), lower(event.transactionHash), event.logIndex, numeric(event.listingId, "listingId", { positive: true }), event.eventType]);
