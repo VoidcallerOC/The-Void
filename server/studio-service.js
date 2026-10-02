@@ -12,6 +12,12 @@ import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
 import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
 
+// Full-length audio the browser may upload straight to private storage. WAV
+// masters are far larger than an API request body can carry.
+export const DIRECT_AUDIO_MIME_TYPES = Object.freeze(["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave", "audio/flac", "audio/x-flac", "audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/aiff", "audio/x-aiff"]);
+const DIRECT_UPLOAD_MEDIA_TYPES = Object.freeze(["AUDIO", "DEMO", "LIVE_RECORDING"]);
+const DIRECT_UPLOAD_TTL_SECONDS = 900;
+
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
 const PRODUCT_TYPES = Object.freeze({
@@ -134,13 +140,14 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, artworkUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, directMediaUploads = null, artworkUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
     this.metadataStorage = metadataStorage;
     this.mediaUploader = mediaUploader;
+    this.directMediaUploads = directMediaUploads;
     this.artworkUploader = artworkUploader;
     this.provenanceRecords = provenanceRecords;
     this.publicationChain = publicationChain;
@@ -499,6 +506,63 @@ export class ArtistStudioService {
     const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey, mediaType, contentSha256, byteSize: body.length });
     await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256 } });
     return { id: asset.id, mediaType: asset.media_type || mediaType, createdAt: asset.created_at || null };
+  }
+
+  // Step 1 of a direct upload: a short-lived, private-only, size- and
+  // type-limited Pinata link, issued only to the artist's owner wallet.
+  async createMediaUploadUrl({ request, artistId, input }) {
+    const { identity, artist } = await this.ownedArtist({ artistId, request });
+    const direct = this.directMediaUploads;
+    if (!direct || typeof direct.sign !== "function") throw new ApiError(503, "MEDIA_DIRECT_UPLOAD_UNAVAILABLE", "Direct protected media upload is not configured.");
+    const mediaType = enumValue(String(input.mediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
+    const contentType = requiredText(input.contentType, "contentType", { max: 128 }).toLowerCase();
+    if (!DIRECT_AUDIO_MIME_TYPES.includes(contentType)) throw new ApiError(400, "AUDIO_TYPE_UNSUPPORTED", "Audio must be WAV, AIFF, FLAC, MP3, AAC/M4A or OGG.");
+    const byteSize = Number(input.byteSize);
+    if (!Number.isSafeInteger(byteSize) || byteSize <= 0) throw new ApiError(400, "MEDIA_UPLOAD_EMPTY", "byteSize must be the file size in bytes.");
+    if (byteSize > direct.maxBytes) throw new ApiError(413, "MEDIA_UPLOAD_TOO_LARGE", `The full track must be ${Math.floor(direct.maxBytes / 1048576)} MB or smaller.`);
+    const filename = optionalText(input.filename, "filename", { max: 256 }) || "track";
+    const uploadId = `upload-${randomUUID()}`;
+    let url;
+    try {
+      url = await direct.sign({ filename, maxBytes: direct.maxBytes, mimeTypes: [...DIRECT_AUDIO_MIME_TYPES], expiresSeconds: DIRECT_UPLOAD_TTL_SECONDS, keyvalues: { voidArtistId: artist.id, voidUploadId: uploadId, voidMediaType: mediaType } });
+    } catch (error) {
+      throw new ApiError(error.status || 502, error.code || "MEDIA_UPLOAD_FAILED", error.message || "Could not create an upload link.");
+    }
+    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOAD_ISSUED", subjectType: "artist", subjectId: artist.id, payload: { uploadId, mediaType, contentType, byteSize } });
+    return { uploadId, url, maxBytes: direct.maxBytes, expiresAt: new Date(Date.now() + DIRECT_UPLOAD_TTL_SECONDS * 1000).toISOString() };
+  }
+
+  // Step 2: record the uploaded file. The server finds it in private storage by
+  // the keyvalues it signed into the link, so a client cannot register a file
+  // it did not upload through this artist's link, or a public one.
+  async registerMediaUpload({ request, artistId, input }) {
+    const { identity, artist } = await this.ownedArtist({ artistId, request });
+    const direct = this.directMediaUploads;
+    if (!direct || typeof direct.find !== "function") throw new ApiError(503, "MEDIA_DIRECT_UPLOAD_UNAVAILABLE", "Direct protected media upload is not configured.");
+    const uploadId = requiredText(input.uploadId, "uploadId", { max: 128 });
+    if (!/^upload-[0-9a-f-]{36}$/.test(uploadId)) throw new ApiError(400, "INVALID_UPLOAD_ID", "uploadId is invalid.");
+    // Declared by the artist's browser (the server never downloads the master).
+    // It only feeds the preview/full-track separation check.
+    const contentSha256 = requiredText(input.contentSha256, "contentSha256", { max: 64 }).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(contentSha256)) throw new ApiError(400, "INVALID_CONTENT_HASH", "contentSha256 must be a SHA-256 hex digest.");
+    let file;
+    try {
+      file = await direct.find({ keyvalues: { voidArtistId: artist.id, voidUploadId: uploadId } });
+    } catch (error) {
+      throw new ApiError(error.status || 502, error.code || "MEDIA_UPLOAD_LOOKUP_FAILED", error.message || "Could not confirm the upload.");
+    }
+    if (!file || !file.cid) throw new ApiError(409, "MEDIA_UPLOAD_NOT_FOUND", "The upload has not reached private storage yet. Try again in a moment.");
+    if (file.network !== "private" || file.keyvalues.voidArtistId !== artist.id || file.keyvalues.voidUploadId !== uploadId) throw new ApiError(409, "MEDIA_UPLOAD_MISMATCH", "The stored file does not match this upload.");
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw new ApiError(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.");
+    const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
+    const existing = await this.db.query("SELECT id, media_type, created_at FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artist.id, file.cid]);
+    if (existing.rows.length) return { id: existing.rows[0].id, mediaType: existing.rows[0].media_type || mediaType, byteSize: file.size, createdAt: existing.rows[0].created_at || null };
+    const publicPreview = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'contentSha256'=$2 LIMIT 1", [artist.id, contentSha256]);
+    if (publicPreview.rows.length) throw new ApiError(409, "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW", "This exact file is already public as a preview, so it cannot be token-gated.");
+    const id = `asset-${randomUUID()}`;
+    const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey: file.cid, mediaType, contentSha256, byteSize: file.size });
+    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: file.size, uploadId, direct: true } });
+    return { id: asset.id, mediaType: asset.media_type || mediaType, byteSize: file.size, createdAt: asset.created_at || null };
   }
 
   // Public release/track artwork. Unlike protected media it is pinned publicly,

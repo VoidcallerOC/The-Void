@@ -35,11 +35,13 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, indexerConfig, rateLimiter, logger });
   let resolvedMediaGateway = mediaGateway;
   let mediaUploader = null;
+  let directMediaUploads = null;
   if (!resolvedMediaGateway) {
     try {
       const resolvedMediaConfig = mediaConfig || loadMediaConfig();
       const storage = createPrivateMediaStorage({ config: resolvedMediaConfig });
       mediaUploader = (input) => storage.put(input);
+      if (resolvedMediaConfig.driver === "pinata") directMediaUploads = { maxBytes: resolvedMediaConfig.maxBytes, sign: (input) => storage.createSignedUpload(input), find: (input) => storage.findSignedUpload(input) };
       resolvedMediaGateway = createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage, mediaConfig: resolvedMediaConfig });
     } catch (error) {
       if (String(process.env.VERCEL || "") !== "1") throw error;
@@ -48,7 +50,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   }
   const provenanceRecords = new ProvenanceRecords({ db: pool });
   const metadataFetcher = createIpfsMetadataFetcher({ gateway: process.env.IPFS_GATEWAY });
-  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, artworkUploader, provenanceRecords, metadataFetcher, logger });
+  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, directMediaUploads, artworkUploader, provenanceRecords, metadataFetcher, logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });

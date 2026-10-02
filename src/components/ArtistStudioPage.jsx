@@ -10,7 +10,7 @@ import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, crea
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
-import { ARTWORK_ACCEPT, AUDIO_ACCEPT, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
+import { ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -417,10 +417,16 @@ export function ArtistStudioPage() {
   }, (uploaded) => `Public preview uploaded: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · ${uploaded.uri}`);
 
   const uploadFullTrack = (file) => runUpload("full-track", file, async (owner) => {
-    const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers });
+    const progress = (event) => {
+      const message = event.stage === "hashing" ? `Checking ${file.name} (${formatBytes(file.size)})…`
+        : event.stage === "uploading" ? `Uploading ${file.name} privately… ${Math.floor((event.loaded / event.total) * 100)}% of ${formatBytes(event.total)}`
+        : `Confirming ${file.name} in private storage…`;
+      setUploads((prior) => ({ ...prior, "full-track": { state: "uploading", message } }));
+    };
+    const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers, onProgress: progress });
     setFullTrack(uploaded);
     return uploaded;
-  }, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to gate it to holders.`);
+  }, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to gate it to holders.`);
 
   const selectExistingRelease = (record) => {
     const selection = selectReleaseTemplate(record);
@@ -620,7 +626,7 @@ export function ArtistStudioPage() {
                 {busy === "full-track" ? "Uploading…" : fullTrack ? "Replace full track" : "Upload full track"}
                 <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadFullTrack(file); }} />
               </label>
-              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>15 MB max · private · token-gated</span>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`WAV, AIFF, FLAC or MP3 · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · token-gated`}</span>
             </div>
             <UploadStatus status={uploads["full-track"]} signedIn={canUseStudio} />
           </div>
