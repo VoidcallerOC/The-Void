@@ -121,4 +121,9 @@ describe("catalog source", () => {
     expect(next.artists[0].name).toBe("Local");
     expect(next.editions[0].listings).toBeUndefined();
   });
+
+  it("maps an artist's stored profile links to public socials, dropping unsafe links", () => {
+    const catalog = mapPublishedCatalog({ artists: [{ id: "artist-a", slug: "a", display_name: "A", website_url: "https://a.example", social_links: { x: "https://x.com/a", instagram: "javascript:alert(1)" } }] });
+    expect(catalog.artists[0].socials).toEqual([{ name: "Website", href: "https://a.example/" }, { name: "X", href: "https://x.com/a" }]);
+  });
 });
