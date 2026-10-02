@@ -60,6 +60,8 @@ export function canonicalMetadata(input) {
       ...(text(input.tier, 128) ? [{ trait_type: "Tier", value: text(input.tier, 128) }] : []),
     ],
   };
+  const audio = text(input.audio || edition.application_metadata?.audio, 2048);
+  if (audio) metadata.animation_url = audio;
   if (!metadata.name || !metadata.artist) throw new ApiError(400, "METADATA_INPUT_INVALID", "A release title and artist are required before metadata can be published.");
   return digestCanonicalMetadata(metadata);
 }

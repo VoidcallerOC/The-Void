@@ -129,6 +129,15 @@ describe("HTTP API boundary", () => {
     expect(studioService.uploadArtwork).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", input: { data: "iVBORw==" } }));
   });
 
+  it("routes track audio uploads to the artist's audio endpoint", async () => {
+    const studioService = { uploadTrackAudio: vi.fn().mockResolvedValue({ uri: "ipfs://bafyaudio", contentType: "audio/mpeg", byteSize: 5 }) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/artists/artist-1/audio", body: JSON.stringify({ data: "SUQz" }), headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(200);
+    expect(studioService.uploadTrackAudio).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", input: { data: "SUQz" } }));
+  });
+
   it("routes metadata publication to the canonical Studio endpoint and rejects obsolete paths", async () => {
     const studioService = { publishMetadata: vi.fn().mockResolvedValue({ releaseId: "release-a", metadataUri: "ipfs://cid" }) };
     const handler = createApiHandler({ service: {}, studioService });

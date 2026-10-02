@@ -44,14 +44,13 @@ export async function uploadStudioArtwork({ artistId, file, headers, fetchImpl =
 export const MAX_AUDIO_BYTES = 15 * 1000 * 1000;
 export const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/wave,audio/flac,audio/x-flac,audio/aac,audio/mp4,audio/x-m4a,audio/ogg";
 
-// Uploads a track's protected audio to private storage. Returns the asset id
-// that an experience references; the file itself is never public.
+// Uploads a track's audio for its token metadata (animation_url) and returns
+// the public ipfs:// URI. The server re-checks type and size from the bytes.
 export async function uploadStudioAudio({ artistId, file, headers, fetchImpl = fetch }) {
   if (!artistId) throw new Error("Create the release before uploading audio.");
   if (!file) throw new Error("Choose an audio file to upload.");
   if (!AUDIO_ACCEPT.split(",").includes(file.type)) throw new Error("Audio must be MP3, WAV, FLAC, AAC/M4A or OGG.");
   if (file.size > MAX_AUDIO_BYTES) throw new Error("Audio must be 15 MB or smaller.");
   const data = await fileToBase64(file);
-  const asset = await studioFetch(`/studio/artists/${encodeURIComponent(artistId)}/media`, { method: "POST", payload: { mediaType: "AUDIO", filename: file.name, contentType: file.type, data }, headers, fetchImpl });
-  return { assetId: asset.id, filename: file.name, contentType: file.type };
+  return studioFetch(`/studio/artists/${encodeURIComponent(artistId)}/audio`, { method: "POST", payload: { data, filename: file.name }, headers, fetchImpl });
 }

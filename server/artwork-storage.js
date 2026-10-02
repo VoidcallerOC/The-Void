@@ -19,6 +19,24 @@ export function sniffArtwork(bytes) {
   return found ? { contentType: found.contentType, extension: found.extension } : null;
 }
 
+// Track audio is published as the token's animation_url, so it is public too.
+// 15 MB matches the base64 cap Studio uploads already use.
+export const MAX_AUDIO_BYTES = 15 * 1000 * 1000;
+
+const AUDIO_SIGNATURES = [
+  { contentType: "audio/mpeg", extension: ".mp3", matches: (bytes) => (bytes.length >= 3 && bytes.subarray(0, 3).toString("latin1") === "ID3") || (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && (bytes[1] & 0x06) !== 0) },
+  { contentType: "audio/wav", extension: ".wav", matches: (bytes) => bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WAVE" },
+  { contentType: "audio/flac", extension: ".flac", matches: (bytes) => bytes.length >= 4 && bytes.subarray(0, 4).toString("latin1") === "fLaC" },
+  { contentType: "audio/ogg", extension: ".ogg", matches: (bytes) => bytes.length >= 4 && bytes.subarray(0, 4).toString("latin1") === "OggS" },
+  { contentType: "audio/mp4", extension: ".m4a", matches: (bytes) => bytes.length >= 12 && bytes.subarray(4, 8).toString("latin1") === "ftyp" && ["M4A ", "M4B ", "mp42", "isom", "mp41", "dash"].includes(bytes.subarray(8, 12).toString("latin1")) },
+];
+
+/** The audio type proven by the file's own bytes, or null. */
+export function sniffAudio(bytes) {
+  const found = AUDIO_SIGNATURES.find((signature) => signature.matches(bytes));
+  return found ? { contentType: found.contentType, extension: found.extension } : null;
+}
+
 export function createPinataArtworkUploader({ jwt, fetchImpl = fetch, endpoint = "https://uploads.pinata.cloud/v3/files" }) {
   if (!jwt) throw new Error("Pinata artwork uploads need PINATA_JWT.");
   return async ({ body, filename, contentType }) => {
