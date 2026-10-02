@@ -231,9 +231,16 @@ contract VoidRelease1155V3 {
         return _payout[tokenId];
     }
 
+    /// @notice The edition's creator wallet while it still acts for the edition's artist, else
+    /// address(0). VoidPrimarySale authorizes sale configuration with this, so a wallet that
+    /// was removed or moved to another artist keeps no authority over earlier editions.
+    /// `edition(tokenId).artist` remains the historical creation record.
     function artistOf(uint256 tokenId) external view returns (address) {
         if (!_editions[tokenId].exists) revert EditionNotFound(tokenId);
-        return _editions[tokenId].artist;
+        address creator = _editions[tokenId].artist;
+        bytes32 artistId = _editionArtistId[tokenId];
+        if (_walletArtist[creator] != artistId || !_artists[artistId].active) return address(0);
+        return creator;
     }
 
     function maxSupplyOf(uint256 tokenId) external view returns (uint256) {

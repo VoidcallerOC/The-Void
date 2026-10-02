@@ -12,6 +12,7 @@ import { ProtectedMediaGateway } from "./media-gateway.js";
 import { migrate, migrationBody, migrationsDirectory } from "./migrate.js";
 import { IndexedOwnershipVerifier } from "./ownership.js";
 import { createPersistenceRepository } from "./repositories.js";
+import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT, LEGACY_EDITION_ID, LEGACY_IPFS_MEDIA, LEGACY_METADATA_BASE, LEGACY_TOKENS, legacyExperienceId, legacyIpfsToHttp, legacyMetadataUri } from "../src/lib/legacy-genesis.js";
 
 const SEED = "019_seed_voidcaller_legacy.sql";
@@ -115,7 +116,7 @@ describe.skipIf(!testDatabaseUrl)("019 legacy catalog seed (database)", () => {
 
   afterAll(async () => {
     for (const pool of pools) await pool.end().catch(() => {});
-    for (const name of created) await adminPool.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {});
+    for (const name of created) await dropScratchDatabase(adminPool, name);
     await adminPool.end();
   });
 
