@@ -8,7 +8,7 @@ import { fetchSelfTitledEpVolume } from "../lib/marketplace-api.js";
 import { formatWeiAsAvax } from "../lib/marketplace-surface.js";
 
 // ---------------- Hero ----------------
-export function Hero({ onMint }) {
+export function Hero() {
   const audio = useAudio();
   const [volume, setVolume] = useState(null);
   const hearEP = () => {
@@ -120,7 +120,7 @@ export function Hero({ onMint }) {
             margin: 0,
           }}
         >
-          The first call. The first relic. Trading now on OpenSea and Joepegs — the chain remembers.
+          The first call. The first relic. The chain remembers.
         </p>
         <p
           style={{
@@ -137,7 +137,6 @@ export function Hero({ onMint }) {
           One Chapter I relic unlocks the entire EP. Without it you hear fragments.
         </p>
         <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-          <Btn onClick={onMint}>Claim the relic</Btn>
           <Btn kind="ghost" onClick={hearEP}>Hear the EP</Btn>
           <Link
             to="/marketplace"
