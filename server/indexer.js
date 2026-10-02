@@ -1,4 +1,5 @@
 import { zeroAddress, retry } from "./indexer-utils.js";
+import { collectionIndexerConfig } from "./config.js";
 import { decodeMarketplaceLog } from "./marketplace-events.js";
 import { reconcileMarketplaceListing } from "./marketplace-reconcile.js";
 
@@ -76,6 +77,64 @@ export function decodePurchasedLog(log, { chainId, blockTimestamp, tokenAddress,
   };
 }
 
+function stringFromOffset(data, offsetWord) {
+  const bytesOffset = Number(BigInt(`0x${offsetWord}`));
+  if (!Number.isSafeInteger(bytesOffset) || bytesOffset % 32 !== 0) throw new Error("ABI string offset is invalid.");
+  const start = bytesOffset / 32;
+  const length = Number(BigInt(`0x${word(data, start)}`));
+  if (!Number.isSafeInteger(length) || length > 4096) throw new Error("ABI string length is invalid.");
+  const hex = cleanHex(data).slice((start + 1) * 64, (start + 1) * 64 + length * 2);
+  if (hex.length !== length * 2) throw new Error("ABI string is incomplete.");
+  return new TextDecoder().decode(Uint8Array.from(hex.match(/.{2}/g) || [], (byte) => parseInt(byte, 16)));
+}
+
+/** VoidCollectionFactory.CollectionCreated(collection, artist, index, name, symbol, contractURI). */
+export function decodeCollectionCreatedLog(log, { eventTopic }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  if (!eventTopic || topic !== String(eventTopic).toLowerCase()) return null;
+  if (!Array.isArray(log.topics) || log.topics.length < 4) throw new Error("CollectionCreated requires collection, artist and index topics.");
+  return {
+    eventType: "CollectionCreated",
+    factoryAddress: String(log.address || "").toLowerCase(),
+    collectionAddress: topicAddress(log.topics[1]),
+    artistWallet: topicAddress(log.topics[2]),
+    collectionIndex: BigInt(log.topics[3]).toString(),
+    name: stringFromOffset(log.data, word(log.data, 0)),
+    symbol: stringFromOffset(log.data, word(log.data, 1)),
+    contractUri: stringFromOffset(log.data, word(log.data, 2)),
+  };
+}
+
+/** VoidPrimarySaleV2.Purchased(collection, tokenId, buyer, qty, paid, artistCut, platformCut). */
+export function decodePurchasedV2Log(log, { chainId, blockTimestamp, eventTopic }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  if (!eventTopic || topic !== String(eventTopic).toLowerCase()) return null;
+  if (!Array.isArray(log.topics) || log.topics.length < 4) throw new Error("Purchased requires collection, tokenId and buyer topics.");
+  const quantity = uintWord(word(log.data, 0));
+  const paidWei = uintWord(word(log.data, 1));
+  const artistCutWei = uintWord(word(log.data, 2));
+  const platformCutWei = uintWord(word(log.data, 3));
+  if (BigInt(quantity) <= 0n || BigInt(paidWei) <= 0n) throw new Error("Purchased quantity and payment must be positive.");
+  if (BigInt(artistCutWei) + BigInt(platformCutWei) !== BigInt(paidWei)) throw new Error("Purchased cuts do not sum to the amount paid.");
+  return {
+    chainId,
+    eventType: "Purchased",
+    saleAddress: String(log.address || "").toLowerCase(),
+    tokenContractAddress: topicAddress(log.topics[1]),
+    transactionHash: String(log.transactionHash || "").toLowerCase(),
+    blockNumber: Number(log.blockNumber),
+    blockHash: String(log.blockHash || "").toLowerCase(),
+    logIndex: Number(log.logIndex),
+    blockTimestamp,
+    tokenId: BigInt(log.topics[2]).toString(),
+    buyerWallet: topicAddress(log.topics[3]),
+    quantity,
+    paidWei,
+    artistCutWei,
+    platformCutWei,
+  };
+}
+
 export function classifyMarketplaceLog(log, topics = {}) {
   const topic = String(log?.topics?.[0] || "").toLowerCase();
   const entries = Object.entries(topics).find(([, value]) => String(value).toLowerCase() === topic);
@@ -97,10 +156,35 @@ export class BlockchainIndexer {
     this.onProgress = onProgress;
   }
 
+  // Factories sync first so a collection created in this range is indexed from its
+  // creation block in the same cycle; collections found earlier are reloaded once.
   async syncAll() {
+    if (!this.collectionsLoaded) await this.loadRegisteredCollections();
     const results = [];
-    for (const config of this.configs) results.push(await this.syncContract(config));
+    for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY")) results.push(await this.syncContract(config));
+    for (const config of this.configs.filter((item) => item.contractType !== "COLLECTION_FACTORY")) results.push(await this.syncContract(config));
     return results;
+  }
+
+  saleOperators() {
+    return this.configs.filter((item) => item.contractType === "PRIMARY_SALE" || item.contractType === "PRIMARY_SALE_V2").map((item) => String(item.address).toLowerCase());
+  }
+
+  addCollection({ chainId, address, startBlock, factoryAddress }) {
+    const normalized = String(address).toLowerCase();
+    if (this.configs.some((item) => String(item.address).toLowerCase() === normalized)) return false;
+    this.configs.push(collectionIndexerConfig({ chainId, address: normalized, startBlock, skipMintOperators: this.saleOperators(), factoryAddress }));
+    this.logger.info?.("indexer.collection.added", { chainId: Number(chainId), address: normalized, startBlock: Number(startBlock) });
+    return true;
+  }
+
+  async loadRegisteredCollections() {
+    if (!this.store.listFactoryCollections) { this.collectionsLoaded = true; return; }
+    for (const factory of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY")) {
+      const rows = await this.store.listFactoryCollections({ chainId: Number(factory.chainId), factoryAddress: factory.address });
+      for (const row of rows) this.addCollection({ chainId: factory.chainId, address: row.address, startBlock: Number(row.deployment_block_number ?? factory.startBlock ?? 0), factoryAddress: factory.address });
+    }
+    this.collectionsLoaded = true;
   }
 
   async syncContract(config) {
@@ -220,6 +304,53 @@ export class BlockchainIndexer {
     const chainId = Number(config.chainId);
     const base = { chainId, contractAddress: String(log.address || config.address).toLowerCase(), transactionHash: String(log.transactionHash || "").toLowerCase(), blockNumber: Number(log.blockNumber), blockHash: String(log.blockHash || block.hash).toLowerCase(), logIndex: Number(log.logIndex), blockTimestamp: new Date(Number(block.timestamp) * 1000) };
     if (!base.transactionHash || !Number.isInteger(base.logIndex) || base.logIndex < 0) return this.store.recordIndexerError({ ...base, errorType: "MALFORMED_LOG", message: "Missing transaction hash or log index." });
+    if (config.contractType === "COLLECTION_FACTORY") {
+      let created;
+      try {
+        created = decodeCollectionCreatedLog(log, { eventTopic: config.eventTopics?.CollectionCreated });
+      } catch (error) {
+        await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
+        await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_COLLECTION_FACTORY_EVENT", message: error.message, payload: log });
+        return { duplicate: false, malformed: true };
+      }
+      if (!created) {
+        const inserted = await this.store.recordEvent({ ...base, eventType: "UNKNOWN", eventData: {}, isMalformed: false });
+        return { duplicate: !inserted, eventType: "UNKNOWN" };
+      }
+      // Only the configured factory is trusted to announce collections.
+      if (created.factoryAddress !== String(config.address).toLowerCase()) throw new Error("CollectionCreated came from an unconfigured factory.");
+      const inserted = await this.store.recordEvent({ ...base, eventType: "CollectionCreated", eventData: created, isMalformed: false });
+      await this.store.registerCollection({ chainId, factoryAddress: created.factoryAddress, collectionAddress: created.collectionAddress, artistWallet: created.artistWallet, name: created.name, symbol: created.symbol, contractUri: created.contractUri, collectionIndex: created.collectionIndex, blockNumber: base.blockNumber, transactionHash: base.transactionHash });
+      const added = this.addCollection({ chainId, address: created.collectionAddress, startBlock: base.blockNumber, factoryAddress: created.factoryAddress });
+      return { duplicate: !inserted, eventType: "CollectionCreated", collection: created.collectionAddress, added };
+    }
+    if (config.contractType === "PRIMARY_SALE_V2") {
+      let purchased;
+      try {
+        purchased = decodePurchasedV2Log(log, { chainId, blockTimestamp: base.blockTimestamp, eventTopic: config.eventTopics?.Purchased });
+      } catch (error) {
+        await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
+        await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_PRIMARY_SALE_EVENT", message: error.message, payload: log });
+        return { duplicate: false, malformed: true };
+      }
+      if (!purchased) {
+        const inserted = await this.store.recordEvent({ ...base, eventType: "UNKNOWN", eventData: {}, isMalformed: false });
+        return { duplicate: !inserted, eventType: "UNKNOWN" };
+      }
+      // The sale contract only sells registered collections; refuse to credit anything else.
+      if (!this.configs.some((item) => item.contractType === "ERC1155" && String(item.address).toLowerCase() === purchased.tokenContractAddress)) {
+        await this.store.recordIndexerError({ ...base, errorType: "PRIMARY_SALE_UNKNOWN_COLLECTION", message: "Purchased references a collection this indexer does not track.", payload: purchased });
+        throw new Error("Purchased references an untracked collection.");
+      }
+      const inserted = await this.store.recordEvent({ ...base, eventType: "Purchased", eventData: purchased, isMalformed: false });
+      try {
+        const projection = await this.store.applyPrimaryPurchase(purchased);
+        return { duplicate: !inserted, eventType: "Purchased", projectionApplied: !projection?.duplicate, projection };
+      } catch (error) {
+        await this.store.recordIndexerError({ ...base, errorType: "PRIMARY_SALE_PROJECTION_FAILED", message: error.message, payload: purchased });
+        throw error;
+      }
+    }
     if (config.contractType === "PRIMARY_SALE") {
       let purchased;
       try {
