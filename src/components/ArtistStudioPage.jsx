@@ -10,7 +10,7 @@ import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, crea
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
-import { ARTWORK_ACCEPT, AUDIO_ACCEPT, studioFetch, uploadStudioArtwork, uploadStudioAudio } from "../lib/studio-api.js";
+import { ARTWORK_ACCEPT, AUDIO_ACCEPT, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -62,7 +62,7 @@ function initialState() {
     trackTitle: "",
     trackDescription: "",
     trackArtwork: "",
-    trackAudio: "",
+    trackPreview: "",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "10000000000000000",
@@ -98,6 +98,7 @@ export function ArtistStudioPage() {
   const [busy, setBusy] = useState("");
   const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
   const [e2eMintPlan, setE2eMintPlan] = useState(() => createFujiE2EMintPlan());
+  const [fullTrack, setFullTrack] = useState(null);
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
   const [mintEditionId, setMintEditionId] = useState("");
@@ -233,7 +234,7 @@ export function ArtistStudioPage() {
             quantity: form.quantity,
             priceWei: form.priceWei,
             marketplace: {},
-            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork, ...(form.trackAudio ? { audio: form.trackAudio } : {}) },
+            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}) },
           },
           headers,
         });
@@ -262,7 +263,7 @@ export function ArtistStudioPage() {
           experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
           productType: form.productType,
           requirements: [],
-          mediaConfig: {},
+          mediaConfig: fullTrack ? { protected: true, protectedMedia: [{ assetId: fullTrack.assetId, mediaType: "AUDIO", contentType: fullTrack.contentType }] } : {},
         },
         headers,
       });
@@ -286,7 +287,7 @@ export function ArtistStudioPage() {
       const saved = editionId ? { releaseId: ids.releaseId, editionId } : await saveDraft(ids);
       const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
-        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackAudio ? { audio: form.trackAudio } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
       });
       const provider = wallet.getProvider?.();
@@ -383,13 +384,24 @@ export function ArtistStudioPage() {
     } finally { setBusy(""); }
   };
 
-  const uploadAudio = async (file) => {
-    setBusy("audio"); setNotice("");
+  const uploadPreview = async (file) => {
+    setBusy("preview"); setNotice("");
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      const uploaded = await uploadStudioAudio({ artistId: artistId || await ensureArtist(), file, headers });
-      set("trackAudio", uploaded.uri);
-      setNotice("Audio uploaded. It is published in the token metadata as animation_url.");
+      const uploaded = await uploadStudioPreview({ artistId: artistId || await ensureArtist(), file, headers });
+      set("trackPreview", uploaded.uri);
+      setNotice("Public preview uploaded. Wallets and marketplaces will play it from the token metadata.");
+    } catch (error) {
+      setNotice(error.message);
+    } finally { setBusy(""); }
+  };
+
+  const uploadFullTrack = async (file) => {
+    setBusy("full-track"); setNotice("");
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      setFullTrack(await uploadStudioFullTrack({ artistId: artistId || await ensureArtist(), file, headers }));
+      setNotice("Full track uploaded privately. Save the catalog structure to gate it to holders of this track.");
     } catch (error) {
       setNotice(error.message);
     } finally { setBusy(""); }
@@ -560,15 +572,25 @@ export function ArtistStudioPage() {
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
           <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} />
           <div style={{ marginTop: 16 }}>
-            <TextField title="Track audio (token metadata · animation_url)" value={form.trackAudio} onChange={(value) => set("trackAudio", value)} placeholder="Upload audio or paste an audio URL" />
-            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <p style={{ margin: "0 0 8px" }}>Public preview (~30 seconds) — played by wallets and marketplaces from the token metadata</p>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
-                {busy === "audio" ? "Uploading…" : form.trackAudio ? "Replace audio" : "Upload audio"}
-                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadAudio(file); }} />
+                {busy === "preview" ? "Uploading…" : form.trackPreview ? "Replace preview" : "Upload preview"}
+                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadPreview(file); }} />
               </label>
-              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>MP3, WAV, FLAC, AAC/M4A or OGG · 15 MB max · public</span>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>~30 s clip · 5 MB max · public</span>
             </div>
-            {form.trackAudio && <audio controls preload="none" src={ipfsToHttp(form.trackAudio)} style={{ width: "100%", marginTop: 12 }} />}
+            {form.trackPreview && <audio controls preload="none" src={ipfsToHttp(form.trackPreview)} style={{ width: "100%", marginTop: 12 }} />}
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <p style={{ margin: "0 0 8px" }}>Full track (private) — only wallets holding this track's token can stream it</p>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
+                {busy === "full-track" ? "Uploading…" : fullTrack ? "Replace full track" : "Upload full track"}
+                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadFullTrack(file); }} />
+              </label>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{fullTrack ? `Uploaded privately: ${fullTrack.filename} · attached when you save the catalog structure` : "15 MB max · private · token-gated"}</span>
+            </div>
           </div>
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>

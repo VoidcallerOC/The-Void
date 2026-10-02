@@ -10,7 +10,7 @@ import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommi
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
 import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
-import { MAX_ARTWORK_BYTES, MAX_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
+import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -195,6 +195,23 @@ export class ArtistStudioService {
     }
   }
 
+  // A private full track sent without explicit requirements unlocks for
+  // holders of this edition's own token(s). Never ungated: an edition with
+  // no token is rejected.
+  async defaultEditionRequirements({ editionId, mediaConfig, requirements }) {
+    const protectedMedia = Array.isArray(mediaConfig?.protectedMedia) ? mediaConfig.protectedMedia : [];
+    if (!protectedMedia.length || (Array.isArray(requirements) && requirements.length)) return requirements;
+    const { rows } = await this.db.query("SELECT t.token_id::text AS token_id, lower(c.address) AS contract_address, c.chain_id FROM tokens t JOIN contracts c ON c.id=t.contract_id WHERE t.edition_id=$1", [editionId]);
+    if (!rows.length) throw new ApiError(400, "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED", "Save the track before attaching its full audio so it can be gated to the track's token.");
+    const byContract = new Map();
+    for (const row of rows) {
+      const key = `${row.chain_id}:${row.contract_address}`;
+      if (!byContract.has(key)) byContract.set(key, { type: "erc1155-balance", contract: row.contract_address, chainId: Number(row.chain_id), tokenIds: [], minAmount: "1" });
+      byContract.get(key).tokenIds.push(String(row.token_id));
+    }
+    return [...byContract.values()];
+  }
+
   async bindProtectedExperience({ artistId, mediaConfig, requirements }) {
     const config = requireMediaConfig(mediaConfig);
     const normalizedRequirements = requireRequirements(requirements);
@@ -218,7 +235,8 @@ export class ArtistStudioService {
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
     const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
     const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
-    const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, audio: input.audio, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: input.releaseType, tier: edition.tier });
+    const previewAudio = await this.vettedPreviewAudio({ artistId: release.artist_id, uri: input.previewAudio ?? edition.application_metadata?.previewAudio });
+    const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, previewAudio, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: input.releaseType, tier: edition.tier });
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
@@ -426,7 +444,8 @@ export class ArtistStudioService {
     const productType = input.productType ? String(input.productType).toUpperCase() : null;
     const mappedType = productType ? PRODUCT_TYPES[productType] : String(input.type || input.experienceType || "").toUpperCase();
     if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
-    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements: input.requirements });
+    const requirements = await this.defaultEditionRequirements({ editionId: edition.id, mediaConfig: input.mediaConfig, requirements: input.requirements });
+    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements });
     const mediaConfig = { ...bound.mediaConfig, ...(productType ? { productType, deliveryType: mappedType } : {}) };
     const experience = await this.repository.saveExperience({ id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, status: "DRAFT" });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_CREATED", subjectType: "experience", subjectId: experience.id, payload: { editionId: edition.id } });
@@ -472,6 +491,8 @@ export class ArtistStudioService {
     const body = Buffer.from(encoded, "base64");
     if (!body.length) throw new ApiError(400, "MEDIA_UPLOAD_EMPTY", "Protected media upload was empty.");
     const contentSha256 = createHash("sha256").update(body).digest("hex");
+    const publicPreview = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'contentSha256'=$2 LIMIT 1", [artist.id, contentSha256]);
+    if (publicPreview.rows.length) throw new ApiError(409, "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW", "This exact file is already public as a preview, so it cannot be token-gated.");
     const stored = await this.mediaUploader({ artistId: artist.id, body, filename: optionalText(input.filename, "filename", { max: 256 }) || "upload.bin", contentType: optionalText(input.contentType, "contentType", { max: 128 }) || "application/octet-stream", mediaType });
     const storageKey = requiredText(stored?.storageKey, "storageKey", { max: 1024 });
     const id = `asset-${randomUUID()}`;
@@ -504,29 +525,45 @@ export class ArtistStudioService {
     return { uri, contentType: image.contentType, byteSize: body.length };
   }
 
-  // Track audio for the token's animation_url. Public by design, like artwork:
-  // wallets and marketplaces play it straight from the metadata.
-  async uploadTrackAudio({ request, artistId, input }) {
+  // PUBLIC preview clip for the token's animation_url. Full-length audio must
+  // go through uploadProtectedMedia instead; the two can never be the same file.
+  async uploadTrackPreview({ request, artistId, input }) {
     const { identity, artist } = await this.ownedArtist({ artistId, request });
-    if (typeof this.artworkUploader !== "function") throw new ApiError(503, "AUDIO_UPLOAD_UNAVAILABLE", "Audio upload is not configured.");
-    const maxEncoded = Math.ceil(MAX_AUDIO_BYTES / 3) * 4;
-    if (String(input.data ?? "").length > maxEncoded) throw new ApiError(413, "AUDIO_TOO_LARGE", "Audio must be 15 MB or smaller.");
+    if (typeof this.artworkUploader !== "function") throw new ApiError(503, "PREVIEW_UPLOAD_UNAVAILABLE", "Preview upload is not configured.");
+    const maxEncoded = Math.ceil(MAX_PREVIEW_AUDIO_BYTES / 3) * 4;
+    if (String(input.data ?? "").length > maxEncoded) throw new ApiError(413, "PREVIEW_TOO_LARGE", "A preview must be 5 MB or smaller. Upload a ~30-second clip, not the full track.");
     const body = Buffer.from(requiredText(input.data, "data", { max: maxEncoded }), "base64");
-    if (!body.length) throw new ApiError(400, "AUDIO_UPLOAD_EMPTY", "Audio upload was empty.");
-    if (body.length > MAX_AUDIO_BYTES) throw new ApiError(413, "AUDIO_TOO_LARGE", "Audio must be 15 MB or smaller.");
+    if (!body.length) throw new ApiError(400, "PREVIEW_UPLOAD_EMPTY", "Preview upload was empty.");
+    if (body.length > MAX_PREVIEW_AUDIO_BYTES) throw new ApiError(413, "PREVIEW_TOO_LARGE", "A preview must be 5 MB or smaller. Upload a ~30-second clip, not the full track.");
     const audio = sniffAudio(body);
     if (!audio) throw new ApiError(400, "AUDIO_TYPE_UNSUPPORTED", "Audio must be MP3, WAV, FLAC, AAC/M4A or OGG.");
     const contentSha256 = createHash("sha256").update(body).digest("hex");
+    const privateMatch = await this.db.query("SELECT id FROM media_assets WHERE artist_id=$1 AND metadata->>'contentSha256'=$2 LIMIT 1", [artist.id, contentSha256]);
+    if (privateMatch.rows.length) throw new ApiError(409, "PREVIEW_MATCHES_PRIVATE_TRACK", "This file is already uploaded as private, token-gated audio. Upload a separate short preview clip instead.");
     let stored;
     try {
-      stored = await this.artworkUploader({ artistId: artist.id, body, filename: `audio-${contentSha256.slice(0, 16)}${audio.extension}`, contentType: audio.contentType });
+      stored = await this.artworkUploader({ artistId: artist.id, body, filename: `preview-${contentSha256.slice(0, 16)}${audio.extension}`, contentType: audio.contentType });
     } catch (error) {
-      throw new ApiError(error.status || 502, error.code === "ARTWORK_UPLOAD_UNAUTHORIZED" ? "AUDIO_UPLOAD_UNAUTHORIZED" : "AUDIO_UPLOAD_FAILED", error.message || "Audio upload failed.");
+      throw new ApiError(error.status || 502, error.code === "ARTWORK_UPLOAD_UNAUTHORIZED" ? "PREVIEW_UPLOAD_UNAUTHORIZED" : "PREVIEW_UPLOAD_FAILED", error.message || "Preview upload failed.");
     }
     const uri = requiredText(stored?.uri, "uri", { max: 1024 });
-    if (!uri.startsWith("ipfs://")) throw new ApiError(502, "AUDIO_UPLOAD_FAILED", "Audio upload did not return an IPFS URI.");
-    await this.audit({ identity, request, eventType: "STUDIO_AUDIO_UPLOADED", subjectType: "artist", subjectId: artist.id, payload: { uri, contentType: audio.contentType, contentSha256, byteSize: body.length } });
+    if (!uri.startsWith("ipfs://")) throw new ApiError(502, "PREVIEW_UPLOAD_FAILED", "Preview upload did not return an IPFS URI.");
+    // This audit row is also the registry publishMetadata checks animation_url against.
+    await this.audit({ identity, request, eventType: "STUDIO_AUDIO_PREVIEW_UPLOADED", subjectType: "artist", subjectId: artist.id, payload: { uri, contentType: audio.contentType, contentSha256, byteSize: body.length } });
     return { uri, contentType: audio.contentType, byteSize: body.length };
+  }
+
+  // animation_url may only be a preview this artist uploaded through
+  // uploadTrackPreview, and never one of the artist's private storage objects.
+  async vettedPreviewAudio({ artistId, uri }) {
+    const value = optionalText(uri, "previewAudio", { max: 2048 });
+    if (!value) return null;
+    const registered = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uri'=$2 LIMIT 1", [artistId, value]);
+    if (!registered.rows.length) throw new ApiError(400, "PREVIEW_AUDIO_NOT_REGISTERED", "animation_url must be a preview clip uploaded in Studio.");
+    const cid = value.startsWith("ipfs://") ? value.slice(7).split(/[/?#]/)[0] : "";
+    const privateObject = await this.db.query("SELECT id FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artistId, cid]);
+    if (privateObject.rows.length) throw new ApiError(400, "PREVIEW_AUDIO_IS_PRIVATE", "animation_url cannot point to private, token-gated audio.");
+    return value;
   }
 }
 

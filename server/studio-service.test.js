@@ -168,7 +168,23 @@ describe("Artist Studio", () => {
     await expect(unauthorized.instance.createEdition({ request, releaseId: "release-1", input: { name: "Denied", chainId: 43113, contractAddress: contract, tokenId: "1", quantity: "1", priceWei: "1" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
   });
 
-  it("rejects protected media with empty requirements, a foreign token, or a foreign storage key", async () => {
+  it("gates a private full track sent without requirements to holders of the edition's own token", async () => {
+    const edition = { id: "edition-1", release_id: "release-1", artist_id: "artist-1" };
+    const harness = service({ rows: [edition] });
+    harness.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (text.includes("media_assets")) return { rows: [{ id: "asset-1", artist_id: "artist-1", storage_key: "bafyprivatefulltrack", media_type: "AUDIO" }] };
+      if (text.includes("FROM tokens")) return { rows: [{ token_id: "7", contract_address: contract, chain_id: 43113 }] };
+      return { rows: [edition] };
+    });
+    await harness.instance.createExperience({ request, editionId: "edition-1", input: { title: "Full track", type: "AUDIO", requirements: [], mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO", contentType: "audio/mpeg" }] } } });
+    const saved = harness.repo.saveExperience.mock.calls[0][0];
+    expect(saved.requirements).toEqual([{ type: "erc1155-balance", contract, chainId: 43113, tokenIds: ["7"], minAmount: "1" }]);
+    expect(saved.mediaConfig).toMatchObject({ protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO" }] });
+    expect(JSON.stringify(saved.mediaConfig)).not.toContain("bafyprivatefulltrack");
+  });
+
+  it("rejects protected media for an edition without tokens, a foreign token, or a foreign storage key", async () => {
     const ownedToken = [{ token_id: "7", contract_address: contract, chain_id: 43113 }];
     const ownedAsset = [{ id: "asset-1", artist_id: "artist-1", storage_key: "records/full-record.mp3", media_type: "AUDIO" }];
     const edition = { id: "edition-1", release_id: "release-1", artist_id: "artist-1" };
@@ -184,7 +200,7 @@ describe("Artist Studio", () => {
     }
     const mediaConfig = { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] };
     const requirement = { type: "erc1155-balance", contract, tokenIds: ["7"] };
-    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
+    await expect(experienceService({ tokens: [] }).instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
     await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["9"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
     await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", tokenIds: ["7"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
     await expect(experienceService({ assets: [] }).instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [requirement], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }] } } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_OWNED" });
@@ -213,7 +229,8 @@ describe("Artist Studio", () => {
   });
 
   it("writes media assets only from the upload path and does not echo the storage key", async () => {
-    const { instance, repo } = service({ rows: [{ id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
+    const { instance, repo, db } = service({ rows: [{ id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
+    db.query.mockImplementation(async (sql) => (String(sql).includes("FROM audit_events") ? { rows: [] } : { rows: [{ id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] }));
     const storageKey = "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234";
     repo.saveMediaAsset = vi.fn(async (input) => ({ id: input.id, media_type: input.mediaType, created_at: "2026-09-24T00:00:00.000Z" }));
     instance.mediaUploader = vi.fn(async () => ({ storageKey }));
@@ -260,21 +277,35 @@ describe("Artist Studio", () => {
       await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 503, code: "ARTWORK_UPLOAD_UNAVAILABLE" });
     });
 
-    it("pins track audio publicly and returns its ipfs URI for animation_url", async () => {
-      const { instance } = service({ rows: [artistRow] });
-      instance.artworkUploader = vi.fn(async () => ({ uri: "ipfs://bafytrackaudio" }));
+    it("pins a short public preview, registers it, and returns its ipfs URI", async () => {
+      const { instance, repo, db } = service({ rows: [artistRow] });
+      db.query.mockImplementation(async (sql) => (String(sql).includes("media_assets WHERE artist_id=$1 AND metadata") ? { rows: [] } : { rows: [artistRow] }));
+      instance.artworkUploader = vi.fn(async () => ({ uri: "ipfs://bafypreview" }));
       const mp3 = Buffer.from("ID3\x04\x00\x00", "latin1");
-      await expect(instance.uploadTrackAudio({ request, artistId: "artist-1", input: { data: mp3.toString("base64") } })).resolves.toEqual({ uri: "ipfs://bafytrackaudio", contentType: "audio/mpeg", byteSize: mp3.length });
-      expect(instance.artworkUploader).toHaveBeenCalledWith(expect.objectContaining({ contentType: "audio/mpeg", filename: expect.stringMatching(/^audio-[0-9a-f]{16}\.mp3$/) }));
+      await expect(instance.uploadTrackPreview({ request, artistId: "artist-1", input: { data: mp3.toString("base64") } })).resolves.toEqual({ uri: "ipfs://bafypreview", contentType: "audio/mpeg", byteSize: mp3.length });
+      expect(instance.artworkUploader).toHaveBeenCalledWith(expect.objectContaining({ contentType: "audio/mpeg", filename: expect.stringMatching(/^preview-[0-9a-f]{16}\.mp3$/) }));
+      expect(repo.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_AUDIO_PREVIEW_UPLOADED", subjectType: "artist", subjectId: "artist-1", payload: expect.objectContaining({ uri: "ipfs://bafypreview", contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }) }));
     });
 
-    it("rejects non-audio files and audio over 15 MB", async () => {
-      const { instance } = service({ rows: [artistRow] });
+    it("rejects non-audio previews, previews over 5 MB, and previews identical to a private track", async () => {
+      const { instance, db } = service({ rows: [artistRow] });
       instance.artworkUploader = vi.fn();
-      await expect(instance.uploadTrackAudio({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ code: "AUDIO_TYPE_UNSUPPORTED" });
-      const large = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(15 * 1000 * 1000)]);
-      await expect(instance.uploadTrackAudio({ request, artistId: "artist-1", input: { data: large.toString("base64") } })).rejects.toMatchObject({ status: 413, code: "AUDIO_TOO_LARGE" });
+      await expect(instance.uploadTrackPreview({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ code: "AUDIO_TYPE_UNSUPPORTED" });
+      const large = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(5 * 1000 * 1000)]);
+      await expect(instance.uploadTrackPreview({ request, artistId: "artist-1", input: { data: large.toString("base64") } })).rejects.toMatchObject({ status: 413, code: "PREVIEW_TOO_LARGE" });
+      db.query.mockImplementation(async (sql) => (String(sql).includes("media_assets WHERE artist_id=$1 AND metadata") ? { rows: [{ id: "asset-full" }] } : { rows: [artistRow] }));
+      await expect(instance.uploadTrackPreview({ request, artistId: "artist-1", input: { data: Buffer.from("ID3\x04", "latin1").toString("base64") } })).rejects.toMatchObject({ status: 409, code: "PREVIEW_MATCHES_PRIVATE_TRACK" });
       expect(instance.artworkUploader).not.toHaveBeenCalled();
+    });
+
+    it("refuses to store a private full track that is already public as a preview", async () => {
+      const { instance, repo, db } = service({ rows: [artistRow] });
+      instance.mediaUploader = vi.fn();
+      repo.saveMediaAsset = vi.fn();
+      db.query.mockImplementation(async (sql) => (String(sql).includes("FROM audit_events") ? { rows: [{ id: "audit-1" }] } : { rows: [artistRow] }));
+      await expect(instance.uploadProtectedMedia({ request, artistId: "artist-1", input: { mediaType: "AUDIO", data: "SUQz" } })).rejects.toMatchObject({ status: 409, code: "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW" });
+      expect(instance.mediaUploader).not.toHaveBeenCalled();
+      expect(repo.saveMediaAsset).not.toHaveBeenCalled();
     });
 
     it("refuses wallets that do not own the artist", async () => {
