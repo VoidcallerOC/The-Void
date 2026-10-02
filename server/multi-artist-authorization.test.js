@@ -11,6 +11,7 @@ import { migrate } from "./migrate.js";
 import { IndexedOwnershipVerifier } from "./ownership.js";
 import { tokenIdFor as anchorTokenIdFor } from "./provenance-anchor.js";
 import { createPersistenceRepository } from "./repositories.js";
+import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 import { ArtistStudioService } from "./studio-service.js";
 import { FUJI_RELEASE_CONFIG, fujiTokenId } from "../src/lib/fuji-release.js";
 
@@ -101,8 +102,7 @@ describe.skipIf(!testDatabaseUrl)("multi-artist authorization (database)", () =>
   });
 
   afterAll(async () => {
-    await pool?.end().catch(() => {});
-    if (dbName) await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`).catch(() => {});
+    if (adminPool) await dropScratchDatabase(adminPool, dbName, { pool });
     await adminPool?.end();
   });
 
