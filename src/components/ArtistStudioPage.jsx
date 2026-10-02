@@ -10,7 +10,7 @@ import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, crea
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
-import { ARTWORK_ACCEPT, studioFetch, uploadStudioArtwork } from "../lib/studio-api.js";
+import { ARTWORK_ACCEPT, AUDIO_ACCEPT, studioFetch, uploadStudioArtwork, uploadStudioAudio } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -97,6 +97,7 @@ export function ArtistStudioPage() {
   const [busy, setBusy] = useState("");
   const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
   const [e2eMintPlan, setE2eMintPlan] = useState(() => createFujiE2EMintPlan());
+  const [trackAudio, setTrackAudio] = useState(null);
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
   const [mintEditionId, setMintEditionId] = useState("");
@@ -261,7 +262,7 @@ export function ArtistStudioPage() {
           experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
           productType: form.productType,
           requirements: [],
-          mediaConfig: {},
+          mediaConfig: trackAudio ? { protected: true, protectedMedia: [{ assetId: trackAudio.assetId, mediaType: "AUDIO", contentType: trackAudio.contentType }] } : {},
         },
         headers,
       });
@@ -377,6 +378,17 @@ export function ArtistStudioPage() {
       const uploaded = await uploadStudioArtwork({ artistId: artistId || await ensureArtist(), file, headers });
       set(key, uploaded.uri);
       setNotice("Artwork uploaded.");
+    } catch (error) {
+      setNotice(error.message);
+    } finally { setBusy(""); }
+  };
+
+  const uploadAudio = async (file) => {
+    setBusy("audio"); setNotice("");
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      setTrackAudio(await uploadStudioAudio({ artistId: artistId || await ensureArtist(), file, headers }));
+      setNotice("Audio uploaded privately. It unlocks for holders of this track once saved.");
     } catch (error) {
       setNotice(error.message);
     } finally { setBusy(""); }
@@ -570,6 +582,16 @@ export function ArtistStudioPage() {
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
           </p>
+          <div style={{ marginTop: 16 }}>
+            <p style={{ margin: "0 0 8px" }}>Track audio (private — only holders of this track can play it)</p>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
+                {busy === "audio" ? "Uploading…" : trackAudio ? "Replace audio" : "Upload audio"}
+                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadAudio(file); }} />
+              </label>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{trackAudio ? `Uploaded: ${trackAudio.filename}` : "MP3, WAV, FLAC, AAC/M4A or OGG · 15 MB max"}</span>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={saveCatalogStructure}>{busy === "catalog" ? "Saving catalog…" : "Save catalog structure"}</button>

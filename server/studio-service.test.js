@@ -168,7 +168,23 @@ describe("Artist Studio", () => {
     await expect(unauthorized.instance.createEdition({ request, releaseId: "release-1", input: { name: "Denied", chainId: 43113, contractAddress: contract, tokenId: "1", quantity: "1", priceWei: "1" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
   });
 
-  it("rejects protected media with empty requirements, a foreign token, or a foreign storage key", async () => {
+  it("gates uploaded audio sent without requirements to holders of the edition's own token", async () => {
+    const edition = { id: "edition-1", release_id: "release-1", artist_id: "artist-1" };
+    const harness = service({ rows: [edition] });
+    harness.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (text.includes("media_assets")) return { rows: [{ id: "asset-1", artist_id: "artist-1", storage_key: "bafyprivateaudio", media_type: "AUDIO" }] };
+      if (text.includes("FROM tokens")) return { rows: [{ token_id: "7", contract_address: contract, chain_id: 43113 }] };
+      return { rows: [edition] };
+    });
+    await harness.instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO", contentType: "audio/mpeg" }] } } });
+    const saved = harness.repo.saveExperience.mock.calls[0][0];
+    expect(saved.requirements).toEqual([{ type: "erc1155-balance", contract, chainId: 43113, tokenIds: ["7"], minAmount: "1" }]);
+    expect(saved.mediaConfig).toMatchObject({ protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO", contentType: "audio/mpeg" }] });
+    expect(JSON.stringify(saved.mediaConfig)).not.toContain("bafyprivateaudio");
+  });
+
+  it("rejects protected media for an edition without tokens, a foreign token, or a foreign storage key", async () => {
     const ownedToken = [{ token_id: "7", contract_address: contract, chain_id: 43113 }];
     const ownedAsset = [{ id: "asset-1", artist_id: "artist-1", storage_key: "records/full-record.mp3", media_type: "AUDIO" }];
     const edition = { id: "edition-1", release_id: "release-1", artist_id: "artist-1" };
@@ -184,7 +200,7 @@ describe("Artist Studio", () => {
     }
     const mediaConfig = { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] };
     const requirement = { type: "erc1155-balance", contract, tokenIds: ["7"] };
-    await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
+    await expect(experienceService({ tokens: [] }).instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [], mediaConfig } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED" });
     await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["9"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
     await expect(experienceService().instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", tokenIds: ["7"] }], mediaConfig } })).rejects.toMatchObject({ code: "REQUIREMENT_TOKEN_NOT_OWNED" });
     await expect(experienceService({ assets: [] }).instance.createExperience({ request, editionId: "edition-1", input: { title: "Full Record", type: "AUDIO", requirements: [requirement], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "bafybeigdyrzt5sfp7hwz5secretcid123456789012345678901234" }] } } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_NOT_OWNED" });
