@@ -195,6 +195,22 @@ export class ArtistStudioService {
     }
   }
 
+  // Protected media sent without explicit requirements unlocks for holders of
+  // this edition's own token(s), the natural default for a track's audio.
+  async defaultEditionRequirements({ editionId, mediaConfig, requirements }) {
+    const protectedMedia = Array.isArray(mediaConfig?.protectedMedia) ? mediaConfig.protectedMedia : [];
+    if (!protectedMedia.length || (Array.isArray(requirements) && requirements.length)) return requirements;
+    const { rows } = await this.db.query("SELECT t.token_id::text AS token_id, lower(c.address) AS contract_address, c.chain_id FROM tokens t JOIN contracts c ON c.id=t.contract_id WHERE t.edition_id=$1", [editionId]);
+    if (!rows.length) throw new ApiError(400, "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED", "Save the track before attaching protected media so it can be gated to the track's token.");
+    const byContract = new Map();
+    for (const row of rows) {
+      const key = `${row.chain_id}:${row.contract_address}`;
+      if (!byContract.has(key)) byContract.set(key, { type: "erc1155-balance", contract: row.contract_address, chainId: Number(row.chain_id), tokenIds: [], minAmount: "1" });
+      byContract.get(key).tokenIds.push(String(row.token_id));
+    }
+    return [...byContract.values()];
+  }
+
   async bindProtectedExperience({ artistId, mediaConfig, requirements }) {
     const config = requireMediaConfig(mediaConfig);
     const normalizedRequirements = requireRequirements(requirements);
@@ -426,7 +442,8 @@ export class ArtistStudioService {
     const productType = input.productType ? String(input.productType).toUpperCase() : null;
     const mappedType = productType ? PRODUCT_TYPES[productType] : String(input.type || input.experienceType || "").toUpperCase();
     if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
-    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements: input.requirements });
+    const requirements = await this.defaultEditionRequirements({ editionId: edition.id, mediaConfig: input.mediaConfig, requirements: input.requirements });
+    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements });
     const mediaConfig = { ...bound.mediaConfig, ...(productType ? { productType, deliveryType: mappedType } : {}) };
     const experience = await this.repository.saveExperience({ id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, status: "DRAFT" });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_CREATED", subjectType: "experience", subjectId: experience.id, payload: { editionId: edition.id } });
