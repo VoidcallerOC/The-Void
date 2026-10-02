@@ -18,6 +18,8 @@ import { ListingPanel } from "./ListingPanel.jsx";
 import { ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
+import { TokenArtwork } from "./TokenArtwork.jsx";
+import { tokenView } from "../lib/token-view.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
 function PlatformHeader({ eyebrow, title, children }) {
@@ -187,10 +189,10 @@ export function ReleasePage({ children = null } = {}) {
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Songs / tokens</h2>
           <div className="vc-market-grid">
             {release.tracks.map((track) => {
-              const token = catalog.tokens.find((item) => Number(item.tokenId) === Number(track.tokenId));
-              const experienceId = track.experienceId || token?.experiences?.[0];
+              const view = tokenView(catalog, { edition: editionItems[0]?.edition, release, tokenId: track.tokenId });
+              const experienceId = track.experienceId || view.token?.experiences?.[0];
               return <Link key={track.tokenId} to={experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
-                <img src={token?.media?.art || release.artwork} alt={`${track.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                <TokenArtwork sources={view.artworkSources} alt={`${track.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
                 <div style={{ padding: 18 }}><Status>Token #{track.tokenId}</Status><h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}>{track.title}</h3><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{track.time} · Open song experience</p></div>
               </Link>;
             })}
@@ -295,6 +297,7 @@ export function ExperiencePage() {
   const library = getCollectorLibrary(catalog, wallet.ownershipRecords || []);
   const owned = Boolean((experience.requirements?.length && canAccessExperience(experience, wallet.ownershipRecords || [])) || library.editions.some((item) => item.edition.id === edition?.id) || (edition && String(edition.status).toLowerCase() === "minted" && !isCertifiedFujiEdition(edition)));
   const tracks = tracksForRelease(release, experience);
+  const view = tokenView(catalog, { edition, release, experience });
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
@@ -328,9 +331,10 @@ export function ExperiencePage() {
         )}
       </PlatformHeader>
       <div className="vc-grid-2col" style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.9fr) minmax(280px, 1.2fr)", gap: 28, alignItems: "start" }}>
-        <img src={artworkFor(edition, release)} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
+        <TokenArtwork sources={view.artworkSources} alt={`${view.name} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
         <div style={card}>
           <Status>{access}</Status>
+          {view.token && <p className="vc-card-meta" style={{ margin: "10px 0 0" }}>{view.name} · Token #{view.tokenId}{edition ? ` · ${edition.title}` : ""}</p>}
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: 38, margin: "14px 0" }}>{owned ? "Unlocked" : "The session"}</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
             {protectedMedia
@@ -435,9 +439,10 @@ export function MyCollectionPage() {
     const experiences = catalog.experiences.filter((experience) => (edition.experienceIds || []).includes(experience.id) || experience.editionId === edition.id);
     return { edition, release, artist, quantity: Number(amount), experiences };
   });
-  const owned = [...library.editions];
+  // One card per owned token: each track is its own token with its own art.
+  const owned = library.editions.flatMap((item) => item.holdings.map((holding) => ({ ...item, tokenId: holding.tokenId, quantity: Number(holding.amount) })));
   for (const item of fujiItems) {
-    if (!owned.some((row) => row.edition.id === item.edition.id)) owned.push(item);
+    if (!owned.some((row) => row.edition.id === item.edition.id)) owned.push({ ...item, tokenId: item.edition.tokenIds?.[0] ?? null });
   }
 
   return (
@@ -457,20 +462,24 @@ export function MyCollectionPage() {
         </div>
       ) : (
         <div className="vc-market-grid">
-          {owned.map(({ edition, release, artist, quantity, experiences }) => (
-            <article key={edition.id} className="vc-market-card">
-              <img src={artworkFor(edition, release)} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+          {owned.map(({ edition, release, artist, quantity, experiences, tokenId }) => {
+            const view = tokenView(catalog, { edition, release, tokenId });
+            const experience = experiences.find((item) => (view.token?.experiences || []).includes(item.id)) || catalog.experiences.find((item) => (view.token?.experiences || []).includes(item.id)) || experiences[0];
+            return (
+            <article key={`${edition.id}:${tokenId ?? ""}`} className="vc-market-card">
+              <TokenArtwork sources={view.artworkSources} alt={`${view.name} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
               <div style={{ padding: 20 }}>
                 <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase", margin: 0 }}>{artist?.name}</p>
-                <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{release?.title || edition.title}</h3>
-                <p style={{ color: "var(--vc-bone-dim)" }}>{edition.title} · {quantity} owned</p>
+                <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{view.token ? view.name : release?.title || edition.title}</h3>
+                <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
                   <Link to={`/edition/${edition.id}`} style={primaryBtn}>Owned</Link>
-                  {experiences[0] && <Link to={`/experience/${experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
+                  {experience && <Link to={`/experience/${experience.id}`} style={ghostBtn}>Open experience</Link>}
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
       <div style={{ marginTop: 28, display: "flex", gap: 10, flexWrap: "wrap" }}>
