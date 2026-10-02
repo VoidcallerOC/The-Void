@@ -12,8 +12,6 @@ describe("Studio release selection", () => {
       editionId: "",
       selectedReleaseId: "",
       form: {
-        artistName: "Voidcaller",
-        artistBio: "Metalcore.",
         releaseTitle: "Voidcaller Full EP",
         releaseDescription: "The record.",
         releaseArtwork: "/art.png",

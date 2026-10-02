@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { profileSocials } from "./artist-profile.js";
 import {
   createArtist,
   createCatalog,
@@ -104,6 +105,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       bio: row.bio || "",
       avatar: meta.profileArtwork || meta.artwork || "/assets/voidcaller_art_4.png",
       banner: meta.banner || meta.profileArtwork || "/assets/voidcaller_art_6.png",
+      socials: profileSocials(row.social_links, row.website_url),
       verified: row.verified === true || row.verification_status === "VERIFIED",
     });
   });

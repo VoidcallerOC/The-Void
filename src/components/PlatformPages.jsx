@@ -7,6 +7,7 @@ import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
+import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
 import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
@@ -106,10 +107,12 @@ export function ArtistsPage() {
 export function ArtistPage({ children = null } = {}) {
   const catalog = useMarketplaceCatalogs();
   const { artist: artistId } = useParams();
+  const [profileOverride, setProfileOverride] = useState(null);
   const result = getArtistCatalog(catalog, artistId);
   const secondary = resolveSecondaryStatus();
   if (!result) return <Navigate to="/artists" replace />;
-  const { artist, releases, editions } = result;
+  const { releases, editions } = result;
+  const artist = { ...result.artist, ...(profileOverride || {}) };
   const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => editions.some((edition) => edition.id === item.edition.id));
   return (
     <section style={shell}>
@@ -122,6 +125,7 @@ export function ArtistPage({ children = null } = {}) {
       <div style={{ maxWidth: 650, margin: "28px 0 56px", color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
         <p>{artist.bio}</p>
         {(artist.socials || []).map((social) => <a key={social.name} href={social.href} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)", marginRight: 18 }}>{social.name}</a>)}
+        <ArtistProfileEditor artistId={result.artist.id} onSaved={(saved) => setProfileOverride((prior) => ({ ...(prior || {}), ...Object.fromEntries(Object.entries(saved).filter(([key, value]) => !((key === "avatar" || key === "banner") && !value))) }))} />
       </div>
       <Eyebrow>Releases</Eyebrow>
       <div className="vc-market-grid" style={{ margin: "16px 0 48px" }}>
