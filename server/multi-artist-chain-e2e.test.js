@@ -16,6 +16,7 @@ import { createIndexerStore } from "./indexer-store.js";
 import { migrate } from "./migrate.js";
 import { IndexedOwnershipVerifier } from "./ownership.js";
 import { createPersistenceRepository } from "./repositories.js";
+import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 import { ArtistStudioService } from "./studio-service.js";
 import fujiRelease from "../config/fuji-release.json" with { type: "json" };
 
@@ -166,8 +167,7 @@ describe.skipIf(!ready)("second artist on a real chain, indexer and database", (
 
   afterAll(async () => {
     anvil?.child.kill();
-    await pool?.end().catch(() => {});
-    if (dbName) await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`).catch(() => {});
+    if (adminPool) await dropScratchDatabase(adminPool, dbName, { pool });
     await adminPool?.end();
   });
 
