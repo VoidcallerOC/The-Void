@@ -6,6 +6,7 @@ import { ApiError } from "./api-errors.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceAnchorService } from "./provenance-anchor.js";
+import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 import { ArtistStudioService } from "./studio-service.js";
 import { assertProvenanceConsistency, provenancePublicationStatus, publicationView } from "./studio-publication.js";
 
@@ -49,11 +50,11 @@ function editionCreatedReceipt(uri = "ipfs://metadata") {
   return { status: 1, logs: [{ address: fujiRelease.contractAddress, topics: encoded.topics, data: encoded.data }] };
 }
 
-function studio({ rows = [], chain = null, records = null, metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata" }) }, metadataFetcher = null } = {}) {
+function studio({ authorization = {}, rows = [], chain = null, records = null, metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata" }) }, metadataFetcher = null } = {}) {
   const repo = repository();
   const db = { query: vi.fn().mockResolvedValue({ rows }) };
   const instance = new ArtistStudioService({
-    db,
+    db: verifiedArtistDb(db, authorization),
     repository: repo,
     metadataStorage,
     provenanceRecords: records,
@@ -148,6 +149,27 @@ describe("Artist Studio publication pipeline", () => {
     expect(harness.repo.saveRelease).not.toHaveBeenCalled();
     const retried = await harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } });
     expect(retried).toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_PENDING", fullyPublished: false });
+  });
+
+  it("refuses to confirm an edition created on-chain by another artist's wallet", async () => {
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
+    const chain = { getTransactionReceipt: vi.fn().mockResolvedValue(editionCreatedReceipt()), edition: vi.fn() };
+    const harness = studio({ records, chain, authorization: { creatorOwns: false } });
+    harness.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [editionRow()] } : { rows: [releaseRow()] });
+    await expect(harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "EDITION_CREATED_BY_ANOTHER_ARTIST" });
+    expect(harness.repo.saveRelease).not.toHaveBeenCalled();
+  });
+
+  it("refuses publication by an unverified or revoked artist before any chain or storage call", async () => {
+    for (const [authorization, code] of [[{ verified: false }, "ARTIST_NOT_VERIFIED"], [{ revoked: true }, "ARTIST_VERIFICATION_REVOKED"]]) {
+      const chain = { getTransactionReceipt: vi.fn(), edition: vi.fn() };
+      const harness = studio({ chain, authorization });
+      harness.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [editionRow()] } : { rows: [releaseRow()] });
+      await expect(harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code });
+      await expect(harness.instance.publishMetadata({ request, releaseId: "release-1", input: {} })).rejects.toMatchObject({ code });
+      expect(chain.getTransactionReceipt).not.toHaveBeenCalled();
+      expect(harness.repo.saveToken).not.toHaveBeenCalled();
+    }
   });
 
   it("fails closed on inconsistent provenance and on a duplicate verified publication", async () => {
