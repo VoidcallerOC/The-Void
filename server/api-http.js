@@ -154,6 +154,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.uploadArtwork({ request: apiRequest, artistId: base[2], input: body });
         }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "artists" && base[3] === "audio-preview" && base.length === 4) {
+          if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+          data = await studioService.uploadTrackPreview({ request: apiRequest, artistId: base[2], input: body });
+        }
         else if (method === "PATCH" && base[0] === "studio" && base[1] === "releases" && base.length === 3) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.updateRelease({ request: apiRequest, releaseId: base[2], input: body });
