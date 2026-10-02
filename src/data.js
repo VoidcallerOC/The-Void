@@ -3,8 +3,6 @@ import { createArtist, createCatalog, createCollection, createEdition, createExp
 
 // Static data for the Voidcaller site.
 // Reflects the actual project: a self-titled EP collection minted on Avalanche.
-//   OpenSea:  https://opensea.io/collection/voidcaller-avalanche
-//   Joepegs:  https://joepegs.com/collections/avalanche/voidcaller
 
 // ===========================================================================
 // $VOID PRESALE — STAGED, NOT LIVE.
@@ -50,11 +48,6 @@ export const VC_DATA = {
     { name: "Discord", href: "https://discord.gg/9htWQv8v6t" },
     { name: "Twitter/X", href: "https://x.com/VoidcallerOC" },
   ],
-  marketplaces: [
-    { name: "SNOWTRACE", href: "https://snowtrace.io/address/0xd1b4367dd9f235f9ee61878019d66e31511e98ee" },
-    { name: "OPENSEA",   href: "https://opensea.io/collection/voidcaller-avalanche" },
-    { name: "JOEPEGS",   href: "https://joepegs.com/collections/avalanche/voidcaller" },
-  ],
   releases: [
     {
       id: "I",
@@ -63,7 +56,7 @@ export const VC_DATA = {
       date: "MINTED",
       art: "/assets/voidcaller_art_4.png",
       bleed: "Self-titled EP · on-chain on Avalanche",
-      tagline: "The first call. The first relic. One relic unlocks the full EP. Trading on OpenSea and Joepegs — the chain remembers.",
+      tagline: "The first call. The first relic. One relic unlocks the full EP. The chain remembers.",
       status: "MINTED",
       mint: "—",
       forged: "—",
@@ -185,13 +178,13 @@ export const VOIDCALLER_CATALOG = createCatalog({
   experiences: [voidcallerExperience],
 });
 
-// Main-page volume is scoped to this existing canonical edition identity.
+// Main-page volume is scoped to the published canonical Fuji VOIDCALLER edition.
 export const SELF_TITLED_EP_IDENTITY = Object.freeze({
-  releaseId: voidcallerRelease.id,
-  editionId: voidcallerEdition.id,
-  chainId: voidcallerEdition.chainId,
-  tokenContractAddress: voidcallerEdition.contractAddress,
-  tokenIds: Object.freeze(voidcallerEdition.tokenIds.map(String)),
+  releaseId: "release-8f6d5a9f-585d-4948-b05b-7098125d16cf",
+  editionId: "edition-ecf27444-94b7-40d5-bace-5f061792f55e",
+  chainId: 43113,
+  tokenContractAddress: "0x82b26Da27136935454Bdf1e40801190B521b82e5",
+  tokenIds: Object.freeze(["33778802922810732976408591241428358474475553907731009337085064305512658576739"]),
 });
 
 export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions"];
