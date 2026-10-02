@@ -86,6 +86,35 @@ export class PrivateMediaStorage {
     throw Object.assign(new Error("Protected media upload is not available for this storage driver."), { status: 501, code: "MEDIA_UPLOAD_UNSUPPORTED" });
   }
 
+  // Direct browser uploads (Pinata only). The API signs a short-lived private
+  // upload link whose keyvalues it chooses, so a file found later under those
+  // keyvalues was uploaded through a link this server issued for that artist.
+  async createSignedUpload({ filename, keyvalues, maxBytes, mimeTypes, expiresSeconds = 900, fetchImpl = fetch }) {
+    if (this.config.driver !== "pinata") throw Object.assign(new Error("Direct media upload is not available for this storage driver."), { status: 501, code: "MEDIA_DIRECT_UPLOAD_UNSUPPORTED" });
+    const payload = { date: Math.floor(Date.now() / 1000), expires: expiresSeconds, network: "private", max_file_size: maxBytes, allow_mime_types: mimeTypes, keyvalues };
+    if (filename) payload.filename = String(filename).slice(0, 256);
+    const response = await fetchImpl("https://uploads.pinata.cloud/v3/files/sign", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.config.pinata.jwt}` }, body: JSON.stringify(payload) });
+    if (response.status === 401 || response.status === 403) throw Object.assign(new Error("The Pinata key is not allowed to create signed upload links. Give it Files write permission."), { status: 502, code: "MEDIA_UPLOAD_UNAUTHORIZED" });
+    if (!response.ok) throw Object.assign(new Error(`Pinata signed upload link failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_UPLOAD_FAILED" });
+    const body = await response.json();
+    if (typeof body?.data !== "string" || !body.data.startsWith("https://")) throw Object.assign(new Error("Pinata signed upload link response was invalid."), { status: 502, code: "MEDIA_UPLOAD_FAILED" });
+    return body.data;
+  }
+
+  // Finds a private file by the keyvalues its signed upload link stamped on it.
+  async findSignedUpload({ keyvalues, fetchImpl = fetch }) {
+    if (this.config.driver !== "pinata") throw Object.assign(new Error("Direct media upload is not available for this storage driver."), { status: 501, code: "MEDIA_DIRECT_UPLOAD_UNSUPPORTED" });
+    const params = new URLSearchParams({ limit: "2" });
+    for (const [key, value] of Object.entries(keyvalues)) params.append(`keyvalues[${key}]`, String(value));
+    const response = await fetchImpl(`https://api.pinata.cloud/v3/files/private?${params}`, { headers: { authorization: `Bearer ${this.config.pinata.jwt}` } });
+    if (!response.ok) throw Object.assign(new Error(`Pinata private file lookup failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_UPLOAD_LOOKUP_FAILED" });
+    const body = await response.json();
+    const files = Array.isArray(body?.data?.files) ? body.data.files : [];
+    if (files.length !== 1) return null;
+    const file = files[0];
+    return { cid: typeof file.cid === "string" ? file.cid : null, size: Number(file.size), mimeType: file.mime_type || null, keyvalues: file.keyvalues && typeof file.keyvalues === "object" ? file.keyvalues : {}, network: file.network || "private" };
+  }
+
   async open({ storageKey, range = null, contentType = null }) {
     const key = safeStorageKey(storageKey);
     if (this.config.driver === "filesystem") {

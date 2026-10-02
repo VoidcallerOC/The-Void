@@ -208,7 +208,7 @@ export function loadMediaConfig(env = process.env) {
   const grantTtlSeconds = boundedPositiveInteger(env.MEDIA_GRANT_TTL_SECONDS, 300, "MEDIA_GRANT_TTL_SECONDS", { min: 30, max: 900 });
   const signedUrlTtlSeconds = boundedPositiveInteger(env.MEDIA_SIGNED_URL_TTL_SECONDS, 60, "MEDIA_SIGNED_URL_TTL_SECONDS", { min: 15, max: 300 });
   if (signedUrlTtlSeconds > grantTtlSeconds) throw new ConfigurationError("MEDIA_SIGNED_URL_TTL_SECONDS may not exceed MEDIA_GRANT_TTL_SECONDS.");
-  const maxBytes = boundedPositiveInteger(env.MEDIA_MAX_BYTES, 104857600, "MEDIA_MAX_BYTES", { min: 1, max: 1073741824 });
+  const maxBytes = boundedPositiveInteger(env.MEDIA_MAX_BYTES, 524288000, "MEDIA_MAX_BYTES", { min: 1, max: 1073741824 });
   const auditHashSecret = secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" });
   if (driver === "filesystem") return Object.freeze({ driver, privateRoot: resolve(String(env.MEDIA_PRIVATE_ROOT || resolve(process.cwd(), "server/private-media"))), grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret });
   if (driver === "pinata") {
