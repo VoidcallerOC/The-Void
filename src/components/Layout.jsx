@@ -62,7 +62,7 @@ export function Layout() {
             on load — content centers vertically; taller pages just grow. */}
         <main className="vc-main">
           <Suspense fallback={<SectionFallback />}>
-            <Outlet context={{ onMint }} />
+            <Outlet context={{ onMint, catalog }} />
           </Suspense>
         </main>
         <Footer />

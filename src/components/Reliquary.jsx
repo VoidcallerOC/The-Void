@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import { Send } from "lucide-react";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
@@ -23,12 +24,13 @@ function experienceAccessForToken(experience, token) {
 }
 
 export function Reliquary() {
+  const { catalog: supportedCatalog = VOIDCALLER_CATALOG } = useOutletContext() || {};
   const w = useWallet();
   const [meta, setMeta] = useState(FALLBACK_METADATA);
   const [transfer, setTransfer] = useState(null);
   useEffect(() => { let alive = true; fetchAllMetadata().then((items) => { if (alive) setMeta(items); }); return () => { alive = false; }; }, []);
 
-  const library = useMemo(() => getCollectorLibrary(VOIDCALLER_CATALOG, w.ownershipRecords || []), [w.ownershipRecords]);
+  const library = useMemo(() => getCollectorLibrary(supportedCatalog, w.ownershipRecords || []), [supportedCatalog, w.ownershipRecords]);
   const metadata = useMemo(() => Object.fromEntries(meta.map((item) => [String(item.tokenId), item])), [meta]);
   const totalQuantity = library.tokens.reduce((sum, token) => sum + token.amount, 0);
 
