@@ -73,17 +73,18 @@ export function PurchasePanel({ edition }) {
     if (!wallet.authenticated) { setMessage("Authenticate your wallet before submitting a purchase."); return; }
     if (!listing || listing.status !== LISTING_STATUS.ACTIVE) { setMessage("No active indexed listing is available for this edition."); return; }
     const selectedListing = { ...listing };
+    const marketplaceTarget = selectedListing.marketplace || MARKETPLACE_CONFIG.address;
     const selectedQuantity = Number(quantity);
     const payment = requiredPayment(selectedListing, selectedQuantity);
     let submitted = null;
     setPendingPurchase(null);
     try {
       setMessage("Creating a purchase intent and verifying the indexed listing, quantity, and payment in your wallet…");
-      await createAuthoritativePurchaseIntent({ listing: selectedListing, wallet: wallet.account, quantity: selectedQuantity, marketplaceAddress: MARKETPLACE_CONFIG.address, authHeaders: wallet.authHeaders });
+      await createAuthoritativePurchaseIntent({ listing: selectedListing, wallet: wallet.account, quantity: selectedQuantity, marketplaceAddress: marketplaceTarget, authHeaders: wallet.authHeaders });
       submitted = await submitPurchase({
         provider: wallet.getProvider(),
         buyer: wallet.account,
-        marketplace: MARKETPLACE_CONFIG.address,
+        marketplace: marketplaceTarget,
         listing: selectedListing,
         quantity: selectedQuantity,
         chain,
@@ -96,11 +97,11 @@ export function PurchasePanel({ edition }) {
         },
       });
       setMessage("Wallet receipt observed. Recording the submission; settlement is not yet confirmed by the marketplace index.");
-      await recordAuthoritativeTransactionSubmission({ transactionHash: submitted.txHash, chainId: chain.id, wallet: wallet.account, marketplaceAddress: MARKETPLACE_CONFIG.address, listingId: selectedListing.id, type: "PURCHASE", authHeaders: wallet.authHeaders });
+      await recordAuthoritativeTransactionSubmission({ transactionHash: submitted.txHash, chainId: chain.id, wallet: wallet.account, marketplaceAddress: marketplaceTarget, listingId: selectedListing.id, type: "PURCHASE", authHeaders: wallet.authHeaders });
       setPendingPurchase({
         transactionHash: submitted.txHash,
         chainId: chain.id,
-        marketplaceAddress: MARKETPLACE_CONFIG.address,
+        marketplaceAddress: marketplaceTarget,
         buyer: wallet.account,
         listing: selectedListing,
         quantity: selectedQuantity,
@@ -113,7 +114,7 @@ export function PurchasePanel({ edition }) {
         setPendingPurchase({
           transactionHash: submitted.txHash,
           chainId: chain.id,
-          marketplaceAddress: MARKETPLACE_CONFIG.address,
+          marketplaceAddress: marketplaceTarget,
           buyer: wallet.account,
           listing: selectedListing,
           quantity: selectedQuantity,

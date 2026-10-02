@@ -37,6 +37,7 @@ vi.mock("../lib/marketplace-api.js", async (importOriginal) => {
 });
 
 const buyer = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
+const indexedMarketplace = "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b";
 const tokenContract = "0x82b26da27136935454bdf1e40801190b521b82e5";
 const transactionHash = `0x${"a".repeat(64)}`;
 const edition = { id: "edition-1", title: "Test edition", chainId: 43113, contractAddress: tokenContract, tokenIds: ["42"] };
@@ -44,7 +45,7 @@ const activeListing = {
   id: "listing-uuid",
   listingId: "1",
   chain: 43113,
-  marketplace: mocks.address,
+  marketplace: indexedMarketplace,
   tokenContract,
   contract: tokenContract,
   tokenId: "42",
@@ -60,7 +61,7 @@ const indexedTransaction = (overrides = {}) => ({
   transaction_type: "PURCHASE",
   status: "SUBMITTED",
   from_wallet: buyer,
-  to_address: mocks.address,
+  to_address: indexedMarketplace,
   value_wei: "10000000000000000",
   purchases: [],
   ...overrides,
@@ -132,8 +133,11 @@ describe("PurchasePanel authoritative settlement polling", () => {
     await clickCollect();
 
     expect(mocks.createIntent).toHaveBeenCalledOnce();
+    expect(mocks.createIntent.mock.calls[0][0].marketplaceAddress).toBe(indexedMarketplace);
     expect(mocks.submitPurchase).toHaveBeenCalledOnce();
+    expect(mocks.submitPurchase.mock.calls[0][0].marketplace).toBe(indexedMarketplace);
     expect(mocks.recordSubmission).toHaveBeenCalledOnce();
+    expect(mocks.recordSubmission.mock.calls[0][0].marketplaceAddress).toBe(indexedMarketplace);
     expect(mocks.fetchAuthoritativeTransaction).toHaveBeenCalledOnce();
     expect(progressStep("PENDING", container).style.color).toBe("var(--vc-crimson)");
     expect(progressStep("CONFIRMED", container).style.color).not.toBe("var(--vc-crimson)");
