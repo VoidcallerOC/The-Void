@@ -31,7 +31,7 @@ const zeroWord = `0x${"0".repeat(64)}`;
 const oneWord = `0x${"0".repeat(63)}1`;
 const ownershipConfig = buildMarketplaceOwnershipConfig([edition]);
 
-function markupFor(owned, selectedEdition = edition, chainId = FUJI_RELEASE_CONFIG.chainId) {
+function markupFor(owned, selectedEdition = edition, chainId = FUJI_RELEASE_CONFIG.chainId, ownedAmount) {
   const wallet = {
     account: seller,
     authenticated: false,
@@ -42,7 +42,7 @@ function markupFor(owned, selectedEdition = edition, chainId = FUJI_RELEASE_CONF
     owned,
   };
   return renderToStaticMarkup(
-    React.createElement(WalletCtx.Provider, { value: wallet }, React.createElement(ListingPanel, { edition: selectedEdition })),
+    React.createElement(WalletCtx.Provider, { value: wallet }, React.createElement(ListingPanel, { edition: selectedEdition, ...(ownedAmount === undefined ? {} : { tokenId, ownedAmount }) })),
   );
 }
 
@@ -99,5 +99,13 @@ describe("ListingPanel Fuji ownership and target gating", () => {
 
     expect(listingButton(markup)).toContain("disabled");
     expect(markup).toMatch(/Connect your wallet to Avalanche Fuji/i);
+  });
+
+  it("caps listing quantity at the actual owned Reliquary balance", () => {
+    const owned = { fuji: new Set([tokenId]) };
+    const markup = markupFor(owned, edition, FUJI_RELEASE_CONFIG.chainId, 3);
+
+    expect(markup).toContain('id="listing-amount"');
+    expect(markup).toContain('max="3"');
   });
 });

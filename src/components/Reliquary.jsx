@@ -4,10 +4,12 @@ import { Send } from "lucide-react";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
+import { ListingPanel } from "./ListingPanel.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { fetchAllMetadata, CHAINS, FALLBACK_METADATA } from "../lib/web3.js";
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { getCollectorLibrary, canAccessExperience } from "../lib/collection.js";
+import { FUJI_LISTING_CONFIG, FUJI_LISTING_TARGET, fujiEditionHasTokenId, fujiListingTargetError } from "../lib/marketplace.js";
 
 const chainKeyFor = (record) => record.chain?.key || Object.keys(CHAINS).find((key) => CHAINS[key].id === Number(record.chain?.id || record.chainId || record.chain)) || "cchain";
 
@@ -23,11 +25,33 @@ function experienceAccessForToken(experience, token) {
   };
 }
 
+function listingTargetErrorFor(token, chainKey, wallet) {
+  const { edition } = token;
+  const chain = CHAINS[chainKey] || token.chain || { key: chainKey, id: edition?.chainId };
+  return fujiListingTargetError({
+    config: FUJI_LISTING_CONFIG,
+    marketplace: FUJI_LISTING_CONFIG.address,
+    chain,
+    chainId: wallet.chainId,
+    editionChainId: edition?.chainId,
+    tokenContract: edition?.contractAddress,
+  });
+}
+
+function canListOwnedToken(token, chainKey, wallet) {
+  return wallet.connected
+    && Number(token.amount) > 0
+    && !listingTargetErrorFor(token, chainKey, wallet)
+    && String(token.contract).toLowerCase() === FUJI_LISTING_TARGET.tokenAddress.toLowerCase()
+    && fujiEditionHasTokenId(token.edition, token.tokenId);
+}
+
 export function Reliquary() {
   const { catalog: supportedCatalog = VOIDCALLER_CATALOG } = useOutletContext() || {};
   const w = useWallet();
   const [meta, setMeta] = useState(FALLBACK_METADATA);
   const [transfer, setTransfer] = useState(null);
+  const [listingTokenKey, setListingTokenKey] = useState(null);
   useEffect(() => { let alive = true; fetchAllMetadata().then((items) => { if (alive) setMeta(items); }); return () => { alive = false; }; }, []);
 
   const library = useMemo(() => getCollectorLibrary(supportedCatalog, w.ownershipRecords || []), [supportedCatalog, w.ownershipRecords]);
@@ -48,10 +72,13 @@ export function Reliquary() {
             {library.tokens.map((token) => {
               const { edition, release, artist, experiences } = token;
               const chainKey = chainKeyFor(token);
+              const tokenKey = `${token.chain?.id || token.chain}:${token.contract}:${token.tokenId}`;
               const experienceAccess = experiences.map((experience) => experienceAccessForToken(experience, token));
-              return <article key={`${token.chain?.id || token.chain}:${token.contract}:${token.tokenId}`} data-token-id={token.tokenId} data-contract={token.contract} style={{ background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", overflow: "hidden" }}>
+              const canList = canListOwnedToken(token, chainKey, w);
+              const listingOpen = listingTokenKey === tokenKey;
+              return <article key={tokenKey} data-token-id={token.tokenId} data-contract={token.contract} style={{ background: "var(--vc-abyss)", border: "1px solid var(--vc-ash)", borderTop: "2px solid var(--vc-crimson)", overflow: "hidden" }}>
                 <img src={release?.artwork || metadata[String(token.tokenId)]?.image || ""} alt="" loading="lazy" style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block" }} />
-                <div style={{ padding: "18px" }}><div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>{artist?.name || "Artist"}</div><h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", lineHeight: 1, margin: "8px 0" }}>{release?.title || edition.title}</h2><div style={{ fontFamily: "var(--font-body)", color: "var(--vc-bone-dim)", fontSize: 14 }}>{edition.title} · TOKEN #{token.tokenId} · {token.amount} owned · {token.chain?.name || edition.chain}</div><div style={{ marginTop: 16, display: "grid", gap: 8 }}>{experienceAccess.map((experience) => <div key={experience.id} style={{ borderTop: "1px solid var(--vc-ash)", paddingTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: experience.access.accessible ? "var(--vc-bone)" : "var(--vc-bone-dim)" }}>{experience.access.label} · {experience.experienceType} · {experience.title}<div style={{ textTransform: "none", letterSpacing: 0, marginTop: 5, fontFamily: "var(--font-body)", fontSize: 12 }}>{experience.access.reason}</div></div>)}</div><button onClick={() => setTransfer({ name: `${artist?.name || "Asset"} · ${edition.title} · Token #${token.tokenId}`, tokenId: token.tokenId, amount: token.amount, contract: token.contract, chainKey, image: metadata[String(token.tokenId)]?.image })} style={{ marginTop: 18, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", padding: "9px", background: "transparent", border: "1px solid var(--vc-ash)", color: "var(--vc-bone-dim)", cursor: "pointer" }}><Send size={12} /> SEND TOKEN</button></div>
+                <div style={{ padding: "18px" }}><div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>{artist?.name || "Artist"}</div><h2 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", lineHeight: 1, margin: "8px 0" }}>{release?.title || edition.title}</h2><div style={{ fontFamily: "var(--font-body)", color: "var(--vc-bone-dim)", fontSize: 14 }}>{edition.title} · TOKEN #{token.tokenId} · {token.amount} owned · {token.chain?.name || edition.chain}</div><div style={{ marginTop: 16, display: "grid", gap: 8 }}>{experienceAccess.map((experience) => <div key={experience.id} style={{ borderTop: "1px solid var(--vc-ash)", paddingTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: experience.access.accessible ? "var(--vc-bone)" : "var(--vc-bone-dim)" }}>{experience.access.label} · {experience.experienceType} · {experience.title}<div style={{ textTransform: "none", letterSpacing: 0, marginTop: 5, fontFamily: "var(--font-body)", fontSize: 12 }}>{experience.access.reason}</div></div>)}</div><button onClick={() => setTransfer({ name: `${artist?.name || "Asset"} · ${edition.title} · Token #${token.tokenId}`, tokenId: token.tokenId, amount: token.amount, contract: token.contract, chainKey, image: metadata[String(token.tokenId)]?.image })} style={{ marginTop: 18, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", padding: "9px", background: "transparent", border: "1px solid var(--vc-ash)", color: "var(--vc-bone-dim)", cursor: "pointer" }}><Send size={12} /> SEND TOKEN</button>{canList && <button type="button" onClick={() => setListingTokenKey(listingOpen ? null : tokenKey)} aria-expanded={listingOpen} style={{ marginTop: 10, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.16em", textTransform: "uppercase", padding: "9px", background: "transparent", border: "1px solid var(--vc-crimson)", color: "var(--vc-bone)", cursor: "pointer" }}>{listingOpen ? "CLOSE LISTING" : "LIST ON SECONDARY MARKET"}</button>}{listingOpen && <ListingPanel edition={edition} tokenId={token.tokenId} ownedAmount={token.amount} />}</div>
               </article>;
             })}
           </div>

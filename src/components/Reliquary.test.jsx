@@ -1,13 +1,31 @@
 /** @vitest-environment jsdom */
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Reliquary } from "./Reliquary.jsx";
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_RELEASE_CONFIG } from "../lib/fuji-release.js";
 import { mapPublishedCatalog, mergeCatalogs } from "../lib/catalog-source.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import { WalletCtx } from "../lib/wallet-context.js";
+
+vi.mock("./ListingPanel.jsx", () => ({
+  ListingPanel: ({ edition, tokenId, ownedAmount }) => (
+    <div data-testid="listing-panel" data-edition-id={edition.id} data-token-id={tokenId} data-owned-amount={ownedAmount}>EXISTING LISTING PANEL</div>
+  ),
+}));
+
+vi.mock("../lib/marketplace.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    FUJI_LISTING_CONFIG: actual.resolveFujiListingConfig({
+      VITE_FUJI_LISTING_MARKETPLACE_ADDRESS: "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b",
+      VITE_FUJI_LISTING_CHAIN_ID: "43113",
+    }),
+  };
+});
 
 const wallet = "0x1111111111111111111111111111111111111111";
 const fujiContract = FUJI_RELEASE_CONFIG.contractAddress.toLowerCase();
@@ -51,13 +69,41 @@ const cchainContract = VOIDCALLER_CATALOG.editions[0].contractAddress;
 const cchainRecord = (tokenId, amount = 1) => ({ wallet, contract: cchainContract, tokenId, amount, chain: { key: "cchain", id: 43114, name: "Avalanche C-Chain" }, updatedAt: 1 });
 const fujiRecord = (overrides = {}) => ({ wallet, contract: fujiContract, tokenId: fujiTokenId, amount: 1, chain: { key: "fuji", id: 43113, name: "Avalanche Fuji" }, updatedAt: 1, ...overrides });
 
+function walletValue(ownershipRecords) {
+  return {
+    connected: true,
+    account: wallet,
+    chainId: 43113,
+    loadingOwnership: false,
+    ownershipRecords,
+    owned: { cchain: new Set(["1", "2"]), fuji: new Set([fujiTokenId]) },
+    disconnect: () => {},
+  };
+}
+
 function renderReliquary(ownershipRecords, catalog = VOIDCALLER_CATALOG) {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={["/reliquary"]}>
       <Routes>
         <Route path="/reliquary" element={<Outlet context={{ catalog }} />}>
           <Route index element={(
-            <WalletCtx.Provider value={{ connected: true, account: wallet, loadingOwnership: false, ownershipRecords, owned: {}, disconnect: () => {} }}>
+            <WalletCtx.Provider value={walletValue(ownershipRecords)}>
+              <Reliquary />
+            </WalletCtx.Provider>
+          )} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function renderInteractiveReliquary(ownershipRecords, catalog = VOIDCALLER_CATALOG) {
+  return render(
+    <MemoryRouter initialEntries={["/reliquary"]}>
+      <Routes>
+        <Route path="/reliquary" element={<Outlet context={{ catalog }} />}>
+          <Route index element={(
+            <WalletCtx.Provider value={walletValue(ownershipRecords)}>
               <Reliquary />
             </WalletCtx.Provider>
           )} />
@@ -90,6 +136,26 @@ describe("Reliquary token breakdown", () => {
     expect(markup).toContain("Voidcaller");
     expect(markup).toContain("VOIDCALLER · TOKEN #");
     expect(markup).toContain('/assets/voidcaller_art_4.png');
+  });
+
+  it("exposes the listing action only for a canonical Fuji owned item", () => {
+    const markup = renderReliquary([fujiRecord()], productionFujiCatalog);
+    expect(markup).toContain("LIST ON SECONDARY MARKET");
+
+    const cchainMarkup = renderReliquary([cchainRecord("1")]);
+    expect(cchainMarkup).not.toContain("LIST ON SECONDARY MARKET");
+
+    const unknownMarkup = renderReliquary([fujiRecord({ contract: "0x2222222222222222222222222222222222222222" })], productionFujiCatalog);
+    expect(unknownMarkup).not.toContain("LIST ON SECONDARY MARKET");
+  });
+
+  it("opens the existing listing flow with the actual edition, token ID, and owned balance", () => {
+    renderInteractiveReliquary([fujiRecord({ amount: 3 })], productionFujiCatalog);
+    fireEvent.click(screen.getByRole("button", { name: "LIST ON SECONDARY MARKET" }));
+    const panel = screen.getByTestId("listing-panel");
+    expect(panel.getAttribute("data-edition-id")).toBe(fujiEditionId);
+    expect(panel.getAttribute("data-token-id")).toBe(fujiTokenId);
+    expect(panel.getAttribute("data-owned-amount")).toBe("3");
   });
 
   it("keeps Fuji and existing C-Chain editions supported together", () => {

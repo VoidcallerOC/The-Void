@@ -7,7 +7,7 @@ import { formatWeiAsAvax, parseAvaxToWei, resolveEditionChain } from "../lib/mar
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
 
-export function ListingPanel({ edition }) {
+export function ListingPanel({ edition, tokenId: requestedTokenId, ownedAmount }) {
   const wallet = useWallet();
   const [amount, setAmount] = useState("1");
   const [priceAvax, setPriceAvax] = useState("");
@@ -16,7 +16,7 @@ export function ListingPanel({ edition }) {
   const [message, setMessage] = useState("");
   const [submittedListingId, setSubmittedListingId] = useState(null);
   const chain = useMemo(() => resolveEditionChain(edition), [edition]);
-  const tokenId = edition?.tokenIds?.[0];
+  const tokenId = requestedTokenId ?? edition?.tokenIds?.[0];
   const targetError = fujiListingTargetError({
     config: FUJI_LISTING_CONFIG,
     marketplace: FUJI_LISTING_CONFIG.address,
@@ -26,8 +26,10 @@ export function ListingPanel({ edition }) {
     tokenContract: edition?.contractAddress,
   });
   const listingReady = !targetError;
-  const owned = listingReady && wallet.connected && tokenId !== undefined
-    && Boolean(wallet.owned?.[chain?.key]?.has(Number(tokenId)) || wallet.owned?.[chain?.key]?.has(String(tokenId)));
+  const ownedBalance = ownedAmount === undefined
+    ? (wallet.owned?.[chain?.key]?.has(Number(tokenId)) || wallet.owned?.[chain?.key]?.has(String(tokenId)) ? 1 : 0)
+    : Number(ownedAmount);
+  const owned = listingReady && wallet.connected && tokenId !== undefined && ownedBalance > 0;
   const priceWei = parseAvaxToWei(priceAvax);
 
   const list = async () => {
@@ -36,6 +38,7 @@ export function ListingPanel({ edition }) {
     if (!provider || !wallet.account) { setMessage("Connect your wallet on Avalanche Fuji before listing."); return; }
     if (!wallet.authenticated) { setMessage("Authenticate your wallet before submitting a listing transaction."); return; }
     if (!priceWei) { setMessage("Enter a native AVAX price."); return; }
+    if (!Number.isInteger(Number(amount)) || Number(amount) > ownedBalance) { setMessage(`Quantity cannot exceed your owned balance of ${ownedBalance}.`); return; }
     const error = validateListingDraft({ seller: wallet.account, contract: edition.contractAddress, tokenId, amount, price: priceWei, expiresAt: expiresAt ? new Date(expiresAt).getTime() : 0 });
     if (error) { setMessage(error); return; }
     try {
@@ -75,7 +78,7 @@ export function ListingPanel({ edition }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, opacity: listingReady ? 1 : 0.55 }}>
         <div>
           <label htmlFor="listing-amount">QUANTITY</label>
-          <input id="listing-amount" type="number" min="1" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} style={field} disabled={!listingReady} />
+          <input id="listing-amount" type="number" min="1" max={ownedBalance || undefined} step="1" value={amount} onChange={(event) => setAmount(event.target.value)} style={field} disabled={!listingReady} />
         </div>
         <div>
           <label htmlFor="listing-price">PRICE · AVAX</label>
