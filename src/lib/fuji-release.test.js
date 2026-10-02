@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiTransactionTarget, assertProvenanceAnchorTarget, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiE2EMint, encodeFujiMint, explainFujiEditionError, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition } from "./fuji-release.js";
+import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiE2EMintPlan, assertFujiTransactionTarget, assertProvenanceAnchorTarget, createFujiE2EMintPlan, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiE2ECreateEdition, encodeFujiE2EMint, encodeFujiMint, explainFujiEditionError, fujiIds, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiE2EMintPreflight, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses a valid certified Fuji release configuration", () => {
@@ -35,17 +35,141 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(withRoyalty.tokenId).toBe(edition.tokenId);
   });
 
-  it("locks the temporary E2E mint to the exact wallet, token, quantity, and contract call", () => {
-    const data = encodeFujiE2EMint();
+  it("locks the temporary E2E mint to the exact wallet, the run's fresh token, quantity 1, and the certified contract", () => {
+    const plan = createFujiE2EMintPlan({ now: 1790960000000, random: () => "a1b2c3d4e5f6" });
+    const data = encodeFujiE2EMint(plan);
     const mintIface = new ethers.Interface(["function mint(address,uint256,uint256,bytes)"]);
     const decoded = mintIface.decodeFunctionData("mint", data);
     expect(FUJI_E2E_MINT.wallet).toBe("0xabd3746e8b852f55be52fc44fab6cab908b1c174");
     expect(decoded[0].toLowerCase()).toBe(FUJI_E2E_MINT.wallet);
-    expect(decoded[1]).toBe(FUJI_E2E_MINT.tokenId);
-    expect(decoded[2]).toBe(FUJI_E2E_MINT.quantity);
+    expect(decoded[1]).toBe(plan.tokenId);
+    expect(decoded[2]).toBe(1n);
     expect(decoded[3]).toBe("0x");
     expect(data.slice(0, 10)).toBe("0x731133e9");
     expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x82b26Da27136935454Bdf1e40801190B521b82e5");
+    expect(() => encodeFujiE2EMint()).toThrow(/fresh E2E test edition plan/);
+  });
+
+  it("encodes a one-copy createEdition for the run's dedicated test edition", () => {
+    const plan = createFujiE2EMintPlan({ now: 1790960000000, random: () => "a1b2c3d4e5f6" });
+    const { tokenId, data } = encodeFujiE2ECreateEdition(plan);
+    const createIface = new ethers.Interface(["function createEdition(bytes32,bytes32,uint256,string)"]);
+    const [releaseId, editionId, maxSupply, metadataUri] = createIface.decodeFunctionData("createEdition", data);
+    expect(tokenId).toBe(plan.tokenId);
+    expect(ethers.decodeBytes32String(releaseId)).toBe("the-void:e2e-mint");
+    expect(ethers.decodeBytes32String(editionId)).toBe(plan.editionId);
+    expect(maxSupply).toBe(1n);
+    expect(JSON.parse(decodeURIComponent(metadataUri.slice("data:application/json,".length))).description).toMatch(/not a catalog edition/);
+  });
+
+  describe("temporary E2E mint never reuses an edition", () => {
+    const RETIRED = 69621777096996404494569967715110965261109496187347335164928263396549073080909n;
+
+    it("retires the already-minted catalog E2E token from the failed transaction", () => {
+      expect(FUJI_E2E_MINT.retiredTokenIds).toContain(RETIRED);
+      expect(FUJI_E2E_MINT).not.toHaveProperty("tokenId");
+    });
+
+    it("derives a fresh token ID per run with the contract's tokenIdFor convention", () => {
+      const first = createFujiE2EMintPlan({ now: 1790960000000, random: () => "000000000001" });
+      const second = createFujiE2EMintPlan({ now: 1790960000000, random: () => "000000000002" });
+      const later = createFujiE2EMintPlan({ now: 1790960000001, random: () => "000000000001" });
+      expect(new Set([first.tokenId, second.tokenId, later.tokenId]).size).toBe(3);
+      for (const plan of [first, second, later]) {
+        expect(plan.tokenId).toBe(fujiTokenId(plan.releaseId, plan.editionId));
+        expect(plan.tokenId).not.toBe(RETIRED);
+        expect(plan.editionId.length).toBeLessThanOrEqual(31);
+        expect(plan.quantity).toBe(1n);
+        expect(plan.maxSupply).toBe(1n);
+      }
+      const random = new Set(Array.from({ length: 50 }, () => createFujiE2EMintPlan().tokenId));
+      expect(random.size).toBe(50);
+    });
+
+    it("keeps E2E identities outside the catalog's slug space", () => {
+      expect(fujiSlug(FUJI_E2E_MINT.releaseId, "releaseId")).not.toBe(FUJI_E2E_MINT.releaseId);
+      expect(FUJI_E2E_MINT.releaseId).not.toMatch(/^[a-z0-9-]+$/);
+    });
+
+    it("rejects plans that point at a retired, catalog, or mismatched token", () => {
+      const plan = createFujiE2EMintPlan({ now: 1790960000000, random: () => "a1b2c3d4e5f6" });
+      expect(() => assertFujiE2EMintPlan({ ...plan, tokenId: RETIRED })).toThrow(/does not match/);
+      expect(() => assertFujiE2EMintPlan({ ...plan, releaseId: "marketplace-fuji-e2e-test" })).toThrow(/fresh E2E test edition plan/);
+      expect(() => assertFujiE2EMintPlan({ ...plan, editionId: "marketplace-fuji-e2e-test" })).toThrow(/fresh E2E test edition plan/);
+      expect(() => assertFujiE2EMintPlan({ ...plan, maxSupply: 2n })).toThrow(/exactly one copy/);
+      expect(() => encodeFujiE2EMint({ ...plan, tokenId: RETIRED })).toThrow();
+    });
+
+    function chainDouble({ edition = null, artistRole = true, issuerRole = true, paused = false, receipt = null, balance = 0n } = {}) {
+      const iface = new ethers.Interface(FUJI_RELEASE_ABI);
+      const editionIface = new ethers.Interface([
+        "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))",
+        "error EditionNotFound(uint256 tokenId)",
+      ]);
+      const sent = [];
+      const provider = {
+        sent,
+        request: async ({ method, params }) => {
+          sent.push(method);
+          if (method === "eth_chainId") return "0xa869";
+          if (method === "eth_getTransactionReceipt") return receipt;
+          if (method !== "eth_call") throw new Error(`unexpected provider method: ${method}`);
+          const { data } = params[0];
+          const selector = data.slice(0, 10);
+          if (selector === iface.getFunction("hasRole").selector) {
+            const [role] = iface.decodeFunctionData("hasRole", data);
+            return iface.encodeFunctionResult("hasRole", [role === FUJI_ROLES.ARTIST_ROLE ? artistRole : issuerRole]);
+          }
+          if (selector === iface.getFunction("paused").selector) return iface.encodeFunctionResult("paused", [paused]);
+          if (selector === iface.getFunction("balanceOf").selector) return iface.encodeFunctionResult("balanceOf", [balance]);
+          if (selector === editionIface.getFunction("edition").selector) {
+            const [tokenId] = editionIface.decodeFunctionData("edition", data);
+            if (!edition) throw Object.assign(new Error("execution reverted"), { data: editionIface.encodeErrorResult("EditionNotFound", [tokenId]) });
+            return editionIface.encodeFunctionResult("edition", [[edition.releaseId, edition.editionId, edition.artist, edition.maxSupply, edition.mintedSupply, "data:application/json,{}", true]]);
+          }
+          throw new Error(`unexpected eth_call selector: ${selector}`);
+        },
+      };
+      return provider;
+    }
+
+    const plan = createFujiE2EMintPlan({ now: 1790960000000, random: () => "a1b2c3d4e5f6" });
+    const ownEdition = (mintedSupply, overrides = {}) => ({ ...fujiIds(plan.releaseId, plan.editionId), artist: FUJI_E2E_MINT.wallet, maxSupply: 1n, mintedSupply, ...overrides });
+
+    it("plans creation first when the run's edition does not exist yet", async () => {
+      const provider = chainDouble();
+      await expect(readFujiE2EMintPreflight(provider, FUJI_E2E_MINT.wallet, plan)).resolves.toMatchObject({ stage: "create", tokenId: plan.tokenId, quantity: 1n });
+      expect(provider.sent).not.toContain("eth_sendTransaction");
+    });
+
+    it("allows the mint only into this run's own unminted edition", async () => {
+      await expect(readFujiE2EMintPreflight(chainDouble({ edition: ownEdition(0n) }), FUJI_E2E_MINT.wallet, plan)).resolves.toMatchObject({ stage: "mint" });
+    });
+
+    it("blocks a repeat mint into an edition whose single copy is already minted, even if the seller moved it", async () => {
+      const provider = chainDouble({ edition: ownEdition(1n), balance: 0n });
+      await expect(readFujiE2EMintPreflight(provider, FUJI_E2E_MINT.wallet, plan)).rejects.toThrow(/already has minted supply 1/);
+      expect(provider.sent).not.toContain("eth_sendTransaction");
+    });
+
+    it("blocks a token ID owned by an edition this control did not create", async () => {
+      const foreign = chainDouble({ edition: ownEdition(0n, { artist: "0x284c09a7cc187e096cbbdc88d99defe6df32180a" }) });
+      await expect(readFujiE2EMintPreflight(foreign, FUJI_E2E_MINT.wallet, plan)).rejects.toThrow(/did not create/);
+    });
+
+    it("requires ARTIST_ROLE to create the test edition and refuses other wallets", async () => {
+      await expect(readFujiE2EMintPreflight(chainDouble({ artistRole: false }), FUJI_E2E_MINT.wallet, plan)).rejects.toThrow(/ARTIST_ROLE/);
+      await expect(readFujiE2EMintPreflight(chainDouble(), "0x284c09a7cc187e096cbbdc88d99defe6df32180a", plan)).rejects.toThrow(/restricted/);
+    });
+
+    it("verifies the mint receipt against the run's token, not the retired one", async () => {
+      const transfer = new ethers.Interface(["event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)"]);
+      const logFor = (id) => ({ address: FUJI_RELEASE_CONFIG.contractAddress, ...transfer.encodeEventLog("TransferSingle", [FUJI_E2E_MINT.wallet, ethers.ZeroAddress, FUJI_E2E_MINT.wallet, id, 1n]) });
+      const ok = chainDouble({ receipt: { status: "0x1", logs: [logFor(plan.tokenId)] }, balance: 1n });
+      await expect(verifyFujiE2EMint(ok, { transactionHash: "0x01", plan })).resolves.toMatchObject({ balance: 1n });
+      const retired = chainDouble({ receipt: { status: "0x1", logs: [logFor(RETIRED)] }, balance: 1n });
+      await expect(verifyFujiE2EMint(retired, { transactionHash: "0x01", plan })).rejects.toThrow(/expected TransferSingle/);
+    });
   });
 
   it("decodes every field from the deployed Edition struct return", async () => {
