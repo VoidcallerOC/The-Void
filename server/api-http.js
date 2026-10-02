@@ -66,7 +66,11 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         return sendMedia(response, await mediaGateway.openMedia({ request: apiRequest, grantId: base[1] }), responseHeaders);
       }
       let data;
-      if (method === "GET" && base[0] === "artists" && base.length === 1) data = await service.listArtists({ ...Object.fromEntries(url.searchParams), requestId });
+      if (method === "GET" && base[0] === "studio" && base[1] === "catalog" && base.length === 2) {
+        if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+        data = await studioService.listCatalog({ request: apiRequest });
+      }
+      else if (method === "GET" && base[0] === "artists" && base.length === 1) data = await service.listArtists({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "indexer" && base[1] === "health" && base.length === 2) data = await service.getIndexerHealth({ chainId: url.searchParams.get("chainId") });
       else if (method === "GET" && base[0] === "artists" && base.length === 3 && base[2] === "verification") {
         if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");

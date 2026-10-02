@@ -147,6 +147,17 @@ export class ArtistStudioService {
   }
 
   async identity(request) { return requireWalletAuth(this.authenticator, request); }
+  async listCatalog({ request } = {}) {
+    const identity = await this.identity(request);
+    const owner = identity.wallet;
+    const [artists, releases, editions, experiences] = await Promise.all([
+      this.db.query("SELECT a.id, a.slug, a.display_name, a.status, ao.owner_wallet, p.bio, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY a.display_name LIMIT 100", [owner]),
+      this.db.query("SELECT r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY r.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
+    ]);
+    return { artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows };
+  }
   async ownedArtist({ artistId, request, lock = false }) {
     const identity = await this.identity(request);
     const query = `SELECT a.*, ao.owner_wallet, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE a.id=$1 AND ao.owner_wallet=$2${lock ? " FOR UPDATE" : ""} LIMIT 1`;
