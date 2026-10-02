@@ -10,6 +10,7 @@ import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, crea
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
+import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
@@ -132,11 +133,8 @@ export function ArtistStudioPage() {
     : e2eMintStatus.state === "hidden"
       ? E2E_MINT_CHECKING_STATUS
       : e2eMintStatus;
-  const existingReleases = useMemo(() => (ownedStudioCatalog?.releases || []).map((release) => ({
-    release,
-    artist: (ownedStudioCatalog.artists || []).find((artist) => artist.id === release.artistId) || null,
-  })), [ownedStudioCatalog]);
-  const ownedArtists = ownedStudioCatalog?.artists || [];
+  const existingReleases = useMemo(() => studioReleaseChoices(ownedStudioCatalog || {}), [ownedStudioCatalog]);
+  const ownedArtists = useMemo(() => studioArtistChoices(ownedStudioCatalog?.artists || []), [ownedStudioCatalog]);
   const activeArtist = ownedArtists.find((artist) => artist.id === artistId) || ownedArtists[0] || null;
   const selectedMintRelease = ownedStudioCatalog?.releases?.find((release) => release.id === mintReleaseId) || null;
   const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
@@ -576,7 +574,7 @@ export function ArtistStudioPage() {
                 <label style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
                   Publishing as{" "}
                   <select value={activeArtist.id} onChange={(event) => setArtistId(event.target.value)} style={{ background: "transparent", color: "var(--vc-bone)", border: "1px solid var(--vc-ash)", padding: "6px 8px" }}>
-                    {ownedArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name}</option>)}
+                    {ownedArtists.map((artist) => <option key={artist.id} value={artist.id}>{ownedArtists.filter((other) => other.name === artist.name).length > 1 ? `${artist.name} (${artist.handle || artist.id})` : artist.name}</option>)}
                   </select>
                 </label>
               ) : (

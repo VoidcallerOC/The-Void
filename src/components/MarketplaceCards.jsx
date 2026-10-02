@@ -61,7 +61,7 @@ export function EditionCard({ item, owned = false }) {
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
         <p className="vc-card-kicker">{artist?.name || "The Void"}</p>
-        <p className="vc-card-release">{release?.title || "Official release"}</p>
+        <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
         <h3 className="vc-card-title">{edition.title}</h3>
         {edition.description && <p className="vc-card-body">{edition.description}</p>}
         <p className="vc-card-meta">
@@ -98,7 +98,7 @@ export function SecondaryListingCard({ item, listings = [], owned = false }) {
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
         <p className="vc-card-kicker">{artist?.name || "The Void"} · Index-confirmed secondary</p>
-        <p className="vc-card-release">{release?.title || "Official release"}</p>
+        <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
         <h3 className="vc-card-title">{edition.title}</h3>
         <p className="vc-card-meta">{chainName} · Chain {chainId} · {active.length} active indexed offer{active.length === 1 ? "" : "s"}</p>
         <Includes items={edition.includes} />
