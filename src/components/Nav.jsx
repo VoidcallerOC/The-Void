@@ -12,7 +12,6 @@ const LINKS = [
   ["VERIFY", "/verify"],
   ["COLLECTION", "/collection"],
   ["ARTIST STUDIO", "/studio"],
-  ["ADD TRACKS", "/studio?create=track"],
 ];
 
 export const REVIEWER_NAV_LABEL = "REVIEW APPLICATIONS";
