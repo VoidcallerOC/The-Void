@@ -137,8 +137,8 @@ export function primaryCollectForEdition(edition) {
       certified: true,
     };
   }
-  // Legacy mainnet editions are minted out and trade on OpenSea/Joepegs. They
-  // never get a Collect button, whatever status the catalog row carries.
+  // Legacy mainnet editions are minted out and remain catalog-only. They never
+  // get a Collect button, whatever status the catalog row carries.
   if (String(edition.status).toLowerCase() === "minted" || isLegacyMainnetEdition(edition)) {
     return {
       availability: "minted",
