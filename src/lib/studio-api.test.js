@@ -56,4 +56,9 @@ describe("Studio API contract", () => {
     expect(endpoint).toBe("/api/studio/artists/artist-a/media");
     expect(JSON.parse(options.body)).toEqual({ mediaType: "AUDIO", filename: "song.mp3", contentType: "audio/mpeg", data: "SUQz" });
   });
+
+  it("explains an upload rejected for size before it reaches the API", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("Request Entity Too Large", { status: 413 }));
+    await expect(studioFetch("/studio/artists/a/audio-preview", { method: "POST", payload: {}, fetchImpl })).rejects.toMatchObject({ status: 413, message: "The file is too large for the upload route. Try a smaller file." });
+  });
 });
