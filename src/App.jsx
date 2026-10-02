@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useOutletContext, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
@@ -22,8 +22,7 @@ const FujiIntegrationPage = SUMMIT_DEMO
   : null;
 
 function HomePage() {
-  const { onMint } = useOutletContext();
-  return <Hero onMint={onMint} />;
+  return <Hero />;
 }
 function ChroniclePage() {
   return <Chronicle />;

@@ -27,7 +27,7 @@ function renderNav({ account, store }) {
     <MemoryRouter initialEntries={["/"]}>
       <WalletCtx.Provider value={walletValue(account)}>
         <ReviewerNotificationsProvider store={store}>
-          <Nav onMint={() => {}} />
+          <Nav />
         </ReviewerNotificationsProvider>
       </WalletCtx.Provider>
     </MemoryRouter>,
@@ -54,6 +54,7 @@ describe("site header · reviewer notifications", () => {
     const store = storeFor({ reviewer: false, count: 0 });
     await store.sync(session(NORMAL));
     const html = renderNav({ account: NORMAL, store });
+    expect(html).not.toContain("CLAIM A RELIC");
     expect(html).not.toContain(REVIEWER_NAV_LABEL);
     expect(reviewerLinks(html)).toBe(0);
     expect(html).not.toContain("vc-nav-badge");

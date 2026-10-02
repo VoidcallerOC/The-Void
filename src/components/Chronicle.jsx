@@ -127,16 +127,6 @@ function ReleaseCard({ r }) {
                     : <><Play size={12} strokeWidth={1.75} fill="currentColor" /> LISTEN</>}
                 </Btn>
               )}
-              {VC_DATA.marketplaces.filter(m => m.name !== "SNOWTRACE").map((m) => (
-                <Btn
-                  key={m.name}
-                  kind="ghost"
-                  onClick={() => window.open(m.href, "_blank")}
-                  style={{ flex: 1, padding: "12px 8px", fontSize: 10 }}
-                >
-                  {m.name}
-                </Btn>
-              ))}
             </div>
             {expanded && tracks && (
               <InlineTracklist tracks={tracks} audio={audio} queueId={r.queueId} />
