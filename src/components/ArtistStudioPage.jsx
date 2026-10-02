@@ -33,9 +33,24 @@ function TextField({ title, value, onChange, multiline = false, required = false
   );
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1000))} KB`;
+}
+
+// Per-upload feedback shown right under its button, so a result is never lost
+// in the page-level notice: uploading, a confirmed result, or the error.
+export function UploadStatus({ status, signedIn = true }) {
+  if (!signedIn) return <p role="status" style={{ margin: "8px 0 0", color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Sign in with your artist wallet to upload.</p>;
+  if (!status) return null;
+  const color = status.state === "error" ? "var(--vc-crimson)" : status.state === "done" ? "#7bd88f" : "var(--vc-bone-dim)";
+  const prefix = status.state === "done" ? "✓ " : status.state === "error" ? "✕ " : "";
+  return <p role="status" aria-live="polite" style={{ margin: "8px 0 0", color, fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}>{prefix}{status.message}</p>;
+}
+
 // Artwork is either uploaded here (pinned publicly, stored as ipfs://) or an
 // existing image URL pasted into the field.
-function ArtworkField({ title, value, onChange, onUpload, uploading, disabled }) {
+function ArtworkField({ title, value, onChange, onUpload, uploading, disabled, status, signedIn }) {
   const preview = ipfsToHttp(value);
   return (
     <div style={{ marginTop: 16 }}>
@@ -47,6 +62,7 @@ function ArtworkField({ title, value, onChange, onUpload, uploading, disabled })
         </label>
         <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>PNG, JPEG, GIF or WebP · 3 MB max</span>
       </div>
+      <UploadStatus status={status} signedIn={signedIn} />
       {preview && <img src={preview} alt={`${title} preview`} style={{ width: 160, aspectRatio: "1", objectFit: "cover", marginTop: 12, display: "block" }} />}
     </div>
   );
@@ -98,6 +114,7 @@ export function ArtistStudioPage() {
   const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
   const [e2eMintPlan, setE2eMintPlan] = useState(() => createFujiE2EMintPlan());
   const [fullTrack, setFullTrack] = useState(null);
+  const [uploads, setUploads] = useState({});
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
   const [mintEditionId, setMintEditionId] = useState("");
@@ -374,40 +391,36 @@ export function ArtistStudioPage() {
     } finally { setBusy(""); }
   };
 
-  const uploadArtwork = async (key, file) => {
-    setBusy(`artwork:${key}`); setNotice("");
+  // Runs one upload and records its outcome next to its own button.
+  const runUpload = async (key, file, upload, describe) => {
+    setBusy(key); setNotice("");
+    setUploads((prior) => ({ ...prior, [key]: { state: "uploading", message: `Uploading ${file.name} (${formatBytes(file.size)})…` } }));
     try {
-      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      const uploaded = await uploadStudioArtwork({ artistId: artistId || await ensureArtist(), file, headers });
-      set(key, uploaded.uri);
-      setNotice("Artwork uploaded.");
+      if (!canUseStudio) throw new Error("Sign in with your artist wallet to upload.");
+      const result = await upload(artistId || await ensureArtist());
+      setUploads((prior) => ({ ...prior, [key]: { state: "done", message: describe(result) } }));
     } catch (error) {
-      setNotice(error.message);
+      setUploads((prior) => ({ ...prior, [key]: { state: "error", message: `${file.name}: ${error.message}` } }));
     } finally { setBusy(""); }
   };
 
-  const uploadPreview = async (file) => {
-    setBusy("preview"); setNotice("");
-    try {
-      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      const uploaded = await uploadStudioPreview({ artistId: artistId || await ensureArtist(), file, headers });
-      set("trackPreview", uploaded.uri);
-      setNotice("Public preview uploaded. Wallets and marketplaces will play it from the token metadata.");
-    } catch (error) {
-      setNotice(error.message);
-    } finally { setBusy(""); }
-  };
+  const uploadArtwork = (key, file) => runUpload(`artwork:${key}`, file, async (owner) => {
+    const uploaded = await uploadStudioArtwork({ artistId: owner, file, headers });
+    set(key, uploaded.uri);
+    return uploaded;
+  }, (uploaded) => `Uploaded ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · ${uploaded.uri}`);
 
-  const uploadFullTrack = async (file) => {
-    setBusy("full-track"); setNotice("");
-    try {
-      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      setFullTrack(await uploadStudioFullTrack({ artistId: artistId || await ensureArtist(), file, headers }));
-      setNotice("Full track uploaded privately. Save the catalog structure to gate it to holders of this track.");
-    } catch (error) {
-      setNotice(error.message);
-    } finally { setBusy(""); }
-  };
+  const uploadPreview = (file) => runUpload("preview", file, async (owner) => {
+    const uploaded = await uploadStudioPreview({ artistId: owner, file, headers });
+    set("trackPreview", uploaded.uri);
+    return uploaded;
+  }, (uploaded) => `Public preview uploaded: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · ${uploaded.uri}`);
+
+  const uploadFullTrack = (file) => runUpload("full-track", file, async (owner) => {
+    const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers });
+    setFullTrack(uploaded);
+    return uploaded;
+  }, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to gate it to holders.`);
 
   const selectExistingRelease = (record) => {
     const selection = selectReleaseTemplate(record);
@@ -479,7 +492,7 @@ export function ArtistStudioPage() {
         ))}
       </nav>}
 
-      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
+      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed|uploaded/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
       {txEvidence && (
         <div role="status" style={{ ...card, margin: "20px 0", borderColor: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
           <div>Failed transaction {txEvidence.code ? `(${txEvidence.code})` : ""} — inspect the exact revert on Snowtrace:</div>
@@ -570,7 +583,7 @@ export function ArtistStudioPage() {
           )}
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
-          <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} />
+          <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Creating…" : "Create release"}
@@ -587,7 +600,7 @@ export function ArtistStudioPage() {
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
-          <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} />
+          <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
           <div style={{ marginTop: 16 }}>
             <p style={{ margin: "0 0 8px" }}>Public preview (~30 seconds) — played by wallets and marketplaces from the token metadata</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
@@ -597,6 +610,7 @@ export function ArtistStudioPage() {
               </label>
               <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>~30 s clip · 5 MB max · public</span>
             </div>
+            <UploadStatus status={uploads.preview} signedIn={canUseStudio} />
             {form.trackPreview && <audio controls preload="none" src={ipfsToHttp(form.trackPreview)} style={{ width: "100%", marginTop: 12 }} />}
           </div>
           <div style={{ marginTop: 16 }}>
@@ -606,8 +620,9 @@ export function ArtistStudioPage() {
                 {busy === "full-track" ? "Uploading…" : fullTrack ? "Replace full track" : "Upload full track"}
                 <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadFullTrack(file); }} />
               </label>
-              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{fullTrack ? `Uploaded privately: ${fullTrack.filename} · attached when you save the catalog structure` : "15 MB max · private · token-gated"}</span>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>15 MB max · private · token-gated</span>
             </div>
+            <UploadStatus status={uploads["full-track"]} signedIn={canUseStudio} />
           </div>
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
