@@ -1,4 +1,4 @@
-import { legacyExperienceId } from "./lib/legacy-genesis.js";
+import { LEGACY_CONTRACT, LEGACY_TOKENS, legacyExperienceId } from "./lib/legacy-genesis.js";
 import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "./domain/models.js";
 
 // Static data for the Voidcaller site.
@@ -56,7 +56,7 @@ export const VC_DATA = {
       date: "MINTED",
       art: "/assets/voidcaller_art_4.png",
       bleed: "Self-titled EP · on-chain on Avalanche",
-      tagline: "The first call. The first relic. One relic unlocks the full EP. The chain remembers.",
+      tagline: "The first call. A relic forged. One relic unlocks the full EP. The chain remembers.",
       status: "MINTED",
       mint: "—",
       forged: "—",
@@ -136,12 +136,12 @@ const voidcallerRelease = createRelease({
   artistId: "voidcaller",
   title: "VOIDCALLER",
   subtitle: "Self-titled EP",
-  description: "The first call. The first relic. One relic unlocks the full EP.",
+  description: "The first call. A relic forged. One relic unlocks the full EP.",
   story: VC_DATA.releases[0].tagline,
   status: "minted",
   artwork: "/assets/voidcaller_art_4.png",
-  experiences: ["voidcaller-full-ep"],
-  tracks: VC_DATA.firstEPTracks.map(({ n, title, time }) => ({ n, title, time })),
+  experiences: ["voidcaller-full-ep", ...LEGACY_TOKENS.map(({ tokenId }) => legacyExperienceId(tokenId))],
+  tracks: LEGACY_TOKENS.map(({ n, title, time, tokenId }) => ({ n, title, time, tokenId, experienceId: legacyExperienceId(tokenId) })),
 });
 
 const voidcallerEdition = createEdition({
@@ -157,7 +157,7 @@ const voidcallerEdition = createEdition({
   chain: "AVALANCHE",
   supply: "1,620",
   status: "minted",
-  experienceIds: ["voidcaller-full-ep"],
+  experienceIds: ["voidcaller-full-ep", ...LEGACY_TOKENS.map(({ tokenId }) => legacyExperienceId(tokenId))],
 });
 
 const voidcallerExperience = createExperience({
@@ -165,17 +165,34 @@ const voidcallerExperience = createExperience({
   experienceType: EXPERIENCE_TYPES.AUDIO,
   title: "The Full Record",
   description: "One Chapter I relic unlocks the entire self-titled EP.",
-  requirements: [{ type: "erc1155-balance", contract: VC_DATA.contract, tokenIds: [0, 1, 2, 3] }],
+  requirements: [{ type: "ownership", contract: VC_DATA.contract, tokenIds: [0, 1, 2, 3], minAmount: 1, chainId: 43114 }],
   media: { type: "audio", releaseId: "voidcaller-self-titled", protected: true, previewAvailable: true },
 });
+const voidcallerTrackExperiences = LEGACY_TOKENS.map((track) => createExperience({
+  id: legacyExperienceId(track.tokenId),
+  experienceType: EXPERIENCE_TYPES.AUDIO,
+  title: track.title,
+  description: `Token #${track.tokenId} unlocks the full ${track.title} experience.`,
+  requirements: [{ type: "ownership", contract: LEGACY_CONTRACT, tokenIds: [track.tokenId], minAmount: 1, chainId: 43114 }],
+  media: { type: "audio", releaseId: "voidcaller-self-titled", tokenId: track.tokenId, protected: true, previewAvailable: true, previewSrc: track.previewSrc },
+  editionId: "voidcaller-chapter-i",
+}));
 
 export const VOIDCALLER_CATALOG = createCatalog({
   artists: [voidcallerArtist],
   releases: [voidcallerRelease],
   editions: [voidcallerEdition],
-  tokens: voidcallerEdition.tokenIds.map((tokenId) => createToken({ id: `voidcaller-token-${tokenId}`, editionId: voidcallerEdition.id, tokenId, name: `Voidcaller Relic #${tokenId}` })),
-  collections: [createCollection({ id: "voidcaller-collection", name: "Voidcaller Reliquary", artistIds: [voidcallerArtist.id], releaseIds: [voidcallerRelease.id], editionIds: [voidcallerEdition.id], description: "The first artist collection on the music-native platform." })],
-  experiences: [voidcallerExperience],
+  tokens: LEGACY_TOKENS.map((track) => createToken({
+    id: `voidcaller-token-${track.tokenId}`,
+    editionId: voidcallerEdition.id,
+    tokenId: track.tokenId,
+    name: track.title,
+    experiences: [legacyExperienceId(track.tokenId)],
+    media: { art: track.art, previewSrc: track.previewSrc },
+    song: { title: track.title, duration: track.time, trackNumber: track.n, experienceId: legacyExperienceId(track.tokenId) },
+  })),
+  collections: [createCollection({ id: "voidcaller-collection", name: "VOIDCALLER", artistIds: [voidcallerArtist.id], releaseIds: [voidcallerRelease.id], editionIds: [voidcallerEdition.id], description: "The first Voidcaller music collection: one self-titled release, four collectible tokens, and four corresponding song experiences." })],
+  experiences: [voidcallerExperience, ...voidcallerTrackExperiences],
 });
 
 // Main-page volume is scoped to the published canonical Fuji VOIDCALLER edition.

@@ -5,7 +5,7 @@ import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
-import { getCollectorLibrary } from "../lib/collection.js";
+import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
@@ -178,6 +178,21 @@ export function ReleasePage({ children = null } = {}) {
           )}
         </div>
       </div>
+      {release.id === "voidcaller-self-titled" && (
+        <>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Songs / tokens</h2>
+          <div className="vc-market-grid">
+            {release.tracks.map((track) => {
+              const token = catalog.tokens.find((item) => Number(item.tokenId) === Number(track.tokenId));
+              const experienceId = track.experienceId || token?.experiences?.[0];
+              return <Link key={track.tokenId} to={experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
+                <img src={token?.media?.art || release.artwork} alt={`${track.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                <div style={{ padding: 18 }}><Status>Token #{track.tokenId}</Status><h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}>{track.title}</h3><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{track.time} · Open song experience</p></div>
+              </Link>;
+            })}
+          </div>
+        </>
+      )}
       <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Collectible releases</h2>
       <div className="vc-market-grid">
         {editionItems.length ? editionItems.map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />) : <div style={card}><Status>Forthcoming</Status><p style={{ color: "var(--vc-bone-dim)" }}>Editions will appear here when this release is collectible.</p></div>}
@@ -253,8 +268,11 @@ export function EditionPage() {
   );
 }
 
-function tracksForRelease(release) {
-  if (release?.id === "voidcaller-self-titled") return VC_DATA.firstEPTracks;
+function tracksForRelease(release, experience) {
+  if (release?.id === "voidcaller-self-titled") {
+    const track = experience?.media?.tokenId === undefined ? null : VC_DATA.firstEPTracks.find((item) => Number(item.tokenId) === Number(experience.media.tokenId));
+    return track ? [track] : VC_DATA.firstEPTracks;
+  }
   return (release?.tracks || []).filter((track) => track.previewSrc || track.src);
 }
 
@@ -271,8 +289,8 @@ export function ExperiencePage() {
   const artist = catalog.artists.find((item) => item.id === release?.artistId);
   const protectedMedia = experience.media?.protected && supportedGatewayMediaType(experience.media?.type?.toUpperCase());
   const library = getCollectorLibrary(catalog, wallet.ownershipRecords || []);
-  const owned = Boolean(library.editions.some((item) => item.edition.id === edition?.id) || (edition && String(edition.status).toLowerCase() === "minted" && !isCertifiedFujiEdition(edition)));
-  const tracks = tracksForRelease(release);
+  const owned = Boolean((experience.requirements?.length && canAccessExperience(experience, wallet.ownershipRecords || [])) || library.editions.some((item) => item.edition.id === edition?.id) || (edition && String(edition.status).toLowerCase() === "minted" && !isCertifiedFujiEdition(edition)));
+  const tracks = tracksForRelease(release, experience);
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
@@ -330,7 +348,7 @@ export function ExperiencePage() {
             )}
             {edition && !owned && <Link to={`/edition/${edition.id}`} style={tracks.length ? ghostBtn : primaryBtn}>Collect</Link>}
             {edition && owned && <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>}
-            <Link to="/collection" style={ghostBtn}>My collection</Link>
+            <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </div>
           {playbackError && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6 }}>{playbackError}</p>}
         </div>
@@ -339,7 +357,54 @@ export function ExperiencePage() {
   );
 }
 
+export function CollectionDetailPage() {
+  const catalog = useMarketplaceCatalogs();
+  const { collection: collectionId } = useParams();
+  const collection = catalog.collections.find((item) => item.id === collectionId);
+  if (!collection) return <Navigate to="/collection" replace />;
+  const artist = catalog.artists.find((item) => collection.artistIds.includes(item.id));
+  const releases = catalog.releases.filter((item) => collection.releaseIds.includes(item.id));
+  return (
+    <section style={shell}>
+      <PlatformHeader eyebrow="† Collection" title={collection.name}>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>{collection.description}</p>
+      </PlatformHeader>
+      {artist && <p><Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>Artist · {artist.name}</Link></p>}
+      <div className="vc-market-grid" style={{ marginTop: 28 }}>
+        {releases.map((release) => (
+          <Link key={release.id} to={`/release/${release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
+            <img src={release.artwork} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+            <div style={{ padding: 20 }}><Status>{release.status}</Status><h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{release.title}</h2><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{release.subtitle}</p></div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function CollectionPage() {
+  const catalog = useMarketplaceCatalogs();
+  return (
+    <section style={shell}>
+      <PlatformHeader eyebrow="† Catalog" title="The Void">
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>A music catalog of collections, releases, songs, and the experiences attached to each token.</p>
+      </PlatformHeader>
+      <div className="vc-market-grid">
+        {catalog.collections.map((collection) => {
+          const artist = catalog.artists.find((item) => collection.artistIds.includes(item.id));
+          const release = catalog.releases.find((item) => collection.releaseIds.includes(item.id));
+          return <Link key={collection.id} to={`/collection/${collection.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
+            <img src={release?.artwork || artist?.banner} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+            <div style={{ padding: 20 }}><Status>{artist?.name || "Collection"}</Status><h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{collection.name}</h2><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{collection.description}</p><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase" }}>Open collection</p></div>
+          </Link>;
+        })}
+      </div>
+      <div style={{ marginTop: 28 }}><Link to="/my-collection" style={ghostBtn}>My collection</Link></div>
+    </section>
+  );
+}
+
+export function MyCollectionPage() {
   const catalog = useMarketplaceCatalogs();
   const wallet = useWallet();
   const library = useMemo(() => getCollectorLibrary(catalog, wallet.ownershipRecords || []), [catalog, wallet.ownershipRecords]);
@@ -419,7 +484,7 @@ export function CollectorsPage() {
       <PlatformHeader eyebrow="† Collectors" title="Collectors">
         <p style={{ color: "var(--vc-bone-dim)" }}>A home for collector identity and earned experiences.</p>
       </PlatformHeader>
-      <Link style={primaryBtn} to="/collection">View my collection</Link>
+      <Link style={primaryBtn} to="/my-collection">View my collection</Link>
     </section>
   );
 }

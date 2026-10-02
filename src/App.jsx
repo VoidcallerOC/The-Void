@@ -4,7 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
-import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
+import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectionDetailPage, MyCollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
@@ -89,6 +89,8 @@ export default function App() {
           <Route path="verify/review/:id" element={<VerifyReviewApplicationPage />} />
           {SUMMIT_DEMO && FujiIntegrationPage && <Route path="fuji-integration" element={<FujiIntegrationPage />} />}
           <Route path="collection" element={<CollectionPage />} />
+          <Route path="collection/:collection" element={<CollectionDetailPage />} />
+          <Route path="my-collection" element={<MyCollectionPage />} />
           <Route path="collectors" element={<CollectorsPage />} />
           <Route path="chronicle" element={<ChroniclePage />} />
           <Route path="the-call" element={<BleedPage />} />
