@@ -17,7 +17,7 @@ describe("Studio release selection", () => {
         releaseTitle: "Voidcaller Full EP",
         releaseDescription: "The record.",
         releaseArtwork: "/art.png",
-        trackArtwork: "/art.png",
+        trackArtwork: "",
       },
     });
   });
@@ -30,5 +30,11 @@ describe("Studio release selection", () => {
     expect(selected.artistId).toBe("");
     expect(selected.releaseId).toBe("");
     expect(selected).not.toHaveProperty("ownerWallet");
+  });
+
+  it("never fills artwork with the site's own Voidcaller images", () => {
+    const selected = selectReleaseTemplate({ artist: { name: "A" }, release: { title: "No Art" } });
+    expect(selected.form.releaseArtwork).toBe("");
+    expect(selected.form.trackArtwork).toBe("");
   });
 });

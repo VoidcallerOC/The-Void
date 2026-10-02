@@ -11,8 +11,8 @@ export function selectReleaseTemplate(record) {
       artistBio: artist.bio || "",
       releaseTitle: release.title || "",
       releaseDescription: release.description || "",
-      releaseArtwork: release.artwork || "/assets/voidcaller_art_5.png",
-      trackArtwork: release.artwork || "/assets/voidcaller_art_4.png",
+      releaseArtwork: release.artwork || "",
+      trackArtwork: "",
     },
   };
 }
