@@ -131,22 +131,26 @@ export function ArtistPage({ children = null } = {}) {
         {(artist.socials || []).map((social) => <a key={social.name} href={social.href} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)", marginRight: 18 }}>{social.name}</a>)}
         <ArtistProfileEditor artistId={result.artist.id} onSaved={(saved) => setProfileOverride((prior) => ({ ...(prior || {}), ...Object.fromEntries(Object.entries(saved).filter(([key, value]) => !((key === "avatar" || key === "banner") && !value))) }))} />
       </div>
+      {/* One section: each release appears once, as its collectible edition card
+          (which names and links the release); a release with no edition yet
+          keeps a plain release card. */}
       <Eyebrow>Releases</Eyebrow>
-      <div className="vc-market-grid" style={{ margin: "16px 0 48px" }}>
-        {releases.map((release) => (
-          <Link key={release.id} to={`/release/${release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
-            <img src={release.artwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-            <div style={{ padding: 20 }}>
-              <Status>{release.status}</Status>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{release.title}</h2>
-              <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{release.subtitle}</p>
-            </div>
-          </Link>
-        ))}
-      </div>
-      <Eyebrow>Editions</Eyebrow>
       <div className="vc-market-grid" style={{ marginTop: 16 }}>
-        {editionItems.map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />)}
+        {releases.flatMap((release) => {
+          const items = editionItems.filter((item) => item.edition.releaseId === release.id);
+          if (items.length) return items.map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />);
+          return [(
+            <Link key={release.id} to={`/release/${release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
+              <img src={release.artwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+              <div style={{ padding: 20 }}>
+                <Status>{release.status}</Status>
+                <h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{release.title}</h2>
+                <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{release.subtitle}</p>
+              </div>
+            </Link>
+          )];
+        })}
+        {editionItems.filter((item) => !releases.some((release) => release.id === item.edition.releaseId)).map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />)}
       </div>
     </section>
   );
