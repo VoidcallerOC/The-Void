@@ -120,7 +120,7 @@ export function Hero() {
             margin: 0,
           }}
         >
-          The first call. The first relic. The chain remembers.
+          The first call. A relic forged. The chain remembers.
         </p>
         <p
           style={{
