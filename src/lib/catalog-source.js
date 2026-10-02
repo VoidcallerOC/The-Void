@@ -152,7 +152,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       metadataUri: fuji.metadataUri || meta.metadataUri || "",
       experienceIds: asArray(meta.experienceIds),
       tier: row.tier || "standard",
-      artwork: ipfsToHttp(meta.artwork),
+      artwork: ipfsToHttp(meta.artwork) || ipfsToHttp(row.token_metadata?.image || ""),
+      tokenMetadata: row.token_metadata && typeof row.token_metadata === "object" ? row.token_metadata : null,
       priceWei: meta.priceWei ?? meta.primaryPriceWei ?? meta.marketplace?.priceWei ?? null,
     });
   });
@@ -176,7 +177,10 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     id: `${edition.id}-token-${tokenId}`,
     editionId: edition.id,
     tokenId,
-    name: edition.title,
+    name: edition.tokenMetadata?.name || edition.title,
+    // Published token metadata (public by definition: it is the tokenURI
+    // document). animation_url there is only ever the vetted public preview.
+    metadata: edition.tokenMetadata ? { name: edition.tokenMetadata.name || "", description: edition.tokenMetadata.description || "", image: edition.tokenMetadata.image || "", animationUrl: edition.tokenMetadata.animation_url || "" } : null,
   })));
   return createCatalog({
     artists: mappedArtists,
