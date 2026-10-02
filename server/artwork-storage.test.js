@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
-import { MAX_ARTWORK_BYTES, MAX_AUDIO_BYTES, createPinataArtworkUploader, sniffArtwork, sniffAudio } from "./artwork-storage.js";
+import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, createPinataArtworkUploader, sniffArtwork, sniffAudio } from "./artwork-storage.js";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
@@ -54,6 +54,6 @@ describe("public artwork storage", () => {
     expect(sniffAudio(PNG)).toBeNull();
     expect(sniffAudio(WEBP)).toBeNull();
     expect(sniffAudio(Buffer.from("<html>"))).toBeNull();
-    expect(MAX_AUDIO_BYTES).toBe(15 * 1000 * 1000);
+    expect(MAX_PREVIEW_AUDIO_BYTES).toBe(5 * 1000 * 1000);
   });
 });

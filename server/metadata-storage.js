@@ -60,8 +60,11 @@ export function canonicalMetadata(input) {
       ...(text(input.tier, 128) ? [{ trait_type: "Tier", value: text(input.tier, 128) }] : []),
     ],
   };
-  const audio = text(input.audio || edition.application_metadata?.audio, 2048);
-  if (audio) metadata.animation_url = audio;
+  // animation_url is the PUBLIC preview only. The caller (publishMetadata)
+  // passes it after checking it is a registered preview upload; full-length
+  // audio is protected media and never appears in token metadata.
+  const preview = text(input.previewAudio, 2048);
+  if (preview) metadata.animation_url = preview;
   if (!metadata.name || !metadata.artist) throw new ApiError(400, "METADATA_INPUT_INVALID", "A release title and artist are required before metadata can be published.");
   return digestCanonicalMetadata(metadata);
 }

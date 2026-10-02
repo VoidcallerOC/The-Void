@@ -20,14 +20,13 @@ describe("metadata storage", () => {
     expect(first.metadata.experiences[0].type).toBe("AUDIO");
   });
 
-  it("publishes track audio as animation_url and leaves audio-less metadata unchanged", () => {
-    const withAudio = canonicalMetadata({ ...input, audio: "ipfs://bafytrackaudio" });
-    expect(withAudio.metadata.animation_url).toBe("ipfs://bafytrackaudio");
-    const fromDraft = canonicalMetadata({ ...input, edition: { ...input.edition, application_metadata: { audio: "ipfs://bafydraftaudio" } } });
-    expect(fromDraft.metadata.animation_url).toBe("ipfs://bafydraftaudio");
-    const withoutAudio = canonicalMetadata(input);
-    expect(withoutAudio.metadata).not.toHaveProperty("animation_url");
-    expect(withoutAudio.digest).not.toBe(withAudio.digest);
+  it("sets animation_url only from the vetted public preview and leaves preview-less metadata unchanged", () => {
+    const withPreview = canonicalMetadata({ ...input, previewAudio: "ipfs://bafypreview" });
+    expect(withPreview.metadata.animation_url).toBe("ipfs://bafypreview");
+    const ignoresOtherAudio = canonicalMetadata({ ...input, audio: "ipfs://bafyfulltrack", edition: { ...input.edition, application_metadata: { audio: "ipfs://bafyfulltrack" } } });
+    expect(ignoresOtherAudio.metadata).not.toHaveProperty("animation_url");
+    expect(ignoresOtherAudio.digest).toBe(canonicalMetadata(input).digest);
+    expect(withPreview.digest).not.toBe(canonicalMetadata(input).digest);
   });
 
   it("rejects incomplete metadata input", () => {

@@ -19,9 +19,11 @@ export function sniffArtwork(bytes) {
   return found ? { contentType: found.contentType, extension: found.extension } : null;
 }
 
-// Track audio is published as the token's animation_url, so it is public too.
-// 15 MB matches the base64 cap Studio uploads already use.
-export const MAX_AUDIO_BYTES = 15 * 1000 * 1000;
+// The PUBLIC preview clip (~30 s) is the token's animation_url. Full-length
+// audio never goes here: it is private, token-gated protected media. 5 MB
+// fits a 30-second preview in any accepted format and keeps the base64 body
+// small enough for the /api rewrite.
+export const MAX_PREVIEW_AUDIO_BYTES = 5 * 1000 * 1000;
 
 const AUDIO_SIGNATURES = [
   { contentType: "audio/mpeg", extension: ".mp3", matches: (bytes) => (bytes.length >= 3 && bytes.subarray(0, 3).toString("latin1") === "ID3") || (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && (bytes[1] & 0x06) !== 0) },
