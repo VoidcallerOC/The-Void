@@ -3,6 +3,7 @@ import process from "node:process";
 import { ethers } from "ethers";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { apiErrorFrom } from "./api-errors.js";
 import { ApiService } from "./api-service.js";
 import { artistKeyFor, assertArtistMayPublish, onChainEditionIdentity, releaseAuthorizationFor } from "./artist-authorization.js";
 import { loadServerConfig } from "./config.js";
@@ -10,6 +11,7 @@ import { migrate } from "./migrate.js";
 import { IndexedOwnershipVerifier } from "./ownership.js";
 import { tokenIdFor as anchorTokenIdFor } from "./provenance-anchor.js";
 import { createPersistenceRepository } from "./repositories.js";
+import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 import { ArtistStudioService } from "./studio-service.js";
 import { FUJI_RELEASE_CONFIG, fujiTokenId } from "../src/lib/fuji-release.js";
 
@@ -100,8 +102,7 @@ describe.skipIf(!testDatabaseUrl)("multi-artist authorization (database)", () =>
   });
 
   afterAll(async () => {
-    await pool?.end().catch(() => {});
-    if (dbName) await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`).catch(() => {});
+    if (adminPool) await dropScratchDatabase(adminPool, dbName, { pool });
     await adminPool?.end();
   });
 
@@ -194,6 +195,53 @@ describe.skipIf(!testDatabaseUrl)("multi-artist authorization (database)", () =>
     await expect(studio.createEdition({ request: asWallet(STRANGER), releaseId: "release-collision", input: { trackTitle: "VOIDCALLER" } })).rejects.toMatchObject({ code: "TOKEN_OWNED_BY_ANOTHER_ARTIST" });
     const { rows } = await pool.query("SELECT r.artist_id FROM tokens t JOIN editions e ON e.id=t.edition_id JOIN releases r ON r.id=e.release_id WHERE t.token_id=$1", [VOIDCALLER_CERTIFIED_TOKEN_ID.toString()]);
     expect(rows).toEqual([{ artist_id: "voidcaller" }]);
+  });
+
+  it("enforces canonical token identity in the repository itself, below the Studio guard", async () => {
+    const owner = await onboard({ name: "Token Owner", wallet: "0x1010000000000000000000000000000000001010", releaseTitle: "Owner Release", editionTitle: "Owner Edition" });
+    const other = await onboard({ name: "Token Thief", wallet: "0x2020000000000000000000000000000000002020", releaseTitle: "Thief Release", editionTitle: "Thief Edition" });
+    const current = await tokenRow(owner.edition.id);
+    const contractId = owner.edition.contract_id;
+    // Legitimate: re-saving the same identity refreshes metadata, keeps the edition.
+    await expect(repository.saveToken({ editionId: owner.edition.id, contractId, tokenId: current.token_id, metadataUri: "ipfs://refreshed", metadata: { v: 2 } })).resolves.toMatchObject({ edition_id: owner.edition.id, metadata_uri: "ipfs://refreshed" });
+    // Malicious: another artist's edition (another release) cannot take the token.
+    await expect(repository.saveToken({ editionId: other.edition.id, contractId, tokenId: current.token_id, metadataUri: "ipfs://hijack" })).rejects.toMatchObject({ code: "CONFLICT" });
+    // Retry flow: an unpublished draft hands its token to another draft of the same release.
+    const retry = await repository.saveEdition({ id: "edition-retry", releaseId: owner.release.id, contractId, title: "Owner Edition", tier: null, description: null, supply: "10", status: "DRAFT", metadata: {} });
+    await expect(repository.saveToken({ editionId: retry.id, contractId, tokenId: current.token_id })).resolves.toMatchObject({ edition_id: retry.id });
+    // Once published, even a same-release edition cannot take it.
+    await pool.query("UPDATE editions SET status='PUBLISHED' WHERE id=$1", [retry.id]);
+    await expect(repository.saveToken({ editionId: owner.edition.id, contractId, tokenId: current.token_id })).rejects.toMatchObject({ code: "CONFLICT" });
+    const after = (await pool.query("SELECT t.edition_id, t.metadata_uri, r.artist_id FROM tokens t JOIN editions e ON e.id=t.edition_id JOIN releases r ON r.id=e.release_id WHERE t.contract_id=$1 AND t.token_id=$2", [contractId, current.token_id])).rows;
+    expect(after).toEqual([{ edition_id: retry.id, metadata_uri: null, artist_id: owner.artist.id }]);
+    // Through the API layer the conflict is a 409, never a silent success.
+    const conflict = await repository.saveToken({ editionId: other.edition.id, contractId, tokenId: current.token_id }).catch((error) => error);
+    expect(apiErrorFrom(conflict)).toMatchObject({ status: 409, code: "CONFLICT" });
+  });
+
+  it("drops authority from a wallet removed from the artist, and verification does not transfer to a new wallet", async () => {
+    const ownerWallet = "0x3030000000000000000000000000000000003030";
+    const managerWallet = "0x4040000000000000000000000000000000004040";
+    const rotated = await onboard({ name: "Rotating Artist", wallet: ownerWallet, releaseTitle: "Rotating Release", editionTitle: "Rotating Edition" });
+    await repository.assignArtistOwner({ artistId: rotated.artist.id, wallet: managerWallet, role: "MANAGER" });
+    // Both current wallets act while the verified owner remains an owner.
+    await expect(assertArtistMayPublish(pool, { artistId: rotated.artist.id, wallet: ownerWallet })).resolves.toBeTruthy();
+    await expect(assertArtistMayPublish(pool, { artistId: rotated.artist.id, wallet: managerWallet })).resolves.toBeTruthy();
+    // The old wallet is removed: it loses every Studio and publication path at once.
+    await pool.query("DELETE FROM artist_owners WHERE artist_id=$1 AND owner_wallet=$2", [rotated.artist.id, ownerWallet]);
+    await expect(studio.publishMetadata({ request: asWallet(ownerWallet), releaseId: rotated.release.id, input: {} })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
+    await expect(studio.createEdition({ request: asWallet(ownerWallet), releaseId: rotated.release.id, input: { trackTitle: "x" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
+    await expect(assertArtistMayPublish(pool, { artistId: rotated.artist.id, wallet: ownerWallet })).rejects.toMatchObject({ code: "ARTIST_WALLET_NOT_AUTHORIZED" });
+    // The verification was granted to the removed wallet, so the remaining wallet must be re-verified.
+    await expect(assertArtistMayPublish(pool, { artistId: rotated.artist.id, wallet: managerWallet })).rejects.toMatchObject({ code: "ARTIST_NOT_VERIFIED" });
+    await verify(rotated.artist.id, managerWallet);
+    await expect(studio.publishMetadata({ request: asWallet(managerWallet), releaseId: rotated.release.id, input: {} })).resolves.toMatchObject({ releaseSlug: rotated.release.slug });
+  });
+
+  it("lets a verified, authorized artist publish, and only that artist", async () => {
+    const wallet = "0x5050000000000000000000000000000000005050";
+    const ok = await onboard({ name: "Publishing Artist", wallet, releaseTitle: "Publishing Release", editionTitle: "Publishing Edition" });
+    await expect(studio.publishMetadata({ request: asWallet(wallet), releaseId: ok.release.id, input: {} })).resolves.toMatchObject({ releaseSlug: "publishing-release", editionSlug: "publishing-edition" });
   });
 
   it("blocks unverified, revoked, inactive, and unauthorized publication", async () => {

@@ -302,6 +302,64 @@ contract VoidRelease1155V3Test {
         sale.configureSale(own, 1 ether, 1, 1, 0, 0, false);
     }
 
+    function testWalletMovedToAnotherArtistLosesAuthorityOverOldEditions() public {
+        uint256 id = createTestEdition();
+        vm.prank(testWallet);
+        token.setArtistIssuer(address(sale), true);
+        // The registrar moves the wallet from TEST ARTIST to artist B.
+        token.setArtistWallet(testArtist, testWallet, false);
+        token.setArtistWallet(artistB, testWallet, true);
+        require(token.hasRole(token.ARTIST_ROLE(), testWallet), "now an artist-B wallet");
+        require(token.artistOf(id) == address(0), "no current artist wallet for the old edition");
+        require(token.edition(id).artist == testWallet, "creation record is historical");
+        // It cannot mint or configure the sale of TEST ARTIST's edition any more.
+        vm.prank(testWallet);
+        vm.expectRevert(abi.encodeWithSelector(VoidRelease1155V3.NotAuthorizedMinter.selector, id, testArtist, testWallet));
+        token.mint(testWallet, id, 1, "");
+        vm.prank(testWallet);
+        vm.expectRevert(abi.encodeWithSelector(VoidPrimarySale.NotEditionArtist.selector, id, address(0), testWallet));
+        sale.configureSale(id, 1 wei, 10, 10, 0, 0, false);
+        // Nor create editions under TEST ARTIST's release.
+        vm.prank(testWallet);
+        vm.expectRevert(abi.encodeWithSelector(VoidRelease1155V3.ReleaseOwnedByAnotherArtist.selector, TEST_RELEASE, testArtist, artistB));
+        token.createEdition(TEST_RELEASE, bytes32("after-move"), 1, "ipfs://x", testWallet, 0);
+        // Moving it back restores authority.
+        token.setArtistWallet(artistB, testWallet, false);
+        token.setArtistWallet(testArtist, testWallet, true);
+        require(token.artistOf(id) == testWallet, "restored");
+    }
+
+    function testIssuerBoundary() public {
+        uint256 own = createTestEdition();
+        uint256 bId = createBEdition();
+        address issuerA = address(0x1551);
+        vm.prank(testWallet);
+        token.setArtistIssuer(issuerA, true);
+        // Legitimate: the issuer for artist A mints artist A's edition.
+        vm.prank(issuerA);
+        token.mint(fan, own, 2, "");
+        require(token.balanceOf(fan, own) == 2, "issuer minted own artist");
+        // Boundary: the same issuer cannot mint artist B's edition, singly or in a batch.
+        vm.prank(issuerA);
+        vm.expectRevert(abi.encodeWithSelector(VoidRelease1155V3.NotAuthorizedMinter.selector, bId, artistB, issuerA));
+        token.mint(fan, bId, 1, "");
+        uint256[] memory ids = new uint256[](1);
+        uint256[] memory amounts = new uint256[](1);
+        ids[0] = bId; amounts[0] = 1;
+        vm.prank(issuerA);
+        vm.expectRevert(abi.encodeWithSelector(VoidRelease1155V3.NotAuthorizedMinter.selector, bId, artistB, issuerA));
+        token.mintBatch(fan, ids, amounts, "");
+        // Only artist A's own wallet can withdraw the approval; artist B cannot touch it.
+        vm.prank(bWallet);
+        token.setArtistIssuer(issuerA, false);
+        require(token.isIssuerApproved(testArtist, issuerA), "artist B cannot revoke artist A's issuer");
+        vm.prank(testWallet);
+        token.setArtistIssuer(issuerA, false);
+        vm.prank(issuerA);
+        vm.expectRevert(abi.encodeWithSelector(VoidRelease1155V3.NotAuthorizedMinter.selector, own, testArtist, issuerA));
+        token.mint(fan, own, 1, "");
+    }
+
     function testCrossArtistTokenReferencesAreDistinct() public {
         // Same edition label under each artist's own release yields different tokens.
         token.bindRelease(bytes32("b-shared"), artistB);
