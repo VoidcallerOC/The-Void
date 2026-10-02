@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG } from "../src/lib/fuji-release.js";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
@@ -224,5 +225,47 @@ describe("Artist Studio", () => {
     expect(JSON.stringify(result)).not.toContain(storageKey);
     expect(JSON.stringify(result)).not.toContain("ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb");
     expect(repo.saveExperience).not.toHaveBeenCalled();
+  });
+
+  describe("artwork upload", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const artistRow = { id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" };
+
+    it("pins a sniffed image for the owning artist and returns only the public URI", async () => {
+      const { instance } = service({ rows: [artistRow] });
+      instance.artworkUploader = vi.fn(async () => ({ uri: "ipfs://bafyartwork" }));
+      const result = await instance.uploadArtwork({ request, artistId: "artist-1", input: { data: png.toString("base64"), filename: "cover.png" } });
+      expect(result).toEqual({ uri: "ipfs://bafyartwork", contentType: "image/png", byteSize: png.length });
+      expect(instance.artworkUploader).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", contentType: "image/png", filename: expect.stringMatching(/^artwork-[0-9a-f]{16}\.png$/) }));
+    });
+
+    it("rejects files that are not PNG, JPEG, GIF or WebP, whatever they claim to be", async () => {
+      const { instance } = service({ rows: [artistRow] });
+      instance.artworkUploader = vi.fn();
+      const svg = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+      await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: svg.toString("base64"), filename: "cover.png", contentType: "image/png" } })).rejects.toMatchObject({ code: "ARTWORK_TYPE_UNSUPPORTED" });
+      expect(instance.artworkUploader).not.toHaveBeenCalled();
+    });
+
+    it("rejects artwork over 3 MB before uploading", async () => {
+      const { instance } = service({ rows: [artistRow] });
+      instance.artworkUploader = vi.fn();
+      const large = Buffer.concat([png, Buffer.alloc(3 * 1024 * 1024)]);
+      await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: large.toString("base64") } })).rejects.toMatchObject({ status: 413, code: "ARTWORK_TOO_LARGE" });
+      expect(instance.artworkUploader).not.toHaveBeenCalled();
+    });
+
+    it("reports a clear error when artwork storage is not configured", async () => {
+      const { instance } = service({ rows: [artistRow] });
+      await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 503, code: "ARTWORK_UPLOAD_UNAVAILABLE" });
+    });
+
+    it("refuses wallets that do not own the artist", async () => {
+      const { instance, db } = service({ rows: [], authenticatedWallet: "0x2222222222222222222222222222222222222222" });
+      instance.artworkUploader = vi.fn();
+      await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 403, code: "ARTIST_ACCESS_DENIED" });
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining("ao.owner_wallet=$2"), ["artist-1", "0x2222222222222222222222222222222222222222"]);
+      expect(instance.artworkUploader).not.toHaveBeenCalled();
+    });
   });
 });

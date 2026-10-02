@@ -10,7 +10,8 @@ import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, crea
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
-import { studioFetch } from "../lib/studio-api.js";
+import { ARTWORK_ACCEPT, studioFetch, uploadStudioArtwork } from "../lib/studio-api.js";
+import { ipfsToHttp } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -32,16 +33,35 @@ function TextField({ title, value, onChange, multiline = false, required = false
   );
 }
 
+// Artwork is either uploaded here (pinned publicly, stored as ipfs://) or an
+// existing image URL pasted into the field.
+function ArtworkField({ title, value, onChange, onUpload, uploading, disabled }) {
+  const preview = ipfsToHttp(value);
+  return (
+    <div style={{ marginTop: 16 }}>
+      <TextField title={title} value={value} onChange={onChange} placeholder="Upload an image or paste an image URL" />
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        <label style={{ ...ghostBtn, cursor: disabled || uploading ? "not-allowed" : "pointer", opacity: disabled || uploading ? 0.6 : 1 }}>
+          {uploading ? "Uploading…" : "Upload artwork"}
+          <input type="file" accept={ARTWORK_ACCEPT} disabled={disabled || uploading} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onUpload(file); }} />
+        </label>
+        <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>PNG, JPEG, GIF or WebP · 3 MB max</span>
+      </div>
+      {preview && <img src={preview} alt={`${title} preview`} style={{ width: 160, aspectRatio: "1", objectFit: "cover", marginTop: 12, display: "block" }} />}
+    </div>
+  );
+}
+
 function initialState() {
   return {
     artistName: "",
     artistBio: "",
     releaseTitle: "",
     releaseDescription: "",
-    releaseArtwork: "/assets/voidcaller_art_5.png",
+    releaseArtwork: "",
     trackTitle: "",
     trackDescription: "",
-    trackArtwork: "/assets/voidcaller_art_4.png",
+    trackArtwork: "",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "10000000000000000",
@@ -156,18 +176,22 @@ export function ArtistStudioPage() {
   };
 
 
+  const ensureArtist = async () => {
+    if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
+    const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
+      method: artistId ? "PATCH" : "POST",
+      payload: { id: artistId || undefined, name: form.artistName, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
+      headers,
+    });
+    setArtistId(artist.id);
+    return artist.id;
+  };
+
   const ensureArtistAndRelease = async () => {
     if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
     if (!form.releaseTitle) throw new Error("Enter a release title before creating a track.");
-    let nextArtistId = artistId;
+    const nextArtistId = await ensureArtist();
     let nextReleaseId = releaseId;
-    const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
-      method: artistId ? "PATCH" : "POST",
-      payload: { id: nextArtistId || undefined, name: form.artistName, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
-      headers,
-    });
-    nextArtistId = artist.id;
-    setArtistId(artist.id);
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
       payload: { id: nextReleaseId || undefined, title: form.releaseTitle, description: form.releaseDescription, artwork: form.releaseArtwork },
@@ -255,13 +279,13 @@ export function ArtistStudioPage() {
         release: { title: form.releaseTitle, type: "ep" },
         tracks: [{ title: form.trackTitle || form.releaseTitle }],
         supply: form.quantity,
-        metadata: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
+        metadata: { artwork: form.trackArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
       });
       const ids = await ensureArtistAndRelease();
       const saved = editionId ? { releaseId: ids.releaseId, editionId } : await saveDraft(ids);
       const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
-        payload: { artwork: form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        payload: { artwork: form.trackArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
       });
       const provider = wallet.getProvider?.();
@@ -343,6 +367,18 @@ export function ArtistStudioPage() {
     } catch (error) {
       setNotice(error.message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally { setBusy(""); }
+  };
+
+  const uploadArtwork = async (key, file) => {
+    setBusy(`artwork:${key}`); setNotice("");
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const uploaded = await uploadStudioArtwork({ artistId: artistId || await ensureArtist(), file, headers });
+      set(key, uploaded.uri);
+      setNotice("Artwork uploaded.");
+    } catch (error) {
+      setNotice(error.message);
     } finally { setBusy(""); }
   };
 
@@ -492,7 +528,7 @@ export function ArtistStudioPage() {
           <TextField title="Artist bio" value={form.artistBio} onChange={(value) => set("artistBio", value)} multiline />
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
-          <TextField title="Artwork URL" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} />
+          <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Creating…" : "Create release"}
@@ -509,7 +545,7 @@ export function ArtistStudioPage() {
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
-          <TextField title="Artwork URL" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} />
+          <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} />
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("release")}>Back</button>
@@ -561,7 +597,9 @@ export function ArtistStudioPage() {
           <Eyebrow red>Review</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>{form.releaseTitle || "Untitled release"}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 240px) 1fr", gap: 24, alignItems: "start", marginTop: 20 }}>
-            <img src={form.releaseArtwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover" }} />
+            {form.trackArtwork || form.releaseArtwork
+              ? <img src={ipfsToHttp(form.trackArtwork || form.releaseArtwork)} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover" }} />
+              : <div style={{ width: "100%", aspectRatio: "1", border: "1px dashed var(--vc-ash)", display: "grid", placeItems: "center", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>No artwork yet</div>}
             <div>
               <p><strong>Artist</strong><br />{form.artistName || "—"}</p>
               <p><strong>Release</strong><br />{form.releaseTitle || "—"}</p>

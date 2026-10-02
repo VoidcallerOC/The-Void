@@ -15,6 +15,7 @@ import { createArtistStudioService } from "./studio-service.js";
 import { createArtistVerificationService } from "./verification-service.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
 import { createPinataMetadataStorage } from "./metadata-storage.js";
+import { createPinataArtworkUploader } from "./artwork-storage.js";
 import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./provenance-anchor.js";
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
@@ -27,6 +28,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const resolvedAuthenticator = authenticator || createWalletAuthenticator(resolvedAuthService);
   const metadataConfig = loadMetadataConfig();
   const metadataStorage = metadataConfig.driver === "pinata" ? createPinataMetadataStorage({ config: metadataConfig, logger }) : null;
+  const artworkUploader = metadataConfig.driver === "pinata" ? createPinataArtworkUploader({ jwt: metadataConfig.jwt }) : null;
   const resolvedOwnershipVerifier = ownershipVerifier || createIndexedOwnershipVerifier({ db: pool, config });
   const rateLimiter = createRateLimiter();
   const indexerConfig = config.indexer || loadIndexerConfig(process.env, { requireConfiguration: false });
@@ -46,7 +48,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   }
   const provenanceRecords = new ProvenanceRecords({ db: pool });
   const metadataFetcher = createIpfsMetadataFetcher({ gateway: process.env.IPFS_GATEWAY });
-  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, provenanceRecords, metadataFetcher, logger });
+  const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, artworkUploader, provenanceRecords, metadataFetcher, logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });

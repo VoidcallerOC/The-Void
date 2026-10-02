@@ -119,6 +119,16 @@ describe("HTTP API boundary", () => {
     expect(JSON.parse(unavailableResponse.body).error.code).toBe("ARTIST_STUDIO_UNAVAILABLE");
   });
 
+  it("routes artwork uploads to the artist's artwork endpoint", async () => {
+    const studioService = { uploadArtwork: vi.fn().mockResolvedValue({ uri: "ipfs://bafyart", contentType: "image/png", byteSize: 4 }) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/artists/artist-1/artwork", body: JSON.stringify({ data: "iVBORw==" }), headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toEqual({ uri: "ipfs://bafyart", contentType: "image/png", byteSize: 4 });
+    expect(studioService.uploadArtwork).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", input: { data: "iVBORw==" } }));
+  });
+
   it("routes metadata publication to the canonical Studio endpoint and rejects obsolete paths", async () => {
     const studioService = { publishMetadata: vi.fn().mockResolvedValue({ releaseId: "release-a", metadataUri: "ipfs://cid" }) };
     const handler = createApiHandler({ service: {}, studioService });
