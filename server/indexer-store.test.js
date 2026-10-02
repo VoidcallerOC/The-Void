@@ -122,3 +122,27 @@ describe("ERC1155 transfer projection storage", () => {
     expect(client.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO ownership_snapshots"), expect.arrayContaining([43113, token, "12", buyer, "2"]));
   });
 });
+
+describe("collection registry", () => {
+  const factory = "0xfac0000000000000000000000000000000000001";
+  const collection = "0xC011000000000000000000000000000000000003";
+  const artist = "0xa11ce00000000000000000000000000000000004";
+
+  it("registers a discovered collection as an ERC1155 contract tagged with its factory", async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ address: collection.toLowerCase() }] }) };
+    await new IndexerStore(db).registerCollection({ chainId: 43113, factoryAddress: factory, collectionAddress: collection, artistWallet: artist, name: "Alpha", symbol: "ALPHA", contractUri: "ipfs://alpha", collectionIndex: "0", blockNumber: 5, transactionHash: `0x${"C1".repeat(32)}` });
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/INSERT INTO contracts .* 'ERC1155'/);
+    expect(sql).toMatch(/ON CONFLICT \(chain_id, address\) DO UPDATE/);
+    expect(params).toEqual([43113, collection.toLowerCase(), "Alpha", `0x${"c1".repeat(32)}`, 5, { source: "COLLECTION_FACTORY", factory, artist, symbol: "ALPHA", contractURI: "ipfs://alpha", collectionIndex: "0", createdTx: `0x${"c1".repeat(32)}` }]);
+  });
+
+  it("rejects malformed addresses and lists only this factory's collections", async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const store = new IndexerStore(db);
+    await expect(store.registerCollection({ chainId: 43113, factoryAddress: factory, collectionAddress: "nope", artistWallet: artist, blockNumber: 1, transactionHash: "0x1" })).rejects.toThrow(/collectionAddress/);
+    await store.listFactoryCollections({ chainId: 43113, factoryAddress: factory });
+    expect(db.query).toHaveBeenLastCalledWith(expect.stringContaining("metadata->>'factory'=$2"), [43113, factory]);
+  });
+});
+

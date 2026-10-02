@@ -9,7 +9,7 @@ export async function studioFetch(path, { method = "GET", payload, headers, fetc
   const response = await fetchImpl(endpoint, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.error?.message || (response.status === 404 ? `Artist Studio API route not found: ${method} ${path} (${response.status}).` : `Artist Studio request failed (${response.status}).`));
+    const error = new Error(body.error?.message || (response.status === 404 ? `Artist Studio API route not found: ${method} ${path} (${response.status}).` : response.status === 413 ? "The file is too large for the upload route. Try a smaller file." : `Artist Studio request failed (${response.status}).`));
     error.code = body.error?.code || `HTTP_${response.status}`;
     error.status = response.status;
     error.endpoint = `/api${path}`;
