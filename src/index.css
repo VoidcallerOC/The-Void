@@ -548,3 +548,31 @@ body { padding-bottom: 72px; }
     transition: none;
   }
 }
+
+/* ---------- Collection ambient starfield (components/VoidStarfield.jsx) ---------- */
+/* The host becomes its own stacking context so the field (z-index: -1) paints
+   above the black page ground but beneath every element of the page itself.
+   No existing z-index changes. */
+.vc-starfield-host {
+  position: relative;
+  isolation: isolate;
+}
+.vc-starfield {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  /* Atmosphere, not decoration: a faint arterial haze low in the frame and a
+     vignette that keeps the centre of the page darkest-calm for reading. */
+  background:
+    radial-gradient(120% 70% at 50% 118%, rgba(184, 7, 16, 0.07), rgba(184, 7, 16, 0) 60%),
+    radial-gradient(90% 60% at 18% -10%, rgba(242, 237, 226, 0.025), rgba(242, 237, 226, 0) 55%),
+    radial-gradient(140% 100% at 50% 50%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+.vc-starfield-canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
