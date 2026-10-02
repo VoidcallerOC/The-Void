@@ -10,6 +10,7 @@ import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommi
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
 import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
+import { MAX_ARTWORK_BYTES, sniffArtwork } from "./artwork-storage.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -133,13 +134,14 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, artworkUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
     this.authenticator = authenticator;
     this.metadataStorage = metadataStorage;
     this.mediaUploader = mediaUploader;
+    this.artworkUploader = artworkUploader;
     this.provenanceRecords = provenanceRecords;
     this.publicationChain = publicationChain;
     this.metadataFetcher = metadataFetcher;
@@ -476,6 +478,30 @@ export class ArtistStudioService {
     const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey, mediaType, contentSha256, byteSize: body.length });
     await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256 } });
     return { id: asset.id, mediaType: asset.media_type || mediaType, createdAt: asset.created_at || null };
+  }
+
+  // Public release/track artwork. Unlike protected media it is pinned publicly,
+  // because cards and NFT metadata must show it to everyone.
+  async uploadArtwork({ request, artistId, input }) {
+    const { identity, artist } = await this.ownedArtist({ artistId, request });
+    if (typeof this.artworkUploader !== "function") throw new ApiError(503, "ARTWORK_UPLOAD_UNAVAILABLE", "Artwork upload is not configured.");
+    if (String(input.data ?? "").length > Math.ceil(MAX_ARTWORK_BYTES / 3) * 4 + 4) throw new ApiError(413, "ARTWORK_TOO_LARGE", "Artwork must be 3 MB or smaller.");
+    const body = Buffer.from(requiredText(input.data, "data", { max: 20_000_000 }), "base64");
+    if (!body.length) throw new ApiError(400, "ARTWORK_UPLOAD_EMPTY", "Artwork upload was empty.");
+    if (body.length > MAX_ARTWORK_BYTES) throw new ApiError(413, "ARTWORK_TOO_LARGE", "Artwork must be 3 MB or smaller.");
+    const image = sniffArtwork(body);
+    if (!image) throw new ApiError(400, "ARTWORK_TYPE_UNSUPPORTED", "Artwork must be a PNG, JPEG, GIF or WebP image.");
+    const contentSha256 = createHash("sha256").update(body).digest("hex");
+    let stored;
+    try {
+      stored = await this.artworkUploader({ artistId: artist.id, body, filename: `artwork-${contentSha256.slice(0, 16)}${image.extension}`, contentType: image.contentType });
+    } catch (error) {
+      throw new ApiError(error.status || 502, error.code || "ARTWORK_UPLOAD_FAILED", error.message || "Artwork upload failed.");
+    }
+    const uri = requiredText(stored?.uri, "uri", { max: 1024 });
+    if (!uri.startsWith("ipfs://")) throw new ApiError(502, "ARTWORK_UPLOAD_FAILED", "Artwork upload did not return an IPFS URI.");
+    await this.audit({ identity, request, eventType: "STUDIO_ARTWORK_UPLOADED", subjectType: "artist", subjectId: artist.id, payload: { uri, contentType: image.contentType, contentSha256, byteSize: body.length } });
+    return { uri, contentType: image.contentType, byteSize: body.length };
   }
 }
 
