@@ -30,13 +30,13 @@ describe("Studio API contract", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("uploads track audio privately to the artist's media endpoint as AUDIO", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { id: "asset-9", mediaType: "AUDIO" } }), { status: 200, headers: { "content-type": "application/json" } }));
+  it("uploads track audio to the artist's public audio endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { uri: "ipfs://bafyaudio" } }), { status: 200, headers: { "content-type": "application/json" } }));
     const file = new File([new Uint8Array([0x49, 0x44, 0x33])], "song.mp3", { type: "audio/mpeg" });
-    await expect(uploadStudioAudio({ artistId: "artist-a", file, fetchImpl })).resolves.toEqual({ assetId: "asset-9", filename: "song.mp3", contentType: "audio/mpeg" });
+    await expect(uploadStudioAudio({ artistId: "artist-a", file, fetchImpl })).resolves.toEqual({ uri: "ipfs://bafyaudio" });
     const [endpoint, options] = fetchImpl.mock.calls[0];
-    expect(endpoint).toBe("/api/studio/artists/artist-a/media");
-    expect(JSON.parse(options.body)).toEqual({ mediaType: "AUDIO", filename: "song.mp3", contentType: "audio/mpeg", data: "SUQz" });
+    expect(endpoint).toBe("/api/studio/artists/artist-a/audio");
+    expect(JSON.parse(options.body)).toEqual({ data: "SUQz", filename: "song.mp3" });
   });
 
   it("rejects non-audio and oversized audio before any request", async () => {

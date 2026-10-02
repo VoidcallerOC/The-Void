@@ -20,6 +20,16 @@ describe("metadata storage", () => {
     expect(first.metadata.experiences[0].type).toBe("AUDIO");
   });
 
+  it("publishes track audio as animation_url and leaves audio-less metadata unchanged", () => {
+    const withAudio = canonicalMetadata({ ...input, audio: "ipfs://bafytrackaudio" });
+    expect(withAudio.metadata.animation_url).toBe("ipfs://bafytrackaudio");
+    const fromDraft = canonicalMetadata({ ...input, edition: { ...input.edition, application_metadata: { audio: "ipfs://bafydraftaudio" } } });
+    expect(fromDraft.metadata.animation_url).toBe("ipfs://bafydraftaudio");
+    const withoutAudio = canonicalMetadata(input);
+    expect(withoutAudio.metadata).not.toHaveProperty("animation_url");
+    expect(withoutAudio.digest).not.toBe(withAudio.digest);
+  });
+
   it("rejects incomplete metadata input", () => {
     expect(() => canonicalMetadata({ release: input.release, edition: input.edition })).toThrow(/artist/i);
   });

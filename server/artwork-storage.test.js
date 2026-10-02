@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
-import { MAX_ARTWORK_BYTES, createPinataArtworkUploader, sniffArtwork } from "./artwork-storage.js";
+import { MAX_ARTWORK_BYTES, MAX_AUDIO_BYTES, createPinataArtworkUploader, sniffArtwork, sniffAudio } from "./artwork-storage.js";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
@@ -42,5 +42,18 @@ describe("public artwork storage", () => {
   it("rejects a response without a valid CID", async () => {
     const upload = createPinataArtworkUploader({ jwt: "test-jwt", fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { cid: "../../etc" } }), { status: 200 })) });
     await expect(upload({ body: PNG, filename: "artwork.png", contentType: "image/png" })).rejects.toMatchObject({ code: "ARTWORK_UPLOAD_FAILED" });
+  });
+
+  it("identifies track audio from its bytes and rejects everything else", () => {
+    expect(sniffAudio(Buffer.from("ID3\x04\x00", "latin1"))).toEqual({ contentType: "audio/mpeg", extension: ".mp3" });
+    expect(sniffAudio(Buffer.from([0xff, 0xfb, 0x90, 0x64]))).toEqual({ contentType: "audio/mpeg", extension: ".mp3" });
+    expect(sniffAudio(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVEfmt ")]))).toEqual({ contentType: "audio/wav", extension: ".wav" });
+    expect(sniffAudio(Buffer.from("fLaC\x00", "latin1"))).toEqual({ contentType: "audio/flac", extension: ".flac" });
+    expect(sniffAudio(Buffer.from("OggS\x00", "latin1"))).toEqual({ contentType: "audio/ogg", extension: ".ogg" });
+    expect(sniffAudio(Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from("ftypM4A ")]))).toEqual({ contentType: "audio/mp4", extension: ".m4a" });
+    expect(sniffAudio(PNG)).toBeNull();
+    expect(sniffAudio(WEBP)).toBeNull();
+    expect(sniffAudio(Buffer.from("<html>"))).toBeNull();
+    expect(MAX_AUDIO_BYTES).toBe(15 * 1000 * 1000);
   });
 });

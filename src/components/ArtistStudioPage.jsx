@@ -62,6 +62,7 @@ function initialState() {
     trackTitle: "",
     trackDescription: "",
     trackArtwork: "",
+    trackAudio: "",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "10000000000000000",
@@ -97,7 +98,6 @@ export function ArtistStudioPage() {
   const [busy, setBusy] = useState("");
   const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
   const [e2eMintPlan, setE2eMintPlan] = useState(() => createFujiE2EMintPlan());
-  const [trackAudio, setTrackAudio] = useState(null);
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
   const [mintEditionId, setMintEditionId] = useState("");
@@ -233,7 +233,7 @@ export function ArtistStudioPage() {
             quantity: form.quantity,
             priceWei: form.priceWei,
             marketplace: {},
-            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork },
+            metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork, ...(form.trackAudio ? { audio: form.trackAudio } : {}) },
           },
           headers,
         });
@@ -262,7 +262,7 @@ export function ArtistStudioPage() {
           experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
           productType: form.productType,
           requirements: [],
-          mediaConfig: trackAudio ? { protected: true, protectedMedia: [{ assetId: trackAudio.assetId, mediaType: "AUDIO", contentType: trackAudio.contentType }] } : {},
+          mediaConfig: {},
         },
         headers,
       });
@@ -286,7 +286,7 @@ export function ArtistStudioPage() {
       const saved = editionId ? { releaseId: ids.releaseId, editionId } : await saveDraft(ids);
       const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
-        payload: { artwork: form.trackArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackAudio ? { audio: form.trackAudio } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
       });
       const provider = wallet.getProvider?.();
@@ -387,8 +387,9 @@ export function ArtistStudioPage() {
     setBusy("audio"); setNotice("");
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      setTrackAudio(await uploadStudioAudio({ artistId: artistId || await ensureArtist(), file, headers }));
-      setNotice("Audio uploaded privately. It unlocks for holders of this track once saved.");
+      const uploaded = await uploadStudioAudio({ artistId: artistId || await ensureArtist(), file, headers });
+      set("trackAudio", uploaded.uri);
+      setNotice("Audio uploaded. It is published in the token metadata as animation_url.");
     } catch (error) {
       setNotice(error.message);
     } finally { setBusy(""); }
@@ -558,6 +559,17 @@ export function ArtistStudioPage() {
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
           <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} />
+          <div style={{ marginTop: 16 }}>
+            <TextField title="Track audio (token metadata · animation_url)" value={form.trackAudio} onChange={(value) => set("trackAudio", value)} placeholder="Upload audio or paste an audio URL" />
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
+                {busy === "audio" ? "Uploading…" : form.trackAudio ? "Replace audio" : "Upload audio"}
+                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadAudio(file); }} />
+              </label>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>MP3, WAV, FLAC, AAC/M4A or OGG · 15 MB max · public</span>
+            </div>
+            {form.trackAudio && <audio controls preload="none" src={ipfsToHttp(form.trackAudio)} style={{ width: "100%", marginTop: 12 }} />}
+          </div>
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("release")}>Back</button>
@@ -582,16 +594,6 @@ export function ArtistStudioPage() {
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
           </p>
-          <div style={{ marginTop: 16 }}>
-            <p style={{ margin: "0 0 8px" }}>Track audio (private — only holders of this track can play it)</p>
-            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
-                {busy === "audio" ? "Uploading…" : trackAudio ? "Replace audio" : "Upload audio"}
-                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadAudio(file); }} />
-              </label>
-              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{trackAudio ? `Uploaded: ${trackAudio.filename}` : "MP3, WAV, FLAC, AAC/M4A or OGG · 15 MB max"}</span>
-            </div>
-          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={saveCatalogStructure}>{busy === "catalog" ? "Saving catalog…" : "Save catalog structure"}</button>
