@@ -244,16 +244,18 @@ export class ArtistStudioService {
       const expectedTokenId = certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
       const expectedReleaseId = ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
       const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
-      const event = receipt.logs.map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
+      // Only the certified release contract's own logs count; any contract can emit a look-alike event.
+      const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === CERTIFIED_CONTRACT).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
       if (!event) throw new Error("expected EditionCreated event was not found");
-      // The edition must have been created by a wallet of this release's own artist.
-      const creator = String(event.args.artist || "").toLowerCase();
-      const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
-      if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
         : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
       if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
+      // The edition, as stored on the certified contract, must have been created by a wallet of this release's own artist.
+      const creator = String(onChain[2] || "").toLowerCase();
+      if (creator !== String(event.args.artist || "").toLowerCase()) throw new Error("on-chain edition creator does not match the publication event");
+      const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
+      if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
       let proof = currentProof;
       if (this.metadataFetcher && proof?.verification_status !== "VERIFIED") {
         try {

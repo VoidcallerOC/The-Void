@@ -5,7 +5,7 @@ import { WalletButton } from "./WalletButton.jsx";
 import { TransferModal } from "./TransferModal.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { fetchAllMetadata, CHAINS, FALLBACK_METADATA } from "../lib/web3.js";
-import { VOIDCALLER_CATALOG } from "../data.js";
+import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { getCollectorLibrary, canAccessExperience } from "../lib/collection.js";
 
 const chainKeyFor = (record) => record.chain?.key || Object.keys(CHAINS).find((key) => CHAINS[key].id === Number(record.chain?.id || record.chainId || record.chain)) || "cchain";
@@ -28,7 +28,9 @@ export function Reliquary() {
   const [transfer, setTransfer] = useState(null);
   useEffect(() => { let alive = true; fetchAllMetadata().then((items) => { if (alive) setMeta(items); }); return () => { alive = false; }; }, []);
 
-  const library = useMemo(() => getCollectorLibrary(VOIDCALLER_CATALOG, w.ownershipRecords || []), [w.ownershipRecords]);
+  // Every artist on The Void, not only VOIDCALLER: base catalog + Studio overlay + published API catalog.
+  const catalog = useMarketplaceCatalogs();
+  const library = useMemo(() => getCollectorLibrary(catalog, w.ownershipRecords || []), [catalog, w.ownershipRecords]);
   const metadata = useMemo(() => Object.fromEntries(meta.map((item) => [String(item.tokenId), item])), [meta]);
   const totalQuantity = library.tokens.reduce((sum, token) => sum + token.amount, 0);
 

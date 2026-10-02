@@ -153,10 +153,22 @@ describe("Artist Studio publication pipeline", () => {
 
   it("refuses to confirm an edition created on-chain by another artist's wallet", async () => {
     const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
-    const chain = { getTransactionReceipt: vi.fn().mockResolvedValue(editionCreatedReceipt()), edition: vi.fn() };
+    const onChain = [ids("the-record", "chapter-i").releaseId, ids("the-record", "chapter-i").editionId, owner, 10n, 0n, "ipfs://metadata", true];
+    const chain = { getTransactionReceipt: vi.fn().mockResolvedValue(editionCreatedReceipt()), edition: vi.fn().mockResolvedValue(onChain) };
     const harness = studio({ records, chain, authorization: { creatorOwns: false } });
     harness.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [editionRow()] } : { rows: [releaseRow()] });
     await expect(harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "EDITION_CREATED_BY_ANOTHER_ARTIST" });
+    expect(harness.repo.saveRelease).not.toHaveBeenCalled();
+  });
+
+  it("ignores a look-alike EditionCreated log emitted by any contract other than the certified release", async () => {
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
+    const receipt = editionCreatedReceipt();
+    receipt.logs = receipt.logs.map((log) => ({ ...log, address: "0x000000000000000000000000000000000000dead" }));
+    const chain = { getTransactionReceipt: vi.fn().mockResolvedValue(receipt), edition: vi.fn().mockResolvedValue([ids("the-record", "chapter-i").releaseId, ids("the-record", "chapter-i").editionId, owner, 10n, 0n, "ipfs://metadata", true]) };
+    const harness = studio({ records, chain });
+    harness.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [editionRow()] } : { rows: [releaseRow()] });
+    await expect(harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "PUBLICATION_NOT_CONFIRMED" });
     expect(harness.repo.saveRelease).not.toHaveBeenCalled();
   });
 

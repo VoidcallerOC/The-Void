@@ -71,9 +71,14 @@ export class PersistenceRepository {
     return rows[0];
   }
 
+  // A canonical token (contract_id, token_id) is never silently re-pointed to
+  // another release, and so never to another artist. Re-saving the same edition
+  // refreshes metadata. Only an unpublished draft may hand its token to another
+  // draft of the same release (a Studio retry); anything else is a conflict.
   async saveToken({ editionId, contractId, tokenId, metadataUri = null, metadata = null, metadataVersion = null }) {
     const values = [requiredText(editionId, "token.editionId"), contractId, nonNegativeBigInt(tokenId, "token.tokenId"), optionalText(metadataUri, "token.metadataUri", { max: 2048 }), metadata === null ? null : normalizeJson(metadata), optionalText(metadataVersion, "token.metadataVersion")];
-    const { rows } = await this.db.query(`INSERT INTO tokens (edition_id, contract_id, token_id, metadata_uri, metadata, metadata_version) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (contract_id, token_id) DO UPDATE SET edition_id=EXCLUDED.edition_id, metadata_uri=EXCLUDED.metadata_uri, metadata=EXCLUDED.metadata, metadata_version=EXCLUDED.metadata_version, last_metadata_sync_at=now(), updated_at=now() RETURNING *`, values);
+    const { rows } = await this.db.query(`INSERT INTO tokens (edition_id, contract_id, token_id, metadata_uri, metadata, metadata_version) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (contract_id, token_id) DO UPDATE SET edition_id=EXCLUDED.edition_id, metadata_uri=EXCLUDED.metadata_uri, metadata=EXCLUDED.metadata, metadata_version=EXCLUDED.metadata_version, last_metadata_sync_at=now(), updated_at=now() WHERE tokens.edition_id=EXCLUDED.edition_id OR EXISTS (SELECT 1 FROM editions current_edition JOIN editions next_edition ON next_edition.release_id=current_edition.release_id WHERE current_edition.id=tokens.edition_id AND next_edition.id=EXCLUDED.edition_id AND current_edition.status<>'PUBLISHED') RETURNING *`, values);
+    if (!rows[0]) throw new PersistenceConflictError("This chain, contract and token ID already belong to another edition and cannot be reassigned.");
     return rows[0];
   }
 
