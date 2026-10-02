@@ -55,7 +55,6 @@ function ArtworkField({ title, value, onChange, onUpload, uploading, disabled })
 function initialState() {
   return {
     artistName: "",
-    artistBio: "",
     releaseTitle: "",
     releaseDescription: "",
     releaseArtwork: "",
@@ -120,6 +119,8 @@ export function ArtistStudioPage() {
     release,
     artist: (ownedStudioCatalog.artists || []).find((artist) => artist.id === release.artistId) || null,
   })), [ownedStudioCatalog]);
+  const ownedArtists = ownedStudioCatalog?.artists || [];
+  const activeArtist = ownedArtists.find((artist) => artist.id === artistId) || ownedArtists[0] || null;
   const selectedMintRelease = ownedStudioCatalog?.releases?.find((release) => release.id === mintReleaseId) || null;
   const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
   const selectedMintEdition = mintEditions.find((edition) => edition.id === mintEditionId) || null;
@@ -178,19 +179,20 @@ export function ArtistStudioPage() {
   };
 
 
+  // Releases are published as the wallet's own artist profile. Profile details
+  // (name, bio, pictures, links) are edited on the artist page, never here, so
+  // Studio no longer overwrites them. Only a wallet with no profile yet creates one.
   const ensureArtist = async () => {
-    if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
-    const artist = await studioFetch(artistId ? `/studio/artists/${encodeURIComponent(artistId)}` : "/studio/artists", {
-      method: artistId ? "PATCH" : "POST",
-      payload: { id: artistId || undefined, name: form.artistName, bio: form.artistBio, profileArtwork: form.releaseArtwork, links: {} },
-      headers,
-    });
+    if (artistId) return artistId;
+    if (activeArtist) { setArtistId(activeArtist.id); return activeArtist.id; }
+    if (!form.artistName.trim()) throw new Error("Enter your artist name to create your artist profile.");
+    const artist = await studioFetch("/studio/artists", { method: "POST", payload: { name: form.artistName.trim(), links: {} }, headers });
     setArtistId(artist.id);
+    setOwnedStudioCatalog((prior) => ({ ...(prior || {}), artists: [...(prior?.artists || []), { id: artist.id, name: artist.display_name || form.artistName.trim(), handle: artist.slug || artist.id }] }));
     return artist.id;
   };
 
   const ensureArtistAndRelease = async () => {
-    if (!form.artistName) throw new Error("Enter an artist name before creating a release.");
     if (!form.releaseTitle) throw new Error("Enter a release title before creating a track.");
     const nextArtistId = await ensureArtist();
     let nextReleaseId = releaseId;
@@ -549,8 +551,23 @@ export function ArtistStudioPage() {
               ))}
             </div>
           )}
-          <TextField title="Artist name" value={form.artistName} onChange={(value) => set("artistName", value)} required />
-          <TextField title="Artist bio" value={form.artistBio} onChange={(value) => set("artistBio", value)} multiline />
+          {activeArtist ? (
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", margin: "8px 0 4px" }}>
+              {ownedArtists.length > 1 ? (
+                <label style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
+                  Publishing as{" "}
+                  <select value={activeArtist.id} onChange={(event) => setArtistId(event.target.value)} style={{ background: "transparent", color: "var(--vc-bone)", border: "1px solid var(--vc-ash)", padding: "6px 8px" }}>
+                    {ownedArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name}</option>)}
+                  </select>
+                </label>
+              ) : (
+                <p style={{ margin: 0 }}>Publishing as <strong>{activeArtist.name}</strong></p>
+              )}
+              <Link to={`/artist/${encodeURIComponent(activeArtist.id)}`} style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Edit artist profile →</Link>
+            </div>
+          ) : (
+            canUseStudio && ownedStudioCatalog && <TextField title="Your artist name (creates your artist profile — add bio and links on your profile page)" value={form.artistName} onChange={(value) => set("artistName", value)} required />
+          )}
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} />
@@ -647,7 +664,7 @@ export function ArtistStudioPage() {
               ? <img src={ipfsToHttp(form.trackArtwork || form.releaseArtwork)} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover" }} />
               : <div style={{ width: "100%", aspectRatio: "1", border: "1px dashed var(--vc-ash)", display: "grid", placeItems: "center", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>No artwork yet</div>}
             <div>
-              <p><strong>Artist</strong><br />{form.artistName || "—"}</p>
+              <p><strong>Artist</strong><br />{activeArtist?.name || form.artistName || "—"}</p>
               <p><strong>Release</strong><br />{form.releaseTitle || "—"}</p>
               <p><strong>Type</strong><br />EP</p>
               <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
