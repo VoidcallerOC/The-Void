@@ -169,6 +169,16 @@ describe("indexed listing attachment", () => {
     expect(listingsForEdition([indexedListing], FUJI_INTEGRATION_CATALOG.editions[0])).toHaveLength(1);
   });
 
+  it("rejects a wrong token on the correct Fuji chain and canonical contract", () => {
+    const edition = FUJI_INTEGRATION_CATALOG.editions[0];
+    const wrongTokenListing = { ...indexedListing, tokenId: "33778802922810732976408591241428358474475553907731009337085064305512658576740" };
+    expect(wrongTokenListing.chain).toBe(43113);
+    expect(wrongTokenListing.tokenContract.toLowerCase()).toBe(FUJI_RELEASE_CONFIG.contractAddress.toLowerCase());
+    expect(listingMatchesEdition(wrongTokenListing, edition)).toBe(false);
+    expect(attachIndexedListings({ catalogs: [FUJI_INTEGRATION_CATALOG], listings: [wrongTokenListing] })[0].edition).toBeNull();
+    expect(listingsForEdition([wrongTokenListing], edition)).toEqual([]);
+  });
+
   it("does not synthesize a listing when the index is empty or mismatched", () => {
     expect(attachIndexedListings({ catalogs: [FUJI_INTEGRATION_CATALOG], listings: [] })).toEqual([]);
     expect(listingsForEdition([{ ...indexedListing, tokenContract: "0x0000000000000000000000000000000000000001" }], FUJI_INTEGRATION_CATALOG.editions[0])).toEqual([]);
