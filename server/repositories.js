@@ -77,8 +77,10 @@ export class PersistenceRepository {
     return rows[0];
   }
 
+  // requirements is a JSON array; node-pg would encode a JS array as a Postgres
+  // array literal, which jsonb rejects, so it is serialized explicitly.
   async saveExperience({ id, artistId = null, releaseId = null, editionId = null, title, description = null, experienceType, requirements = [], mediaConfig = {}, version = 1, status = "DRAFT" }) {
-    const values = [requiredText(id, "experience.id"), artistId, releaseId, editionId, requiredText(title, "experience.title"), optionalText(description, "experience.description", { max: 20000 }), requiredText(experienceType, "experience.experienceType"), requirements, normalizeJson(mediaConfig), version, enumValue(status, "experience.status", APPLICATION_STATUSES)];
+    const values = [requiredText(id, "experience.id"), artistId, releaseId, editionId, requiredText(title, "experience.title"), optionalText(description, "experience.description", { max: 20000 }), requiredText(experienceType, "experience.experienceType"), JSON.stringify(Array.isArray(requirements) ? requirements : []), normalizeJson(mediaConfig), version, enumValue(status, "experience.status", APPLICATION_STATUSES)];
     const { rows } = await this.db.query(`INSERT INTO experiences (id, artist_id, release_id, edition_id, title, description, experience_type, requirements, media_config, version, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET artist_id=EXCLUDED.artist_id, release_id=EXCLUDED.release_id, edition_id=EXCLUDED.edition_id, title=EXCLUDED.title, description=EXCLUDED.description, experience_type=EXCLUDED.experience_type, requirements=EXCLUDED.requirements, media_config=EXCLUDED.media_config, version=EXCLUDED.version, status=EXCLUDED.status, updated_at=now() RETURNING *`, values);
     return rows[0];
   }
