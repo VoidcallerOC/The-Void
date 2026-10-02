@@ -32,3 +32,23 @@ describe("per-track token view", () => {
     expect(view.artworkSources).toContain("/assets/album.png");
   });
 });
+
+describe("playable track for a token", () => {
+  it("a legacy token plays its own song (gated full track for holders, preview otherwise)", async () => {
+    const { playableTrackFor } = await import("./token-view.js");
+    const token = VOIDCALLER_CATALOG.tokens.find((item) => String(item.tokenId) === "1");
+    const track = playableTrackFor(token);
+    expect(track.title).toBe("The Hollow");
+    expect(track.previewSrc).toBe("/assets/audio-preview/ep1-01-the-hollow-preview.mp3");
+    expect(track.protectedMedia).toEqual({ experienceId: "voidcaller-legacy-track-1", mediaType: "AUDIO" });
+  });
+
+  it("a published token plays only its public preview", async () => {
+    const { playableTrackFor } = await import("./token-view.js");
+    const track = playableTrackFor({ id: "e-token-9", editionId: "e", tokenId: "9", name: "Track Nine", metadata: { name: "Track Nine", animationUrl: "ipfs://bafypreviewnine", image: "ipfs://bafyart" } });
+    expect(track).toMatchObject({ title: "Track Nine", preview: true });
+    expect(track.src).toMatch(/\/ipfs\/bafypreviewnine$/);
+    expect(track.protectedMedia).toBeUndefined();
+    expect(playableTrackFor({ id: "x", editionId: "e", tokenId: "1", metadata: {} })).toBeNull();
+  });
+});
