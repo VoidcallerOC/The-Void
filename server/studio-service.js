@@ -9,6 +9,7 @@ import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
 import { verifyEditionPublication } from "./publication-anchor.js";
+import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
 const TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "ARTWORK", "LYRICS", "DEMO", "LIVE_RECORDING", "TICKET", "VIP_ACCESS", "DISCOUNT", "PHYSICAL_REDEMPTION"]);
@@ -196,6 +197,7 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, a.display_name, ao.owner_wallet FROM releases r JOIN artists a ON a.id=r.artist_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish metadata for this release.");
+    await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
     if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
@@ -207,8 +209,10 @@ export class ArtistStudioService {
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
+    const publishTokenId = certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
+    await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: CERTIFIED_CONTRACT, chainId: CERTIFIED_CHAIN_ID, tokenId: publishTokenId });
     const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
-    await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")), metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
+    await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: publishTokenId, metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
     assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: metadataDocument, provenanceRoot: provenance.root });
     const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
@@ -223,6 +227,7 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
+    await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
@@ -241,6 +246,10 @@ export class ArtistStudioService {
       const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
       const event = receipt.logs.map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
       if (!event) throw new Error("expected EditionCreated event was not found");
+      // The edition must have been created by a wallet of this release's own artist.
+      const creator = String(event.args.artist || "").toLowerCase();
+      const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
+      if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
         : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
@@ -339,7 +348,9 @@ export class ArtistStudioService {
     const { identity, artist } = await this.ownedArtist({ artistId, request });
     const id = input.id ? requiredText(input.id, "release.id", { max: 128 }) : `release-${randomUUID()}`;
     const title = requiredText(input.title, "release.title", { max: 256 });
-    const slug = await availableSlug(this.db, { table: "releases", scopeColumn: "artist_id", scopeValue: artist.id, value: title, field: "release title" });
+    // Release slugs become the on-chain releaseId (bytes32), which is shared by every
+    // artist on the canonical contract, so they are allocated platform-wide.
+    const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
     const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return release;
@@ -367,6 +378,7 @@ export class ArtistStudioService {
     const editionName = requiredText(input.trackTitle || input.title || input.name || release.title, "track.title", { max: 256 });
     const editionSlug = generatedSlug(editionName, "track title");
     const tokenId = certifiedTokenId(release.slug, editionSlug);
+    await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: address, chainId: selectedChainId, tokenId });
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
     const edition = await this.repository.inTransaction(async (repository) => {
       const contract = await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG } from "../src/lib/fuji-release.js";
+import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 import { ArtistStudioService, EDITION_ABI } from "./studio-service.js";
 
 const certifiedFujiRelease = FUJI_RELEASE_CONFIG.contractAddress.toLowerCase();
@@ -23,10 +24,10 @@ function repository() {
   repo.inTransaction = vi.fn(async (callback) => callback(repo));
   return repo;
 }
-function service({ rows = [], authenticated = true, authenticatedWallet = owner, metadataStorage = null } = {}) {
+function service({ rows = [], authenticated = true, authenticatedWallet = owner, metadataStorage = null, authorization = {} } = {}) {
   const repo = repository();
   const db = { query: vi.fn().mockResolvedValue({ rows }) };
-  return { instance: new ArtistStudioService({ db, repository: repo, metadataStorage, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: authenticatedWallet }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
+  return { instance: new ArtistStudioService({ db: verifiedArtistDb(db, authorization), repository: repo, metadataStorage, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: authenticatedWallet }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
 }
 const request = { requestId: "request-1", headers: {} };
 
