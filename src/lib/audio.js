@@ -14,6 +14,7 @@ export const VC_AUDIO = {
   playing: false,
   queue: null,
   queueId: "tunnel-vision",
+  queueLabel: null,
   listeners: new Set(),
   owned: new Set(),
   mediaAuthorization: null,
@@ -103,9 +104,10 @@ export const VC_AUDIO = {
     return audio;
   },
 
-  setQueue(tracks, queueId) {
+  setQueue(tracks, queueId, queueLabel = null) {
     this.queue = tracks;
     this.queueId = queueId || "queue";
+    this.queueLabel = queueLabel || null;
     this.idx = 0;
     if (this.el) {
       this.el.pause();

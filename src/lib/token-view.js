@@ -1,4 +1,5 @@
 import { ipfsToHttp } from "./web3.js";
+import { VC_DATA } from "../data.js";
 
 // Each track is its own token. Views of one track resolve that token's own
 // metadata first and only fall back to the edition / release (collection) art.
@@ -36,4 +37,18 @@ export function tokenView(catalog, { edition = null, release = null, tokenId = n
     artwork: sources[0],
     artworkSources: [...new Set(sources)],
   };
+}
+
+/**
+ * The player track for one token, or null. Legacy Voidcaller tokens use their
+ * catalog track (public preview, upgraded to the gated full track for
+ * holders). Published tokens play their public preview (animation_url).
+ */
+export function playableTrackFor(token, { artwork = "" } = {}) {
+  if (!token) return null;
+  const legacy = token.editionId === "voidcaller-chapter-i" ? VC_DATA.firstEPTracks.find((track) => sameId(track.tokenId, token.tokenId)) : null;
+  if (legacy) return legacy;
+  const preview = ipfsToHttp(token.metadata?.animationUrl || token.media?.previewSrc || "");
+  if (!preview) return null;
+  return { n: String(token.tokenId), title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
 }
