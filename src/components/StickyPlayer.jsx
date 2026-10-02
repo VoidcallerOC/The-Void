@@ -28,7 +28,7 @@ export function StickyPlayer() {
   const t = audio.el?.currentTime || 0;
   const frac = dur ? t / dur : 0;
   // Pick eyebrow label from queueId
-  const label = audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION";
+  const label = audio.queueLabel || (audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION");
   const art = cur?.art || (audio.queueId === "self-titled" ? "/assets/voidcaller_art_4.png" : VC_DATA.featuredEP.art);
   const onSeek = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();

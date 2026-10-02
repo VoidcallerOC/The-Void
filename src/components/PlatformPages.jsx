@@ -19,7 +19,8 @@ import { ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
-import { tokenView } from "../lib/token-view.js";
+import { playableTrackFor, tokenView } from "../lib/token-view.js";
+import { PlayTokenButton } from "./PlayTokenButton.jsx";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
 function PlatformHeader({ eyebrow, title, children }) {
@@ -191,10 +192,21 @@ export function ReleasePage({ children = null } = {}) {
             {release.tracks.map((track) => {
               const view = tokenView(catalog, { edition: editionItems[0]?.edition, release, tokenId: track.tokenId });
               const experienceId = track.experienceId || view.token?.experiences?.[0];
-              return <Link key={track.tokenId} to={experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
-                <TokenArtwork sources={view.artworkSources} alt={`${track.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-                <div style={{ padding: 18 }}><Status>Token #{track.tokenId}</Status><h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}>{track.title}</h3><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{track.time} · Open song experience</p></div>
-              </Link>;
+              const to = experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`;
+              return <article key={track.tokenId} className="vc-market-card">
+                <Link to={to} style={{ color: "inherit", textDecoration: "none", display: "block" }}>
+                  <TokenArtwork sources={view.artworkSources} alt={`${track.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                </Link>
+                <div style={{ padding: 18 }}>
+                  <Status>Token #{track.tokenId}</Status>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}><Link to={to} style={{ color: "inherit", textDecoration: "none" }}>{track.title}</Link></h3>
+                  <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 14px" }}>{track.time}</p>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <PlayTokenButton track={playableTrackFor(view.token)} queueId={`token:${view.token?.id || track.tokenId}`} collection={release.title} primary />
+                    <Link to={to} style={ghostBtn}>Song experience</Link>
+                  </div>
+                </div>
+              </article>;
             })}
           </div>
         </>
@@ -298,6 +310,8 @@ export function ExperiencePage() {
   const owned = Boolean((experience.requirements?.length && canAccessExperience(experience, wallet.ownershipRecords || [])) || library.editions.some((item) => item.edition.id === edition?.id) || (edition && String(edition.status).toLowerCase() === "minted" && !isCertifiedFujiEdition(edition)));
   const tracks = tracksForRelease(release, experience);
   const view = tokenView(catalog, { edition, release, experience });
+  // A one-token experience plays that token's song; the full-EP experience keeps the queue below.
+  const tokenTrack = playableTrackFor(view.token);
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
@@ -311,7 +325,7 @@ export function ExperiencePage() {
       audio.pause();
       return;
     }
-    audio.setQueue(tracks, queueId);
+    audio.setQueue(tracks, queueId, release?.title || experience.title);
     try {
       await audio.play(0);
     } catch {
@@ -349,12 +363,13 @@ export function ExperiencePage() {
             </ol>
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            {tracks.length > 0 && (
+            {tokenTrack && <PlayTokenButton track={tokenTrack} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
+            {!tokenTrack && tracks.length > 0 && (
               <button type="button" style={primaryBtn} onClick={hear}>
                 {isPlaying ? "Pause experience" : owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}
               </button>
             )}
-            {edition && !owned && <Link to={`/edition/${edition.id}`} style={tracks.length ? ghostBtn : primaryBtn}>Collect</Link>}
+            {edition && !owned && <Link to={`/edition/${edition.id}`} style={tracks.length || tokenTrack ? ghostBtn : primaryBtn}>Collect</Link>}
             {edition && owned && <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>}
             <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </div>
@@ -473,7 +488,8 @@ export function MyCollectionPage() {
                 <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{view.token ? view.name : release?.title || edition.title}</h3>
                 <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-                  <Link to={`/edition/${edition.id}`} style={primaryBtn}>Owned</Link>
+                  <PlayTokenButton track={playableTrackFor(view.token)} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
+                  <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>
                   {experience && <Link to={`/experience/${experience.id}`} style={ghostBtn}>Open experience</Link>}
                 </div>
               </div>
