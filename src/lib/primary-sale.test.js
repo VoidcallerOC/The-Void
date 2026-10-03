@@ -93,4 +93,13 @@ describe("Fuji ERC-1155 primary sale", () => {
     const soldOut = new ethers.Interface(["error SoldOut(uint256 tokenId, uint256 remaining, uint256 requested)"]).encodeErrorResult("SoldOut", [1, 0, 1]);
     expect(explainCollectError({ data: soldOut })).toMatchObject({ state: "sold-out", message: "This release is sold out." });
   });
+
+  it("names release-contract reverts from purchase instead of hiding them", () => {
+    const release = new ethers.Interface(["error AccessDenied(bytes32 role, address account)", "error EditionNotFound(uint256 tokenId)"]);
+    const denied = release.encodeErrorResult("AccessDenied", [ethers.id("ISSUER_ROLE"), "0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1"]);
+    expect(explainCollectError({ data: denied })).toMatchObject({ state: "unauthorized-sale" });
+    expect(explainCollectError({ data: release.encodeErrorResult("EditionNotFound", [1n]) })).toMatchObject({ state: "not-created" });
+    expect(explainCollectError(new Error("execution reverted"))).toMatchObject({ state: "reverted" });
+    expect(explainCollectError(new Error("insufficient funds for gas * price + value"))).toMatchObject({ state: "insufficient-funds" });
+  });
 });
