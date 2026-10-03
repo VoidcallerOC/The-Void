@@ -34,6 +34,15 @@ function TextField({ title, value, onChange, multiline = false, required = false
   );
 }
 
+function DayTimeField({ title, value, onChange, required = false }) {
+  return (
+    <label style={label}>
+      {title}
+      <input type="datetime-local" required={required} value={value} onChange={(event) => onChange(event.target.value)} style={{ ...field, colorScheme: "dark" }} />
+    </label>
+  );
+}
+
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1000))} KB`;
@@ -826,8 +835,8 @@ export function ArtistStudioPage() {
                   <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
                   <TextField title="Stop the sale early after this many?" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Leave empty to keep selling until the end" : (form.quantity || "Same as the copy limit")} />
                   <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder="Leave empty for no limit" />
-                  <TextField title="When can people start buying?" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave empty to start now" />
-                  <TextField title={isUnlimitedQuantity(form.quantity) ? "When does it stop? Required." : "When does it stop? Optional."} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Type a time. After this, nobody can buy." : "Leave empty if it shouldn't stop on a clock"} required={isUnlimitedQuantity(form.quantity)} />
+                  <DayTimeField title="When can people start buying? Leave empty to start now." value={form.saleStart} onChange={(value) => set("saleStart", value)} />
+                  <DayTimeField title={isUnlimitedQuantity(form.quantity) ? "When does it stop? Required." : "When does it stop? Leave empty if it should stay up."} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} required={isUnlimitedQuantity(form.quantity)} />
                   {isUnlimitedQuantity(form.quantity) && (
                     <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
                       This song is open. People can keep buying until the stop time. After that, it ends. There is no button to make more later.
