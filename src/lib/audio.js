@@ -82,6 +82,14 @@ export const VC_AUDIO = {
     return grant.accessUrl;
   },
 
+  // Play a track whose protected source was already authorized elsewhere
+  // (e.g. the experience page's unlock), through the one shared player.
+  playGranted(track, grant, queueId, queueLabel = null) {
+    this.mediaGrants.set(grantKey(track), grant);
+    this.setQueue([track], queueId, queueLabel);
+    return this.play(0);
+  },
+
   setOwnership(tokenIds) {
     this.owned = new Set(tokenIds || []);
     const track = this.queue && this.queue[this.idx];

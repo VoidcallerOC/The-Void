@@ -398,7 +398,7 @@ export function ExperiencePage() {
             <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </div>
           {playbackError && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6 }}>{playbackError}</p>}
-          {experience.media?.protected && edition && isCertifiedFujiEdition(edition) && <ProtectedExperiencePlayer experience={experience} />}
+          {experience.media?.protected && edition && isCertifiedFujiEdition(edition) && <ProtectedExperiencePlayer experience={experience} title={tokenTrack?.title || view.name} art={view.artworkSources?.[0]} collection={release?.title || edition?.title} />}
         </div>
       </div>
     </section>
