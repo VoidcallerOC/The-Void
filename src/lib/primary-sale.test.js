@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
-import { encodeConfigureSale, encodePurchase, explainCollectError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, purchaseCost, simulateConfigureSale, validateSaleSupply } from "./primary-sale.js";
+import { FUJI_RELEASE_CONFIG, sendFujiTransaction } from "./fuji-release.js";
+import { createFujiPublicProvider, encodeConfigureSale, encodePurchase, explainCollectError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, purchaseCost, simulateConfigureSale, validateSaleSupply } from "./primary-sale.js";
 
 const CANONICAL_FUJI_V2_RELEASE = "0x82b26Da27136935454Bdf1e40801190B521b82e5";
 const CANONICAL_FUJI_PRIMARY_SALE = "0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1";
@@ -36,17 +36,49 @@ describe("Fuji ERC-1155 primary sale", () => {
     expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 0n, perWalletLimit: 1n })).toThrow("Sale supply must be greater than zero.");
   });
 
-  it("simulates configureSale with the exact sender, target, calldata, and zero value", async () => {
+  it("uses the public Fuji RPC for configureSale preflight with the exact sender, target, calldata, and zero value", async () => {
     const data = encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n });
     const calls = [];
-    const provider = { request: async (request) => {
+    const publicProvider = createFujiPublicProvider({ fetchImpl: async (_url, init) => {
+      const request = JSON.parse(init.body);
       calls.push(request);
-      if (request.method === "eth_chainId") return "0xa869";
-      if (request.method === "eth_call") return "0x";
-      throw new Error(`unexpected provider method: ${request.method}`);
-    } };
-    await simulateConfigureSale(provider, { from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", data });
+      return { ok: true, json: async () => ({ result: request.method === "eth_chainId" ? "0xa869" : "0x" }) };
+    } });
+    await simulateConfigureSale(publicProvider, { from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", data });
     expect(calls[1]).toMatchObject({ method: "eth_call", params: [{ from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", to: ethers.getAddress(CANONICAL_FUJI_PRIMARY_SALE), data, value: "0x0", gas: "0x7a120" }, "latest"] });
+  });
+
+  it("surfaces a public-RPC simulation revert instead of hanging", async () => {
+    const data = encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n });
+    const publicProvider = createFujiPublicProvider({ fetchImpl: async (_url, init) => {
+      const request = JSON.parse(init.body);
+      if (request.method === "eth_chainId") return { ok: true, json: async () => ({ result: "0xa869" }) };
+      return { ok: true, json: async () => ({ error: { code: -32000, message: "execution reverted: unauthorized" } }) };
+    } });
+    await expect(simulateConfigureSale(publicProvider, { from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", data })).rejects.toMatchObject({ code: "CONFIGURE_SALE_SIMULATION_REVERTED" });
+  });
+
+  it("surfaces a public-RPC timeout instead of leaving preflight pending", async () => {
+    const data = encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 2n });
+    const publicProvider = createFujiPublicProvider({ timeoutMs: 5, fetchImpl: () => new Promise(() => {}) });
+    await expect(simulateConfigureSale(publicProvider, { from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", data })).rejects.toMatchObject({ code: "FUJI_RPC_TIMEOUT" });
+  });
+
+  it("keeps eth_sendTransaction on the authenticated wallet provider", async () => {
+    const walletCalls = [];
+    const publicCalls = [];
+    const walletProvider = { request: async (request) => {
+      walletCalls.push(request);
+      if (request.method === "eth_sendTransaction") return "0x01";
+      throw new Error(`unexpected wallet provider method: ${request.method}`);
+    } };
+    const publicProvider = { request: async (request) => {
+      publicCalls.push(request);
+      return { status: "0x1", blockNumber: "0x1", logs: [] };
+    } };
+    await sendFujiTransaction({ provider: walletProvider, receiptProvider: publicProvider, assumeFujiChain: true, from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", to: CANONICAL_FUJI_PRIMARY_SALE, data: "0x1234" });
+    expect(walletCalls.map(({ method }) => method)).toEqual(["eth_sendTransaction"]);
+    expect(publicCalls[0].method).toBe("eth_getTransactionReceipt");
   });
 
   it("configures a sale from a human-readable 6:00am start without a BigInt error", () => {

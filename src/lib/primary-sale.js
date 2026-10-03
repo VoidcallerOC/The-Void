@@ -2,6 +2,68 @@ import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG, assertFujiProvider, fujiExplorerUrl, sendFujiTransaction } from "./fuji-release.js";
 import { normalizeSaleTimeToUnixSeconds } from "./sale-time.js";
 
+export const FUJI_RPC_TIMEOUT_MS = 10_000;
+
+export class FujiRpcTimeoutError extends Error {
+  constructor(method, timeoutMs = FUJI_RPC_TIMEOUT_MS) {
+    super(`The Fuji public RPC timed out while handling ${method}. Please try again.`);
+    this.name = "FujiRpcTimeoutError";
+    this.code = "FUJI_RPC_TIMEOUT";
+    this.method = method;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+export class FujiRpcUnavailableError extends Error {
+  constructor(method, cause) {
+    super(`The Fuji public RPC is unavailable while handling ${method}. Please try again later.`);
+    this.name = "FujiRpcUnavailableError";
+    this.code = "FUJI_RPC_UNAVAILABLE";
+    this.method = method;
+    this.cause = cause;
+  }
+}
+
+export function createFujiPublicProvider({ fetchImpl = globalThis.fetch, rpcUrl = FUJI_RELEASE_CONFIG.rpcUrl, timeoutMs = FUJI_RPC_TIMEOUT_MS } = {}) {
+  if (typeof fetchImpl !== "function") throw new Error("The browser does not provide fetch for the Fuji public RPC.");
+  return {
+    async request({ method, params = [] } = {}) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let raceTimer;
+      try {
+        const operation = (async () => {
+          let response;
+          try {
+            response = await fetchImpl(rpcUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+              signal: controller.signal,
+            });
+          } catch (error) {
+            if (error?.name === "AbortError") throw new FujiRpcTimeoutError(method, timeoutMs);
+            throw new FujiRpcUnavailableError(method, error);
+          }
+          let json;
+          try { json = await response.json(); } catch (error) { throw new FujiRpcUnavailableError(method, error); }
+          if (!response.ok || json?.error) {
+            const error = new Error(json?.error?.message || `HTTP ${response.status}`);
+            error.data = json?.error?.data;
+            error.rpcCode = json?.error?.code;
+            throw error;
+          }
+          return json?.result;
+        })();
+        return await Promise.race([operation, new Promise((_, reject) => { raceTimer = setTimeout(() => reject(new FujiRpcTimeoutError(method, timeoutMs)), timeoutMs); })]);
+      } finally {
+        clearTimeout(timer);
+        clearTimeout(raceTimer);
+      }
+    },
+  };
+}
+
 const configuredSaleAbi = Array.isArray(FUJI_RELEASE_CONFIG.primarySaleAbi) ? FUJI_RELEASE_CONFIG.primarySaleAbi : [];
 export const PRIMARY_SALE_ABI = Object.freeze(configuredSaleAbi.length ? configuredSaleAbi : [
   "function sales(uint256) view returns (uint256 priceWei, uint256 maxSupply, uint256 sold, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused, bool configured)",
@@ -64,7 +126,28 @@ export async function simulateConfigureSale(provider, { from, data, value = 0 } 
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
   const sale = fujiPrimarySaleAddress();
   if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
-  return provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)), gas: SIMULATION_GAS }, "latest"] });
+  try {
+    return await provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)), gas: SIMULATION_GAS }, "latest"] });
+  } catch (error) {
+    if (error?.code === "FUJI_RPC_TIMEOUT" || error?.code === "FUJI_RPC_UNAVAILABLE") throw error;
+    throw Object.assign(new Error(`Sale configuration simulation reverted on Fuji: ${error?.shortMessage || error?.message || "execution reverted"}`), {
+      code: "CONFIGURE_SALE_SIMULATION_REVERTED",
+      cause: error,
+    });
+  }
+}
+
+export function explainConfigureSaleError(error) {
+  if (error?.code === "FUJI_RPC_TIMEOUT") return { code: error.code, message: error.message };
+  if (error?.code === "FUJI_RPC_UNAVAILABLE") return { code: error.code, message: error.message };
+  if (error?.code === "CONFIGURE_SALE_SIMULATION_REVERTED") return { code: error.code, message: error.message };
+  if (error?.code === "CHAIN_MISMATCH") return { code: error.code, message: error.message };
+  if (error?.code === "WALLET_PROVIDER_UNAVAILABLE") return { code: error.code, message: error.message };
+  if (error?.code === 4001 || error?.code === "ACTION_REJECTED" || /user rejected|user denied|rejected the request/i.test(String(error?.message || ""))) {
+    return { code: "TRANSACTION_REJECTED", message: "Transaction rejected in the wallet. No sale was configured." };
+  }
+  if (error?.code === "TRANSACTION_SUBMISSION_FAILED") return { code: error.code, message: error.message };
+  return { code: error?.code || "CONFIGURE_SALE_FAILED", message: error?.message || "Sale configuration failed. No transaction was submitted." };
 }
 
 export function encodePurchase(tokenId, qty = 1) {

@@ -81,10 +81,25 @@ export function assertFujiAddress(address) {
 
 export async function assertFujiProvider(provider) {
   if (!provider?.request) throw new Error("Connect a wallet before using the Fuji release.");
-  const chain = await provider.request({ method: "eth_chainId" });
+  const chain = await requestWithTimeout(provider, { method: "eth_chainId" });
   const chainId = Number.parseInt(chain, 16);
-  if (chainId !== FUJI_RELEASE_CONFIG.chainId) throw new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}).`);
+  if (chainId !== FUJI_RELEASE_CONFIG.chainId) throw Object.assign(new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}).`), { code: "CHAIN_MISMATCH", chainId });
   return chainId;
+}
+
+export const PROVIDER_REQUEST_TIMEOUT_MS = 120_000;
+
+export async function requestWithTimeout(provider, request, timeoutMs = PROVIDER_REQUEST_TIMEOUT_MS) {
+  if (!provider?.request) throw new Error("The provider is unavailable.");
+  let timer;
+  try {
+    return await Promise.race([
+      provider.request(request),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`The wallet provider timed out while handling ${request.method}.`), { code: "PROVIDER_REQUEST_TIMEOUT", method: request.method })), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const v2CreateIface = new ethers.Interface([
@@ -321,15 +336,21 @@ export function assertProvenanceAnchorTarget(address) {
   return target;
 }
 
-export async function sendFujiTransaction({ provider, from, data, to, value, anchorAddress = null }) {
-  await assertFujiProvider(provider);
+export async function sendFujiTransaction({ provider, from, data, to, value, anchorAddress = null, assumeFujiChain = false, receiptProvider = provider }) {
+  if (!assumeFujiChain) await assertFujiProvider(provider);
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
   const target = anchorAddress ? assertProvenanceAnchorTarget(anchorAddress) : assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress);
   if (anchorAddress && to && ethers.getAddress(to) !== target) throw new Error("The provenance transaction target does not match the configured anchor.");
   const tx = { from, to: target, data };
   if (value !== undefined && value !== null && BigInt(value) > 0n) tx.value = ethers.toQuantity(BigInt(value));
-  const hash = await provider.request({ method: "eth_sendTransaction", params: [tx] });
-  const receipt = await waitForReceipt(provider, hash);
+  let hash;
+  try {
+    hash = await requestWithTimeout(provider, { method: "eth_sendTransaction", params: [tx] });
+  } catch (error) {
+    if (error?.code === "PROVIDER_REQUEST_TIMEOUT") throw error;
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { code: error?.code || "TRANSACTION_SUBMISSION_FAILED" });
+  }
+  const receipt = await waitForReceipt(receiptProvider, hash);
   if (!receipt || receipt.status !== "0x1") {
     // Best-effort: replay the same call read-only to recover the revert reason, and
     // always preserve the transaction hash so the failure can be inspected on-chain.

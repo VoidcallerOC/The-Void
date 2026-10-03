@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, simulateFujiCall, verifyFujiEditionCreation } from "../lib/fuji-release.js";
-import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
+import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
@@ -184,9 +184,8 @@ export function ArtistStudioPage() {
   useEffect(() => {
     let cancelled = false;
     if (!canUseStudio || step !== "sale" || !publishedTokenId || !fujiPrimarySaleAddress()) return undefined;
-    const provider = wallet.getProvider?.();
-    if (!provider) return undefined;
-    readPrimarySale(provider, publishedTokenId, wallet.account)
+    const publicProvider = createFujiPublicProvider();
+    readPrimarySale(publicProvider, publishedTokenId, wallet.account)
       .then((sale) => { if (!cancelled) setConfiguredSale(sale); })
       .catch(() => { if (!cancelled) setConfiguredSale(null); });
     return () => { cancelled = true; };
@@ -359,10 +358,14 @@ export function ArtistStudioPage() {
       if (!sale) throw new Error("VoidPrimarySale is not deployed on Fuji yet. The collectible stays ERC-1155, but fans cannot pay until the sale contract is configured.");
       if (!publishedTokenId) throw new Error("Publish the release before setting up the sale.");
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      const provider = wallet.getProvider?.();
-      const edition = await readFujiEdition(provider, publishedTokenId);
+      if (wallet.chainId !== FUJI_RELEASE_CONFIG.chainId) throw Object.assign(new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}) before configuring the sale.`), { code: "CHAIN_MISMATCH" });
+      // All reads and the exact preflight use the public Fuji RPC. The wallet
+      // provider is intentionally acquired only after preflight succeeds, for
+      // the user-confirmed transaction submission below.
+      const publicProvider = createFujiPublicProvider();
+      const edition = await readFujiEdition(publicProvider, publishedTokenId);
       if (!edition?.exists) throw new Error("The published edition could not be found on Fuji. Refresh the edition before configuring its sale.");
-      const existingSale = await readPrimarySale(provider, publishedTokenId, wallet.account);
+      const existingSale = await readPrimarySale(publicProvider, publishedTokenId, wallet.account);
       if (existingSale?.configured) {
         setConfiguredSale(existingSale);
         setNotice("This release already has a primary sale configured. No transaction was submitted.");
@@ -378,12 +381,19 @@ export function ArtistStudioPage() {
         endTime: form.saleEnd,
         paused: form.salePaused,
       });
-      await simulateConfigureSale(provider, { from: wallet.account, data });
-      const transaction = await sendFujiTransaction({ provider, from: wallet.account, data, to: sale });
+      await simulateConfigureSale(publicProvider, { from: wallet.account, data });
+      const walletProvider = wallet.getProvider?.();
+      if (!walletProvider?.request) throw Object.assign(new Error("The wallet provider is unavailable. Reconnect your wallet before configuring the sale."), { code: "WALLET_PROVIDER_UNAVAILABLE" });
+      let transaction;
+      try {
+        transaction = await sendFujiTransaction({ provider: walletProvider, receiptProvider: publicProvider, from: wallet.account, data, to: sale, assumeFujiChain: true });
+      } catch (error) {
+        throw Object.assign(new Error(explainConfigureSaleError({ ...error, code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? error.code : "TRANSACTION_SUBMISSION_FAILED" }).message), { code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? "TRANSACTION_REJECTED" : "TRANSACTION_SUBMISSION_FAILED", cause: error, transactionHash: error?.transactionHash });
+      }
       setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
-      setConfiguredSale(await readPrimarySale(provider, publishedTokenId, wallet.account));
+      setConfiguredSale(await readPrimarySale(publicProvider, publishedTokenId, wallet.account));
     } catch (error) {
-      setNotice(error.message);
+      setNotice(explainConfigureSaleError(error).message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
     } finally {
       setBusy("");
