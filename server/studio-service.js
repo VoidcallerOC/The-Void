@@ -578,21 +578,41 @@ export class ArtistStudioService {
     // link that first stored it. That is acceptable only if that earlier link
     // was also issued by this server to this same artist.
     const storedUploadId = String(file.keyvalues.voidUploadId || "");
-    let stampedByThisArtist = file.keyvalues.voidArtistId === artist.id && storedUploadId === uploadId;
-    if (!stampedByThisArtist && file.keyvalues.voidArtistId === artist.id && /^upload-[0-9a-f-]{36}$/.test(storedUploadId)) {
-      const earlier = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uploadId'=$2 LIMIT 1", [artist.id, storedUploadId]);
+    const stampedArtistId = String(file.keyvalues.voidArtistId || "");
+    // The stamped artist must be this artist, or another artist record owned
+    // by the same authenticated wallet (one person can hold several profiles).
+    let stampedArtistOwned = stampedArtistId === artist.id;
+    if (!stampedArtistOwned && stampedArtistId) {
+      const sibling = await this.db.query("SELECT artist_id FROM artist_owners WHERE artist_id=$1 AND owner_wallet=$2 LIMIT 1", [stampedArtistId, identity.wallet]);
+      stampedArtistOwned = sibling.rows.length > 0;
+    }
+    let stampedByThisArtist = stampedArtistOwned && stampedArtistId === artist.id && storedUploadId === uploadId;
+    if (!stampedByThisArtist && stampedArtistOwned && /^upload-[0-9a-f-]{36}$/.test(storedUploadId)) {
+      const earlier = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uploadId'=$2 LIMIT 1", [stampedArtistId, storedUploadId]);
       stampedByThisArtist = earlier.rows.length > 0;
     }
-    if (!stampedByThisArtist) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through this artist's upload link.", { upstream });
+    if (!stampedByThisArtist) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through an upload link issued to an artist this wallet owns.", { upstream });
     if (!DIRECT_AUDIO_MIME_TYPES.includes(String(file.mimeType || "").toLowerCase())) throw fail(415, "AUDIO_TYPE_UNSUPPORTED", `The stored object is ${file.mimeType || "of unknown type"}, not supported audio.`, { upstream });
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw fail(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.", { upstream });
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
 
     // Idempotent: the same private object registers once.
-    const existing = await this.db.query("SELECT id, media_type, metadata->>'contentSha256' AS content_sha256, created_at FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artist.id, file.cid]);
+    const existing = await this.db.query("SELECT id, artist_id, media_type, metadata->>'contentSha256' AS content_sha256, created_at FROM media_assets WHERE storage_key=$1 LIMIT 1", [file.cid]);
     if (existing.rows.length) {
       const row = existing.rows[0];
       if (row.content_sha256 && String(row.content_sha256).toLowerCase() !== contentSha256) throw fail(409, "MEDIA_HASH_MISMATCH", "This private object is already registered with a different SHA-256.");
+      if (String(row.artist_id) !== artist.id) {
+        // Registered under another artist record. Move it only if this wallet
+        // owns that record too and none of its releases use the asset.
+        const owner = await this.db.query("SELECT artist_id FROM artist_owners WHERE artist_id=$1 AND owner_wallet=$2 LIMIT 1", [row.artist_id, identity.wallet]);
+        if (!owner.rows.length) throw fail(409, "MEDIA_ASSET_OWNED_ELSEWHERE", "This private object is registered to an artist this wallet does not own.");
+        const inUse = await this.db.query("SELECT 1 FROM experiences WHERE media_config::text LIKE $1 LIMIT 1", [`%${row.id}%`]);
+        if (inUse.rows.length) throw fail(409, "MEDIA_ASSET_IN_USE", "This track is already used by a release of your other artist profile. Use that profile, or upload a different master.");
+        await this.db.query("UPDATE media_assets SET artist_id=$1, updated_at=now() WHERE id=$2 AND artist_id=$3", [artist.id, row.id, row.artist_id]);
+        await this.audit({ identity, request, eventType: "STUDIO_MEDIA_REASSIGNED", subjectType: "media_asset", subjectId: row.id, payload: { fromArtistId: row.artist_id, toArtistId: artist.id, uploadId } });
+        this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "REASSIGNED", assetId: row.id, fromArtistId: row.artist_id, upstream });
+        return { id: row.id, mediaType: row.media_type || mediaType, byteSize: file.size, createdAt: row.created_at || null };
+      }
       this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "ALREADY_REGISTERED", assetId: row.id, upstream });
       return { id: row.id, mediaType: row.media_type || mediaType, byteSize: file.size, createdAt: row.created_at || null };
     }
