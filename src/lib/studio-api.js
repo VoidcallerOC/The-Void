@@ -12,6 +12,7 @@ export async function studioFetch(path, { method = "GET", payload, headers, fetc
     const error = new Error(body.error?.message || (response.status === 404 ? `Artist Studio API route not found: ${method} ${path} (${response.status}).` : response.status === 413 ? "The file is too large for the upload route. Try a smaller file." : `Artist Studio request failed (${response.status}).`));
     error.code = body.error?.code || `HTTP_${response.status}`;
     error.status = response.status;
+    error.details = body.error?.details || null;
     error.endpoint = `/api${path}`;
     throw error;
   }
@@ -151,6 +152,18 @@ async function sendToSignedUrl({ url, file, contentType, send, onProgress }) {
   }
 }
 
+const PRIVATE_STORAGE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 4000, 8000, 15000]);
+
+function withUploadPhase(error, phase) {
+  if (error && typeof error === "object") {
+    error.phase = phase;
+    return error;
+  }
+  const wrapped = new Error(String(error || "Upload failed."));
+  wrapped.phase = phase;
+  return wrapped;
+}
+
 // PRIVATE full-length track. The API issues a short-lived private upload link
 // to the artist's wallet, the browser sends the file straight to private
 // storage, and the API then records it. Only an asset id comes back, never a
@@ -174,15 +187,23 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   }
   onProgress?.({ stage: "hashing" });
   const contentSha256 = await hash(file);
-  await sendToSignedUrl({ url: link.url, file, contentType, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
-  onProgress?.({ stage: "confirming" });
-  for (let attempt = 0; ; attempt += 1) {
+  try {
+    await sendToSignedUrl({ url: link.url, file, contentType, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
+  } catch (error) {
+    throw withUploadPhase(error, "upload");
+  }
+  onProgress?.({ stage: "verifying" });
+  for (let attempt = 0; attempt < PRIVATE_STORAGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) await wait(PRIVATE_STORAGE_RETRY_DELAYS_MS[attempt]);
     try {
+      onProgress?.({ stage: "verifying", attempt: attempt + 1, totalAttempts: PRIVATE_STORAGE_RETRY_DELAYS_MS.length });
       const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256 }, headers, fetchImpl });
+      onProgress?.({ stage: "registering" });
       return { assetId: asset.id, filename: file.name, contentType, byteSize: asset.byteSize ?? file.size };
     } catch (error) {
-      if (error.code !== "MEDIA_UPLOAD_NOT_FOUND" || attempt >= 5) throw error;
-      await wait(2000);
+      if (error.code !== "MEDIA_UPLOAD_NOT_FOUND" || error.details?.retryable !== true || attempt === PRIVATE_STORAGE_RETRY_DELAYS_MS.length - 1) {
+        throw withUploadPhase(error, error.code === "MEDIA_UPLOAD_NOT_FOUND" ? "private-storage" : "registration");
+      }
     }
   }
 }

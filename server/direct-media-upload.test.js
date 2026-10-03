@@ -72,7 +72,7 @@ describe("registering a direct upload", () => {
 
   it("says to retry while the file has not reached storage", async () => {
     const { instance, repository } = setup({ file: null });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).rejects.toMatchObject({ status: 409, code: "MEDIA_UPLOAD_NOT_FOUND" });
+    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).rejects.toMatchObject({ status: 409, code: "MEDIA_UPLOAD_NOT_FOUND", details: { retryable: true, reason: "PRIVATE_STORAGE_EVENTUAL_CONSISTENCY", retryAfterMs: 1000 } });
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
