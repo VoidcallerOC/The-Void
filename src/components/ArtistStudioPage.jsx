@@ -6,7 +6,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, createFujiE2EMintPlan, encodeCreateFujiEdition, encodeFujiE2ECreateEdition, encodeFujiE2EMint, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiE2EMintPreflight, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -22,7 +22,6 @@ const STEPS = [
   ["track", "Tracks"],
   ["experience", "Experiences"],
 ];
-const E2E_MINT_CHECKING_STATUS = { state: "checking", message: "Checking Fuji chain, artist and issuer roles, and that this run's test edition is unused…" };
 
 function TextField({ title, value, onChange, multiline = false, required = false, placeholder = "", readOnly = false }) {
   const Tag = multiline ? "textarea" : "input";
@@ -112,8 +111,6 @@ export function ArtistStudioPage() {
   // recover and inspect the exact transaction instead of losing it.
   const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
-  const [e2eMintStatus, setE2eMintStatus] = useState({ state: "hidden", message: "" });
-  const [e2eMintPlan, setE2eMintPlan] = useState(() => createFujiE2EMintPlan());
   const [fullTrack, setFullTrack] = useState(null);
   const [uploads, setUploads] = useState({});
   const [mintReleaseId, setMintReleaseId] = useState("");
@@ -124,15 +121,6 @@ export function ArtistStudioPage() {
   const canUseStudio = wallet.connected && wallet.authenticated;
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
-  const walletAccount = wallet.account;
-  const walletConnected = wallet.connected;
-  const walletProvider = wallet.provider;
-  const isE2EAdmin = walletAccount?.toLowerCase() === FUJI_E2E_MINT.wallet;
-  const visibleE2eMintStatus = !isE2EAdmin || !walletConnected
-    ? { state: "hidden", message: "" }
-    : e2eMintStatus.state === "hidden"
-      ? E2E_MINT_CHECKING_STATUS
-      : e2eMintStatus;
   const existingReleases = useMemo(() => studioReleaseChoices(ownedStudioCatalog || {}), [ownedStudioCatalog]);
   const ownedArtists = useMemo(() => studioArtistChoices(ownedStudioCatalog?.artists || []), [ownedStudioCatalog]);
   const activeArtist = ownedArtists.find((artist) => artist.id === artistId) || ownedArtists[0] || null;
@@ -154,44 +142,7 @@ export function ArtistStudioPage() {
     return () => { cancelled = true; };
   }, [canUseStudio, headers]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!isE2EAdmin || !walletConnected) return undefined;
-    void Promise.resolve()
-      .then(() => {
-        if (cancelled) return undefined;
-        return readFujiE2EMintPreflight(walletProvider, walletAccount, e2eMintPlan);
-      })
-      .then((result) => {
-        if (!cancelled && result) setE2eMintStatus({ state: "ready", message: result.stage === "create" ? "Preflight passed. This run creates a fresh one-copy test edition, then mints it." : "Preflight passed. This run's test edition exists and is unminted.", result });
-      })
-      .catch((error) => { if (!cancelled) setE2eMintStatus({ state: "blocked", message: error.message }); });
-    return () => { cancelled = true; };
-  }, [isE2EAdmin, walletConnected, walletAccount, walletProvider, e2eMintPlan]);
 
-  const mintE2ETestCopy = async () => {
-    const plan = e2eMintPlan;
-    setBusy("e2e-mint");
-    try {
-      const provider = wallet.getProvider?.();
-      let preflight = await readFujiE2EMintPreflight(provider, wallet.account, plan);
-      if (preflight.stage === "create") {
-        setE2eMintStatus({ state: "confirming", message: "Rabby confirmation 1 of 2: create this run's one-copy test edition…" });
-        const created = encodeFujiE2ECreateEdition(plan);
-        await simulateCreateFujiEdition(provider, { from: wallet.account, data: created.data });
-        const creation = await sendFujiTransaction({ provider, from: wallet.account, data: created.data });
-        await verifyFujiEditionCreation(provider, { transactionHash: creation.hash, releaseId: plan.releaseId, editionId: plan.editionId, tokenId: plan.tokenId });
-        preflight = await readFujiE2EMintPreflight(provider, wallet.account, plan);
-      }
-      if (preflight.stage !== "mint") throw new Error("The E2E test edition is not ready to mint.");
-      setE2eMintStatus({ state: "confirming", message: "Rabby confirmation 2 of 2: mint exactly one copy of this run's test edition…" });
-      const result = await sendFujiTransaction({ provider, from: wallet.account, data: encodeFujiE2EMint(plan) });
-      const verified = await verifyFujiE2EMint(provider, { transactionHash: result.hash, plan });
-      setE2eMintStatus({ state: "complete", message: `Mint confirmed. Seller balance verified at ${verified.balance.toString()}. Start a new run for another test edition.`, hash: result.hash });
-    } catch (error) {
-      setE2eMintStatus({ state: "blocked", message: error.message, hash: error.transactionHash || "" });
-    } finally { setBusy(""); }
-  };
 
 
   // Releases are published as the wallet's own artist profile. Profile details
@@ -475,18 +426,6 @@ export function ArtistStudioPage() {
         </div>
       )}
 
-      {isE2EAdmin && wallet.connected && (
-        <section style={{ ...card, marginBottom: 24, borderColor: "var(--vc-crimson)" }} aria-label="Temporary Fuji E2E mint control">
-          <Eyebrow red>Temporary Fuji E2E control</Eyebrow>
-          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 30, margin: "10px 0 8px" }}>Mint E2E Test Copy</h2>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>Admin-only test control. It submits no transaction until you click and approve the normal Rabby confirmation.</p>
-          <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.7, wordBreak: "break-all" }}>Test release: {e2eMintPlan.releaseId}<br />Test edition: {e2eMintPlan.editionId}<br />Token ID: {e2eMintPlan.tokenId.toString()}<br />Quantity: 1<br />Contract: {FUJI_RELEASE_CONFIG.contractAddress}</p>
-          {visibleE2eMintStatus.message && <p role="status" style={{ color: visibleE2eMintStatus.state === "complete" || visibleE2eMintStatus.state === "ready" ? "var(--vc-bone-dim)" : "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{visibleE2eMintStatus.message}</p>}
-          {visibleE2eMintStatus.hash && <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all" }}>TX: <a href={fujiExplorerUrl("tx", visibleE2eMintStatus.hash)} target="_blank" rel="noreferrer">{visibleE2eMintStatus.hash}</a></p>}
-          <button type="button" style={primaryBtn} disabled={busy !== "" || visibleE2eMintStatus.state !== "ready"} onClick={mintE2ETestCopy}>{busy === "e2e-mint" ? "Confirming…" : "Mint E2E Test Copy"}</button>
-          {visibleE2eMintStatus.state === "complete" && <button type="button" style={{ ...primaryBtn, marginLeft: 12 }} disabled={busy !== ""} onClick={() => { setE2eMintStatus({ state: "hidden", message: "" }); setE2eMintPlan(createFujiE2EMintPlan()); }}>Start New E2E Run</button>}
-        </section>
-      )}
 
       {workflow === "catalog" && <nav aria-label="Catalog editor workflow" className="vc-studio-steps">
         {STEPS.map(([id, title], index) => (
