@@ -551,7 +551,7 @@ export class ArtistStudioService {
     } catch (error) {
       throw new ApiError(error.status || 502, error.code || "MEDIA_UPLOAD_LOOKUP_FAILED", error.message || "Could not confirm the upload.");
     }
-    if (!file || !file.cid) throw new ApiError(409, "MEDIA_UPLOAD_NOT_FOUND", "The upload has not reached private storage yet. Try again in a moment.");
+    if (!file || !file.cid) throw new ApiError(409, "MEDIA_UPLOAD_NOT_FOUND", "The upload has not reached private storage yet.", { retryable: true, reason: "PRIVATE_STORAGE_EVENTUAL_CONSISTENCY", retryAfterMs: 1000 });
     if (file.network !== "private" || file.keyvalues.voidArtistId !== artist.id || file.keyvalues.voidUploadId !== uploadId) throw new ApiError(409, "MEDIA_UPLOAD_MISMATCH", "The stored file does not match this upload.");
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw new ApiError(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.");
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);

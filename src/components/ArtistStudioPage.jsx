@@ -349,7 +349,8 @@ export function ArtistStudioPage() {
       const result = await upload(artistId || await ensureArtist());
       setUploads((prior) => ({ ...prior, [key]: { state: "done", message: describe(result) } }));
     } catch (error) {
-      setUploads((prior) => ({ ...prior, [key]: { state: "error", message: `${file.name}: ${error.message}` } }));
+      const phase = error.phase === "upload" ? "Upload failed" : error.phase === "private-storage" ? "Private storage not available" : error.phase === "registration" ? "Registration failed" : "Upload failed";
+      setUploads((prior) => ({ ...prior, [key]: { state: "error", message: `${file.name}: ${phase}: ${error.message}` } }));
     } finally { setBusy(""); }
   };
 
@@ -369,7 +370,8 @@ export function ArtistStudioPage() {
     const progress = (event) => {
       const message = event.stage === "hashing" ? `Checking ${file.name} (${formatBytes(file.size)})…`
         : event.stage === "uploading" ? `Uploading ${file.name} privately… ${Math.floor((event.loaded / event.total) * 100)}% of ${formatBytes(event.total)}`
-        : `Confirming ${file.name} in private storage…`;
+        : event.stage === "registering" ? `Registering ${file.name}…`
+        : `Verifying ${file.name} in private storage…`;
       setUploads((prior) => ({ ...prior, "full-track": { state: "uploading", message } }));
     };
     const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers, onProgress: progress });

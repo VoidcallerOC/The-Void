@@ -90,13 +90,40 @@ describe("Studio API contract", () => {
   it("waits for the stored file to appear before giving up", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json(signed))
-      .mockResolvedValueOnce(json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet" }, 409))
+      .mockResolvedValueOnce(json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409))
       .mockResolvedValueOnce(json({ id: "asset-11" }));
     const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
     const wait = vi.fn().mockResolvedValue();
     const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
     await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).resolves.toMatchObject({ assetId: "asset-11" });
     expect(wait).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledWith(1000);
+  });
+
+  it("uses bounded exponential backoff across repeated private-storage misses", async () => {
+    const retryable = () => json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json(signed))
+      .mockImplementationOnce(retryable)
+      .mockImplementationOnce(retryable)
+      .mockImplementationOnce(retryable)
+      .mockResolvedValueOnce(json({ id: "asset-12" }));
+    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
+    const wait = vi.fn().mockResolvedValue();
+    const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
+    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).resolves.toMatchObject({ assetId: "asset-12" });
+    expect(wait.mock.calls.map(([delay]) => delay)).toEqual([1000, 2000, 4000]);
+  });
+
+  it("stops after the bounded retry window when private storage never appears", async () => {
+    const retryable = () => json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json(signed)).mockImplementation(retryable);
+    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
+    const wait = vi.fn().mockResolvedValue();
+    const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
+    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_NOT_FOUND", phase: "private-storage" });
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(wait.mock.calls.map(([delay]) => delay)).toEqual([1000, 2000, 4000, 8000, 15000]);
   });
 
   it("falls back to the API route only for small files when direct upload is unavailable", async () => {
