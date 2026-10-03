@@ -34,6 +34,17 @@ function TextField({ title, value, onChange, multiline = false, required = false
   );
 }
 
+
+function priceInAvax(wei) {
+  try {
+    const text = String(wei ?? "").trim();
+    if (!/^\d+$/.test(text)) return "";
+    return formatAvax(text);
+  } catch {
+    return "";
+  }
+}
+
 function DayTimeField({ title, value, onChange, required = false }) {
   return (
     <label style={label}>
@@ -751,6 +762,7 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Limited or open</h2>
           <TextField title="How many copies?" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Leave empty for open" />
           <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+          {priceInAvax(form.priceWei) && <p style={{ color: "var(--vc-bone-dim)", margin: "8px 0 0" }}>{priceInAvax(form.priceWei)}</p>}
           <TextField title="Your cut on a resale (0 to 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>Type a number if only that many should ever exist. Leave it empty if people should be able to keep getting one until the sale ends. You cannot change this after you publish. 1000 on the resale cut means 10%.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
@@ -833,6 +845,7 @@ export function ArtistStudioPage() {
                 <>
                   <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This song isn't for sale yet. Fill this in to put it on sale.</p>
                   <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+          {priceInAvax(form.priceWei) && <p style={{ color: "var(--vc-bone-dim)", margin: "8px 0 0" }}>{priceInAvax(form.priceWei)}</p>}
                   <TextField title="Stop the sale early after this many?" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Leave empty to keep selling until the end" : (form.quantity || "Same as the copy limit")} />
                   <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder="Leave empty for no limit" />
                   <DayTimeField title="When can people start buying? Leave empty to start now." value={form.saleStart} onChange={(value) => set("saleStart", value)} />
