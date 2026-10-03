@@ -101,8 +101,9 @@ function savedProfileOf(row, meta) {
   const saved = {};
   if (row.display_name) saved.name = row.display_name;
   if (typeof row.bio === "string") saved.bio = row.bio;
-  if (meta.profileArtwork) saved.avatar = meta.profileArtwork;
-  if (meta.banner) saved.banner = meta.banner;
+  // Saved images are ipfs:// URIs; browsers cannot load those in <img> or url().
+  if (meta.profileArtwork) saved.avatar = ipfsToHttp(meta.profileArtwork);
+  if (meta.banner) saved.banner = ipfsToHttp(meta.banner);
   if (row.social_links != null || row.website_url != null) saved.socials = profileSocials(row.social_links, row.website_url);
   if (row.verified === true || row.verification_status === "VERIFIED") saved.verified = true;
   return saved;
@@ -129,8 +130,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       name: row.display_name || row.name || row.slug || row.id,
       handle: row.slug || row.handle || row.id,
       bio: row.bio || "",
-      avatar: meta.profileArtwork || meta.artwork || "/assets/voidcaller_art_4.png",
-      banner: meta.banner || meta.profileArtwork || "/assets/voidcaller_art_6.png",
+      avatar: ipfsToHttp(meta.profileArtwork || meta.artwork) || "/assets/voidcaller_art_4.png",
+      banner: ipfsToHttp(meta.banner || meta.profileArtwork) || "/assets/voidcaller_art_6.png",
       socials: profileSocials(row.social_links, row.website_url),
       verified: row.verified === true || row.verification_status === "VERIFIED",
       savedProfile: savedProfileOf(row, meta),
