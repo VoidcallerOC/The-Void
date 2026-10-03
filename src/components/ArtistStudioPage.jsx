@@ -117,6 +117,8 @@ export function ArtistStudioPage() {
   const [fullTrack, setFullTrack] = useState(null);
   // Edition whose catalog structure was saved with a private full track this session.
   const [gatedEditionId, setGatedEditionId] = useState("");
+  // Outcome of "Save catalog structure", shown beside the button (the page notice is far above it).
+  const [catalogStatus, setCatalogStatus] = useState(null);
   const [uploads, setUploads] = useState({});
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
@@ -228,11 +230,20 @@ export function ArtistStudioPage() {
   };
 
   const saveCatalogStructure = async () => {
-    setBusy("catalog"); setNotice("");
+    setBusy("catalog"); setNotice(""); setCatalogStatus({ ok: true, message: "Saving catalog structure…" });
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const alreadyGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
+      // Holders unlock the private full track through this experience, so never
+      // save it without one (that would publish a token that unlocks nothing).
+      if (!fullTrack && !alreadyGated) throw new Error("Upload the full track on the Tracks step first. It is what holders unlock.");
       const ids = editionId ? { releaseId, editionId } : await saveDraft();
       if (!ids.editionId) throw new Error("Save the track draft before configuring its experience.");
+      if (!fullTrack && alreadyGated) {
+        const done = "Catalog already saved with its private full track. Continue to Supply.";
+        setNotice(done); setCatalogStatus({ ok: true, message: done }); setStep("supply");
+        return;
+      }
       await studioFetch(`/studio/editions/${encodeURIComponent(ids.editionId)}/experiences`, {
         method: "POST",
         payload: {
@@ -245,11 +256,14 @@ export function ArtistStudioPage() {
         },
         headers,
       });
-      if (fullTrack) setGatedEditionId(ids.editionId);
-      setNotice(`Catalog saved: ${form.releaseTitle || "Untitled release"} now contains its track and experience relationship.`);
-      setStep("release");
+      setGatedEditionId(ids.editionId);
+      const done = `Catalog saved: ${form.releaseTitle || "Untitled release"} now gates its full track to holders. Continue with supply and publishing.`;
+      setNotice(done);
+      setCatalogStatus({ ok: true, message: done });
+      setStep("supply");
     } catch (error) {
       setNotice(error.message);
+      setCatalogStatus({ ok: false, message: error.message || "The catalog could not be saved." });
     } finally { setBusy(""); }
   };
 
@@ -638,6 +652,8 @@ export function ArtistStudioPage() {
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={saveCatalogStructure}>{busy === "catalog" ? "Saving catalog…" : "Save catalog structure"}</button>
           </div>
+          {!canUseStudio && <p role="status" style={{ color: "var(--vc-crimson)", marginTop: 12 }}>Connect and authenticate the artist wallet to save.</p>}
+          {catalogStatus && <p role="status" style={{ color: catalogStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)", marginTop: 12, lineHeight: 1.6 }}>{catalogStatus.message}</p>}
         </section>
       )}
 
