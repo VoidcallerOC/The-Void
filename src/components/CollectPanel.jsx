@@ -23,6 +23,7 @@ import {
   fujiPrimarySaleAddress,
   readPrimarySale,
 } from "../lib/primary-sale.js";
+import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
 
 function saleFacts(sale) {
   if (!fujiPrimarySaleAddress()) return "Primary sale is not configured on Fuji yet. This ERC-1155 cannot be bought until VoidPrimarySale is deployed.";
@@ -57,7 +58,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [noticeState, setNoticeState] = useState("");
-  const [txHash, setTxHash] = useState("");
+  const [sessionEvidence, setSessionEvidence] = useState(null);
   const [notCreated, setNotCreated] = useState(false);
 
   const library = useMemo(() => (catalog ? getCollectorLibrary(catalog, wallet.ownershipRecords || []) : null), [catalog, wallet.ownershipRecords]);
@@ -65,6 +66,13 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const fujiOwned = balance !== null && balance > 0n;
   const owned = certified ? fujiOwned : catalogOwned || primary.availability === "minted" && catalogOwned;
   const blocked = Boolean(sale?.configured && (sale.remaining === 0n || sale.paused || sale.purchased >= sale.perWalletLimit));
+
+  const storedEvidence = useMemo(() => loadPrimaryPurchaseEvidence({ editionId: edition?.id, tokenId, purchaser: wallet.account }), [edition?.id, tokenId, wallet.account]);
+  const purchaseEvidence = sessionEvidence?.editionId === edition?.id
+    && sessionEvidence?.tokenId === String(tokenId)
+    && sessionEvidence?.purchaser === String(wallet.account || "").toLowerCase()
+    ? sessionEvidence
+    : storedEvidence;
 
   useEffect(() => {
     let live = true;
@@ -128,7 +136,14 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       if (onChainSale.paused) throw Object.assign(new Error("This sale is paused."), { state: "paused" });
       if (onChainSale.purchased >= onChainSale.perWalletLimit) throw Object.assign(new Error("This wallet has reached the collector limit for this release."), { state: "wallet-limit" });
       const result = await collectEdition({ provider, from: wallet.account, tokenId, qty: 1, priceWei: onChainSale.priceWei });
-      setTxHash(result.hash);
+      setSessionEvidence(savePrimaryPurchaseEvidence({
+        transactionHash: result.hash,
+        tokenId,
+        editionId: edition.id,
+        quantity: 1,
+        priceWei: onChainSale.priceWei,
+        purchaser: wallet.account,
+      }));
       const nextBalance = await readFujiBalance(provider, wallet.account, tokenId);
       setBalance(nextBalance);
       const refreshed = await readPrimarySale(provider, tokenId, wallet.account);
@@ -212,9 +227,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
           {notice}
         </p>
       )}
-      {txHash && (
+      {purchaseEvidence?.transactionHash && (
         <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all" }}>
-          Receipt · <a href={fujiExplorerUrl("tx", txHash)} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{txHash}</a>
+          Receipt · <a href={fujiExplorerUrl("tx", purchaseEvidence.transactionHash)} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{purchaseEvidence.transactionHash}</a>
         </p>
       )}
     </>

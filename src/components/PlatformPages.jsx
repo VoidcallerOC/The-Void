@@ -319,6 +319,9 @@ export function ExperiencePage() {
   const audio = useAudio();
   const wallet = useWallet();
   const [playbackError, setPlaybackError] = useState("");
+  if (!experience && catalog.publishedLoading) {
+    return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading experience…</p></section>;
+  }
   if (!experience) return <Navigate to="/discover" replace />;
   const edition = catalog.editions.find((item) => (item.experienceIds || []).includes(experience.id) || experience.editionId === item.id);
   const release = catalog.releases.find((item) => item.id === edition?.releaseId || (item.experiences || []).includes(experience.id));

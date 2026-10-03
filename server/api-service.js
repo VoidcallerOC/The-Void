@@ -320,7 +320,15 @@ export class ApiService {
   async getMarketplaceTransaction({ chainId: rawChainId, transactionHash: rawTransactionHash }) {
     const selectedChainId = chainId(rawChainId, "chainId");
     const selectedTransactionHash = transactionHash(rawTransactionHash);
-    const { rows } = await this.db.query(`SELECT t.*, COALESCE(jsonb_agg(jsonb_build_object('status', p.status, 'listingId', p.listing_id, 'quantity', p.quantity, 'salePriceWei', p.sale_price_wei, 'settlementLogIndex', p.settlement_log_index, 'finalizedAt', p.finalized_at)) FILTER (WHERE p.id IS NOT NULL), '[]'::jsonb) AS purchases FROM transactions t LEFT JOIN purchases p ON p.transaction_id=t.id WHERE t.chain_id=$1 AND t.transaction_hash=$2 GROUP BY t.id LIMIT 1`, [selectedChainId, selectedTransactionHash]);
+    const { rows } = await this.db.query(`SELECT t.*,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('status', p.status, 'listingId', p.listing_id, 'quantity', p.quantity, 'salePriceWei', p.sale_price_wei, 'settlementLogIndex', p.settlement_log_index, 'finalizedAt', p.finalized_at)) FROM purchases p WHERE p.transaction_id=t.id), '[]'::jsonb) AS purchases,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('status', pp.status, 'saleContractAddress', pp.sale_contract_address, 'tokenContractAddress', pp.token_contract_address, 'transactionHash', pp.transaction_hash, 'logIndex', pp.log_index, 'tokenId', pp.token_id::text, 'editionId', e.id, 'quantity', pp.quantity::text, 'priceWei', pp.paid_wei::text, 'purchaser', pp.buyer_wallet, 'blockNumber', pp.block_number, 'finalizedAt', pp.finalized_at))
+        FROM primary_purchases pp
+        LEFT JOIN contracts tc ON tc.chain_id=pp.chain_id AND LOWER(tc.address)=LOWER(pp.token_contract_address)
+        LEFT JOIN tokens tok ON tok.contract_id=tc.id AND tok.token_id=pp.token_id
+        LEFT JOIN editions e ON e.id=tok.edition_id
+        WHERE pp.chain_id=t.chain_id AND pp.transaction_hash=t.transaction_hash), '[]'::jsonb) AS "primaryPurchases"
+      FROM transactions t WHERE t.chain_id=$1 AND t.transaction_hash=$2 LIMIT 1`, [selectedChainId, selectedTransactionHash]);
     if (!rows[0]) throw new ApiError(404, "TRANSACTION_NOT_FOUND", "The indexed marketplace transaction was not found.");
     return rows[0];
   }

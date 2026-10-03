@@ -148,6 +148,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       description: row.description || "",
       story: meta.story || row.description || "",
       status: String(row.status || "published").toLowerCase(),
+      publishedAt: row.published_at || row.publishedAt || null,
+      updatedAt: row.updated_at || row.updatedAt || null,
       artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
