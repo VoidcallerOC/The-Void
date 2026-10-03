@@ -235,10 +235,16 @@ describe("Pinata signed upload requests", () => {
     await expect(storage.getPrivateUpload({ fileId: "0198f2a4-1111-7222-8333-944455556666", fetchImpl })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_LOOKUP_FAILED", upstream: { status: 403 } });
   });
 
+  it("refuses a partial download instead of hashing it", async () => {
+    const hashing = new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: "j", gateway: "https://gw.example", endpoint: "x" } }, signer: async (cid) => `https://gw.example/files/${cid}` });
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("hel", { status: 206, headers: { "content-range": "bytes 0-2/5" } }));
+    await expect(hashing.sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).rejects.toMatchObject({ code: "MEDIA_HASH_UNVERIFIED", upstream: { status: 206 } });
+  });
+
   it("hashes the stored private object through a signed download link", async () => {
     const hashing = new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: "j", gateway: "https://gw.example", endpoint: "x" } }, signer: async (cid) => `https://gw.example/files/${cid}?sig=1` });
     const fetchImpl = vi.fn().mockResolvedValue(new Response("hello"));
-    await expect(hashing.sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).resolves.toEqual({ sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", bytes: 5 });
-    expect(fetchImpl).toHaveBeenCalledWith("https://gw.example/files/bafyx?sig=1");
+    await expect(hashing.sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).resolves.toMatchObject({ sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", bytes: 5, download: { status: 200 } });
+    expect(fetchImpl).toHaveBeenCalledWith("https://gw.example/files/bafyx?sig=1", { headers: { "accept-encoding": "identity" } });
   });
 });
