@@ -38,7 +38,7 @@ async function sendMedia(response, media, cors = {}) {
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
-export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, contractOwnerVerification = null, provenanceAnchor = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
+export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, marketplacePresentation = null, contractOwnerVerification = null, provenanceAnchor = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
   if (!service) throw new TypeError("createApiHandler requires an ApiService.");
   return async function handle(request, response) {
     const requestId = request.headers["x-request-id"] || createRequestId();
@@ -92,6 +92,12 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       else if (method === "GET" && base[0] === "listings" && base.length === 4) data = await service.getIndexedListing({ chainId: base[1], marketplaceAddress: base[2], listingId: base[3] });
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "volume" && base[2] === "self-titled-ep" && base.length === 3) data = await service.getSelfTitledEpVolume({ chainId: url.searchParams.get("chainId"), tokenContractAddress: url.searchParams.get("tokenContractAddress"), tokenIds: url.searchParams.get("tokenIds")?.split(",") || [] });
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "volume" && base.length === 2) data = await service.getMarketplaceVolume();
+      else if (method === "GET" && base[0] === "marketplace" && base[1] === "presentation" && base.length <= 3) {
+        if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
+        if (base.length === 2) data = await marketplacePresentation.get();
+        else if (base[2] === "editor") data = await marketplacePresentation.getEditor({ request: apiRequest });
+        else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
+      }
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "transactions" && base.length === 4) data = await service.getMarketplaceTransaction({ chainId: base[2], transactionHash: base[3] });
       else if (method === "GET" && base[0] === "collectors" && base.length === 2) data = await service.getCollector({ request: apiRequest, wallet: base[1] });
       else if (method === "GET" && base[0] === "collection" && base[1] === "activity") data = await service.collectionActivity({ request: apiRequest, wallet: url.searchParams.get("wallet"), limit: url.searchParams.get("limit"), offset: url.searchParams.get("offset") });
@@ -118,6 +124,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");
           rateLimiter?.check(`${apiRequest.rateLimitKey}:artist-verify-submit:${String(base[1] || "").toLowerCase()}`);
           data = await contractOwnerVerification.verifyClaim({ slug: base[1], address: body.address, signature: body.signature, nonce: body.nonce });
+        }
+        else if (method === "POST" && base.join("/") === "marketplace/presentation") {
+          if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
+          data = await marketplacePresentation.update({ request: apiRequest, input: body });
         }
         else if (method === "POST" && base.join("/") === "listings") data = await service.createListing({ request: apiRequest, input: body });
         else if (method === "POST" && base.join("/") === "listings/cancel") data = await service.cancelListing({ request: apiRequest, input: body });

@@ -135,3 +135,15 @@ export async function recordAuthoritativeTransactionSubmission({ transactionHash
     : { transactionHash, chainId, buyerWallet: wallet, marketplaceAddress, listingId };
   return request(path, { method: "POST", headers: authHeaders, fetchImpl, body });
 }
+
+export async function fetchMarketplacePresentation({ fetchImpl = fetch, signal } = {}) {
+  return request("/api/marketplace/presentation", { fetchImpl, signal });
+}
+
+export async function fetchMarketplacePresentationEditor({ authHeaders = {}, fetchImpl = fetch, signal } = {}) {
+  return request("/api/marketplace/presentation/editor", { headers: authHeaders, fetchImpl, signal });
+}
+
+export async function saveMarketplacePresentation({ heroArtwork, authHeaders = {}, fetchImpl = fetch } = {}) {
+  return request("/api/marketplace/presentation", { method: "POST", body: { heroArtwork }, headers: authHeaders, fetchImpl });
+}
