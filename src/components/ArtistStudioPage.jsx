@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
-import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
+import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, fujiPrimarySaleAddress, weiToAvax, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
@@ -33,6 +33,7 @@ function TextField({ title, value, onChange, multiline = false, required = false
     </label>
   );
 }
+
 
 function DayTimeField({ title, value, onChange, required = false }) {
   return (
@@ -99,7 +100,7 @@ function initialState() {
     trackPreview: "",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
-    priceWei: "10000000000000000",
+    priceWei: "0.01",
     royaltyBps: "500",
     saleSupply: "",
     perWalletLimit: "1",
@@ -163,7 +164,7 @@ export function ArtistStudioPage() {
     setReleaseId(resumed.releaseId);
     setEditionId(resumed.editionId || "");
     setPublishedTokenId(resumed.tokenId);
-    setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined)) }));
+    setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined).map(([key, value]) => [key, key === "priceWei" ? weiToAvax(value) : value])) }));
     setConfiguredSale(null);
     setWorkflow("catalog");
     setStep("sale");
@@ -253,7 +254,7 @@ export function ArtistStudioPage() {
             description: form.trackDescription,
             artwork: form.trackArtwork,
             quantity: form.quantity,
-            priceWei: form.priceWei,
+            priceWei: avaxToWei(form.priceWei),
             marketplace: {},
             metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}) },
           },
@@ -385,7 +386,7 @@ export function ArtistStudioPage() {
       const perWalletLimit = String(form.perWalletLimit ?? "").trim() === "" && openEdition ? "0" : form.perWalletLimit;
       const data = encodeConfigureSale({
         tokenId: publishedTokenId,
-        priceWei: form.priceWei,
+        priceWei: avaxToWei(form.priceWei),
         maxSupply: saleSupply,
         perWalletLimit,
         startTime: form.saleStart,
@@ -402,7 +403,7 @@ export function ArtistStudioPage() {
       } catch (error) {
         throw Object.assign(new Error(explainConfigureSaleError({ ...error, code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? error.code : "TRANSACTION_SUBMISSION_FAILED" }).message), { code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? "TRANSACTION_REJECTED" : "TRANSACTION_SUBMISSION_FAILED", cause: error, transactionHash: error?.transactionHash });
       }
-      setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
+      setNotice(`Sale configured at ${form.priceWei} AVAX. Transaction confirmed: ${transaction.hash}`);
       setConfiguredSale(await readPrimarySale(publicProvider, publishedTokenId, wallet.account));
     } catch (error) {
       setNotice(explainConfigureSaleError(error).message);
@@ -584,7 +585,7 @@ export function ArtistStudioPage() {
                     setArtistId(resumed.artistId);
                     setReleaseId(resumed.releaseId);
                     setEditionId(resumed.editionId);
-                    setForm((prior) => ({ ...prior, ...resumed.form }));
+                    setForm((prior) => ({ ...prior, ...resumed.form, ...(resumed.form?.priceWei ? { priceWei: weiToAvax(resumed.form.priceWei) } : {}) }));
                     setWorkflow("catalog");
                     setStep("track");
                     setNotice(`${resumed.form.releaseTitle} is loaded. Check its preview clip and full track${resumed.gated ? "" : ", save the catalog structure"}, then publish it on Fuji.`);
@@ -750,7 +751,7 @@ export function ArtistStudioPage() {
           <Eyebrow red>How many</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Limited or open</h2>
           <TextField title="How many copies?" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Leave empty for open" />
-          <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+          <TextField title="Price (AVAX)" value={form.priceWei} onChange={(value) => set("priceWei", value)} placeholder="0.01" />
           <TextField title="Your cut on a resale (0 to 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>Type a number if only that many should ever exist. Leave it empty if people should be able to keep getting one until the sale ends. You cannot change this after you publish. 1000 on the resale cut means 10%.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
@@ -832,7 +833,7 @@ export function ArtistStudioPage() {
               ) : (
                 <>
                   <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This song isn't for sale yet. Fill this in to put it on sale.</p>
-                  <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+                  <TextField title="Price (AVAX)" value={form.priceWei} onChange={(value) => set("priceWei", value)} placeholder="0.01" />
                   <TextField title="Stop the sale early after this many?" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Leave empty to keep selling until the end" : (form.quantity || "Same as the copy limit")} />
                   <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder="Leave empty for no limit" />
                   <DayTimeField title="When can people start buying? Leave empty to start now." value={form.saleStart} onChange={(value) => set("saleStart", value)} />
