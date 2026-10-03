@@ -131,7 +131,10 @@ export function ArtistStudioPage() {
   const activeArtist = ownedArtists.find((artist) => artist.id === artistId) || ownedArtists[0] || null;
   const selectedMintRelease = ownedStudioCatalog?.releases?.find((release) => release.id === mintReleaseId) || null;
   const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
-  const selectedMintEdition = mintEditions.find((edition) => edition.id === mintEditionId) || null;
+  // Only editions on the certified Fuji contract can be minted from Studio; when
+  // there is exactly one, use it without making the artist pick it.
+  const mintableEditions = mintEditions.filter((edition) => String(edition.contractAddress || "").toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase());
+  const selectedMintEdition = mintEditions.find((edition) => edition.id === mintEditionId) || (mintableEditions.length === 1 ? mintableEditions[0] : null);
   const mintTracks = useMemo(() => {
     if (!selectedMintRelease) return [];
     if (Array.isArray(selectedMintRelease.tracks) && selectedMintRelease.tracks.length) return selectedMintRelease.tracks;
@@ -325,7 +328,7 @@ export function ArtistStudioPage() {
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate the artist wallet before minting.");
       if (!selectedMintRelease) throw new Error("Select an existing album or collection first.");
-      if (!selectedMintEdition) throw new Error("Select the target contract for this catalog.");
+      if (!selectedMintEdition) throw new Error(mintableEditions.length ? "Select the target contract for this catalog." : "This catalog has no edition on the certified Fuji contract, so there is nothing Studio can mint for it yet.");
       if (!mintTrackIds.length) throw new Error("Select at least one existing track.");
       const target = assertFujiAddress(selectedMintEdition.contractAddress);
       const provider = wallet.getProvider?.();
@@ -480,7 +483,7 @@ export function ArtistStudioPage() {
             </div>
             <label style={label}>
               Select target contract
-              <select value={mintEditionId} onChange={(event) => setMintEditionId(event.target.value)} style={field}>
+              <select value={selectedMintEdition?.id || ""} onChange={(event) => setMintEditionId(event.target.value)} style={field}>
                 <option value="">Choose a contract</option>
                 {mintEditions.map((edition) => <option key={edition.id} value={edition.id} disabled={String(edition.contractAddress || "").toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()}>{edition.contractAddress || "Contract not configured"} · chain {edition.chainId || "—"}</option>)}
               </select>
@@ -488,7 +491,7 @@ export function ArtistStudioPage() {
             {selectedMintEdition && String(selectedMintEdition.contractAddress || "").toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase() && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>This contract is not the certified Fuji mint target and is read-only in Artist Studio.</p>}
             <TextField title="Mint quantity per selected track" value={mintAmount} onChange={setMintAmount} required />
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-              <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !mintTrackIds.length || !selectedMintEdition} onClick={mintSelectedTracks}>{busy === "mint-tracks" ? "Minting…" : "Mint token(s)"}</button>
+              <button type="button" style={primaryBtn} disabled={busy !== ""} onClick={mintSelectedTracks}>{busy === "mint-tracks" ? "Minting…" : "Mint token(s)"}</button>
               <button type="button" style={ghostBtn} onClick={() => { setWorkflow("catalog"); setStep("release"); }}>Back to catalog editor</button>
             </div>
             {mintStatus && <p role="status" style={{ marginTop: 14, fontFamily: "var(--font-mono)", fontSize: 12, color: mintStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{mintStatus.ok ? "" : "✕ "}{mintStatus.message}</p>}
