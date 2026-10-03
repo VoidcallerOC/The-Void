@@ -163,11 +163,12 @@ describe.skipIf(!testDatabaseUrl)("019 legacy catalog seed (database)", () => {
       expect(row.metadata_uri).toBe(legacyMetadataUri(row.token_id));
       expect(row.metadata).toMatchObject({ image: media.image, animation_url: media.animationUrl, art: gatewayUrl(media.image), artUri: media.image });
     }
-    expect(before.releases[0].release_metadata).toMatchObject({ artwork: gatewayUrl(LEGACY_IPFS_MEDIA[1].image), artworkUri: LEGACY_IPFS_MEDIA[1].image });
+    // Migration 029 makes the robed-figure EP cover the release and edition cover.
+    expect(before.releases[0].release_metadata).toMatchObject({ artwork: "/assets/voidcaller_ep_cover.webp", artworkUri: LEGACY_IPFS_MEDIA[1].image });
     for (const track of before.releases[0].release_metadata.tracks) {
       expect(track).toMatchObject({ art: gatewayUrl(LEGACY_IPFS_MEDIA[track.tokenId].image), artUri: LEGACY_IPFS_MEDIA[track.tokenId].image, experienceId: legacyExperienceId(track.tokenId), previewSrc: LEGACY_TOKENS.find((item) => item.tokenId === track.tokenId).previewSrc });
     }
-    expect(before.editions[0].application_metadata).toMatchObject({ artwork: gatewayUrl(LEGACY_IPFS_MEDIA[1].image), artworkUri: LEGACY_IPFS_MEDIA[1].image });
+    expect(before.editions[0].application_metadata).toMatchObject({ artwork: "/assets/voidcaller_ep_cover.webp", artworkUri: LEGACY_IPFS_MEDIA[1].image });
     expect(before.experiences.map((row) => row.id)).toEqual(LEGACY_TOKENS.map((track) => legacyExperienceId(track.tokenId)));
     for (const row of before.experiences) {
       const tokenId = row.id.split("-").pop();
@@ -233,7 +234,7 @@ describe.skipIf(!testDatabaseUrl)("019 legacy catalog seed (database)", () => {
     expect(releases).toEqual([expect.objectContaining({ id: LEGACY_ALBUM_ID, artist_slug: "voidcaller", status: "PUBLISHED" })]);
     expect(releases[0].release_metadata.tracks.map((track) => track.previewSrc)).toEqual(expect.arrayContaining(LEGACY_TOKENS.map((track) => track.previewSrc)));
     // The public token images survive the CID redaction. Other CIDs still do not.
-    expect(releases[0].release_metadata).toMatchObject({ artwork: gatewayUrl(LEGACY_IPFS_MEDIA[1].image), artworkUri: LEGACY_IPFS_MEDIA[1].image });
+    expect(releases[0].release_metadata).toMatchObject({ artwork: "/assets/voidcaller_ep_cover.webp", artworkUri: LEGACY_IPFS_MEDIA[1].image });
     for (const track of releases[0].release_metadata.tracks) expect(track).toMatchObject({ art: gatewayUrl(LEGACY_IPFS_MEDIA[track.tokenId].image), artUri: LEGACY_IPFS_MEDIA[track.tokenId].image });
     await pool.query("UPDATE releases SET release_metadata = release_metadata || $2 WHERE id=$1", [LEGACY_ALBUM_ID, { secretCid: "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", note: `see ${LEGACY_IPFS_MEDIA[2].animationUrl}` }]);
     const redacted = (await service.listReleases({}))[0].release_metadata;
@@ -242,7 +243,7 @@ describe.skipIf(!testDatabaseUrl)("019 legacy catalog seed (database)", () => {
 
     const editions = await service.listEditions({});
     expect(editions).toEqual([expect.objectContaining({ id: LEGACY_EDITION_ID, chain_id: String(LEGACY_CHAIN_ID), contract_address: LEGACY_CONTRACT, status: "PUBLISHED" })]);
-    expect(editions[0].application_metadata).toMatchObject({ legacy: true, primarySale: false, tokenIds: ["0", "1", "2", "3"], artwork: gatewayUrl(LEGACY_IPFS_MEDIA[1].image) });
+    expect(editions[0].application_metadata).toMatchObject({ legacy: true, primarySale: false, tokenIds: ["0", "1", "2", "3"], artwork: "/assets/voidcaller_ep_cover.webp" });
 
     const experiences = await service.listExperiences({});
     expect(experiences.map((row) => row.id).sort()).toEqual(LEGACY_TOKENS.map((track) => legacyExperienceId(track.tokenId)).sort());
