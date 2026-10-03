@@ -12,8 +12,8 @@ describe("runtime config packaging", () => {
     expect(config).toMatchObject({ networkName: "Avalanche Fuji", chainId: 43113, contractType: "ERC1155" });
     expect(config.contractAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
     if (config.contractName === "VoidRelease1155V2") {
-      expect(config.contractAddress).toBe("0x82b26Da27136935454Bdf1e40801190B521b82e5");
-      expect(config.primarySaleAddress).toBe("0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1");
+      expect(config.contractAddress).toBe("0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6");
+      expect(config.primarySaleAddress).toBe("0x51cCD2d5Cd71368917f1EFe3fa43Fab8068E1aBA");
       if (process.env.EXPECTED_FUJI_V2_RELEASE_ADDRESS) expect(config.contractAddress.toLowerCase()).toBe(process.env.EXPECTED_FUJI_V2_RELEASE_ADDRESS.toLowerCase());
     } else {
       expect(config.contractName).toBe("VoidRelease1155");
