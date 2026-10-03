@@ -189,6 +189,25 @@ export function formatAvax(wei) {
   return `${ethers.formatEther(BigInt(wei))} AVAX`;
 }
 
+export function avaxToWei(value) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error("Enter a price in AVAX.");
+  let wei;
+  try {
+    wei = ethers.parseEther(text);
+  } catch {
+    throw new Error("Enter a price in AVAX, like 0.01.");
+  }
+  if (wei <= 0n) throw new Error("Price must be more than 0 AVAX.");
+  return wei.toString();
+}
+
+export function weiToAvax(value) {
+  const text = String(value ?? "").trim();
+  if (!/^\d+$/.test(text)) return text;
+  return ethers.formatEther(BigInt(text));
+}
+
 function revertData(error) {
   const candidates = [error?.data, error?.error?.data, error?.info?.error?.data, error?.cause?.data, error?.data?.data];
   for (const candidate of candidates) {
