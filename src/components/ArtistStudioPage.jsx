@@ -10,6 +10,7 @@ import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdi
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
+import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
@@ -145,11 +146,7 @@ export function ArtistStudioPage() {
   // there is exactly one, use it without making the artist pick it.
   const mintableEditions = mintEditions.filter((edition) => String(edition.contractAddress || "").toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase());
   const selectedMintEdition = mintEditions.find((edition) => edition.id === mintEditionId) || (mintableEditions.length === 1 ? mintableEditions[0] : null);
-  const mintTracks = useMemo(() => {
-    if (!selectedMintRelease) return [];
-    if (Array.isArray(selectedMintRelease.tracks) && selectedMintRelease.tracks.length) return selectedMintRelease.tracks;
-    return mintEditions.flatMap((edition) => (edition.tokenIds || []).map((tokenId) => ({ title: edition.title, tokenId: String(tokenId), experienceId: edition.experienceIds?.[0] || "" })));
-  }, [selectedMintRelease, mintEditions]);
+  const mintTracks = useMemo(() => tracksOnRelease(selectedMintRelease, mintEditions), [selectedMintRelease, mintEditions]);
 
   const openPublishedSale = (catalog, requestedReleaseId) => {
     const resumed = resumeOwnedRelease(catalog, requestedReleaseId);
@@ -400,6 +397,33 @@ export function ArtistStudioPage() {
     }
   };
 
+  const startNewTrack = () => {
+    if (!selectedMintRelease) return;
+    setSelectedReleaseId(selectedMintRelease.id);
+    setArtistId(selectedMintRelease.artistId || "");
+    setReleaseId(selectedMintRelease.id);
+    setEditionId("");
+    setGatedEditionId("");
+    setPublishedTokenId("");
+    setFullTrack(null);
+    setExperienceAudio(null);
+    setForm((prior) => ({
+      ...prior,
+      releaseTitle: selectedMintRelease.title || prior.releaseTitle,
+      releaseDescription: selectedMintRelease.description || "",
+      releaseArtwork: selectedMintRelease.artwork || "",
+      trackTitle: "",
+      trackDescription: "",
+      trackArtwork: "",
+      trackPreview: "",
+      experienceTitle: "",
+      experienceDescription: "",
+    }));
+    setWorkflow("catalog");
+    setStep("track");
+    setNotice(`${selectedMintRelease.title} stays the release. Name the new song below. Saving adds that track to this release. It does not mint more copies of a song already on it.`);
+  };
+
   const mintSelectedTracks = async () => {
     setBusy("mint-tracks"); setNotice(""); setMintTxHashes([]); setTxEvidence(null); setMintStatus({ ok: true, message: "Checking mint permission on Fuji…" });
     try {
@@ -507,7 +531,7 @@ export function ArtistStudioPage() {
         <button type="button" className={`vc-studio-action${workflow === "mint" ? " is-primary" : ""}`} onClick={() => { setWorkflow("mint"); setStep("mint"); setNotice(""); }}>
           <Eyebrow red>02</Eyebrow>
           <h2>Add tracks</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Select existing tracks and mint them on-chain.</p>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Add another song to a release, or mint copies of a track already on-chain.</p>
         </button>
       </div>
 
@@ -548,7 +572,7 @@ export function ArtistStudioPage() {
         <section style={card} aria-label="Mint existing tracks">
           <Eyebrow red>Token minting / deployment</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Add tracks</h2>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Your catalog is already defined. Select an existing album or collection, choose its tracks, select an authorized contract, then mint the token copies.</p>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Pick the release. Add track puts a new song on that same release. Mint quantity is how many copies of a track that is already on-chain.</p>
           {!canUseStudio ? <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to load your catalog.</p> : ownedStudioCatalog && !existingReleases.length ? <p style={{ color: "var(--vc-bone-dim)" }}>No albums or collections are available for this authenticated artist.</p> : null}
           <label style={label}>
             Select album / collection
@@ -558,11 +582,12 @@ export function ArtistStudioPage() {
             </select>
           </label>
           {selectedMintRelease && <>
-            <label style={label}>Select tracks</label>
+            <label style={label}>Tracks on this release</label>
             <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               {mintTracks.length ? mintTracks.map((track) => {
                 const id = mintTrackKey(track);
-                return <label key={id} style={{ ...label, marginTop: 0, display: "flex", gap: 10, alignItems: "center", textTransform: "none", letterSpacing: 0, fontSize: 14 }}><input type="checkbox" checked={mintTrackIds.includes(id)} onChange={() => setMintTrackIds((prior) => prior.includes(id) ? prior.filter((item) => item !== id) : [...prior, id])} /> {track.title || "Untitled track"}{track.experienceId ? ` · ${track.experienceId}` : ""}</label>;
+                const onChain = track.tokenId !== undefined && track.tokenId !== null && track.tokenId !== "";
+                return <label key={id} style={{ ...label, marginTop: 0, display: "flex", gap: 10, alignItems: "center", textTransform: "none", letterSpacing: 0, fontSize: 14 }}><input type="checkbox" disabled={!onChain} checked={mintTrackIds.includes(id)} onChange={() => setMintTrackIds((prior) => prior.includes(id) ? prior.filter((item) => item !== id) : [...prior, id])} /> {track.title || "Untitled track"}{onChain ? ` · token ${track.tokenId}` : " · not on-chain yet"}</label>;
               }) : (
                 <div>
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>Nothing to mint yet: this release has not been published on Fuji, so it has no token. Publishing creates the on-chain edition; its token then appears here.</p>
@@ -590,9 +615,13 @@ export function ArtistStudioPage() {
               </select>
             </label>
             {selectedMintEdition && String(selectedMintEdition.contractAddress || "").toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase() && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>This contract is not the certified Fuji mint target and is read-only in Artist Studio.</p>}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+              <button type="button" style={primaryBtn} onClick={startNewTrack}>Add track</button>
+            </div>
             <TextField title="Mint quantity per selected track" value={mintAmount} onChange={setMintAmount} required />
+            <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>This number is copies of the tracks you checked. It does not add a new song.</p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-              <button type="button" style={primaryBtn} disabled={busy !== ""} onClick={mintSelectedTracks}>{busy === "mint-tracks" ? "Minting…" : "Mint token(s)"}</button>
+              <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={mintSelectedTracks}>{busy === "mint-tracks" ? "Minting…" : "Mint copies"}</button>
               <button type="button" style={ghostBtn} onClick={() => { setWorkflow("catalog"); setStep("release"); }}>Back to catalog editor</button>
             </div>
             {mintStatus && <p role="status" style={{ marginTop: 14, fontFamily: "var(--font-mono)", fontSize: 12, color: mintStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{mintStatus.ok ? "" : "✕ "}{mintStatus.message}</p>}
@@ -658,7 +687,7 @@ export function ArtistStudioPage() {
         <section style={card}>
           <Eyebrow red>Tracks</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Track details</h2>
-          <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}</p>
+          <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}. {editionId ? "Editing this track." : releaseId ? "Saving adds a new track on this release. It does not change the songs already on it." : ""}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
           <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
