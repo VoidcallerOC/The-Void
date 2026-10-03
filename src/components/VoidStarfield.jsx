@@ -25,9 +25,9 @@ const HEADING_Y = 0.57;
 
 // depth: drift + parallax multiplier. Counts are per device class, not area.
 const LAYERS = [
-  { name: "far", depth: 0.18, speed: 0.9, scroll: 0.03, size: [0.5, 0.95], alpha: [0.22, 0.54], pointer: 0, counts: { desktop: 240, tablet: 145, mobile: 88 } },
-  { name: "mid", depth: 0.45, speed: 2.2, scroll: 0.07, size: [0.85, 1.4], alpha: [0.38, 0.74], pointer: 0.45, counts: { desktop: 84, tablet: 52, mobile: 30 } },
-  { name: "near", depth: 1, speed: 4.2, scroll: 0.13, size: [1.1, 1.8], alpha: [0.48, 0.74], pointer: 1, counts: { desktop: 15, tablet: 10, mobile: 7 } },
+  { name: "far", depth: 0.18, speed: 0.9, scroll: 0.03, size: [0.6, 1.1], alpha: [0.32, 0.68], pointer: 0, counts: { desktop: 240, tablet: 145, mobile: 88 } },
+  { name: "mid", depth: 0.45, speed: 2.2, scroll: 0.07, size: [1, 1.6], alpha: [0.5, 0.88], pointer: 0.45, counts: { desktop: 100, tablet: 62, mobile: 36 } },
+  { name: "near", depth: 1, speed: 4.2, scroll: 0.13, size: [1.25, 2.05], alpha: [0.6, 0.88], pointer: 1, counts: { desktop: 18, tablet: 12, mobile: 8 } },
 ];
 
 const POINTER_RADIUS = 150; // CSS px
