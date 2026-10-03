@@ -20,7 +20,7 @@ import { ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
-import { playableTrackFor, tokenView } from "../lib/token-view.js";
+import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
@@ -398,7 +398,7 @@ export function ExperiencePage() {
             <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </div>
           {playbackError && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6 }}>{playbackError}</p>}
-          {experience.media?.protected && edition && isCertifiedFujiEdition(edition) && <ProtectedExperiencePlayer experience={experience} title={tokenTrack?.title || view.name} art={view.artworkSources?.[0]} collection={release?.title || edition?.title} />}
+          {experience.media?.protected && edition && isCertifiedFujiEdition(edition) && <ProtectedExperiencePlayer experience={experience} title={experienceTrackTitle({ experience, tokenTrack, view })} art={view.artworkSources?.[0]} collection={release?.title || edition?.title} />}
         </div>
       </div>
     </section>
