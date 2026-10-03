@@ -156,17 +156,17 @@ describe("registering a direct upload", () => {
     expect(used.reassigned).toEqual([]);
   });
 
-  it("registers a gateway-transformed object only when Pinata's size equals the browser's byte count, recording the hash as unverified", async () => {
-    const size = 180 * 1024 * 1024;
-    const { instance, repository, logger } = setup({ file: stored(), storedSha: "e".repeat(64), storedBytes: size - 12733 });
-    await expect(register(instance, { byteSize: size })).resolves.toMatchObject({ id: expect.stringMatching(/^asset-/) });
-    expect(repository.saveMediaAsset).toHaveBeenCalled();
-    expect(repository.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_MEDIA_UPLOADED", payload: expect.objectContaining({ hashVerified: false, hashCheck: "GATEWAY_TRANSFORMED" }) }));
-    expect(logger.info).toHaveBeenCalledWith("MEDIA_UPLOAD_VERIFY", expect.objectContaining({ outcome: "REGISTERED", hashVerified: false }));
-    const other = setup({ file: stored(), storedSha: "e".repeat(64), storedBytes: size - 12733 });
-    await expect(register(other.instance, { byteSize: size - 1 })).rejects.toMatchObject({ code: "MEDIA_SIZE_MISMATCH" });
-    await expect(register(other.instance)).rejects.toMatchObject({ code: "MEDIA_SIZE_MISMATCH" });
-    expect(other.repository.saveMediaAsset).not.toHaveBeenCalled();
+  it("treats Pinata's size as the DAG size: verifies the hash against the browser's byte count", async () => {
+    const fileBytes = 180 * 1024 * 1024 - 12733; // Pinata size includes UnixFS overhead
+    const { instance, repository } = setup({ file: stored(), storedBytes: fileBytes });
+    await expect(register(instance, { byteSize: fileBytes })).resolves.toMatchObject({ byteSize: fileBytes });
+    expect(repository.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ byteSize: fileBytes }));
+    expect(repository.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_MEDIA_UPLOADED", payload: expect.objectContaining({ hashVerified: true }) }));
+    const wrongSize = setup({ file: stored(), storedBytes: fileBytes });
+    await expect(register(wrongSize.instance, { byteSize: fileBytes - 1 })).rejects.toMatchObject({ code: "MEDIA_HASH_MISMATCH" });
+    const wrongHash = setup({ file: stored(), storedBytes: fileBytes, storedSha: "e".repeat(64) });
+    await expect(register(wrongHash.instance, { byteSize: fileBytes })).rejects.toMatchObject({ code: "MEDIA_HASH_MISMATCH" });
+    expect(wrongHash.repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
   it("refuses when the stored bytes do not hash to the declared SHA-256", async () => {
