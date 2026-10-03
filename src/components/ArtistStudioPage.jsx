@@ -69,6 +69,15 @@ function ArtworkField({ title, value, onChange, onUpload, uploading, disabled, s
   );
 }
 
+function isUnlimitedQuantity(value) {
+  const text = String(value ?? "").trim();
+  return text === "" || /^0+$/.test(text);
+}
+
+function supplyLabel(value) {
+  return isUnlimitedQuantity(value) ? "Unlimited until the sale ends" : String(value);
+}
+
 function initialState() {
   return {
     artistName: "",
@@ -368,15 +377,23 @@ export function ArtistStudioPage() {
         setNotice("This release already has a primary sale configured. No transaction was submitted.");
         return;
       }
-      validateSaleSupply(form.saleSupply || form.quantity, edition.maxSupply);
+      const openEdition = BigInt(edition.maxSupply) === 0n;
+      const rawSaleSupply = String(form.saleSupply ?? "").trim();
+      const requestedSaleSupply = rawSaleSupply === "" ? (openEdition ? "0" : (form.quantity || edition.maxSupply)) : rawSaleSupply;
+      const saleSupply = validateSaleSupply(requestedSaleSupply, edition.maxSupply);
+      if (openEdition && !String(form.saleEnd ?? "").trim()) {
+        throw new Error("An unlimited edition must have a sale end time. That end time closes the edition.");
+      }
+      const perWalletLimit = String(form.perWalletLimit ?? "").trim() === "" && openEdition ? "0" : form.perWalletLimit;
       const data = encodeConfigureSale({
         tokenId: publishedTokenId,
         priceWei: form.priceWei,
-        maxSupply: form.saleSupply || form.quantity,
-        perWalletLimit: form.perWalletLimit,
+        maxSupply: saleSupply,
+        perWalletLimit,
         startTime: form.saleStart,
         endTime: form.saleEnd,
         paused: form.salePaused,
+        openEdition,
       });
       await simulateConfigureSale(publicProvider, { from: wallet.account, data });
       const walletProvider = wallet.getProvider?.();
@@ -783,10 +800,10 @@ export function ArtistStudioPage() {
         <section style={card}>
           <Eyebrow red>Supply</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>How many relics</h2>
-          <TextField title="Quantity" value={form.quantity} onChange={(value) => set("quantity", value)} required />
+          <TextField title="Quantity" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Blank or 0 for unlimited" />
           <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
           <TextField title="Resale royalty (basis points, max 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
-          <p style={{ color: "var(--vc-bone-dim)" }}>Quantity is the ERC-1155 edition supply. Royalty is stored on VoidRelease1155V2 at publish and paid on later marketplace resales. It is ignored on the current V1 deployment, which has no ERC-2981.</p>
+          <p style={{ color: "var(--vc-bone-dim)" }}>Leave Quantity blank or 0 for an unlimited open edition. The edition stays open until the sale end time. A number above 0 is a fixed cap and cannot be changed after publish. Royalty is stored on VoidRelease1155V2 at publish and paid on later marketplace resales. It is ignored on the current V1 deployment, which has no ERC-2981.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("experience")}>Back</button>
             <button type="button" style={primaryBtn} onClick={() => setStep("preview")}>Continue</button>
@@ -808,7 +825,7 @@ export function ArtistStudioPage() {
               <p><strong>Type</strong><br />EP</p>
               <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
               <p><strong>Experiences</strong><br />{form.experienceTitle || experienceCategoryLabel(form.productType)}</p>
-              <p><strong>Supply</strong><br />{form.quantity || "—"}</p>
+              <p><strong>Supply</strong><br />{supplyLabel(form.quantity)}</p>
             </div>
           </div>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginTop: 24 }}>Publishing creates the on-chain collectible for this release. No blockchain knowledge required.</p>
@@ -824,7 +841,7 @@ export function ArtistStudioPage() {
           <Eyebrow red>Publish</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Publish release</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-            Publishing creates your collectible release on The Void. Supply {form.quantity || "—"}.
+            Publishing creates your collectible release on The Void. Supply {supplyLabel(form.quantity)}. A published edition is fixed; an unlimited edition needs a new edition, not a change to one that already exists.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={() => saveDraft().catch(() => {})}>
@@ -860,17 +877,22 @@ export function ArtistStudioPage() {
                 <div role="status" style={{ border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 }}>
                   <strong>Primary sale configured</strong>
                   <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
-                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.remaining.toString()} left of {configuredSale.maxSupply.toString()} · {configuredSale.perWalletLimit.toString()} per wallet{configuredSale.paused ? " · Sale paused" : ""}
+                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.maxSupply === 0n ? "No sale cap" : `${configuredSale.remaining.toString()} left of ${configuredSale.maxSupply.toString()}`} · {configuredSale.perWalletLimit === 0n ? "No per-wallet cap" : `${configuredSale.perWalletLimit.toString()} per wallet`}{configuredSale.paused ? " · Sale paused" : ""}
                   </p>
                 </div>
               ) : (
                 <>
                   <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This release does not have a primary sale yet. Configure it using the persisted published token above.</p>
                   <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-                  <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={form.quantity || "Edition supply"} />
-                  <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} />
+                  <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Blank or 0 for no sale cap" : (form.quantity || "Edition supply")} />
+                  <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Blank or 0 for no per-wallet cap" : ""} />
                   <TextField title="Start time (e.g. 6:00am, an ISO datetime, or unix seconds — optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave blank for no start" />
-                  <TextField title="End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder="Leave blank for no end" />
+                  <TextField title={isUnlimitedQuantity(form.quantity) ? "End time (required — this closes the edition)" : "End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)"} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Required close time" : "Leave blank for no end"} required={isUnlimitedQuantity(form.quantity)} />
+                  {isUnlimitedQuantity(form.quantity) && (
+                    <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
+                      This edition is unlimited. Leave sale supply blank or 0 if the sale itself should not cap copies. The end time is required: after it, purchases revert and no further copies are minted. There is no separate mint button.
+                    </p>
+                  )}
                   <label style={label}>
                     <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
                   </label>

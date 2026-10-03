@@ -10,12 +10,10 @@ export function validateReleasePublish({ release, tracks, supply, metadata } = {
   tracks.forEach((track, index) => {
     requiredText(track?.title, `Track ${index + 1} title`);
   });
-  const quantity = requiredText(supply, "Supply");
-  try {
-    if (BigInt(quantity) <= 0n) throw new Error();
-  } catch {
-    throw new Error("Supply must be a positive whole number.");
-  }
+  const rawSupply = String(supply ?? "").trim();
+  // Blank or 0 is an open edition. The sale end time, not this field, closes it.
+  const quantity = rawSupply === "" || /^0+$/.test(rawSupply) ? "0" : rawSupply;
+  if (!/^\d+$/.test(quantity)) throw new Error("Supply must be a positive whole number, or blank or 0 for an unlimited edition.");
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Release metadata is required.");
   requiredText(metadata.artwork, "Release artwork");
   return { title, tracks, supply: quantity, metadata };

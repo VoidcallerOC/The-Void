@@ -122,10 +122,24 @@ contract VoidPrimarySale is ReentrancyGuard {
         uint256 editionSupply = releases.maxSupplyOf(tokenId);
         if (artist != msg.sender) revert NotEditionArtist(tokenId, artist, msg.sender);
         if (priceWei == 0) revert InvalidPrice();
-        if (maxSupply == 0 || maxSupply > editionSupply) revert InvalidSupply();
+        // editionSupply 0 is an open edition. Its sale may also use maxSupply 0
+        // (no sale cap). The end time is the close; endTime 0 is rejected.
+        // A capped edition still requires 0 < sale supply <= edition supply.
+        bool openEdition = editionSupply == 0;
+        if (openEdition) {
+            if (endTime == 0) revert InvalidWindow();
+        } else if (maxSupply == 0 || maxSupply > editionSupply) {
+            revert InvalidSupply();
+        }
         Sale storage sale = sales[tokenId];
-        if (maxSupply < sale.sold) revert InvalidSupply();
-        if (perWalletLimit == 0 || perWalletLimit > maxSupply) revert InvalidWalletLimit();
+        if (maxSupply != 0 && maxSupply < sale.sold) revert InvalidSupply();
+        if (openEdition) {
+            // perWalletLimit 0 means no per-wallet cap. A positive limit still applies,
+            // and cannot exceed a positive sale cap.
+            if (maxSupply != 0 && perWalletLimit > maxSupply) revert InvalidWalletLimit();
+        } else if (perWalletLimit == 0 || perWalletLimit > maxSupply) {
+            revert InvalidWalletLimit();
+        }
         if (endTime != 0 && startTime != 0 && endTime < startTime) revert InvalidWindow();
         sale.priceWei = priceWei;
         sale.maxSupply = maxSupply;
@@ -144,10 +158,16 @@ contract VoidPrimarySale is ReentrancyGuard {
         if (sale.startTime != 0 && block.timestamp < sale.startTime) revert SaleNotStarted(tokenId);
         if (sale.endTime != 0 && block.timestamp > sale.endTime) revert SaleEnded(tokenId);
         if (qty == 0) revert ZeroQuantity();
-        uint256 remaining = sale.maxSupply - sale.sold;
-        if (qty > remaining) revert SoldOut(tokenId, remaining, qty);
+        // Sale maxSupply 0 does not cap copies. The end time is what closes the sale.
+        if (sale.maxSupply != 0) {
+            uint256 remaining = sale.maxSupply - sale.sold;
+            if (qty > remaining) revert SoldOut(tokenId, remaining, qty);
+        }
         uint256 already = walletPurchased[tokenId][msg.sender];
-        if (already + qty > sale.perWalletLimit) revert WalletLimitExceeded(tokenId, sale.perWalletLimit, already, qty);
+        // perWalletLimit 0 means no per-wallet cap (open editions only).
+        if (sale.perWalletLimit != 0 && already + qty > sale.perWalletLimit) {
+            revert WalletLimitExceeded(tokenId, sale.perWalletLimit, already, qty);
+        }
         uint256 paid = sale.priceWei * qty;
         if (msg.value != paid) revert WrongPayment(paid, msg.value);
 

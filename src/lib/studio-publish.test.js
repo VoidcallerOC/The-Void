@@ -29,6 +29,13 @@ describe("Release-native Studio publish validation", () => {
     expect(() => validateReleasePublish({ ...validInput, tracks: [{ title: "" }] })).toThrow("Track 1 title is required.");
   });
 
+  it("treats a blank or zero supply as an unlimited edition", () => {
+    expect(validateReleasePublish({ ...validInput, supply: "" }).supply).toBe("0");
+    expect(validateReleasePublish({ ...validInput, supply: "0" }).supply).toBe("0");
+    expect(() => validateReleasePublish({ ...validInput, supply: "-1" })).toThrow(/unlimited/);
+    expect(() => validateReleasePublish({ ...validInput, supply: "1.5" })).toThrow(/unlimited/);
+  });
+
   it("does not describe a release as fully published while provenance is pending or failed", () => {
     expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_PENDING", fullyPublished: false }).fullyPublished).toBe(false);
     expect(publicationResultMessage({ title: "The Record", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false }).message).toMatch(/not fully published/);
