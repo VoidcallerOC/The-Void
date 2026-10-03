@@ -137,7 +137,8 @@ export function decodeFujiRevert(error) {
 // preserving the decoded error code and raw revert data for debugging. Returns a
 // null message when the reason is unknown, so callers keep their generic fallback.
 export function explainFujiEditionError(error) {
-  const { name, data } = decodeFujiRevert(error);
+  const decoded = decodeFujiRevert(error);
+  const { name, data } = decoded;
   const base = { code: name, revertData: data || null };
   switch (name) {
     case "AccessDenied":
@@ -154,6 +155,16 @@ export function explainFujiEditionError(error) {
       return { ...base, message: "The edition payout address is invalid." };
     case "RoyaltyTooHigh":
       return { ...base, message: "Royalty exceeds the 10% (1000 basis points) cap." };
+    case "EditionNotFound":
+      return { ...base, message: "This token's edition does not exist on Fuji yet. Publish the release before minting it." };
+    case "InactiveEdition":
+      return { ...base, message: "This edition is not active on Fuji, so it cannot be minted." };
+    case "ExceedsSupply":
+      return { ...base, message: `Mint exceeds the edition's remaining supply (${String(decoded.args?.[1] ?? "?")} left).` };
+    case "ZeroQuantity":
+      return { ...base, message: "Mint quantity must be at least 1." };
+    case "UnsafeRecipient":
+      return { ...base, message: "The receiving wallet is a contract that cannot accept ERC-1155 tokens." };
     default: {
       const code = error?.code ?? error?.info?.error?.code ?? error?.cause?.code;
       const message = String(error?.shortMessage || error?.message || "");
@@ -195,6 +206,19 @@ export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metad
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
   return { tokenId, data: v2CreateIface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri, ethers.getAddress(payout), bps]) };
+}
+
+// Dry-run a release-contract call from this wallet so a revert surfaces its
+// decoded reason before anything is broadcast.
+export async function simulateFujiCall(provider, { from, to, data }) {
+  await assertFujiProvider(provider);
+  const target = assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress);
+  try {
+    await provider.request({ method: "eth_call", params: [{ from, to: target, data }, "latest"] });
+  } catch (error) {
+    const explained = explainFujiEditionError(error);
+    throw Object.assign(new Error(explained.message || `This transaction would revert on Fuji${explained.code ? ` (${explained.code})` : ""}. Nothing was sent.`), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
+  }
 }
 
 export function encodeFujiMint({ to, tokenId, amount = 1 }) {
