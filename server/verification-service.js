@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
+import { setImmediate } from "node:timers";
 import { ApiError } from "./api-errors.js";
 import { requireWalletAuth } from "./api-runtime.js";
 import {
@@ -30,6 +31,7 @@ export function createArtistVerificationService({
   db,
   authenticator,
   reviewerWallets = process.env.VERIFICATION_REVIEWER_WALLETS,
+  notifier = null,
   logger = console,
 } = {}) {
   if (!db?.query || typeof authenticator !== "function") {
@@ -138,7 +140,17 @@ export function createArtistVerificationService({
       ],
     );
     await recordEvent({ applicationId: rows[0].id, fromStatus: null, toStatus: "SUBMITTED", actorWallet: id.wallet, actorRole: "APPLICANT" });
-    logger.info?.("verification.submitted", { wallet: id.wallet, publicId: rows[0].public_id });
+    logger.info?.("VERIFICATION_SUBMITTED", { publicId: rows[0].public_id });
+    // Reviewer alert (X DM). The application is already SUBMITTED; the alert is
+    // attempted after the response is sent and can never fail the submission.
+    if (notifier) {
+      const application = rows[0];
+      setImmediate(() => {
+        Promise.resolve()
+          .then(() => notifier.notifySubmitted(application))
+          .catch((error) => logger.error?.("X_DM_FAILED", { publicId: application.public_id, code: "NOTIFIER_ERROR", detail: String(error?.message || error).slice(0, 200) }));
+      });
+    }
     return applicantApplicationDto(rows[0]);
   }
 
@@ -192,7 +204,12 @@ export function createArtistVerificationService({
     await requireReviewer(request);
     const { rows } = await db.query(`SELECT * FROM artist_verification_applications WHERE public_id=$1 LIMIT 1`, [idOrPublic]);
     if (!rows[0]) throw new ApiError(404, "APPLICATION_NOT_FOUND", "Application was not found.");
-    return reviewerApplicationDto(rows[0]);
+    const application = reviewerApplicationDto(rows[0]);
+    if (notifier) {
+      // Reviewers can see whether the X DM alert for this application went out.
+      application.reviewerAlert = await notifier.statusFor(rows[0].id).catch(() => null);
+    }
+    return application;
   }
 
   async function decide({ request, publicId: idOrPublic, input = {} }) {
