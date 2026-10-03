@@ -38,7 +38,7 @@ describe("Marketplace Fuji ownership configuration", () => {
     expect(config.chains.fuji).toMatchObject({
       id: 43113,
       key: "fuji",
-      contract: "0x82b26Da27136935454Bdf1e40801190B521b82e5",
+      contract: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6",
       tokenIds: [tokenId],
     });
     expect(config.chains.cchain).toEqual(expect.objectContaining({ id: 43114 }));

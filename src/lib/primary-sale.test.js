@@ -3,8 +3,8 @@ import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG, sendFujiTransaction } from "./fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, encodePurchase, explainCollectError, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, purchaseCost, simulateConfigureSale, validateSaleSupply } from "./primary-sale.js";
 
-const CANONICAL_FUJI_V2_RELEASE = "0x82b26Da27136935454Bdf1e40801190B521b82e5";
-const CANONICAL_FUJI_PRIMARY_SALE = "0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1";
+const CANONICAL_FUJI_V2_RELEASE = "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6";
+const CANONICAL_FUJI_PRIMARY_SALE = "0x51cCD2d5Cd71368917f1EFe3fa43Fab8068E1aBA";
 
 describe("Fuji ERC-1155 primary sale", () => {
   it("reads the certified V2 VoidPrimarySale from the Fuji release config", () => {
@@ -147,7 +147,7 @@ describe("Fuji ERC-1155 primary sale", () => {
 
   it("names release-contract reverts from purchase instead of hiding them", () => {
     const release = new ethers.Interface(["error AccessDenied(bytes32 role, address account)", "error EditionNotFound(uint256 tokenId)"]);
-    const denied = release.encodeErrorResult("AccessDenied", [ethers.id("ISSUER_ROLE"), "0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1"]);
+    const denied = release.encodeErrorResult("AccessDenied", [ethers.id("ISSUER_ROLE"), "0x51cCD2d5Cd71368917f1EFe3fa43Fab8068E1aBA"]);
     expect(explainCollectError({ data: denied })).toMatchObject({ state: "unauthorized-sale" });
     expect(explainCollectError({ data: release.encodeErrorResult("EditionNotFound", [1n]) })).toMatchObject({ state: "not-created" });
     expect(explainCollectError(new Error("execution reverted"))).toMatchObject({ state: "reverted" });
