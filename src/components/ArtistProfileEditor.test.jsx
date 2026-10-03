@@ -42,4 +42,35 @@ describe("artist profile editor", () => {
     expect(options).toMatchObject({ method: "PATCH", payload: { name: "Voidcaller", bio: "New bio", links: { x: "https://x.com/vc" }, profileArtwork: "ipfs://avatar", profileMetadata: { keep: true } } });
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ bio: "New bio", socials: [{ name: "X", href: "https://x.com/vc" }] }));
   });
+
+  describe("standalone edit page mode", () => {
+    it("tells a signed-out visitor to connect instead of rendering nothing", async () => {
+      renderWith({ connected: false, authenticated: false, authHeaders: {} }, { standalone: true });
+      await act(async () => {});
+      expect(screen.getByText(/Connect and authenticate the wallet that owns this artist profile/)).toBeTruthy();
+      expect(studioFetch).not.toHaveBeenCalled();
+    });
+
+    it("refuses a wallet that does not own the artist", async () => {
+      studioFetch.mockResolvedValue({ artists: [{ id: "artist-other", display_name: "Someone" }] });
+      renderWith(signedIn, { standalone: true });
+      expect(await screen.findByText(/not owned by the connected wallet/)).toBeTruthy();
+      expect(screen.queryByLabelText("Bio")).toBeNull();
+    });
+
+    it("opens the form directly for the owner and stays open after saving", async () => {
+      studioFetch.mockImplementation(async (path) => (path === "/studio/catalog" ? { artists: [ownerRow] } : { id: "artist-a" }));
+      renderWith(signedIn, { standalone: true });
+      const bio = await screen.findByLabelText("Bio");
+      expect(bio.value).toBe("Old bio");
+      expect(screen.queryByText("Cancel")).toBeNull();
+      fireEvent.change(bio, { target: { value: "Edited on the profile page" } });
+      fireEvent.click(screen.getByText("Save profile"));
+      expect(await screen.findByText("Profile saved.")).toBeTruthy();
+      expect(screen.getByLabelText("Bio").value).toBe("Edited on the profile page");
+      const [path, options] = studioFetch.mock.calls.find(([call]) => call !== "/studio/catalog");
+      expect(path).toBe("/studio/artists/artist-a");
+      expect(options).toMatchObject({ method: "PATCH", payload: { bio: "Edited on the profile page" } });
+    });
+  });
 });
