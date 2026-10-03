@@ -625,7 +625,7 @@ export class ArtistStudioService {
     } catch (error) {
       throw fail(error.status || 502, error.code || "MEDIA_HASH_UNVERIFIED", `Could not read the private object to verify it: ${error.message}`, { upstream: error.upstream || upstream });
     }
-    if (stored.sha256 !== contentSha256 || stored.bytes !== file.size) throw fail(409, "MEDIA_HASH_MISMATCH", "The stored object's SHA-256 does not match the file the browser hashed.", { details: { storedBytes: stored.bytes, declaredBytes: file.size } });
+    if (stored.sha256 !== contentSha256 || stored.bytes !== file.size) throw fail(409, "MEDIA_HASH_MISMATCH", "The stored object's SHA-256 does not match the file the browser hashed.", { details: { storedBytes: stored.bytes, declaredBytes: file.size, download: stored.download || null } });
 
     const id = `asset-${randomUUID()}`;
     const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey: file.cid, mediaType, contentSha256, byteSize: file.size });
