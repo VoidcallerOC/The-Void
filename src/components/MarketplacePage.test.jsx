@@ -6,10 +6,12 @@ import { baseCatalogs, mapPublishedCatalog, mergeCatalogs } from "../lib/catalog
 import { EditionCard } from "./MarketplaceCards.jsx";
 import { MarketplacePage } from "./MarketplacePage.jsx";
 
-const { catalogState, fetchListings, fetchVolume, walletState } = vi.hoisted(() => ({
+const { catalogState, fetchListings, fetchVolume, fetchPresentation, fetchEditor, walletState } = vi.hoisted(() => ({
   catalogState: { current: null },
   fetchListings: vi.fn(),
   fetchVolume: vi.fn(),
+  fetchPresentation: vi.fn(),
+  fetchEditor: vi.fn(),
   walletState: { current: { connected: false, owned: {} } },
 }));
 
@@ -20,7 +22,13 @@ vi.mock("../lib/catalog-source.js", async (importOriginal) => {
 
 vi.mock("../lib/marketplace-api.js", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchIndexedListings: (...args) => fetchListings(...args), fetchMarketplaceVolume: (...args) => fetchVolume(...args) };
+  return {
+    ...actual,
+    fetchIndexedListings: (...args) => fetchListings(...args),
+    fetchMarketplaceVolume: (...args) => fetchVolume(...args),
+    fetchMarketplacePresentation: (...args) => fetchPresentation(...args),
+    fetchMarketplacePresentationEditor: (...args) => fetchEditor(...args),
+  };
 });
 
 vi.mock("../lib/marketplace.js", async (importOriginal) => {
@@ -79,6 +87,10 @@ beforeEach(() => {
   fetchListings.mockResolvedValue([]);
   fetchVolume.mockReset();
   fetchVolume.mockResolvedValue({ currency: "AVAX", overallVolumeWei: "30000000000000000" });
+  fetchPresentation.mockReset();
+  fetchPresentation.mockResolvedValue({ heroArtwork: null, updatedAt: null });
+  fetchEditor.mockReset();
+  fetchEditor.mockResolvedValue({ admin: false });
 });
 
 afterEach(() => cleanup());
@@ -133,6 +145,43 @@ describe("public marketplace inventory", () => {
     expect(within(secondary).getByRole("link", { name: "Collect" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);
     expect(screen.getByText("Official editions grouped below")).toBeTruthy();
     expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION/i);
+  });
+});
+
+describe("marketplace hero artwork", () => {
+  const heroBg = (container) => container.querySelector(".vc-market-hero-bg");
+
+  it("shows no hero artwork when none is configured, never an edition image", async () => {
+    const { container } = renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
+    expect(heroBg(container)).toBeNull();
+  });
+
+  it("shows the configured artwork, and an indexed listing's token art never replaces it", async () => {
+    fetchPresentation.mockResolvedValue({ heroArtwork: "/assets/hero-b.png", updatedAt: "2026-10-03T00:00:00Z" });
+    fetchListings.mockResolvedValueOnce([{ id: "listing-1", listingId: "1", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "500000000000000000", status: "ACTIVE", authority: "INDEXED" }]);
+    const { container } = renderMarketplace();
+    await waitFor(() => expect(heroBg(container)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Seller · 0xaBd3…c174")).toBeTruthy());
+    expect(heroBg(container).style.backgroundImage).toContain("/assets/hero-b.png");
+    expect(heroBg(container).style.backgroundImage).not.toContain("voidcaller_art_4");
+  });
+
+  it("offers the header editor only to a wallet the server confirms as admin", async () => {
+    walletState.current = { connected: true, authenticated: true, account: "0x284c09a7cc187e096cbbdc88d99defe6df32180a", authHeaders: {}, owned: {} };
+    const first = renderMarketplace();
+    await waitFor(() => expect(fetchEditor).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Admin · Header artwork" })).toBeNull();
+    first.unmount();
+    fetchEditor.mockResolvedValue({ admin: true });
+    renderMarketplace();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Admin · Header artwork" })).toBeTruthy());
+  });
+
+  it("does not ask the server about admin rights for a signed-out visitor", async () => {
+    renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
+    expect(fetchEditor).not.toHaveBeenCalled();
   });
 });
 

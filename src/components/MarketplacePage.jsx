@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { EditionCard, EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
-import { fetchIndexedListings, fetchMarketplaceVolume } from "../lib/marketplace-api.js";
+import { fetchIndexedListings, fetchMarketplacePresentation, fetchMarketplaceVolume } from "../lib/marketplace-api.js";
+import { marketplaceHeroImage } from "../lib/marketplace-presentation.js";
+import { MarketplaceHeroEditor } from "./MarketplaceHeroEditor.jsx";
 import { MARKETPLACE_CONFIG } from "../lib/marketplace.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { useWallet } from "../lib/wallet-context.js";
-import { artworkFor, contentShell } from "../lib/marketplace-chrome.js";
+import { contentShell } from "../lib/marketplace-chrome.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import {
   MARKETPLACE_STATE,
@@ -52,6 +54,7 @@ export function MarketplacePage() {
     .filter((item) => !focusEdition || item.edition.id === focusEdition), [catalog, focusEdition, focusRelease]);
   const [listingRequest, setListingRequest] = useState(null);
   const [volume, setVolume] = useState(null);
+  const [presentation, setPresentation] = useState(null);
   const requestKey = `${infrastructure}:${MARKETPLACE_CONFIG.chainId}:${String(MARKETPLACE_CONFIG.address || "").toLowerCase()}`;
   const currentRequest = listingRequest?.key === requestKey ? listingRequest : null;
   const listingsState = infrastructure === MARKETPLACE_STATE.LIVE ? currentRequest?.status || "loading" : "idle";
@@ -71,6 +74,16 @@ export function MarketplacePage() {
       });
     return () => controller.abort();
   }, [infrastructure, requestKey]);
+
+  // The hero artwork is the admin-set marketplace asset only, never an
+  // edition, release, token or listing image.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchMarketplacePresentation({ signal: controller.signal })
+      .then(setPresentation)
+      .catch((error) => { if (error?.name !== "AbortError") setPresentation(null); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,12 +121,12 @@ export function MarketplacePage() {
     () => editions.filter((item) => item.primary.availability === "available" && !listedEditionIds.has(item.edition.id)),
     [editions, listedEditionIds],
   );
-  const featured = officialEditions[0] || editions.find((item) => item.primary.availability === "available");
+  const heroImage = marketplaceHeroImage(presentation);
 
   return (
     <section>
       <header className="vc-market-hero-bleed">
-        {featured && <div className="vc-market-hero-bg" style={{ backgroundImage: `url(${artworkFor(featured.edition, featured.release)})` }} aria-hidden />}
+        {heroImage && <div className="vc-market-hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden />}
         <div className="vc-market-hero-shade" aria-hidden />
         <div className="vc-market-hero-copy">
           <Eyebrow red>† {copy.eyebrow}</Eyebrow>
@@ -124,6 +137,7 @@ export function MarketplacePage() {
             <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
           </div>}
           <QuietStatus primary="Published catalog" secondary={marketplaceSecondaryAvailability(secondary)} />
+          <MarketplaceHeroEditor current={presentation?.heroArtwork || ""} onSaved={setPresentation} />
         </div>
       </header>
 
