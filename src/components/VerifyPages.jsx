@@ -14,6 +14,7 @@ import {
   submitVerificationApplication,
 } from "../lib/verification-api.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
+import { fujiExplorerUrl, grantPublishingRoles, readPublishingRoles } from "../lib/fuji-release.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -495,6 +496,55 @@ const REVIEW_ACTIONS = [
   { status: "REVOKED", label: "Revoke" },
 ];
 
+// Verification is a database approval; publishing and minting on the certified
+// Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. A reviewer
+// holding the contract's admin role grants them here with their own wallet.
+function OnChainRolesPanel({ artistWallet }) {
+  const wallet = useWallet();
+  const [roles, setRoles] = useState(null);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [txs, setTxs] = useState([]);
+  const [checked, setChecked] = useState(0);
+  const provider = wallet.connected ? wallet.getProvider?.() : null;
+  const account = wallet.account;
+
+  useEffect(() => {
+    const current = wallet.connected ? wallet.getProvider?.() : null; // re-read only when the connection or account changes
+    if (!current) return undefined;
+    let cancelled = false;
+    readPublishingRoles(current, artistWallet)
+      .then((next) => { if (!cancelled) setRoles(next); })
+      .catch((error) => { if (!cancelled) setStatus(error.message); });
+    return () => { cancelled = true; };
+  }, [wallet.connected, account, artistWallet, checked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const grant = async () => {
+    setBusy(true); setStatus(""); setTxs([]);
+    try {
+      if (!provider || !account) throw new Error("Connect the contract admin wallet first.");
+      const results = await grantPublishingRoles({ provider, from: account, account: artistWallet, onProgress: setStatus });
+      setTxs(results.filter((result) => result.hash));
+      setStatus(results.every((result) => result.alreadyHeld) ? "This wallet already holds both roles." : "Roles granted on Fuji. The artist can now publish and mint.");
+      setChecked((count) => count + 1);
+    } catch (error) { setStatus(error.message); } finally { setBusy(false); }
+  };
+
+  const held = roles && roles.ARTIST_ROLE && roles.ISSUER_ROLE;
+  return (
+    <section style={{ ...card, marginTop: 16 }}>
+      <Eyebrow red>On-chain publishing roles</Eyebrow>
+      <p style={{ ...muted, fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all", marginTop: 12 }}>{artistWallet}</p>
+      <p style={{ ...muted, fontSize: 13 }}>
+        {roles ? `ARTIST_ROLE ${roles.ARTIST_ROLE ? "✓" : "✕"} · ISSUER_ROLE ${roles.ISSUER_ROLE ? "✓" : "✕"}` : provider ? "Checking roles on Fuji…" : "Connect a wallet to check roles on Fuji."}
+      </p>
+      {!held && <button type="button" style={primaryBtn} disabled={busy} onClick={grant}>{busy ? "Granting…" : "Grant publishing roles"}</button>}
+      {status && <p role="status" style={{ ...muted, fontFamily: "var(--font-mono)", fontSize: 11, marginTop: 12 }}>{status}</p>}
+      {txs.map((tx) => <p key={tx.hash} style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all", margin: "4px 0" }}>{tx.role}: <a href={fujiExplorerUrl("tx", tx.hash)} target="_blank" rel="noreferrer">{tx.hash}</a></p>)}
+    </section>
+  );
+}
+
 export function VerifyReviewApplicationPage() {
   const { id } = useParams();
   const wallet = useWallet();
@@ -620,6 +670,7 @@ export function VerifyReviewApplicationPage() {
                 </button>
               ))}
             </div>
+            {app.status === "VERIFIED" && app.walletAddress && <OnChainRolesPanel artistWallet={app.walletAddress} />}
           </aside>
         </div>
       )}
