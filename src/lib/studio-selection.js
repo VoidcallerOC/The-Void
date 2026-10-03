@@ -24,13 +24,17 @@ export function editionHasGatedTrack(catalog, editionId) {
 // Unlike selectReleaseTemplate, it keeps the release and edition ids, so
 // publishing updates that release instead of creating a new, empty one, and it
 // restores the saved preview clip. Prefers the edition already carrying the
-// gated full track, then the newest edition without an on-chain token.
+// gated full track, then the newest edition. Returns { published: true } for a
+// release that is already on Fuji.
 export function resumeOwnedRelease(catalog, releaseId) {
   const release = (catalog?.releases || []).find((item) => item.id === releaseId);
   if (!release) return null;
   const editions = (catalog?.editions || []).filter((edition) => edition.releaseId === releaseId);
-  const unpublished = editions.filter((edition) => edition.status !== "available");
-  const edition = unpublished.find((item) => editionHasGatedTrack(catalog, item.id)) || unpublished[unpublished.length - 1] || null;
+  // A release already on Fuji cannot be published again: its token id is fixed
+  // by the release and track slugs, so a second edition would collide with it.
+  if (release.status === "published" || editions.some((edition) => edition.status === "available")) return { published: true, releaseId: release.id, title: release.title || "" };
+  // The API lists editions newest first.
+  const edition = editions.find((item) => editionHasGatedTrack(catalog, item.id)) || editions[0] || null;
   const includes = Array.isArray(edition?.includes) && edition.includes.length ? edition.includes.join("\n") : null;
   return {
     artistId: release.artistId || "",
