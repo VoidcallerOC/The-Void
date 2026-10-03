@@ -6,7 +6,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, simulateFujiCall, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -347,7 +347,9 @@ export function ArtistStudioPage() {
       for (const track of selected) {
         if (track.tokenId === undefined || track.tokenId === null || track.tokenId === "") throw new Error(`Track ${track.title || "(untitled)"} has no token relationship yet.`);
         setMintStatus({ ok: true, message: `Confirm the mint for ${track.title || "the track"} in your wallet…` });
-        const transaction = await sendFujiTransaction({ provider, from: wallet.account, to: target, data: encodeFujiMint({ to: wallet.account, tokenId: track.tokenId, amount: mintAmount }) });
+        const data = encodeFujiMint({ to: wallet.account, tokenId: track.tokenId, amount: mintAmount });
+        await simulateFujiCall(provider, { from: wallet.account, to: target, data });
+        const transaction = await sendFujiTransaction({ provider, from: wallet.account, to: target, data });
         hashes.push({ title: track.title, hash: transaction.hash });
       }
       setMintTxHashes(hashes);
