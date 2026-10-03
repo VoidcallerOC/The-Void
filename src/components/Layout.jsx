@@ -1,6 +1,7 @@
 import { useEffect, useMemo, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
+import { VoidStarfield } from "./VoidStarfield.jsx";
 import { Nav } from "./Nav.jsx";
 import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
@@ -52,6 +53,11 @@ export function Layout() {
       <ReviewerNotificationsProvider>
         <PreviewHostBridge />
         <ScrollToTop />
+        {/* The whole shell is one isolated stacking context so the ambient
+            starfield (z-index -1) sits above the black page ground and beneath
+            every page, the nav, footer and player. */}
+        <div className="vc-starfield-host">
+        <VoidStarfield />
         <Grain />
         <Scanlines />
         <Nav />
@@ -64,6 +70,7 @@ export function Layout() {
         </main>
         <Footer />
         <StickyPlayer />
+        </div>
       </ReviewerNotificationsProvider>
     </WalletProvider>
   );

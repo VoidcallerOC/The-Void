@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Ambient starfield for The Void's Collection page.
+ * Ambient starfield behind every page of The Void (mounted once in Layout).
  *
  * Three depth layers (far dust, mid stars, a few near stars with a soft halo)
  * drift very slowly along one shared heading, offset by scroll at different
@@ -25,9 +25,9 @@ const HEADING_Y = 0.57;
 
 // depth: drift + parallax multiplier. Counts are per device class, not area.
 const LAYERS = [
-  { name: "far", depth: 0.18, speed: 0.9, scroll: 0.03, size: [0.5, 0.95], alpha: [0.16, 0.44], pointer: 0, counts: { desktop: 230, tablet: 140, mobile: 85 } },
-  { name: "mid", depth: 0.45, speed: 2.2, scroll: 0.07, size: [0.85, 1.4], alpha: [0.3, 0.62], pointer: 0.45, counts: { desktop: 70, tablet: 44, mobile: 26 } },
-  { name: "near", depth: 1, speed: 4.2, scroll: 0.13, size: [1.1, 1.8], alpha: [0.38, 0.62], pointer: 1, counts: { desktop: 13, tablet: 9, mobile: 6 } },
+  { name: "far", depth: 0.18, speed: 0.9, scroll: 0.03, size: [0.5, 0.95], alpha: [0.22, 0.54], pointer: 0, counts: { desktop: 240, tablet: 145, mobile: 88 } },
+  { name: "mid", depth: 0.45, speed: 2.2, scroll: 0.07, size: [0.85, 1.4], alpha: [0.38, 0.74], pointer: 0.45, counts: { desktop: 84, tablet: 52, mobile: 30 } },
+  { name: "near", depth: 1, speed: 4.2, scroll: 0.13, size: [1.1, 1.8], alpha: [0.48, 0.74], pointer: 1, counts: { desktop: 15, tablet: 10, mobile: 7 } },
 ];
 
 const POINTER_RADIUS = 150; // CSS px
