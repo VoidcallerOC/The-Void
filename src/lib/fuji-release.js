@@ -65,12 +65,21 @@ export function fujiTokenId(releaseId, editionId) {
   return tokenId === 0n ? 1n : tokenId;
 }
 
+/** The VoidRoleGranter that lets reviewers grant publishing roles, or "" until it is deployed. */
+export function fujiRoleGranterAddress() {
+  const value = String(FUJI_RELEASE_CONFIG.roleGranterAddress || "").trim();
+  if (!ethers.isAddress(value) || ethers.getAddress(value) === ethers.ZeroAddress) return "";
+  return ethers.getAddress(value);
+}
+
 export function assertFujiTransactionTarget(address) {
   if (!ethers.isAddress(address)) throw new Error("Only the certified Fuji release or its primary sale contract is allowed for this path.");
   const target = ethers.getAddress(address);
   if (target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) return ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress);
   const sale = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "");
   if (ethers.isAddress(sale) && ethers.getAddress(sale) !== ethers.ZeroAddress && target.toLowerCase() === sale.toLowerCase()) return ethers.getAddress(sale);
+  const granter = fujiRoleGranterAddress();
+  if (granter && target.toLowerCase() === granter.toLowerCase()) return granter;
   throw new Error("Only the certified Fuji release or its primary sale contract is allowed for this path.");
 }
 
@@ -478,8 +487,50 @@ export async function readPublishingRoles(provider, account) {
 }
 
 /** Grants each missing publishing role to `account`, one transaction per role. */
-export async function grantPublishingRoles({ provider, from, account, onProgress }) {
-  if (!(await readFujiRole(provider, FUJI_ROLES.DEFAULT_ADMIN_ROLE, from))) throw new Error("The connected wallet is not an admin of the Fuji release contract, so it cannot grant roles. Connect the contract admin wallet.");
+const roleGranterIface = new ethers.Interface([
+  "function isReviewer(address) view returns (bool)",
+  "function grantPublishingRoles(address artist)",
+  "error NotReviewer(address caller)",
+  "error SelfGrant(address reviewer)",
+  "error InvalidAddress()",
+]);
+
+/** True when `account` is a listed reviewer on the deployed VoidRoleGranter. */
+export async function readRoleGranterReviewer(provider, account, granterAddress = fujiRoleGranterAddress()) {
+  if (!granterAddress || !ethers.isAddress(account)) return false;
+  await assertFujiProvider(provider);
+  const result = await provider.request({ method: "eth_call", params: [{ to: granterAddress, data: roleGranterIface.encodeFunctionData("isReviewer", [account]) }, "latest"] });
+  return Boolean(roleGranterIface.decodeFunctionResult("isReviewer", result)[0]);
+}
+
+// A verification reviewer (not a contract admin) grants both roles in one
+// transaction through VoidRoleGranter, which alone holds the admin role and
+// can only ever grant ARTIST_ROLE and ISSUER_ROLE.
+async function grantThroughRoleGranter({ provider, from, account, onProgress, granterAddress }) {
+  const data = roleGranterIface.encodeFunctionData("grantPublishingRoles", [account]);
+  try {
+    await provider.request({ method: "eth_call", params: [{ from, to: granterAddress, data }, "latest"] });
+  } catch (error) {
+    let reason = "";
+    try { reason = roleGranterIface.parseError(extractFujiRevertData(error))?.name || ""; } catch { /* unknown revert */ }
+    if (reason === "SelfGrant") throw new Error("A reviewer cannot grant publishing roles to their own wallet.", { cause: error });
+    if (reason === "NotReviewer") throw new Error("This wallet is not a reviewer on the role granter.", { cause: error });
+    throw new Error("The role granter would reject this grant. It may not hold the release contract's admin role yet.", { cause: error });
+  }
+  onProgress?.("Confirm granting ARTIST_ROLE and ISSUER_ROLE in your wallet…");
+  const transaction = await sendFujiTransaction({ provider, from, to: granterAddress, data });
+  return [{ role: "ARTIST_ROLE + ISSUER_ROLE", hash: transaction.hash }];
+}
+
+export async function grantPublishingRoles({ provider, from, account, onProgress, granterAddress = fujiRoleGranterAddress() }) {
+  if (!(await readFujiRole(provider, FUJI_ROLES.DEFAULT_ADMIN_ROLE, from))) {
+    const held = await readPublishingRoles(provider, account);
+    if (held.ARTIST_ROLE && held.ISSUER_ROLE) return PUBLISHING_ROLES.map(([name]) => ({ role: name, alreadyHeld: true }));
+    if (await readRoleGranterReviewer(provider, from, granterAddress)) return grantThroughRoleGranter({ provider, from, account, onProgress, granterAddress });
+    throw new Error(granterAddress
+      ? "The connected wallet is neither a reviewer on the role granter nor an admin of the Fuji release contract, so it cannot grant roles."
+      : "The connected wallet is not an admin of the Fuji release contract, and the reviewer role granter is not deployed yet, so it cannot grant roles.");
+  }
   const results = [];
   for (const [name, role] of PUBLISHING_ROLES) {
     if (await readFujiRole(provider, role, account)) { results.push({ role: name, alreadyHeld: true }); continue; }

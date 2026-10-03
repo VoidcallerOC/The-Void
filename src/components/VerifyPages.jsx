@@ -4,7 +4,7 @@ import { Eyebrow, Tag } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
-import { ARTIST_TYPES, canApplicantReapply, canApplicantRespond, validateApplication } from "../lib/verification.js";
+import { ARTIST_TYPES, canApplicantReapply, canApplicantRespond, canReviewerTransition, validateApplication } from "../lib/verification.js";
 import {
   decideVerificationApplication,
   fetchMyApplication,
@@ -498,7 +498,8 @@ const REVIEW_ACTIONS = [
 
 // Verification is a database approval; publishing and minting on the certified
 // Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. A reviewer
-// holding the contract's admin role grants them here with their own wallet.
+// grants them here with their own wallet: through VoidRoleGranter when they
+// are listed on it (no admin role needed), or directly as the contract admin.
 export function OnChainRolesPanel({ artistWallet }) {
   const wallet = useWallet();
   const [roles, setRoles] = useState(null);
@@ -522,7 +523,7 @@ export function OnChainRolesPanel({ artistWallet }) {
   const grant = async () => {
     setBusy(true); setStatus(""); setTxs([]);
     try {
-      if (!provider || !account) throw new Error("Connect the contract admin wallet first.");
+      if (!provider || !account) throw new Error("Connect your reviewer wallet first.");
       const results = await grantPublishingRoles({ provider, from: account, account: artistWallet, onProgress: setStatus });
       setTxs(results.filter((result) => result.hash));
       setStatus(results.every((result) => result.alreadyHeld) ? "This wallet already holds both roles." : "Roles granted on Fuji. The artist can now publish and mint.");
@@ -664,12 +665,16 @@ export function VerifyReviewApplicationPage() {
               <textarea style={{ ...field, minHeight: 90 }} value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 22 }}>
-              {REVIEW_ACTIONS.map((action) => (
+              {/* Only the decisions the server accepts from this status (same rule table). */}
+              {REVIEW_ACTIONS.filter((action) => canReviewerTransition(app.status, action.status)).map((action) => (
                 <button key={action.status} type="button" style={action.status === "VERIFIED" ? primaryBtn : ghostBtn} disabled={Boolean(busy)} onClick={() => decide(action.status)}>
                   {busy === action.status ? "Saving…" : action.label}
                 </button>
               ))}
             </div>
+            {!REVIEW_ACTIONS.some((action) => canReviewerTransition(app.status, action.status)) && (
+              <p style={{ ...muted, fontSize: 13 }}>This application is {String(app.status || "").toLowerCase().replace(/_/g, " ")}; no further review decision is possible.</p>
+            )}
             {app.status === "VERIFIED" && app.walletAddress && <OnChainRolesPanel artistWallet={app.walletAddress} />}
           </aside>
         </div>
