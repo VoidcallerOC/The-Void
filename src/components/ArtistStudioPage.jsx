@@ -548,8 +548,8 @@ export function ArtistStudioPage() {
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>No songs on this release yet. Publishing creates the on-chain edition. After that, its supply cannot be increased.</p>
                   <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => {
                     const resumed = resumeOwnedRelease(ownedStudioCatalog, mintReleaseId);
-                    if (!resumed) { setMintStatus({ ok: false, message: "This release could not be loaded into the editor." }); return; }
-                    if (resumed.published) { setMintStatus({ ok: false, message: `${resumed.title} is already published on Fuji and its token metadata cannot change. To publish it again with a preview and full track, create a new release in the catalog editor.` }); return; }
+                    if (!resumed) { setNotice("This release could not be loaded into the editor."); return; }
+                    if (resumed.published) { setNotice(`${resumed.title} is already published on Fuji and its token metadata cannot change. To publish it again with a preview and full track, create a new release in the catalog editor.`); return; }
                     setSelectedReleaseId(resumed.releaseId);
                     setArtistId(resumed.artistId);
                     setReleaseId(resumed.releaseId);
