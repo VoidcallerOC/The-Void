@@ -498,7 +498,8 @@ const REVIEW_ACTIONS = [
 
 // Verification is a database approval; publishing and minting on the certified
 // Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. A reviewer
-// holding the contract's admin role grants them here with their own wallet.
+// grants them here with their own wallet: through VoidRoleGranter when they
+// are listed on it (no admin role needed), or directly as the contract admin.
 export function OnChainRolesPanel({ artistWallet }) {
   const wallet = useWallet();
   const [roles, setRoles] = useState(null);
@@ -522,7 +523,7 @@ export function OnChainRolesPanel({ artistWallet }) {
   const grant = async () => {
     setBusy(true); setStatus(""); setTxs([]);
     try {
-      if (!provider || !account) throw new Error("Connect the contract admin wallet first.");
+      if (!provider || !account) throw new Error("Connect your reviewer wallet first.");
       const results = await grantPublishingRoles({ provider, from: account, account: artistWallet, onProgress: setStatus });
       setTxs(results.filter((result) => result.hash));
       setStatus(results.every((result) => result.alreadyHeld) ? "This wallet already holds both roles." : "Roles granted on Fuji. The artist can now publish and mint.");
