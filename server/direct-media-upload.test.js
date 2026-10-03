@@ -121,6 +121,20 @@ describe("registering a direct upload", () => {
     }
   });
 
+  it("accepts a Pinata duplicate stamped by an earlier upload link issued to the same artist", async () => {
+    const EARLIER = "upload-11111111-1111-4111-8111-111111111111";
+    const { instance, repository } = setup({ file: stored({ keyvalues: { voidArtistId: "artist-1", voidUploadId: EARLIER, voidMediaType: "AUDIO" } }), issued: [UPLOAD_ID, EARLIER] });
+    await expect(register(instance)).resolves.toMatchObject({ id: expect.stringMatching(/^asset-/) });
+    expect(repository.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ storageKey: CID }));
+  });
+
+  it("refuses a duplicate whose stamped upload link was never issued to this artist", async () => {
+    const OTHER = "upload-22222222-2222-4222-8222-222222222222";
+    const { instance, repository } = setup({ file: stored({ keyvalues: { voidArtistId: "artist-1", voidUploadId: OTHER } }) });
+    await expect(register(instance)).rejects.toMatchObject({ code: "MEDIA_UPLOAD_MISMATCH" });
+    expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+
   it("refuses when the stored bytes do not hash to the declared SHA-256", async () => {
     const { instance, repository } = setup({ file: stored(), storedSha: "c".repeat(64) });
     await expect(register(instance)).rejects.toMatchObject({ status: 409, code: "MEDIA_HASH_MISMATCH" });
