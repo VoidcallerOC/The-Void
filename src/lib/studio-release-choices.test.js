@@ -51,4 +51,19 @@ describe("Studio release picker", () => {
     expect(studioReleaseChoices({ releases, artists, editions: [] }).map(({ release }) => release.id)).toEqual(["ff-18"]);
     expect(studioReleaseChoices({ releases: releases.slice(1), artists, editions: [] })).toEqual([]);
   });
+
+  it("treats ARCHIVED as archived and does not fall back to it when nothing live remains", () => {
+    const artists = [{ id: "voidcaller", name: "Voidcaller" }, { id: "e2e", name: "E2E" }];
+    const releases = [
+      { id: "ff-upper", artistId: "voidcaller", title: "Forgive & Forget", status: "ARCHIVED" },
+      { id: "ff-mixed", artistId: "voidcaller", title: "Forgive & Forget", status: "Archived" },
+      { id: "e2e-only", artistId: "e2e", title: "Marketplace Fuji E2E Test", status: "draft" },
+    ];
+    expect(studioReleaseChoices({ releases, artists, editions: [] }).map(({ release }) => release.id)).toEqual(["e2e-only"]);
+    expect(studioReleaseChoices({
+      releases: [{ id: "ff-only", artistId: "voidcaller", title: "Forgive & Forget", status: "ARCHIVED" }],
+      artists: [{ id: "voidcaller", name: "Voidcaller" }],
+      editions: [],
+    })).toEqual([]);
+  });
 });
