@@ -13,6 +13,8 @@ import { createProtectedMediaGateway } from "./media-gateway.js";
 import { createIndexedOwnershipVerifier } from "./ownership.js";
 import { createArtistStudioService } from "./studio-service.js";
 import { createArtistVerificationService } from "./verification-service.js";
+import { createNotificationStore, createVerificationNotifier } from "./verification-notifier.js";
+import { createXDmClient, loadXDmConfig } from "./x-dm.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
 import { createPinataMetadataStorage } from "./metadata-storage.js";
 import { createPinataArtworkUploader } from "./artwork-storage.js";
@@ -51,22 +53,33 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const provenanceRecords = new ProvenanceRecords({ db: pool });
   const metadataFetcher = createIpfsMetadataFetcher({ gateway: process.env.IPFS_GATEWAY });
   const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, directMediaUploads, artworkUploader, provenanceRecords, metadataFetcher, logger });
-  const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, logger });
+  // Reviewer alerts: X DM to the server-configured reviewer account. Missing
+  // X configuration is reported (startup log + per-alert CONFIG_MISSING), never fatal.
+  const xDmConfig = loadXDmConfig(process.env);
+  if (!xDmConfig.configured) logger.error?.("X_DM_CONFIG_MISSING", { missing: [...xDmConfig.missing, ...xDmConfig.invalid], recipient: `@${xDmConfig.recipientUsername}` });
+  const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
+  const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
-  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService };
+  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT || 8787);
   const config = loadServerConfig();
-  const { server, pool } = createApiServer({ config });
+  const { server, pool, verificationNotifier } = createApiServer({ config });
+  // Retry sweep for reviewer alerts (backoff, missing-config re-checks, backstop).
+  const notificationSweep = setInterval(() => {
+    verificationNotifier.processDue().catch((error) => console.error(JSON.stringify({ event: "X_DM_FAILED", code: "SWEEP_ERROR", detail: error.message })));
+  }, 60_000);
+  notificationSweep.unref();
   let stopping = false;
   const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
+    clearInterval(notificationSweep);
     console.log(JSON.stringify({ event: "api.shutdown.started", signal }));
     const deadline = new Promise((resolve) => setTimeout(resolve, config.shutdownTimeoutMs));
     Promise.race([
