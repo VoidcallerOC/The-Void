@@ -22,6 +22,8 @@ import {
   formatAvax,
   fujiPrimarySaleAddress,
   readPrimarySale,
+  saleIsSoldOut,
+  walletLimitReached,
 } from "../lib/primary-sale.js";
 import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
 
@@ -30,8 +32,8 @@ function saleFacts(sale) {
   if (!sale?.configured) return "This release does not have a primary sale yet.";
   const facts = [
     `Price ${formatAvax(sale.priceWei)}`,
-    `${sale.remaining.toString()} left of ${sale.maxSupply.toString()}`,
-    `${sale.perWalletLimit.toString()} per wallet`,
+    sale.maxSupply === 0n ? "Unlimited until the sale ends" : `${sale.remaining.toString()} left of ${sale.maxSupply.toString()}`,
+    sale.perWalletLimit === 0n ? "No per-wallet cap" : `${sale.perWalletLimit.toString()} per wallet`,
   ];
   if (sale.purchased > 0n) facts.push(`${sale.purchased.toString()} already collected by this wallet`);
   if (sale.paused) facts.push("Sale paused");
@@ -41,9 +43,9 @@ function saleFacts(sale) {
 function collectLabel(sale, busy) {
   if (busy) return "Confirming…";
   if (!sale?.configured) return "Collect";
-  if (sale.remaining === 0n) return "Sold out";
+  if (saleIsSoldOut(sale)) return "Sold out";
   if (sale.paused) return "Sale paused";
-  if (sale.purchased >= sale.perWalletLimit) return "Wallet limit reached";
+  if (walletLimitReached(sale)) return "Wallet limit reached";
   return `Collect · ${formatAvax(sale.priceWei)}`;
 }
 
@@ -65,7 +67,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const catalogOwned = Boolean(library?.editions?.some((item) => item.edition.id === edition.id));
   const fujiOwned = balance !== null && balance > 0n;
   const owned = certified ? fujiOwned : catalogOwned || primary.availability === "minted" && catalogOwned;
-  const blocked = Boolean(sale?.configured && (sale.remaining === 0n || sale.paused || sale.purchased >= sale.perWalletLimit));
+  const blocked = Boolean(sale?.configured && (saleIsSoldOut(sale) || sale.paused || walletLimitReached(sale)));
 
   const storedEvidence = useMemo(() => loadPrimaryPurchaseEvidence({ editionId: edition?.id, tokenId, purchaser: wallet.account }), [edition?.id, tokenId, wallet.account]);
   const purchaseEvidence = sessionEvidence?.editionId === edition?.id
@@ -132,9 +134,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       const onChainSale = await readPrimarySale(provider, tokenId, wallet.account);
       setSale(onChainSale);
       if (!onChainSale?.configured) throw Object.assign(new Error("This release does not have a primary sale yet."), { state: "unconfigured" });
-      if (onChainSale.remaining === 0n) throw Object.assign(new Error("This release is sold out."), { state: "sold-out" });
+      if (saleIsSoldOut(onChainSale)) throw Object.assign(new Error("This release is sold out."), { state: "sold-out" });
       if (onChainSale.paused) throw Object.assign(new Error("This sale is paused."), { state: "paused" });
-      if (onChainSale.purchased >= onChainSale.perWalletLimit) throw Object.assign(new Error("This wallet has reached the collector limit for this release."), { state: "wallet-limit" });
+      if (walletLimitReached(onChainSale)) throw Object.assign(new Error("This wallet has reached the collector limit for this release."), { state: "wallet-limit" });
       const result = await collectEdition({ provider, from: wallet.account, tokenId, qty: 1, priceWei: onChainSale.priceWei });
       setSessionEvidence(savePrimaryPurchaseEvidence({
         transactionHash: result.hash,
@@ -241,7 +243,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     <section style={{ marginTop: 48, border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "28px 24px" }}>
       <Eyebrow red>Collectible release</Eyebrow>
       <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", textTransform: "uppercase", lineHeight: 0.95, margin: "12px 0" }}>
-        {owned ? "Owned" : sale?.remaining === 0n ? "Sold out" : "Collect"}
+        {owned ? "Owned" : saleIsSoldOut(sale) ? "Sold out" : "Collect"}
       </h2>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65 }}>
         {artist?.name} · {release?.title} · {edition.title}. {primary.note}

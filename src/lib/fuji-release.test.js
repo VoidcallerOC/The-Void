@@ -35,6 +35,15 @@ describe("certified Fuji VoidRelease1155 integration", () => {
     expect(withRoyalty.tokenId).toBe(edition.tokenId);
   });
 
+  it("encodes maxSupply 0 as an unlimited open edition", () => {
+    const iface = new ethers.Interface(["function createEdition(bytes32,bytes32,uint256,string,address,uint96)"]);
+    const blank = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: "", metadataUri: "ipfs://test", payout: "0x0000000000000000000000000000000000000001", royaltyBps: 0 });
+    const zero = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: 0, metadataUri: "ipfs://test", payout: "0x0000000000000000000000000000000000000001", royaltyBps: 0 });
+    expect(iface.decodeFunctionData("createEdition", blank.data)[2]).toBe(0n);
+    expect(iface.decodeFunctionData("createEdition", zero.data)[2]).toBe(0n);
+    expect(() => encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: -1, metadataUri: "ipfs://test" })).toThrow(/whole number/);
+  });
+
   it("locks the temporary E2E mint to the exact wallet, the run's fresh token, quantity 1, and the certified contract", () => {
     const plan = createFujiE2EMintPlan({ now: 1790960000000, random: () => "a1b2c3d4e5f6" });
     const data = encodeFujiE2EMint(plan);
