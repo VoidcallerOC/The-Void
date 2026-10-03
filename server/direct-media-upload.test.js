@@ -14,7 +14,7 @@ const UPLOAD_ID = "upload-00000000-0000-4000-8000-000000000000";
 const SHA = "b".repeat(64);
 const CID = "bafybeiprivatemastercid0000000000000000000000000000";
 
-function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, existingSha = SHA, existingArtist = "artist-1", ownedArtists = ["artist-1"], assetInUse = false, reassigned = [], maxBytes = 500 * 1024 * 1024 } = {}) {
+function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, existingSha = SHA, existingArtist = "artist-1", ownedArtists = ["artist-1"], assetInUse = false, reassigned = [], storedBytes = null, maxBytes = 500 * 1024 * 1024 } = {}) {
   const db = { query: vi.fn(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes("STUDIO_MEDIA_UPLOAD_ISSUED")) return { rows: issued.includes(params[1]) ? [{ id: "audit-issued" }] : [] };
@@ -28,7 +28,7 @@ function setup({ wallet = owner, file = null, previewHashes = [], existingKeys =
   }) };
   const repository = { appendAuditEvent: vi.fn(async () => ({})), saveMediaAsset: vi.fn(async (input) => ({ id: input.id, media_type: input.mediaType, created_at: "2026-10-02T00:00:00.000Z" })) };
   const upstream = { endpoint: "GET /v3/files/private/{id}", status: file ? 200 : 404, count: file ? 1 : 0, files: [] };
-  const direct = { maxBytes, sign: vi.fn(async () => "https://uploads.pinata.cloud/v3/files/signed-xyz"), get: vi.fn(async () => ({ file, upstream })), sha256: vi.fn(async () => ({ sha256: storedSha, bytes: file?.size })) };
+  const direct = { maxBytes, sign: vi.fn(async () => "https://uploads.pinata.cloud/v3/files/signed-xyz"), get: vi.fn(async () => ({ file, upstream })), sha256: vi.fn(async () => ({ sha256: storedSha, bytes: storedBytes ?? file?.size, download: { status: 200 } })) };
   const logger = { info: vi.fn(), error: vi.fn() };
   const instance = new ArtistStudioService({ db: verifiedArtistDb(db), repository, directMediaUploads: direct, authenticator: vi.fn().mockResolvedValue({ wallet }), logger });
   return { instance, repository, direct, logger, reassigned };
@@ -154,6 +154,19 @@ describe("registering a direct upload", () => {
     const used = setup({ file: stored({ keyvalues: { voidArtistId: "artist-0", voidUploadId: EARLIER } }), issued: [UPLOAD_ID, EARLIER], existingKeys: [CID], existingArtist: "artist-0", ownedArtists: ["artist-1", "artist-0"], assetInUse: true });
     await expect(register(used.instance)).rejects.toMatchObject({ code: "MEDIA_ASSET_IN_USE" });
     expect(used.reassigned).toEqual([]);
+  });
+
+  it("registers a gateway-transformed object only when Pinata's size equals the browser's byte count, recording the hash as unverified", async () => {
+    const size = 180 * 1024 * 1024;
+    const { instance, repository, logger } = setup({ file: stored(), storedSha: "e".repeat(64), storedBytes: size - 12733 });
+    await expect(register(instance, { byteSize: size })).resolves.toMatchObject({ id: expect.stringMatching(/^asset-/) });
+    expect(repository.saveMediaAsset).toHaveBeenCalled();
+    expect(repository.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_MEDIA_UPLOADED", payload: expect.objectContaining({ hashVerified: false, hashCheck: "GATEWAY_TRANSFORMED" }) }));
+    expect(logger.info).toHaveBeenCalledWith("MEDIA_UPLOAD_VERIFY", expect.objectContaining({ outcome: "REGISTERED", hashVerified: false }));
+    const other = setup({ file: stored(), storedSha: "e".repeat(64), storedBytes: size - 12733 });
+    await expect(register(other.instance, { byteSize: size - 1 })).rejects.toMatchObject({ code: "MEDIA_SIZE_MISMATCH" });
+    await expect(register(other.instance)).rejects.toMatchObject({ code: "MEDIA_SIZE_MISMATCH" });
+    expect(other.repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
   it("refuses when the stored bytes do not hash to the declared SHA-256", async () => {
