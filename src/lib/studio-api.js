@@ -247,7 +247,7 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   // Pinata returned and verifies it (private, this artist's upload, SHA-256).
   onProgress?.({ stage: "verifying" });
   try {
-    const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256, pinataFileId: stored.fileId, cid: stored.cid, uploadReceipt: receiptOf(stored) }, headers, fetchImpl });
+    const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256, byteSize: master.size, pinataFileId: stored.fileId, cid: stored.cid, uploadReceipt: receiptOf(stored) }, headers, fetchImpl });
     onProgress?.({ stage: "registering" });
     return { assetId: asset.id, filename: file.name, contentType, byteSize: asset.byteSize ?? file.size };
   } catch (error) {
