@@ -106,12 +106,26 @@ function certifiedTokenId(releaseSlug, editionSlug) {
 }
 
 function lifecycle(value, field = "status") { return enumValue(String(value || "").toUpperCase(), field, LIFECYCLE); }
+// Taking a release off the public site is the only step backward from PUBLISHED.
+// DRAFT and REVIEW stay unreachable, and publication still requires the on-chain confirm path.
 function patchStatus(input, current, noun) {
   if (input.status === undefined) return current;
+  const requested = String(input.status).trim().toUpperCase();
+  const now = String(current || "").trim().toUpperCase();
+  if (requested === "ARCHIVED") {
+    if (now !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", `Only a published ${noun} can be taken off the site.`);
+    return "ARCHIVED";
+  }
   const next = lifecycle(input.status);
   if (next === "PUBLISHED") throw new ApiError(409, "PUBLICATION_REQUIRES_CONFIRMATION", `Only confirmed on-chain publication can mark a ${noun} published.`);
-  if (current === "PUBLISHED" && next !== current) throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", `Published ${noun}s cannot return to an earlier lifecycle state.`);
+  if (now === "PUBLISHED" && next !== now) throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", `Published ${noun}s cannot return to an earlier lifecycle state.`);
   return next;
+}
+function assertPublishedMayChange(current, input, message) {
+  if (String(current || "").trim().toUpperCase() !== "PUBLISHED" || input.status === undefined || input.status === null || String(input.status).trim() === "") return;
+  const next = String(input.status).trim().toUpperCase();
+  if (next === "PUBLISHED" || next === "ARCHIVED") return;
+  throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", message);
 }
 function jsonObject(value, field) {
   if (value === undefined || value === null) return {};
@@ -416,9 +430,10 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
-    if (release.status === "PUBLISHED" && input.status && lifecycle(input.status) !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", "Published releases cannot return to an earlier lifecycle state.");
+    assertPublishedMayChange(release.status, input, "Published releases cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, release.status, "release");
-    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : null });
+    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
+    if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
     return saved;
   }
@@ -450,7 +465,7 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT e.*, r.artist_id, ao.owner_wallet FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE e.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(editionId, "editionId"), identity.wallet]);
     const edition = rows[0];
     if (!edition) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this edition.");
-    if (edition.status === "PUBLISHED" && input.status && lifecycle(input.status) !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", "Published editions cannot return to an earlier lifecycle state.");
+    assertPublishedMayChange(edition.status, input, "Published editions cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, edition.status, "edition");
     const saved = await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: input.name === undefined && input.title === undefined ? edition.title : requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: input.tier === undefined ? edition.tier : optionalText(input.tier, "edition.tier", { max: 128 }), description: input.description === undefined ? edition.description : optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? edition.supply : positiveBigInt(input.quantity, "edition.quantity"), status, metadata: input.metadata === undefined ? edition.application_metadata : jsonObject(input.metadata, "edition.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_EDITION_UPDATED", subjectType: "edition", subjectId: edition.id });
@@ -479,7 +494,7 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT x.*, ao.owner_wallet FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE x.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(experienceId, "experienceId"), identity.wallet]);
     const experience = rows[0];
     if (!experience) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this experience.");
-    if (experience.status === "PUBLISHED" && input.status && lifecycle(input.status) !== "PUBLISHED") throw new ApiError(409, "LIFECYCLE_TRANSITION_INVALID", "Published experiences cannot return to an earlier lifecycle state.");
+    assertPublishedMayChange(experience.status, input, "Published experiences cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, experience.status, "experience");
     const productType = input.productType ? String(input.productType).toUpperCase() : null;
     const mappedType = productType ? PRODUCT_TYPES[productType] : (input.type === undefined && input.experienceType === undefined ? experience.experience_type : String(input.type || input.experienceType).toUpperCase());
@@ -489,6 +504,13 @@ export class ArtistStudioService {
     const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, version: Number(experience.version || 1) + 1, status });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_UPDATED", subjectType: "experience", subjectId: experience.id });
     return saved;
+  }
+
+  // Same effect as the archive migrations: lifecycle only. Tokens, sales,
+  // ownership, and purchases are not touched.
+  async archiveReleaseChildren(releaseId) {
+    await this.db.query("UPDATE editions SET status = 'ARCHIVED', updated_at = now() WHERE release_id = $1 AND status <> 'ARCHIVED'", [releaseId]);
+    await this.db.query("UPDATE experiences SET status = 'ARCHIVED', updated_at = now() WHERE status <> 'ARCHIVED' AND (release_id = $1 OR edition_id IN (SELECT id FROM editions WHERE release_id = $1))", [releaseId]);
   }
 
   async publishReleaseExperiences(release) {
