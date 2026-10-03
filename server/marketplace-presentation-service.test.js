@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import { createMarketplacePresentationService } from "./marketplace-presentation-service.js";
 
@@ -22,6 +23,38 @@ function fakeDb() {
 
 const authenticator = async (request) => (request.headers.wallet ? { wallet: request.headers.wallet } : null);
 const as = (wallet) => ({ headers: wallet ? { wallet } : {} });
+
+const CID_URI = "ipfs://bafybeidedfcwz6qykwzqoqcs37zsqbjj3wpadyytee4didw2ocnur7veni";
+const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]).toString("base64");
+
+describe("marketplace hero upload", () => {
+  it("lets an admin upload an image file and makes it the hero", async () => {
+    const db = fakeDb();
+    const calls = [];
+    const artworkUploader = async (args) => { calls.push(args); return { uri: CID_URI }; };
+    const service = createMarketplacePresentationService({ db, authenticator, artworkUploader, adminWallets: ADMIN });
+    await expect(service.uploadHero({ request: as(ADMIN), input: { data: png } })).resolves.toMatchObject({ heroArtwork: CID_URI });
+    expect(calls[0]).toMatchObject({ contentType: "image/png" });
+    await expect(service.get()).resolves.toMatchObject({ heroArtwork: CID_URI });
+  });
+
+  it("refuses a non-admin upload before anything is pinned", async () => {
+    let called = false;
+    const service = createMarketplacePresentationService({ db: fakeDb(), authenticator, artworkUploader: async () => { called = true; return { uri: CID_URI }; }, adminWallets: ADMIN });
+    await expect(service.uploadHero({ request: as(OTHER), input: { data: png } })).rejects.toMatchObject({ status: 403 });
+    expect(called).toBe(false);
+  });
+
+  it("rejects a file that is not an image", async () => {
+    const service = createMarketplacePresentationService({ db: fakeDb(), authenticator, artworkUploader: async () => ({ uri: CID_URI }), adminWallets: ADMIN });
+    await expect(service.uploadHero({ request: as(ADMIN), input: { data: Buffer.from("not an image").toString("base64") } })).rejects.toMatchObject({ status: 400, code: "ARTWORK_TYPE_UNSUPPORTED" });
+  });
+
+  it("reports when uploads are not configured", async () => {
+    const service = createMarketplacePresentationService({ db: fakeDb(), authenticator, adminWallets: ADMIN });
+    await expect(service.uploadHero({ request: as(ADMIN), input: { data: png } })).rejects.toMatchObject({ status: 503 });
+  });
+});
 
 describe("marketplace presentation service", () => {
   it("is unconfigured by default", async () => {
