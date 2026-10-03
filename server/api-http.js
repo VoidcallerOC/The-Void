@@ -129,6 +129,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
           data = await marketplacePresentation.update({ request: apiRequest, input: body });
         }
+        else if (method === "POST" && base.join("/") === "marketplace/presentation/artwork") {
+          if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
+          data = await marketplacePresentation.uploadHero({ request: apiRequest, input: body });
+        }
         else if (method === "POST" && base.join("/") === "listings") data = await service.createListing({ request: apiRequest, input: body });
         else if (method === "POST" && base.join("/") === "listings/cancel") data = await service.cancelListing({ request: apiRequest, input: body });
         else if (method === "POST" && base.join("/") === "purchases/intents") data = await service.createPurchaseIntent({ request: apiRequest, input: body });
