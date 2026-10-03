@@ -413,3 +413,34 @@ export async function verifyFujiEditionCreation(provider, { transactionHash, rel
 }
 
 export function fujiExplorerUrl(kind, value) { return `${FUJI_RELEASE_CONFIG.explorer}/${kind}/${value}`; }
+
+// Reviewer tooling: grant a verified artist's wallet the roles the certified
+// Fuji contract requires to publish (ARTIST_ROLE) and mint (ISSUER_ROLE).
+// Signed by the connected wallet, which must hold DEFAULT_ADMIN_ROLE; no
+// server-side key is involved.
+const roleAdminIface = new ethers.Interface(["function grantRole(bytes32 role, address account)"]);
+export const PUBLISHING_ROLES = Object.freeze([["ARTIST_ROLE", FUJI_ROLES.ARTIST_ROLE], ["ISSUER_ROLE", FUJI_ROLES.ISSUER_ROLE]]);
+
+export function encodeFujiGrantRole(role, account) {
+  if (!ethers.isAddress(account)) throw new Error("The artist wallet address is invalid.");
+  return roleAdminIface.encodeFunctionData("grantRole", [role, ethers.getAddress(account)]);
+}
+
+/** Current publishing roles of `account`: { ARTIST_ROLE: bool, ISSUER_ROLE: bool }. */
+export async function readPublishingRoles(provider, account) {
+  const entries = await Promise.all(PUBLISHING_ROLES.map(async ([name, role]) => [name, await readFujiRole(provider, role, account)]));
+  return Object.fromEntries(entries);
+}
+
+/** Grants each missing publishing role to `account`, one transaction per role. */
+export async function grantPublishingRoles({ provider, from, account, onProgress }) {
+  if (!(await readFujiRole(provider, FUJI_ROLES.DEFAULT_ADMIN_ROLE, from))) throw new Error("The connected wallet is not an admin of the Fuji release contract, so it cannot grant roles. Connect the contract admin wallet.");
+  const results = [];
+  for (const [name, role] of PUBLISHING_ROLES) {
+    if (await readFujiRole(provider, role, account)) { results.push({ role: name, alreadyHeld: true }); continue; }
+    onProgress?.(`Confirm granting ${name} in your wallet…`);
+    const transaction = await sendFujiTransaction({ provider, from, data: encodeFujiGrantRole(role, account) });
+    results.push({ role: name, hash: transaction.hash });
+  }
+  return results;
+}
