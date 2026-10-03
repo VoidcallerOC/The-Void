@@ -113,6 +113,23 @@ describe("Artist Studio", () => {
 
     const regression = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date() }] });
     await expect(regression.instance.updateRelease({ request, releaseId: "release-1", input: { status: "REVIEW" } })).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
+    await expect(regression.instance.updateRelease({ request, releaseId: "release-1", input: { status: "DRAFT" } })).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
+    expect(regression.repo.saveRelease).not.toHaveBeenCalled();
+  });
+
+  it("archives a published release and its editions and experiences without touching the token", async () => {
+    const publishedAt = new Date("2026-09-01T00:00:00.000Z");
+    const harness = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] });
+    await expect(harness.instance.updateRelease({ request, releaseId: "release-1", input: { status: "archived" } })).resolves.toMatchObject({ status: "ARCHIVED" });
+    expect(harness.repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ id: "release-1", status: "ARCHIVED", publishedAt }));
+    const updates = harness.db.query.mock.calls.map(([sql]) => String(sql));
+    expect(updates.some((sql) => /UPDATE editions SET status = 'ARCHIVED'/i.test(sql))).toBe(true);
+    expect(updates.some((sql) => /UPDATE experiences SET status = 'ARCHIVED'/i.test(sql))).toBe(true);
+    expect(updates.join("\n")).not.toMatch(/UPDATE tokens|DELETE FROM tokens|UPDATE listings|UPDATE purchases/i);
+
+    const draft = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "DRAFT", release_metadata: {}, published_at: null }] });
+    await expect(draft.instance.updateRelease({ request, releaseId: "release-1", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
+    expect(draft.repo.saveRelease).not.toHaveBeenCalled();
   });
 
   it("derives a title-only release slug and resolves collisions without client input", async () => {

@@ -23,9 +23,13 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
   const artistById = new Map(artists.map((artist) => [artist.id, artist]));
   const editionCount = new Map();
   for (const edition of editions) editionCount.set(edition.releaseId, (editionCount.get(edition.releaseId) || 0) + 1);
-  const rank = (release) => (release.status === "published" ? 2 : 0) + Math.min(1, editionCount.get(release.id) || 0);
-  // Archived releases are retired from the catalog (e.g. duplicates) and are never offered.
-  const all = releases.filter((release) => release.status !== "archived").map((release) => ({ release, artist: artistById.get(release.artistId) || null }));
+  const rank = (release) => (String(release.status || "").trim().toLowerCase() === "published" ? 2 : 0) + Math.min(1, editionCount.get(release.id) || 0);
+  // Archived releases are retired from the catalog and are never offered,
+  // whatever casing the API used (ARCHIVED or archived). The test-record
+  // fallback below only sees this already-filtered list, so an empty live
+  // catalog does not bring archived rows back.
+  const live = releases.filter((release) => String(release.status || "").trim().toLowerCase() !== "archived");
+  const all = live.map((release) => ({ release, artist: artistById.get(release.artistId) || null }));
   const real = all.filter(({ release, artist }) => !isHidden(release) && !isHidden(artist));
   const pool = real.length ? real : all;
   const chosen = new Map();

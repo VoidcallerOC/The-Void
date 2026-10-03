@@ -487,6 +487,30 @@ export function ArtistStudioPage() {
     return uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience ${noun} stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`, mediaType);
   };
 
+  const takeReleaseOffSite = async (record) => {
+    const id = record?.release?.id;
+    if (!id || busy) return;
+    const title = record.release.title || "This release";
+    setBusy(`archive:${id}`);
+    setTxEvidence(null);
+    try {
+      await studioFetch(`/studio/releases/${encodeURIComponent(id)}`, { method: "PATCH", payload: { status: "ARCHIVED" }, headers });
+      setOwnedStudioCatalog((prior) => (prior ? { ...prior, releases: (prior.releases || []).filter((item) => item.id !== id) } : prior));
+      if (selectedReleaseId === id) setSelectedReleaseId("");
+      if (mintReleaseId === id) setMintReleaseId("");
+      if (releaseId === id) {
+        setReleaseId("");
+        setEditionId("");
+        setPublishedTokenId("");
+      }
+      setNotice(`${title} is off the site. The chain token was not deleted.`);
+    } catch (error) {
+      setNotice(error.message || "Could not take this release off the site.");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const selectExistingRelease = (record) => {
     if (record.release.status === "published" && openPublishedSale(ownedStudioCatalog, record.release.id)) return;
     const selection = selectReleaseTemplate(record);
@@ -546,7 +570,7 @@ export function ArtistStudioPage() {
         ))}
       </nav>}
 
-      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed|uploaded/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
+      {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed|uploaded|off the site/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
       {txEvidence && (
         <div role="status" style={{ ...card, margin: "20px 0", borderColor: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
           <div>Failed transaction {txEvidence.code ? `(${txEvidence.code})` : ""} — inspect the exact revert on Snowtrace:</div>
@@ -610,18 +634,23 @@ export function ArtistStudioPage() {
           {existingReleases.length > 0 && (
             <div className="vc-release-picker">
               {existingReleases.map((record) => (
-                <button
+                <div
                   key={record.release.id}
-                  type="button"
                   className={`vc-release-pick${selectedReleaseId === record.release.id ? " is-selected" : ""}`}
-                  onClick={() => selectExistingRelease(record)}
                 >
-                  <img src={record.release.artwork} alt="" />
-                  <div>
-                    <p className="vc-card-kicker">{record.artist?.name}</p>
-                    <strong style={{ display: "block", marginTop: 6 }}>{record.release.title}</strong>
-                  </div>
-                </button>
+                  <button type="button" className="vc-release-pick-open" onClick={() => selectExistingRelease(record)}>
+                    <img src={record.release.artwork} alt="" />
+                    <div>
+                      <p className="vc-card-kicker">{record.artist?.name}</p>
+                      <strong style={{ display: "block", marginTop: 6 }}>{record.release.title}</strong>
+                    </div>
+                  </button>
+                  {String(record.release.status || "").trim().toLowerCase() === "published" && (
+                    <button type="button" className="vc-release-pick-archive" disabled={busy !== ""} onClick={() => takeReleaseOffSite(record)}>
+                      {busy === `archive:${record.release.id}` ? "Taking it off…" : "Take this off the site"}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
