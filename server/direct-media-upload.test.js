@@ -12,23 +12,28 @@ const artistRow = { id: "artist-1", slug: "voidcaller", display_name: "Voidcalle
 const request = { requestId: "request-1", headers: {} };
 const UPLOAD_ID = "upload-00000000-0000-4000-8000-000000000000";
 const SHA = "b".repeat(64);
-const CID = "bafybeiprivatemastercid";
+const CID = "bafybeiprivatemastercid0000000000000000000000000000";
 
-function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], maxBytes = 500 * 1024 * 1024 } = {}) {
+function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, maxBytes = 500 * 1024 * 1024 } = {}) {
   const db = { query: vi.fn(async (sql, params = []) => {
     const text = String(sql);
+    if (text.includes("STUDIO_MEDIA_UPLOAD_ISSUED")) return { rows: issued.includes(params[1]) ? [{ id: "audit-issued" }] : [] };
     if (text.includes("FROM audit_events")) return { rows: previewHashes.includes(params[1]) ? [{ id: "audit-1" }] : [] };
     if (text.includes("FROM media_assets WHERE artist_id=$1 AND storage_key=$2")) return { rows: existingKeys.includes(params[1]) ? [{ id: "asset-existing", media_type: "AUDIO" }] : [] };
     if (text.includes("FROM artists a JOIN artist_owners")) return { rows: params[1] === owner ? [artistRow] : [] };
     return { rows: [] };
   }) };
   const repository = { appendAuditEvent: vi.fn(async () => ({})), saveMediaAsset: vi.fn(async (input) => ({ id: input.id, media_type: input.mediaType, created_at: "2026-10-02T00:00:00.000Z" })) };
-  const direct = { maxBytes, sign: vi.fn(async () => "https://uploads.pinata.cloud/v3/files/signed-xyz"), find: vi.fn(async () => file) };
-  const instance = new ArtistStudioService({ db: verifiedArtistDb(db), repository, directMediaUploads: direct, authenticator: vi.fn().mockResolvedValue({ wallet }), logger: { info: vi.fn() } });
-  return { instance, repository, direct };
+  const upstream = { endpoint: "GET /v3/files/private/{id}", status: file ? 200 : 404, count: file ? 1 : 0, files: [] };
+  const direct = { maxBytes, sign: vi.fn(async () => "https://uploads.pinata.cloud/v3/files/signed-xyz"), get: vi.fn(async () => ({ file, upstream })), sha256: vi.fn(async () => ({ sha256: storedSha, bytes: file?.size })) };
+  const logger = { info: vi.fn(), error: vi.fn() };
+  const instance = new ArtistStudioService({ db: verifiedArtistDb(db), repository, directMediaUploads: direct, authenticator: vi.fn().mockResolvedValue({ wallet }), logger });
+  return { instance, repository, direct, logger };
 }
 
-const stored = (overrides = {}) => ({ cid: CID, size: 180 * 1024 * 1024, mimeType: "audio/wav", network: "private", keyvalues: { voidArtistId: "artist-1", voidUploadId: UPLOAD_ID, voidMediaType: "AUDIO" }, ...overrides });
+const FILE_ID = "0198f2a4-1111-7222-8333-944455556666";
+const IDENTITY = { pinataFileId: FILE_ID };
+const stored = (overrides = {}) => ({ id: FILE_ID, cid: CID, size: 180 * 1024 * 1024, mimeType: "audio/wav", network: "private", keyvalues: { voidArtistId: "artist-1", voidUploadId: UPLOAD_ID, voidMediaType: "AUDIO" }, ...overrides });
 
 describe("direct private upload link", () => {
   it("issues a private, audio-only, size-capped link stamped with the artist and an upload id", async () => {
@@ -61,46 +66,86 @@ describe("direct private upload link", () => {
 });
 
 describe("registering a direct upload", () => {
-  it("records the private file found under this artist's upload id and returns only an asset id", async () => {
+  const register = (instance, input = {}) => instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA, ...IDENTITY, ...input } });
+
+  it("looks up exactly the object Pinata returned, verifies its stored SHA-256, and returns only an asset id", async () => {
     const { instance, repository, direct } = setup({ file: stored() });
-    const result = await instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } });
-    expect(direct.find).toHaveBeenCalledWith({ keyvalues: { voidArtistId: "artist-1", voidUploadId: UPLOAD_ID } });
+    const result = await register(instance);
+    expect(direct.get).toHaveBeenCalledWith({ fileId: FILE_ID, cid: null });
+    expect(direct.sha256).toHaveBeenCalledWith({ cid: CID });
     expect(repository.saveMediaAsset).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", storageKey: CID, mediaType: "AUDIO", contentSha256: SHA, byteSize: 180 * 1024 * 1024 }));
     expect(result.id).toMatch(/^asset-/);
     expect(JSON.stringify(result)).not.toContain(CID);
   });
 
-  it("says to retry while the file has not reached storage", async () => {
-    const { instance, repository } = setup({ file: null });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).rejects.toMatchObject({ status: 409, code: "MEDIA_UPLOAD_NOT_FOUND", details: { retryable: true, reason: "PRIVATE_STORAGE_EVENTUAL_CONSISTENCY", retryAfterMs: 1000 } });
+  it("accepts the tus Upload-CID as the identity", async () => {
+    const { instance, direct } = setup({ file: stored() });
+    await register(instance, { pinataFileId: undefined, cid: CID });
+    expect(direct.get).toHaveBeenCalledWith({ fileId: null, cid: CID });
+  });
+
+  it("requires an object identity instead of searching storage by metadata", async () => {
+    const { instance, direct } = setup({ file: stored() });
+    await expect(register(instance, { pinataFileId: undefined })).rejects.toMatchObject({ status: 400, code: "UPLOAD_IDENTITY_REQUIRED" });
+    expect(direct.get).not.toHaveBeenCalled();
+  });
+
+  it("refuses an upload id this server never issued to the artist", async () => {
+    const { instance, direct } = setup({ file: stored(), issued: [] });
+    await expect(register(instance)).rejects.toMatchObject({ status: 403, code: "UPLOAD_NOT_ISSUED" });
+    expect(direct.get).not.toHaveBeenCalled();
+  });
+
+  it("reports the exact upstream lookup when the object is missing, and logs the evidence", async () => {
+    const { instance, repository, logger } = setup({ file: null });
+    const error = await register(instance).catch((caught) => caught);
+    expect(error).toMatchObject({ status: 404, code: "MEDIA_OBJECT_NOT_FOUND", details: { upstream: { endpoint: "GET /v3/files/private/{id}", status: 404, count: 0 } } });
+    expect(error.message).toContain("HTTP 404");
+    expect(logger.error).toHaveBeenCalledWith("MEDIA_UPLOAD_VERIFY", expect.objectContaining({ outcome: "MEDIA_OBJECT_NOT_FOUND", pinataFileId: FILE_ID }));
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
-  it("never records a public file or one stamped for another artist", async () => {
-    for (const file of [stored({ network: "public" }), stored({ keyvalues: { voidArtistId: "artist-2", voidUploadId: UPLOAD_ID } })]) {
+  it("never records a public object, another artist's object, a different CID, or non-audio", async () => {
+    const cases = [
+      [stored({ network: "public" }), {}, "MEDIA_UPLOAD_NOT_PRIVATE"],
+      [stored({ keyvalues: { voidArtistId: "artist-2", voidUploadId: UPLOAD_ID } }), {}, "MEDIA_UPLOAD_MISMATCH"],
+      [stored({ keyvalues: {} }), {}, "MEDIA_UPLOAD_MISMATCH"],
+      [stored(), { cid: "bafybeiotherobject000000000000000000000000000000" }, "MEDIA_UPLOAD_MISMATCH"],
+      [stored({ mimeType: "video/mp4" }), {}, "AUDIO_TYPE_UNSUPPORTED"],
+      [stored({ cid: "pending" }), {}, "MEDIA_CID_PENDING"],
+    ];
+    for (const [file, input, code] of cases) {
       const { instance, repository } = setup({ file });
-      await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_MISMATCH" });
+      await expect(register(instance, input)).rejects.toMatchObject({ code });
       expect(repository.saveMediaAsset).not.toHaveBeenCalled();
     }
   });
 
+  it("refuses when the stored bytes do not hash to the declared SHA-256", async () => {
+    const { instance, repository } = setup({ file: stored(), storedSha: "c".repeat(64) });
+    await expect(register(instance)).rejects.toMatchObject({ status: 409, code: "MEDIA_HASH_MISMATCH" });
+    expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+
   it("refuses a full track that is already public as the preview", async () => {
     const { instance, repository } = setup({ file: stored(), previewHashes: [SHA] });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).rejects.toMatchObject({ code: "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW" });
+    await expect(register(instance)).rejects.toMatchObject({ code: "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW" });
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
-  it("is idempotent when the same upload is registered twice", async () => {
+  it("is idempotent when the same object is registered twice", async () => {
     const { instance, repository } = setup({ file: stored(), existingKeys: [CID] });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: SHA } })).resolves.toMatchObject({ id: "asset-existing" });
+    await expect(register(instance)).resolves.toMatchObject({ id: "asset-existing" });
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed upload ids and hashes before touching storage", async () => {
+  it("rejects malformed upload ids, hashes and identities before touching storage", async () => {
     const { instance, direct } = setup({ file: stored() });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: "../x", contentSha256: SHA } })).rejects.toMatchObject({ status: 400 });
-    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { uploadId: UPLOAD_ID, contentSha256: "nope" } })).rejects.toMatchObject({ status: 400 });
-    expect(direct.find).not.toHaveBeenCalled();
+    await expect(register(instance, { uploadId: "../x" })).rejects.toMatchObject({ status: 400 });
+    await expect(register(instance, { contentSha256: "nope" })).rejects.toMatchObject({ status: 400 });
+    await expect(register(instance, { pinataFileId: "../../files/public" })).rejects.toMatchObject({ code: "INVALID_PINATA_FILE_ID" });
+    await expect(register(instance, { pinataFileId: undefined, cid: "not-a-cid" })).rejects.toMatchObject({ code: "INVALID_CID" });
+    expect(direct.get).not.toHaveBeenCalled();
   });
 });
 
@@ -121,12 +166,38 @@ describe("Pinata signed upload requests", () => {
     await expect(storage.createSignedUpload({ keyvalues: {}, maxBytes: 1, mimeTypes: [], fetchImpl })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_UNAUTHORIZED" });
   });
 
-  it("looks the file up in private storage by keyvalues", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { files: [{ cid: "bafyx", size: 42, mime_type: "audio/wav", keyvalues: { voidUploadId: "u" } }] } }), { status: 200 }));
-    await expect(storage.findSignedUpload({ keyvalues: { voidArtistId: "a", voidUploadId: "u" }, fetchImpl })).resolves.toEqual({ cid: "bafyx", size: 42, mimeType: "audio/wav", keyvalues: { voidUploadId: "u" }, network: "private" });
+  it("gets the exact private object by Pinata file id (GET /v3/files/private/{id})", async () => {
+    const record = { id: "0198f2a4-1111-7222-8333-944455556666", name: "master.wav", cid: "bafybeiprivatemastercid0000000000000000000000000000", size: 42, number_of_files: 1, mime_type: "audio/wav", keyvalues: { voidUploadId: "u" }, group_id: null, created_at: "2026-10-03T00:00:00Z" };
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: record }), { status: 200 }));
+    const { file, upstream } = await storage.getPrivateUpload({ fileId: record.id, fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toBe(`https://api.pinata.cloud/v3/files/private/${record.id}`);
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe("Bearer jwt-test");
+    expect(file).toMatchObject({ id: record.id, cid: record.cid, size: 42, mimeType: "audio/wav", network: "private", keyvalues: { voidUploadId: "u" } });
+    expect(upstream).toMatchObject({ status: 200, count: 1 });
+    expect(JSON.stringify(upstream)).not.toContain(record.cid);
+  });
+
+  it("gets the object by CID (GET /v3/files/private?cid=) and reports a 404 as missing with evidence", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { files: [{ id: "f1", cid: "bafyx", size: 1, mime_type: "audio/wav", keyvalues: {} }], next_page_token: "" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+    const byCid = await storage.getPrivateUpload({ cid: "bafyx", fetchImpl });
     const url = new URL(fetchImpl.mock.calls[0][0]);
     expect(url.origin + url.pathname).toBe("https://api.pinata.cloud/v3/files/private");
-    expect(url.searchParams.get("metadata[voidArtistId]")).toBe("a");
-    expect(url.searchParams.get("metadata[voidUploadId]")).toBe("u");
+    expect(url.searchParams.get("cid")).toBe("bafyx");
+    expect(byCid.file).toMatchObject({ id: "f1", cid: "bafyx" });
+    const missing = await storage.getPrivateUpload({ fileId: "0198f2a4-1111-7222-8333-944455556666", fetchImpl });
+    expect(missing).toMatchObject({ file: null, upstream: { status: 404, count: 0 } });
+  });
+
+  it("surfaces a non-404 upstream failure with its status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("{\"error\":\"Unauthorized\"}", { status: 403 }));
+    await expect(storage.getPrivateUpload({ fileId: "0198f2a4-1111-7222-8333-944455556666", fetchImpl })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_LOOKUP_FAILED", upstream: { status: 403 } });
+  });
+
+  it("hashes the stored private object through a signed download link", async () => {
+    const hashing = new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: "j", gateway: "https://gw.example", endpoint: "x" } }, signer: async (cid) => `https://gw.example/files/${cid}?sig=1` });
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("hello"));
+    await expect(hashing.sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).resolves.toEqual({ sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", bytes: 5 });
+    expect(fetchImpl).toHaveBeenCalledWith("https://gw.example/files/bafyx?sig=1");
   });
 });

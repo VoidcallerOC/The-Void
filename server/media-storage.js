@@ -1,6 +1,6 @@
 import { createReadStream, promises as fs } from "node:fs";
 import { extname, resolve, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -101,18 +101,44 @@ export class PrivateMediaStorage {
     return body.data;
   }
 
-  // Finds a private file by the keyvalues its signed upload link stamped on it.
-  async findSignedUpload({ keyvalues, fetchImpl = fetch }) {
+  // Looks up the exact private object a direct upload created, by the
+  // identifier Pinata returned to the uploading browser: the file id (multipart
+  // response `data.id`) or the CID (tus `Upload-CID` header). Mirrors the
+  // Pinata SDK (v2.5.6): GET /v3/files/private/{id}, GET /v3/files/private?cid=.
+  // Returns { file, upstream } where upstream is a redacted record of the call.
+  async getPrivateUpload({ fileId = null, cid = null, fetchImpl = fetch }) {
     if (this.config.driver !== "pinata") throw Object.assign(new Error("Direct media upload is not available for this storage driver."), { status: 501, code: "MEDIA_DIRECT_UPLOAD_UNSUPPORTED" });
-    const params = new URLSearchParams({ limit: "2" });
-    for (const [key, value] of Object.entries(keyvalues)) params.append(`metadata[${key}]`, String(value));
-    const response = await fetchImpl(`https://api.pinata.cloud/v3/files/private?${params}`, { headers: { authorization: `Bearer ${this.config.pinata.jwt}` } });
-    if (!response.ok) throw Object.assign(new Error(`Pinata private file lookup failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_UPLOAD_LOOKUP_FAILED" });
-    const body = await response.json();
-    const files = Array.isArray(body?.data?.files) ? body.data.files : [];
-    if (files.length !== 1) return null;
-    const file = files[0];
-    return { cid: typeof file.cid === "string" ? file.cid : null, size: Number(file.size), mimeType: file.mime_type || null, keyvalues: file.keyvalues && typeof file.keyvalues === "object" ? file.keyvalues : {}, network: file.network || "private" };
+    const endpoint = fileId ? `https://api.pinata.cloud/v3/files/private/${encodeURIComponent(fileId)}` : `https://api.pinata.cloud/v3/files/private?${new URLSearchParams({ cid, limit: "10" })}`;
+    const shown = fileId ? "GET /v3/files/private/{id}" : "GET /v3/files/private?cid=";
+    let response;
+    try {
+      response = await fetchImpl(endpoint, { headers: { authorization: `Bearer ${this.config.pinata.jwt}` } });
+    } catch (error) {
+      throw Object.assign(new Error(`Pinata private file lookup could not be reached: ${error.message}`), { status: 502, code: "MEDIA_UPLOAD_LOOKUP_FAILED", upstream: { endpoint: shown, status: null } });
+    }
+    const text = await response.text().catch(() => "");
+    let body = null;
+    try { body = JSON.parse(text); } catch { /* non-JSON error body */ }
+    const files = fileId ? (body?.data && typeof body.data === "object" && !Array.isArray(body.data) ? [body.data] : []) : (Array.isArray(body?.data?.files) ? body.data.files : []);
+    const upstream = { endpoint: shown, status: response.status, count: files.length, files: files.map(redactPinataFile), error: response.ok ? undefined : redactText(text) };
+    if (response.status === 404) return { file: null, upstream };
+    if (!response.ok) throw Object.assign(new Error(`Pinata private file lookup failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_UPLOAD_LOOKUP_FAILED", upstream });
+    // A cid query can in principle match the same bytes uploaded twice; keep
+    // the one carrying this upload's id, if any (the caller re-checks it).
+    const raw = files.find((entry) => !fileId || entry.id === fileId) || null;
+    return { file: raw ? normalizePinataFile(raw) : null, upstream };
+  }
+
+  // SHA-256 of the stored private object, streamed through a short-lived
+  // private download link. Proves the bytes in storage are the declared ones.
+  async sha256OfPrivateObject({ cid, fetchImpl = fetch }) {
+    const url = await this.signer(cid);
+    const response = await fetchImpl(url);
+    if (!response.ok || !response.body) throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", status: response.status } });
+    const hash = createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of response.body) { hash.update(chunk); bytes += chunk.length; }
+    return { sha256: hash.digest("hex"), bytes };
   }
 
   async open({ storageKey, range = null, contentType = null }) {
@@ -132,6 +158,18 @@ export class PrivateMediaStorage {
     try { signedUrl = await this.signer(key); } catch (error) { throw new Error(`Object storage signing failed: ${error.message}`, { cause: error }); }
     return { type: "redirect", url: allowedSignedUrl(signedUrl, this.config.objectUrlHosts) };
   }
+}
+
+const shortId = (value) => (typeof value === "string" && value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value ?? null);
+function normalizePinataFile(file) {
+  return { id: typeof file.id === "string" ? file.id : null, cid: typeof file.cid === "string" ? file.cid : null, name: typeof file.name === "string" ? file.name : null, size: Number(file.size), mimeType: file.mime_type || null, keyvalues: file.keyvalues && typeof file.keyvalues === "object" ? file.keyvalues : {}, network: file.network || "private", createdAt: file.created_at || null };
+}
+/** Pinata file record with identifiers shortened, for logs and error details. */
+export function redactPinataFile(file = {}) {
+  return { keys: Object.keys(file || {}).sort(), id: shortId(file?.id), cid: shortId(file?.cid), name: file?.name ?? null, size: file?.size ?? null, mime_type: file?.mime_type ?? null, network: file?.network ?? null, keyvalues: file?.keyvalues ?? null };
+}
+function redactText(text) {
+  return String(text || "").replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[jwt]").replace(/\b(baf[a-z0-9]{10,}|Qm[1-9A-HJ-NP-Za-km-z]{20,})\b/g, (cid) => shortId(cid)).slice(0, 300);
 }
 
 export function createPrivateMediaStorage(options) { return new PrivateMediaStorage(options); }
