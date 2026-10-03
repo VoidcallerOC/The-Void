@@ -161,6 +161,9 @@ export function ReleasePage({ children = null } = {}) {
   const { release: releaseId } = useParams();
   const result = getReleaseCatalog(catalog, releaseId);
   const secondary = resolveSecondaryStatus();
+  if (!result && catalog.publishedLoading) {
+    return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading release…</p></section>;
+  }
   if (!result) return <Navigate to="/discover" replace />;
   const { release, artist } = result;
   const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => item.release?.id === release.id);

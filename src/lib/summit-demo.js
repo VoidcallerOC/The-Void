@@ -131,7 +131,7 @@ export function deduplicatePublicReleases(catalog) {
     const current = winners.get(key);
     winners.set(key, current ? releaseWinner(current, release) : release);
   }
-  const keptReleaseIds = new Set(winners.values().map((release) => release.id));
+  const keptReleaseIds = new Set([...winners.values()].map((release) => release.id));
   const sourceReleaseIds = new Set(releases.map((release) => release.id));
   const editions = (catalog.editions || []).filter((edition) => !sourceReleaseIds.has(edition.releaseId) || keptReleaseIds.has(edition.releaseId));
   const keptEditionIds = new Set(editions.map((edition) => edition.id));
