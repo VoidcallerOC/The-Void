@@ -24,6 +24,14 @@ export function tokenFor(catalog, { edition = null, tokenId = null, experience =
   return inEdition.length === 1 ? inEdition[0] : null;
 }
 
+/**
+ * Player title for an experience's own audio (e.g. a demo attached to a
+ * token): the experience's name, not the token's song title.
+ */
+export function experienceTrackTitle({ experience = null, tokenTrack = null, view = null } = {}) {
+  return experience?.title || tokenTrack?.title || view?.name || "";
+}
+
 /** Display data for one token: its own name and artwork, then the collection's. */
 export function tokenView(catalog, { edition = null, release = null, tokenId = null, experience = null } = {}) {
   const token = tokenFor(catalog, { edition, tokenId, experience });

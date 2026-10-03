@@ -14,7 +14,8 @@ describe("per-track token view", () => {
     expect(String(view.tokenId)).toBe("3");
     expect(view.artwork).toContain("bafybeic2idq4wqbh5kt7sibfypedj4mejgvos2mh76x2wk3ezxuiljxjaa/3.gif");
     expect(view.artworkSources).toContain("/assets/track-art/ep1-complex.png");
-    expect(view.artworkSources.at(-1)).toBe(release.artwork);
+    expect(view.artworkSources).toContain(release.artwork);
+    expect(view.artworkSources.indexOf(release.artwork)).toBeGreaterThan(view.artworkSources.indexOf(view.artwork));
   });
 
   it("the whole-EP experience keeps the collection artwork", () => {
@@ -50,5 +51,14 @@ describe("playable track for a token", () => {
     expect(track.src).toMatch(/\/ipfs\/bafypreviewnine$/);
     expect(track.protectedMedia).toBeUndefined();
     expect(playableTrackFor({ id: "x", editionId: "e", tokenId: "1", metadata: {} })).toBeNull();
+  });
+});
+
+describe("experience player title", () => {
+  it("names the player after the experience's demo, not the token's song", async () => {
+    const { experienceTrackTitle } = await import("./token-view.js");
+    expect(experienceTrackTitle({ experience: { title: "Stranger Things" }, tokenTrack: { title: "Forgive & Forget" }, view: { name: "Forgive & Forget" } })).toBe("Stranger Things");
+    expect(experienceTrackTitle({ experience: { title: "" }, tokenTrack: { title: "Forgive & Forget" } })).toBe("Forgive & Forget");
+    expect(experienceTrackTitle({ view: { name: "Token" } })).toBe("Token");
   });
 });
