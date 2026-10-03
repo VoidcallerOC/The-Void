@@ -4,7 +4,7 @@ import { Eyebrow, Tag } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
-import { ARTIST_TYPES, canApplicantReapply, canApplicantRespond, validateApplication } from "../lib/verification.js";
+import { ARTIST_TYPES, canApplicantReapply, canApplicantRespond, canReviewerTransition, validateApplication } from "../lib/verification.js";
 import {
   decideVerificationApplication,
   fetchMyApplication,
@@ -665,12 +665,16 @@ export function VerifyReviewApplicationPage() {
               <textarea style={{ ...field, minHeight: 90 }} value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 22 }}>
-              {REVIEW_ACTIONS.map((action) => (
+              {/* Only the decisions the server accepts from this status (same rule table). */}
+              {REVIEW_ACTIONS.filter((action) => canReviewerTransition(app.status, action.status)).map((action) => (
                 <button key={action.status} type="button" style={action.status === "VERIFIED" ? primaryBtn : ghostBtn} disabled={Boolean(busy)} onClick={() => decide(action.status)}>
                   {busy === action.status ? "Saving…" : action.label}
                 </button>
               ))}
             </div>
+            {!REVIEW_ACTIONS.some((action) => canReviewerTransition(app.status, action.status)) && (
+              <p style={{ ...muted, fontSize: 13 }}>This application is {String(app.status || "").toLowerCase().replace(/_/g, " ")}; no further review decision is possible.</p>
+            )}
             {app.status === "VERIFIED" && app.walletAddress && <OnChainRolesPanel artistWallet={app.walletAddress} />}
           </aside>
         </div>
