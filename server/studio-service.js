@@ -15,7 +15,21 @@ import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } 
 // Full-length audio the browser may upload straight to private storage. WAV
 // masters are far larger than an API request body can carry.
 export const DIRECT_AUDIO_MIME_TYPES = Object.freeze(["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave", "audio/flac", "audio/x-flac", "audio/mpeg", "audio/mp3", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg", "audio/aiff", "audio/x-aiff"]);
-const DIRECT_UPLOAD_MEDIA_TYPES = Object.freeze(["AUDIO", "DEMO", "LIVE_RECORDING"]);
+export const DIRECT_VIDEO_MIME_TYPES = Object.freeze(["video/mp4", "video/quicktime", "video/webm"]);
+export const DIRECT_ARCHIVE_MIME_TYPES = Object.freeze(["application/zip", "application/x-zip-compressed"]);
+const DIRECT_UPLOAD_MEDIA_TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOWNLOAD", "DEMO", "LIVE_RECORDING"]);
+
+export function directUploadMimeTypes(mediaType) {
+  if (mediaType === "VIDEO") return DIRECT_VIDEO_MIME_TYPES;
+  if (mediaType === "STEMS" || mediaType === "DOWNLOAD") return [...DIRECT_ARCHIVE_MIME_TYPES, ...DIRECT_AUDIO_MIME_TYPES];
+  return DIRECT_AUDIO_MIME_TYPES;
+}
+
+function unsupportedUpload(mediaType) {
+  if (mediaType === "VIDEO") return ["MEDIA_TYPE_UNSUPPORTED", "A music video must be MP4, MOV, or WebM."];
+  if (mediaType === "STEMS" || mediaType === "DOWNLOAD") return ["MEDIA_TYPE_UNSUPPORTED", "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
+  return ["AUDIO_TYPE_UNSUPPORTED", "Audio must be WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
+}
 const DIRECT_UPLOAD_TTL_SECONDS = 900;
 
 const LIFECYCLE = Object.freeze(["DRAFT", "REVIEW", "PUBLISHED"]);
@@ -517,7 +531,11 @@ export class ArtistStudioService {
     if (!direct || typeof direct.sign !== "function") throw new ApiError(503, "MEDIA_DIRECT_UPLOAD_UNAVAILABLE", "Direct protected media upload is not configured.");
     const mediaType = enumValue(String(input.mediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
     const contentType = requiredText(input.contentType, "contentType", { max: 128 }).toLowerCase();
-    if (!DIRECT_AUDIO_MIME_TYPES.includes(contentType)) throw new ApiError(400, "AUDIO_TYPE_UNSUPPORTED", "Audio must be WAV, AIFF, FLAC, MP3, AAC/M4A or OGG.");
+    const allowed = directUploadMimeTypes(mediaType);
+    if (!allowed.includes(contentType)) {
+      const [code, message] = unsupportedUpload(mediaType);
+      throw new ApiError(400, code, message);
+    }
     const byteSize = Number(input.byteSize);
     if (!Number.isSafeInteger(byteSize) || byteSize <= 0) throw new ApiError(400, "MEDIA_UPLOAD_EMPTY", "byteSize must be the file size in bytes.");
     if (byteSize > direct.maxBytes) throw new ApiError(413, "MEDIA_UPLOAD_TOO_LARGE", `The full track must be ${Math.floor(direct.maxBytes / 1048576)} MB or smaller.`);
@@ -525,7 +543,7 @@ export class ArtistStudioService {
     const uploadId = `upload-${randomUUID()}`;
     let url;
     try {
-      url = await direct.sign({ filename, maxBytes: direct.maxBytes, mimeTypes: [...DIRECT_AUDIO_MIME_TYPES], expiresSeconds: DIRECT_UPLOAD_TTL_SECONDS, keyvalues: { voidArtistId: artist.id, voidUploadId: uploadId, voidMediaType: mediaType } });
+      url = await direct.sign({ filename, maxBytes: direct.maxBytes, mimeTypes: [...allowed], expiresSeconds: DIRECT_UPLOAD_TTL_SECONDS, keyvalues: { voidArtistId: artist.id, voidUploadId: uploadId, voidMediaType: mediaType } });
     } catch (error) {
       throw new ApiError(error.status || 502, error.code || "MEDIA_UPLOAD_FAILED", error.message || "Could not create an upload link.");
     }
@@ -595,9 +613,12 @@ export class ArtistStudioService {
       stampedByThisArtist = earlier.rows.length > 0;
     }
     if (!stampedByThisArtist) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through an upload link issued to an artist this wallet owns.", { upstream });
-    if (!DIRECT_AUDIO_MIME_TYPES.includes(String(file.mimeType || "").toLowerCase())) throw fail(415, "AUDIO_TYPE_UNSUPPORTED", `The stored object is ${file.mimeType || "of unknown type"}, not supported audio.`, { upstream });
-    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw fail(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.", { upstream });
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
+    if (!directUploadMimeTypes(mediaType).includes(String(file.mimeType || "").toLowerCase())) {
+      const [code, message] = unsupportedUpload(mediaType);
+      throw fail(415, code, `The stored object is ${file.mimeType || "of unknown type"}. ${message}`, { upstream });
+    }
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw fail(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.", { upstream });
 
     // Idempotent: the same private object registers once.
     const existing = await this.db.query("SELECT id, artist_id, media_type, metadata->>'contentSha256' AS content_sha256, created_at FROM media_assets WHERE storage_key=$1 LIMIT 1", [file.cid]);

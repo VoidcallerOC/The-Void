@@ -11,7 +11,7 @@ import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleErro
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
-import { ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
+import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -290,7 +290,7 @@ export function ArtistStudioPage() {
           experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
           productType: form.productType,
           requirements: [],
-          mediaConfig: { protected: true, protectedMedia: [{ assetId: unlockAudio.assetId, mediaType: "AUDIO", contentType: unlockAudio.contentType }] },
+          mediaConfig: { protected: true, protectedMedia: [{ assetId: unlockAudio.assetId, mediaType: unlockAudio.mediaType || "AUDIO", contentType: unlockAudio.contentType }] },
         },
         headers,
       });
@@ -461,7 +461,7 @@ export function ArtistStudioPage() {
 
   // Private, token-gated audio: same verified pipeline for the full track and
   // for experience audio (private storage, artist ownership, SHA-256).
-  const uploadPrivateAudio = (key, file, onUploaded, describe) => runUpload(key, file, async (owner) => {
+  const uploadPrivateAudio = (key, file, onUploaded, describe, mediaType = "AUDIO") => runUpload(key, file, async (owner) => {
     const progress = (event) => {
       const message = event.stage === "hashing" ? `Checking ${file.name} (${formatBytes(file.size)})…`
         : event.stage === "uploading" ? `Uploading ${file.name} privately… ${Math.floor((event.loaded / event.total) * 100)}% of ${formatBytes(event.total)}`
@@ -469,12 +469,16 @@ export function ArtistStudioPage() {
         : `Verifying ${file.name} in private storage…`;
       setUploads((prior) => ({ ...prior, [key]: { state: "uploading", message } }));
     };
-    const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers, onProgress: progress });
+    const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers, mediaType, onProgress: progress });
     onUploaded(uploaded);
     return uploaded;
   }, describe);
   const uploadFullTrack = (file) => uploadPrivateAudio("full-track", file, setFullTrack, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}.`);
-  const uploadExperienceAudio = (file) => uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience audio stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`);
+  const uploadExperienceAudio = (file) => {
+    const mediaType = experienceCategory(form.productType)?.deliveryType || "AUDIO";
+    const noun = mediaType === "VIDEO" ? "video" : mediaType === "STEMS" || mediaType === "DOWNLOAD" ? "file" : "audio";
+    return uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience ${noun} stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`, mediaType);
+  };
 
   const selectExistingRelease = (record) => {
     if (record.release.status === "published" && openPublishedSale(ownedStudioCatalog, record.release.id)) return;
@@ -709,17 +713,25 @@ export function ArtistStudioPage() {
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
           </p>
+          {(() => {
+            const deliveryType = experienceCategory(form.productType)?.deliveryType || "AUDIO";
+            const fileAccept = deliveryType === "VIDEO" ? VIDEO_ACCEPT : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? `${ARCHIVE_ACCEPT},${AUDIO_ACCEPT}` : AUDIO_ACCEPT;
+            const hint = deliveryType === "VIDEO" ? "MP4, MOV or WebM" : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? "ZIP, or WAV, AIFF, FLAC or MP3" : "WAV, AIFF, FLAC or MP3";
+            const label = deliveryType === "VIDEO" ? "Experience video" : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? "Experience file" : "Experience audio";
+            return (
           <div style={{ marginTop: 16 }}>
-            <p style={{ margin: "0 0 8px" }}>Experience audio (private) — what collectors unlock, e.g. a new demo</p>
+            <p style={{ margin: "0 0 8px" }}>{label} (private) — what collectors unlock</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
-                {busy === "experience-audio" ? "Uploading…" : experienceAudio ? "Replace experience audio" : "Upload experience audio"}
-                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadExperienceAudio(file); }} />
+                {busy === "experience-audio" ? "Uploading…" : experienceAudio ? `Replace ${label.toLowerCase()}` : `Upload ${label.toLowerCase()}`}
+                <input type="file" accept={fileAccept} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadExperienceAudio(file); }} />
               </label>
-              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`WAV, AIFF, FLAC or MP3 · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · holders only`}</span>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`${hint} · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · holders only`}</span>
             </div>
             <UploadStatus status={uploads["experience-audio"]} signedIn={canUseStudio} />
           </div>
+            );
+          })()}
           <p role="status" style={{ color: experienceAudio || fullTrack || editionGated ? "var(--vc-bone-dim)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
             {experienceAudio
               ? `Holders unlock: ${experienceAudio.filename || experienceAudio.assetId}.`
