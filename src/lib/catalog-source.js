@@ -95,6 +95,32 @@ function metadataOf(row, ...keys) {
   return {};
 }
 
+// Only the profile fields the database actually holds, so a saved profile can
+// replace a built-in artist's details without its placeholder defaults.
+function savedProfileOf(row, meta) {
+  const saved = {};
+  if (row.display_name) saved.name = row.display_name;
+  if (typeof row.bio === "string") saved.bio = row.bio;
+  if (meta.profileArtwork) saved.avatar = meta.profileArtwork;
+  if (meta.banner) saved.banner = meta.banner;
+  if (row.social_links != null || row.website_url != null) saved.socials = profileSocials(row.social_links, row.website_url);
+  if (row.verified === true || row.verification_status === "VERIFIED") saved.verified = true;
+  return saved;
+}
+
+// Built-in catalogs win id collisions in mergeCatalogs, which would hide an
+// artist's saved profile (e.g. "voidcaller") forever. Lay the published
+// profile over any built-in artist with the same id first.
+export function withPublishedArtistProfiles(catalog, published) {
+  if (!catalog) return catalog;
+  const profiles = new Map(asArray(published?.artists).filter((artist) => artist?.savedProfile).map((artist) => [artist.id, artist.savedProfile]));
+  if (!profiles.size) return catalog;
+  return createCatalog({
+    ...catalog,
+    artists: asArray(catalog.artists).map((artist) => (profiles.has(artist?.id) ? { ...artist, ...profiles.get(artist.id) } : artist)),
+  });
+}
+
 export function mapPublishedCatalog({ artists = [], releases = [], editions = [], experiences = [] } = {}) {
   const mappedArtists = asArray(artists).filter((row) => row?.id).map((row) => {
     const meta = metadataOf(row, "profile_metadata", "application_metadata", "metadata");
@@ -107,6 +133,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       banner: meta.banner || meta.profileArtwork || "/assets/voidcaller_art_6.png",
       socials: profileSocials(row.social_links, row.website_url),
       verified: row.verified === true || row.verification_status === "VERIFIED",
+      savedProfile: savedProfileOf(row, meta),
     });
   });
   const mappedReleases = asArray(releases).filter((row) => row?.id).map((row) => {
@@ -150,6 +177,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       status: legacy ? "minted" : String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),
       ...(legacy ? { legacy: true, marketplaces: asArray(meta.marketplaces) } : {}),
       metadataUri: fuji.metadataUri || meta.metadataUri || "",
+      previewAudio: typeof meta.previewAudio === "string" ? meta.previewAudio : "",
       experienceIds: asArray(meta.experienceIds),
       tier: row.tier || "standard",
       artwork: ipfsToHttp(meta.artwork) || ipfsToHttp(row.token_metadata?.image || ""),
@@ -269,7 +297,7 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   return useMemo(() => ({
-    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs(), overlay, withoutShadowedLegacyAlbum(published)])),
+    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(published)])),
     publishedLoading,
   }), [overlay, published, publishedLoading]);
 }
