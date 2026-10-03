@@ -54,7 +54,7 @@ export const VC_DATA = {
       title: "VOIDCALLER",
       subtitle: "Self-titled EP",
       date: "MINTED",
-      art: "/assets/voidcaller_art_4.png",
+      art: "/assets/voidcaller_ep_cover.webp",
       bleed: "Self-titled EP · on-chain on Avalanche",
       tagline: "The first call. A relic forged. One relic unlocks the full EP. The chain remembers.",
       status: "MINTED",
@@ -139,7 +139,7 @@ const voidcallerRelease = createRelease({
   description: "The first call. A relic forged. One relic unlocks the full EP.",
   story: VC_DATA.releases[0].tagline,
   status: "minted",
-  artwork: "/assets/voidcaller_art_4.png",
+  artwork: "/assets/voidcaller_ep_cover.webp",
   experiences: ["voidcaller-full-ep", ...LEGACY_TOKENS.map(({ tokenId }) => legacyExperienceId(tokenId))],
   tracks: LEGACY_TOKENS.map(({ n, title, time, tokenId }) => ({ n, title, time, tokenId, experienceId: legacyExperienceId(tokenId) })),
 });
