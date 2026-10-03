@@ -64,7 +64,7 @@ describe("Studio API contract", () => {
     const send = vi.fn().mockResolvedValue(pinataOk);
     const progress = vi.fn();
     const file = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], "master.wav", { type: "audio/wav" });
-    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, onProgress: progress })).resolves.toEqual({ assetId: "asset-9", filename: "master.wav", contentType: "audio/wav", byteSize: 4 });
+    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, onProgress: progress })).resolves.toEqual({ assetId: "asset-9", filename: "master.wav", contentType: "audio/wav", mediaType: "AUDIO", byteSize: 4 });
     expect(fetchImpl.mock.calls[0][0]).toBe("/api/studio/artists/artist-a/media/upload-url");
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ mediaType: "AUDIO", filename: "master.wav", contentType: "audio/wav", byteSize: 4 });
     expect(send).toHaveBeenCalledTimes(1);
