@@ -128,6 +128,7 @@ export function ArtistStudioPage() {
   // Mint outcome shown beside the Mint button (the page-level notice sits far above it).
   const [mintStatus, setMintStatus] = useState(null);
   const canUseStudio = wallet.connected && wallet.authenticated;
+  const editionGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
   const existingReleases = useMemo(() => studioReleaseChoices(ownedStudioCatalog || {}), [ownedStudioCatalog]);
@@ -647,6 +648,14 @@ export function ArtistStudioPage() {
           <TextField title="Description" value={form.experienceDescription} onChange={(value) => set("experienceDescription", value)} multiline />
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
+          </p>
+          {/* The experience's audio is the private full track from the Tracks step. */}
+          <p role="status" style={{ color: fullTrack || editionGated ? "var(--vc-bone-dim)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
+            {fullTrack
+              ? `Holders unlock: ${fullTrack.filename || fullTrack.assetId} (private full track from the Tracks step).`
+              : editionGated
+                ? "This edition already gates its private full track to holders."
+                : "No full track attached yet. Upload it on the Tracks step; saving attaches it to this experience."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
