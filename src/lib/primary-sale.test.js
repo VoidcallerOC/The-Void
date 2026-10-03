@@ -46,7 +46,7 @@ describe("Fuji ERC-1155 primary sale", () => {
       throw new Error(`unexpected provider method: ${request.method}`);
     } };
     await simulateConfigureSale(provider, { from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", data });
-    expect(calls[1]).toMatchObject({ method: "eth_call", params: [{ from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", to: ethers.getAddress(CANONICAL_FUJI_PRIMARY_SALE), data, value: "0x0" }, "latest"] });
+    expect(calls[1]).toMatchObject({ method: "eth_call", params: [{ from: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", to: ethers.getAddress(CANONICAL_FUJI_PRIMARY_SALE), data, value: "0x0", gas: "0x7a120" }, "latest"] });
   });
 
   it("configures a sale from a human-readable 6:00am start without a BigInt error", () => {
