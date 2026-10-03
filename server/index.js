@@ -43,7 +43,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
       const resolvedMediaConfig = mediaConfig || loadMediaConfig();
       const storage = createPrivateMediaStorage({ config: resolvedMediaConfig });
       mediaUploader = (input) => storage.put(input);
-      if (resolvedMediaConfig.driver === "pinata") directMediaUploads = { maxBytes: resolvedMediaConfig.maxBytes, sign: (input) => storage.createSignedUpload(input), find: (input) => storage.findSignedUpload(input) };
+      if (resolvedMediaConfig.driver === "pinata") directMediaUploads = { maxBytes: resolvedMediaConfig.maxBytes, sign: (input) => storage.createSignedUpload(input), get: (input) => storage.getPrivateUpload(input), sha256: (input) => storage.sha256OfPrivateObject(input) };
       resolvedMediaGateway = createProtectedMediaGateway({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, storage, mediaConfig: resolvedMediaConfig });
     } catch (error) {
       if (String(process.env.VERCEL || "") !== "1") throw error;
