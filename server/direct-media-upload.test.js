@@ -57,8 +57,24 @@ describe("direct private upload link", () => {
     const { instance, direct } = setup({ maxBytes: 100 });
     await expect(instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { contentType: "video/mp4", byteSize: 10 } })).rejects.toMatchObject({ code: "AUDIO_TYPE_UNSUPPORTED" });
     await expect(instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { contentType: "audio/wav", byteSize: 101 } })).rejects.toMatchObject({ status: 413 });
-    await expect(instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "STEMS", contentType: "audio/wav", byteSize: 10 } })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "VIDEO", contentType: "audio/wav", byteSize: 10 } })).rejects.toMatchObject({ code: "MEDIA_TYPE_UNSUPPORTED" });
     expect(direct.sign).not.toHaveBeenCalled();
+  });
+
+
+  it("issues a video link for a music video and a zip-or-audio link for stems and downloads", async () => {
+    const video = setup();
+    await video.instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "VIDEO", filename: "clip.mp4", contentType: "video/mp4", byteSize: 10 } });
+    expect(video.direct.sign.mock.calls[0][0]).toMatchObject({ keyvalues: expect.objectContaining({ voidMediaType: "VIDEO" }) });
+    expect(video.direct.sign.mock.calls[0][0].mimeTypes).toEqual(expect.arrayContaining(["video/mp4"]));
+    expect(video.direct.sign.mock.calls[0][0].mimeTypes.every((type) => type.startsWith("video/"))).toBe(true);
+    const stems = setup();
+    await stems.instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "STEMS", filename: "stems.zip", contentType: "application/zip", byteSize: 10 } });
+    expect(stems.direct.sign.mock.calls[0][0].mimeTypes).toEqual(expect.arrayContaining(["application/zip", "audio/wav"]));
+    expect(stems.direct.sign.mock.calls[0][0].keyvalues.voidMediaType).toBe("STEMS");
+    const download = setup();
+    await download.instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "DOWNLOAD", filename: "master.wav", contentType: "audio/wav", byteSize: 10 } });
+    expect(download.direct.sign.mock.calls[0][0].keyvalues.voidMediaType).toBe("DOWNLOAD");
   });
 
   it("is unavailable (so the client can fall back) when storage has no direct upload", async () => {
