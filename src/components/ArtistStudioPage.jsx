@@ -521,7 +521,7 @@ export function ArtistStudioPage() {
               ) : (
                 <p style={{ margin: 0 }}>Publishing as <strong>{activeArtist.name}</strong></p>
               )}
-              <Link to={`/artist/${encodeURIComponent(activeArtist.id)}`} style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Edit artist profile →</Link>
+              <Link to={`/studio/profile/${encodeURIComponent(activeArtist.id)}`} style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Edit artist profile →</Link>
             </div>
           ) : (
             canUseStudio && ownedStudioCatalog && <TextField title="Your artist name (creates your artist profile — add bio and links on your profile page)" value={form.artistName} onChange={(value) => set("artistName", value)} required />
