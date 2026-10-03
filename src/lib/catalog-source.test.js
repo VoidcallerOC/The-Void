@@ -11,6 +11,7 @@ import {
   readStudioOverlay,
   resolveCatalog,
   upsertStudioOverlay,
+  withPublishedArtistProfiles,
   writeStudioOverlay,
 } from "./catalog-source.js";
 import { collapsePublicCatalog, stripSummitDemoCatalog } from "./summit-demo.js";
@@ -125,5 +126,20 @@ describe("catalog source", () => {
   it("maps an artist's stored profile links to public socials, dropping unsafe links", () => {
     const catalog = mapPublishedCatalog({ artists: [{ id: "artist-a", slug: "a", display_name: "A", website_url: "https://a.example", social_links: { x: "https://x.com/a", instagram: "javascript:alert(1)" } }] });
     expect(catalog.artists[0].socials).toEqual([{ name: "Website", href: "https://a.example/" }, { name: "X", href: "https://x.com/a" }]);
+  });
+
+  it("shows a saved profile for an artist that also exists in the built-in catalog", () => {
+    const published = mapPublishedCatalog({ artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", bio: "Saved bio", social_links: { discord: "https://discord.gg/abc" }, profile_metadata: { profileArtwork: "ipfs://avatar", banner: "ipfs://banner" }, verification_status: "VERIFIED" }] });
+    const merged = mergeCatalogs([withPublishedArtistProfiles(VOIDCALLER_CATALOG, published), published]);
+    const artist = merged.artists.find((item) => item.id === "voidcaller");
+    expect(artist).toMatchObject({ bio: "Saved bio", avatar: "ipfs://avatar", banner: "ipfs://banner", verified: true, socials: [{ name: "Discord", href: "https://discord.gg/abc" }] });
+    expect(artist.handle).toBe("VoidcallerOC");
+  });
+
+  it("keeps a built-in artist's artwork when no profile image was saved", () => {
+    const published = mapPublishedCatalog({ artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", bio: "Saved bio" }] });
+    const artist = withPublishedArtistProfiles(VOIDCALLER_CATALOG, published).artists.find((item) => item.id === "voidcaller");
+    expect(artist.avatar).toBe("/assets/voidcaller_art_4.png");
+    expect(artist.bio).toBe("Saved bio");
   });
 });

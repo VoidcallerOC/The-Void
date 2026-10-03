@@ -19,6 +19,15 @@ export const PRIMARY_SALE_ABI = Object.freeze(configuredSaleAbi.length ? configu
 ]);
 
 const saleIface = new ethers.Interface(PRIMARY_SALE_ABI);
+// purchase() mints through the release contract, so its reverts can carry the
+// release contract's errors instead of the sale's.
+const releaseErrorIface = new ethers.Interface([
+  "error AccessDenied(bytes32 role, address account)",
+  "error ContractPaused()",
+  "error EditionNotFound(uint256 tokenId)",
+  "error InactiveEdition(uint256 tokenId)",
+  "error ExceedsSupply(uint256 tokenId, uint256 available, uint256 requested)",
+]);
 
 export function fujiPrimarySaleAddress() {
   const value = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "").trim();
@@ -100,9 +109,19 @@ export function explainCollectError(error) {
       if (parsed?.name === "SalePaused") return { state: "paused", message: "This sale is paused." };
       if (parsed?.name === "SaleNotStarted" || parsed?.name === "SaleEnded") return { state: "closed", message: "This sale is not open right now." };
       if (parsed?.name === "SaleNotConfigured") return { state: "unconfigured", message: "This release does not have a primary sale yet." };
+    } catch { /* Not a sale error; try the release contract's errors. */ }
+    try {
+      const parsed = releaseErrorIface.parseError(data);
+      if (parsed?.name === "AccessDenied") return { state: "unauthorized-sale", message: "The sale contract is not authorized to mint this release on Fuji (missing ISSUER_ROLE). Nothing was collected." };
+      if (parsed?.name === "ContractPaused") return { state: "paused", message: "The certified Fuji release is paused. Nothing was collected." };
+      if (parsed?.name === "EditionNotFound") return { state: "not-created", message: "This release hasn't been published on-chain yet." };
+      if (parsed?.name === "InactiveEdition") return { state: "closed", message: "This edition is not active on-chain. Nothing was collected." };
+      if (parsed?.name === "ExceedsSupply") return { state: "sold-out", message: "This release is sold out." };
     } catch { /* Unknown revert data falls through. */ }
   }
   if (/sold out/i.test(message)) return { state: "sold-out", message: "This release is sold out." };
+  if (/insufficient funds/i.test(message)) return { state: "insufficient-funds", message: "This wallet does not have enough Fuji AVAX for the price plus gas. Nothing was collected." };
+  if (/revert/i.test(message)) return { state: "reverted", message: `The collect transaction would revert on Fuji: ${message.slice(0, 240)}` };
   return { state: "unavailable", message: "Collection is temporarily unavailable. Please try again later." };
 }
 

@@ -139,11 +139,13 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       await wallet.refreshOwnership?.(wallet.account);
       window.dispatchEvent(new Event("void:marketplace-volume-updated"));
     } catch (error) {
-      console.error("Collect preflight failed", error);
-      if (isFujiEditionNotFoundError(error)) {
-        setNotCreated(true);
-      } else {
-        const explained = error.state ? { state: error.state, message: error.message } : explainCollectError(error);
+      console.error("Collect failed", error);
+      // The edition preflight above already handles a missing edition. Anything
+      // reaching here (usually a purchase revert) shows its real reason rather
+      // than being mistaken for "not yet published".
+      const explained = error.state ? { state: error.state, message: error.message } : explainCollectError(error);
+      if (explained.state === "not-created") setNotCreated(true);
+      else {
         setNotice(explained.message);
         setNoticeState(explained.state);
       }
