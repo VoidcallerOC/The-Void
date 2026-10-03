@@ -31,9 +31,28 @@ describe("Fuji ERC-1155 primary sale", () => {
     expect(validateSaleSupply(20, 25)).toBe(20n);
   });
 
-  it("preserves the existing zero-supply validation semantics", () => {
-    expect(validateSaleSupply(0, 25)).toBe(0n);
+  it("keeps a capped edition from using a zero or oversized sale supply", () => {
+    expect(() => validateSaleSupply(0, 25)).toThrow("Sale supply must be greater than zero.");
+    expect(() => validateSaleSupply(400, 25)).toThrow(/exceeds edition supply/);
     expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 0n, perWalletLimit: 1n })).toThrow("Sale supply must be greater than zero.");
+    expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 4n, perWalletLimit: 0n })).toThrow("Per-wallet limit must be between 1 and the sale supply.");
+  });
+
+  it("encodes an open-edition sale with no supply cap only when it has an end time", () => {
+    const iface = new ethers.Interface([
+      "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
+    ]);
+    expect(validateSaleSupply(0, 0)).toBe(0n);
+    expect(validateSaleSupply("", 0)).toBe(0n);
+    expect(validateSaleSupply(12, 0)).toBe(12n);
+    expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 0n, perWalletLimit: 0n, openEdition: true, endTime: 0 })).toThrow(/sale end time/);
+    expect(() => encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: 0n, perWalletLimit: 0n, openEdition: true, endTime: "" })).toThrow(/sale end time/);
+    const encoded = encodeConfigureSale({ tokenId: 1n, priceWei: 10n, maxSupply: "", perWalletLimit: "", openEdition: true, endTime: "1790000000" });
+    const [, price, supply, limit, , end] = iface.decodeFunctionData("configureSale", encoded);
+    expect(price).toBe(10n);
+    expect(supply).toBe(0n);
+    expect(limit).toBe(0n);
+    expect(end).toBe(1790000000n);
   });
 
   it("uses the public Fuji RPC for configureSale preflight with the exact sender, target, calldata, and zero value", async () => {

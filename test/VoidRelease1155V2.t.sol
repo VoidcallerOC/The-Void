@@ -100,4 +100,18 @@ contract VoidRelease1155V2Test {
             revert();
         } catch {}
     }
+
+    function testOpenEditionMintDoesNotHitSupplyCap() public {
+        vm.prank(artist);
+        uint256 openId = token.createEdition(bytes32("open"), bytes32("edition"), 0, "ipfs://open", payout, 100);
+        require(token.maxSupplyOf(openId) == 0, "stored unlimited");
+        require(token.edition(openId).exists, "exists");
+        vm.startPrank(issuer);
+        token.mint(alice, openId, 1, "");
+        token.mint(alice, openId, 1000, "");
+        vm.stopPrank();
+        require(token.balanceOf(alice, openId) == 1001, "minted past any cap");
+        require(token.edition(openId).mintedSupply == 1001, "minted supply tracked");
+        require(token.edition(openId).maxSupply == 0, "still unlimited");
+    }
 }

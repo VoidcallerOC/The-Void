@@ -254,4 +254,64 @@ contract VoidPrimarySaleTest {
         (address receiver, uint256 royalty) = token.royaltyInfo(id, 10_000);
         require(receiver == payout && royalty == 500, "resale royalty");
     }
+
+    function testOpenEditionSaleSellsInsideWindowAndEndsAfter() public {
+        vm.prank(artist);
+        uint256 openId = token.createEdition(bytes32("open"), bytes32("sale"), 0, "ipfs://open", payout, 100);
+        vm.prank(artist);
+        sale.configureSale(openId, PRICE, 0, 0, 1_000, 2_000, false);
+        vm.warp(999);
+        vm.deal(buyer, PRICE);
+        vm.prank(buyer);
+        try sale.purchase{value: PRICE}(openId, 1) {
+            revert("before start");
+        } catch {}
+        require(token.balanceOf(buyer, openId) == 0, "not started");
+        vm.warp(1_500);
+        vm.deal(buyer, PRICE * 3);
+        vm.prank(buyer);
+        sale.purchase{value: PRICE * 3}(openId, 3);
+        require(token.balanceOf(buyer, openId) == 3, "during window");
+        require(token.edition(openId).mintedSupply == 3, "minted in window");
+        vm.warp(2_001);
+        vm.deal(second, PRICE);
+        vm.prank(second);
+        try sale.purchase{value: PRICE}(openId, 1) {
+            revert("after end");
+        } catch {}
+        require(token.balanceOf(second, openId) == 0, "closed");
+        require(token.edition(openId).mintedSupply == 3, "no mint after close");
+    }
+
+    function testOpenEditionSaleRejectsMissingEndTime() public {
+        vm.prank(artist);
+        uint256 openId = token.createEdition(bytes32("open"), bytes32("noend"), 0, "ipfs://open", payout, 100);
+        vm.prank(artist);
+        try sale.configureSale(openId, PRICE, 0, 0, 0, 0, false) {
+            revert("end required");
+        } catch {}
+        vm.prank(artist);
+        try sale.configureSale(openId, PRICE, 5, 1, 0, 0, false) {
+            revert("positive cap still needs close");
+        } catch {}
+        (,,,,,,, bool configured) = sale.sales(openId);
+        require(!configured, "not configured");
+    }
+
+    function testCappedEditionRejectsSaleSupplyAboveEditionAndZero() public {
+        vm.prank(artist);
+        try sale.configureSale(id, PRICE, 11, 1, 0, 0, false) {
+            revert("above edition");
+        } catch {}
+        vm.prank(artist);
+        try sale.configureSale(id, PRICE, 0, 1, 0, 2_000, false) {
+            revert("zero sale on capped");
+        } catch {}
+        vm.prank(artist);
+        try sale.configureSale(id, PRICE, 4, 0, 0, 0, false) {
+            revert("zero wallet limit on capped");
+        } catch {}
+        (uint256 price,,,,,,,) = sale.sales(id);
+        require(price == PRICE, "capped sale unchanged");
+    }
 }

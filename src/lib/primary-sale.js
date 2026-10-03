@@ -101,24 +101,49 @@ export function fujiReleaseIsV2() {
   return FUJI_RELEASE_CONFIG.contractName === "VoidRelease1155V2";
 }
 
-export function encodeConfigureSale({ tokenId, priceWei, maxSupply, perWalletLimit, startTime = 0, endTime = 0, paused = false }) {
+function wholeSupply(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return 0n;
+  return BigInt(value);
+}
+
+export function encodeConfigureSale({ tokenId, priceWei, maxSupply, perWalletLimit, startTime = 0, endTime = 0, paused = false, openEdition = false }) {
   const price = BigInt(priceWei);
-  const supply = BigInt(maxSupply);
-  const limit = BigInt(perWalletLimit);
+  const supply = wholeSupply(maxSupply);
+  const limit = wholeSupply(perWalletLimit);
   const start = BigInt(normalizeSaleTimeToUnixSeconds(startTime));
   const end = BigInt(normalizeSaleTimeToUnixSeconds(endTime));
   if (price <= 0n) throw new Error("Sale price must be greater than zero.");
-  if (supply <= 0n) throw new Error("Sale supply must be greater than zero.");
-  if (limit <= 0n || limit > supply) throw new Error("Per-wallet limit must be between 1 and the sale supply.");
+  if (supply < 0n || limit < 0n) throw new Error("Sale supply and per-wallet limit must be whole numbers.");
+  if (openEdition) {
+    // The sale end time is the close. An unlimited edition cannot omit it.
+    if (end === 0n) throw new Error("An unlimited edition must have a sale end time. That end time closes the edition.");
+    // Supply 0 means the sale itself does not cap copies. Limit 0 means no per-wallet cap.
+    if (supply !== 0n && limit !== 0n && limit > supply) throw new Error("Per-wallet limit must be between 1 and the sale supply.");
+  } else {
+    if (supply <= 0n) throw new Error("Sale supply must be greater than zero.");
+    if (limit <= 0n || limit > supply) throw new Error("Per-wallet limit must be between 1 and the sale supply.");
+  }
   if (end !== 0n && start !== 0n && end < start) throw new Error("Sale end must be after the start.");
   return saleIface.encodeFunctionData("configureSale", [BigInt(tokenId), price, supply, limit, start, end, Boolean(paused)]);
 }
 
 export function validateSaleSupply(requestedSaleSupply, editionSupply) {
-  const requested = BigInt(requestedSaleSupply);
-  const maximum = BigInt(editionSupply);
+  const requested = wholeSupply(requestedSaleSupply);
+  const maximum = wholeSupply(editionSupply);
+  if (requested < 0n) throw new Error("Sale supply must be a whole number.");
+  // Edition supply 0 is unlimited. The sale may also be uncapped (0) or set its own cap.
+  if (maximum === 0n) return requested;
+  if (requested <= 0n) throw new Error("Sale supply must be greater than zero.");
   if (requested > maximum) throw new Error(`Sale supply exceeds edition supply. This edition contains ${maximum.toString()} copies. Set the sale supply to ${maximum.toString()} or fewer.`);
   return requested;
+}
+
+export function saleIsSoldOut(sale) {
+  return Boolean(sale && sale.maxSupply !== 0n && sale.remaining === 0n);
+}
+
+export function walletLimitReached(sale) {
+  return Boolean(sale && sale.perWalletLimit !== 0n && sale.purchased >= sale.perWalletLimit);
 }
 
 export async function simulateConfigureSale(provider, { from, data, value = 0 } = {}) {
@@ -235,8 +260,9 @@ export async function readPrimarySale(provider, tokenId, account) {
     const walletResult = await provider.request({ method: "eth_call", params: [{ to: sale, data: walletData }, "latest"] });
     purchased = BigInt(saleIface.decodeFunctionResult("walletPurchased", walletResult)[0]);
   }
-  const remaining = decoded.maxSupply > decoded.sold ? decoded.maxSupply - decoded.sold : 0n;
-  return { ...decoded, purchased, remaining, address: sale };
+  const unlimited = decoded.maxSupply === 0n;
+  const remaining = unlimited ? null : (decoded.maxSupply > decoded.sold ? decoded.maxSupply - decoded.sold : 0n);
+  return { ...decoded, purchased, remaining, unlimited, address: sale };
 }
 
 export async function ensureFujiNetwork(provider) {
