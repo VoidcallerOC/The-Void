@@ -14,12 +14,12 @@ const UPLOAD_ID = "upload-00000000-0000-4000-8000-000000000000";
 const SHA = "b".repeat(64);
 const CID = "bafybeiprivatemastercid0000000000000000000000000000";
 
-function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, maxBytes = 500 * 1024 * 1024 } = {}) {
+function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, existingSha = SHA, maxBytes = 500 * 1024 * 1024 } = {}) {
   const db = { query: vi.fn(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes("STUDIO_MEDIA_UPLOAD_ISSUED")) return { rows: issued.includes(params[1]) ? [{ id: "audit-issued" }] : [] };
     if (text.includes("FROM audit_events")) return { rows: previewHashes.includes(params[1]) ? [{ id: "audit-1" }] : [] };
-    if (text.includes("FROM media_assets WHERE artist_id=$1 AND storage_key=$2")) return { rows: existingKeys.includes(params[1]) ? [{ id: "asset-existing", media_type: "AUDIO" }] : [] };
+    if (text.includes("FROM media_assets WHERE artist_id=$1 AND storage_key=$2")) return { rows: existingKeys.includes(params[1]) ? [{ id: "asset-existing", media_type: "AUDIO", content_sha256: existingSha }] : [] };
     if (text.includes("FROM artists a JOIN artist_owners")) return { rows: params[1] === owner ? [artistRow] : [] };
     return { rows: [] };
   }) };
@@ -147,10 +147,16 @@ describe("registering a direct upload", () => {
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
   });
 
-  it("is idempotent when the same object is registered twice", async () => {
-    const { instance, repository } = setup({ file: stored(), existingKeys: [CID] });
+  it("is idempotent when the same object is registered twice, and logs it", async () => {
+    const { instance, repository, logger } = setup({ file: stored(), existingKeys: [CID] });
     await expect(register(instance)).resolves.toMatchObject({ id: "asset-existing" });
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith("MEDIA_UPLOAD_VERIFY", expect.objectContaining({ outcome: "ALREADY_REGISTERED", assetId: "asset-existing" }));
+  });
+
+  it("refuses to return an existing asset whose recorded SHA-256 differs", async () => {
+    const { instance } = setup({ file: stored(), existingKeys: [CID], existingSha: "d".repeat(64) });
+    await expect(register(instance)).rejects.toMatchObject({ code: "MEDIA_HASH_MISMATCH" });
   });
 
   it("rejects malformed upload ids, hashes and identities before touching storage", async () => {
