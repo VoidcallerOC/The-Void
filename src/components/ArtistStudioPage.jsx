@@ -9,7 +9,7 @@ import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
-import { selectReleaseTemplate } from "../lib/studio-selection.js";
+import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
@@ -115,6 +115,8 @@ export function ArtistStudioPage() {
   const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
   const [fullTrack, setFullTrack] = useState(null);
+  // Edition whose catalog structure was saved with a private full track this session.
+  const [gatedEditionId, setGatedEditionId] = useState("");
   const [uploads, setUploads] = useState({});
   const [mintReleaseId, setMintReleaseId] = useState("");
   const [mintTrackIds, setMintTrackIds] = useState([]);
@@ -243,6 +245,7 @@ export function ArtistStudioPage() {
         },
         headers,
       });
+      if (fullTrack) setGatedEditionId(ids.editionId);
       setNotice(`Catalog saved: ${form.releaseTitle || "Untitled release"} now contains its track and experience relationship.`);
       setStep("release");
     } catch (error) {
@@ -253,6 +256,10 @@ export function ArtistStudioPage() {
   const publishEdition = async () => {
     setBusy("publish"); setNotice(""); setTxEvidence(null);
     try {
+      // Token metadata is fixed once the edition exists on Fuji, so the public
+      // preview and the gated full track must be in place before publishing.
+      if (!form.trackPreview) throw new Error("Upload the public preview clip on the Tracks step before publishing. A token's metadata cannot be changed after it is published.");
+      if (!editionId || (gatedEditionId !== editionId && !editionHasGatedTrack(ownedStudioCatalog, editionId))) throw new Error("Save the catalog structure with the private full track before publishing, so holders can unlock it.");
       validateReleasePublish({
         release: { title: form.releaseTitle, type: "ep" },
         tracks: [{ title: form.trackTitle || form.releaseTitle }],
@@ -483,12 +490,16 @@ export function ArtistStudioPage() {
                 <div>
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>Nothing to mint yet: this release has not been published on Fuji, so it has no token. Publishing creates the on-chain edition; its token then appears here.</p>
                   <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => {
-                    const record = existingReleases.find((entry) => entry.release.id === mintReleaseId);
-                    if (!record) { setMintStatus({ ok: false, message: "This release could not be loaded into the editor." }); return; }
-                    selectExistingRelease(record);
+                    const resumed = resumeOwnedRelease(ownedStudioCatalog, mintReleaseId);
+                    if (!resumed) { setMintStatus({ ok: false, message: "This release could not be loaded into the editor." }); return; }
+                    setSelectedReleaseId(resumed.releaseId);
+                    setArtistId(resumed.artistId);
+                    setReleaseId(resumed.releaseId);
+                    setEditionId(resumed.editionId);
+                    setForm((prior) => ({ ...prior, ...resumed.form }));
                     setWorkflow("catalog");
-                    setStep("publish");
-                    setNotice(`${record.release.title} is loaded. Publish it on Fuji, then come back to Add tracks / Mint.`);
+                    setStep("track");
+                    setNotice(`${resumed.form.releaseTitle} is loaded. Check its preview clip and full track${resumed.gated ? "" : ", save the catalog structure"}, then publish it on Fuji.`);
                   }}>Publish this release on Fuji →</button>
                 </div>
               )}
