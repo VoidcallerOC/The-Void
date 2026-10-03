@@ -6,6 +6,7 @@ import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectionDetailPage, MyCollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
+import { ArtistProfileEditPage } from "./components/ArtistProfileEditPage.jsx";
 import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="edition/:edition" element={<EditionPage />} />
           <Route path="experience/:experience" element={<ExperiencePage />} />
           <Route path="studio" element={<ArtistStudioPage />} />
+          <Route path="studio/profile/:artistId" element={<ArtistProfileEditPage />} />
           <Route path="verify" element={<VerifyLanding />} />
           <Route path="verify/apply" element={<VerifyApplyPage />} />
           <Route path="verify/received" element={<VerifyReceivedPage />} />
