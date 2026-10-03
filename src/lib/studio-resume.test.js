@@ -29,7 +29,7 @@ describe("resumeOwnedRelease", () => {
   });
 
   it("refuses a release that is already published on Fuji", () => {
-    expect(resumeOwnedRelease(catalog, "rel-live")).toEqual({ published: true, releaseId: "rel-live", title: "Forgive & Forget" });
+    expect(resumeOwnedRelease(catalog, "rel-live")).toMatchObject({ published: true, releaseId: "rel-live", editionId: "ed-live", tokenId: "3", title: "Forgive & Forget" });
     const editionOnly = { ...catalog, releases: [{ ...catalog.releases[1], status: "draft" }] };
     expect(resumeOwnedRelease(editionOnly, "rel-live")).toMatchObject({ published: true });
   });

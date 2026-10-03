@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectReleaseTemplate } from "./studio-selection.js";
+import { resumeOwnedRelease, selectReleaseTemplate } from "./studio-selection.js";
 
 describe("Studio release selection", () => {
   it("loads a public release as a new wallet-owned template without reusing server IDs", () => {
@@ -34,5 +34,29 @@ describe("Studio release selection", () => {
     const selected = selectReleaseTemplate({ artist: { name: "A" }, release: { title: "No Art" } });
     expect(selected.form.releaseArtwork).toBe("");
     expect(selected.form.trackArtwork).toBe("");
+  });
+
+  it("recovers the edition and token without session state", () => {
+    const catalog = {
+      releases: [{ id: "release-1", artistId: "artist-1", title: "Forgive & Forget", description: "What's done is done", status: "published" }],
+      editions: [{ id: "edition-1", releaseId: "release-1", title: "Forgive & Forget", status: "available", supply: "25", tokenIds: ["987654321"], priceWei: "10000000000000000" }],
+    };
+
+    expect(resumeOwnedRelease(catalog, "release-1")).toMatchObject({
+      published: true,
+      releaseId: "release-1",
+      editionId: "edition-1",
+      tokenId: "987654321",
+      form: { quantity: "25", priceWei: "10000000000000000" },
+    });
+  });
+
+  it("does not claim recovery is possible when the persisted token relationship is absent", () => {
+    const catalog = {
+      releases: [{ id: "release-1", title: "Unresolved", status: "published" }],
+      editions: [{ id: "edition-1", releaseId: "release-1", status: "available", tokenIds: [] }],
+    };
+
+    expect(resumeOwnedRelease(catalog, "release-1")).toMatchObject({ published: true, tokenId: "" });
   });
 });

@@ -32,7 +32,22 @@ export function resumeOwnedRelease(catalog, releaseId) {
   const editions = (catalog?.editions || []).filter((edition) => edition.releaseId === releaseId);
   // A release already on Fuji cannot be published again: its token id is fixed
   // by the release and track slugs, so a second edition would collide with it.
-  if (release.status === "published" || editions.some((edition) => edition.status === "available")) return { published: true, releaseId: release.id, title: release.title || "" };
+  if (release.status === "published" || editions.some((edition) => edition.status === "available")) {
+    const edition = editions.find((item) => item.status === "available" && item.tokenIds?.length) || editions.find((item) => item.tokenIds?.length) || null;
+    return {
+      published: true,
+      releaseId: release.id,
+      editionId: edition?.id || "",
+      tokenId: edition?.tokenIds?.[0] == null ? "" : String(edition.tokenIds[0]),
+      title: release.title || "",
+      form: {
+        releaseTitle: release.title || "",
+        releaseDescription: release.description || "",
+        quantity: edition?.supply ? String(edition.supply) : "",
+        priceWei: edition?.priceWei ? String(edition.priceWei) : undefined,
+      },
+    };
+  }
   // The API lists editions newest first.
   const edition = editions.find((item) => editionHasGatedTrack(catalog, item.id)) || editions[0] || null;
   const includes = Array.isArray(edition?.includes) && edition.includes.length ? edition.includes.join("\n") : null;
