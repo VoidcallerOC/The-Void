@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { SELF_TITLED_EP_IDENTITY, VC_DATA } from "../data.js";
+import { FUJI_VOLUME_IDENTITY, VC_DATA } from "../data.js";
 import { Eyebrow, Btn, Tag } from "./Atoms.jsx";
 import { WordmarkGlitch } from "./Overlays.jsx";
 import { useAudio } from "../lib/audio.js";
@@ -21,7 +21,7 @@ export function Hero() {
     let active = true;
     const loadVolume = async () => {
       try {
-        const next = await fetchSelfTitledEpVolume({ identity: SELF_TITLED_EP_IDENTITY, signal: controller.signal });
+        const next = await fetchSelfTitledEpVolume({ identity: FUJI_VOLUME_IDENTITY, signal: controller.signal });
         if (active) setVolume(next);
       } catch (error) {
         if (error?.name !== "AbortError" && active) setVolume(null);
