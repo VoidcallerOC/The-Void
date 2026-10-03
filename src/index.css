@@ -489,6 +489,35 @@ body { padding-bottom: 72px; }
 .vc-release-pick div {
   padding: 12px;
 }
+.vc-release-pick-open {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.vc-release-pick-archive {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 12px;
+  min-height: 36px;
+  border: 1px solid var(--vc-bone-dim);
+  background: transparent;
+  color: var(--vc-bone);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.vc-release-pick-archive:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 @media (max-width: 900px) {
   .vc-featured-release {
