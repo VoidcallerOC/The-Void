@@ -75,7 +75,8 @@ export function formatWeiAsAvax(wei) {
 
 export function parseAvaxToWei(avax) {
   const raw = String(avax || "").trim();
-  if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return null;
+  // Accept "0.5", ".5" and "5." alike; AVAX has 18 decimals, so never more.
+  if (!raw || !/^(\d+(\.\d{0,18})?|\.\d{1,18})$/.test(raw)) return null;
   const [whole, frac = ""] = raw.split(".");
   const fracWei = (frac + "0".repeat(18)).slice(0, 18);
   return (BigInt(whole || "0") * WEI_PER_AVAX + BigInt(fracWei)).toString();

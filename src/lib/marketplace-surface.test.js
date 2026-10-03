@@ -191,5 +191,9 @@ describe("native price formatting", () => {
     expect(formatWeiAsAvax("10000000000000000")).toBe("0.01 AVAX");
     expect(parseAvaxToWei("0.01")).toBe("10000000000000000");
     expect(parseAvaxToWei("not-a-price")).toBeNull();
+    expect(parseAvaxToWei(".5")).toBe("500000000000000000");
+    expect(parseAvaxToWei("5.")).toBe("5000000000000000000");
+    expect(parseAvaxToWei(".")).toBeNull();
+    expect(parseAvaxToWei("0.0000000000000000001")).toBeNull();
   });
 });
