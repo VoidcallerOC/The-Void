@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, assertFujiAddress, encodeCreateFujiEdition, encodeFujiMint, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, simulateFujiCall, verifyFujiEditionCreation } from "../lib/fuji-release.js";
-import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
+import { encodeConfigureSale, formatAvax, fujiPrimarySaleAddress, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
@@ -104,11 +104,13 @@ export function ArtistStudioPage() {
   const [workflow, setWorkflow] = useState(createIntent === "track" ? "mint" : "catalog");
   const [form, setForm] = useState(initialState);
   const [step, setStep] = useState("release");
+  const requestedReleaseId = params.get("release");
   const [selectedReleaseId, setSelectedReleaseId] = useState("");
   const [artistId, setArtistId] = useState("");
   const [releaseId, setReleaseId] = useState("");
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
+  const [configuredSale, setConfiguredSale] = useState(null);
   const [notice, setNotice] = useState("");
   // On a failed Fuji transaction, hold the hash + explorer link so the user can
   // recover and inspect the exact transaction instead of losing it.
@@ -149,14 +151,46 @@ export function ArtistStudioPage() {
     return mintEditions.flatMap((edition) => (edition.tokenIds || []).map((tokenId) => ({ title: edition.title, tokenId: String(tokenId), experienceId: edition.experienceIds?.[0] || "" })));
   }, [selectedMintRelease, mintEditions]);
 
+  const openPublishedSale = (catalog, requestedReleaseId) => {
+    const resumed = resumeOwnedRelease(catalog, requestedReleaseId);
+    if (!resumed?.published || !resumed.tokenId) return false;
+    setSelectedReleaseId(resumed.releaseId);
+    setArtistId(resumed.artistId || catalog.releases?.find((release) => release.id === resumed.releaseId)?.artistId || "");
+    setReleaseId(resumed.releaseId);
+    setEditionId(resumed.editionId || "");
+    setPublishedTokenId(resumed.tokenId);
+    setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined)) }));
+    setConfiguredSale(null);
+    setWorkflow("catalog");
+    setStep("sale");
+    setNotice(`${resumed.title} is loaded from the published catalog. Check the on-chain primary sale state below.`);
+    return true;
+  };
+
   useEffect(() => {
     let cancelled = false;
     if (!canUseStudio) return undefined;
     studioFetch("/studio/catalog", { headers })
-      .then((payload) => { if (!cancelled) setOwnedStudioCatalog(mapPublishedCatalog(payload)); })
+      .then((payload) => {
+        if (cancelled) return;
+        const catalog = mapPublishedCatalog(payload);
+        setOwnedStudioCatalog(catalog);
+        if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
+      })
       .catch((error) => { if (!cancelled) setNotice(error.message); });
     return () => { cancelled = true; };
-  }, [canUseStudio, headers]);
+  }, [canUseStudio, headers, requestedReleaseId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canUseStudio || step !== "sale" || !publishedTokenId || !fujiPrimarySaleAddress()) return undefined;
+    const provider = wallet.getProvider?.();
+    if (!provider) return undefined;
+    readPrimarySale(provider, publishedTokenId, wallet.account)
+      .then((sale) => { if (!cancelled) setConfiguredSale(sale); })
+      .catch(() => { if (!cancelled) setConfiguredSale(null); });
+    return () => { cancelled = true; };
+  }, [canUseStudio, publishedTokenId, step, wallet, wallet.account]);
 
 
 
@@ -328,6 +362,12 @@ export function ArtistStudioPage() {
       const provider = wallet.getProvider?.();
       const edition = await readFujiEdition(provider, publishedTokenId);
       if (!edition?.exists) throw new Error("The published edition could not be found on Fuji. Refresh the edition before configuring its sale.");
+      const existingSale = await readPrimarySale(provider, publishedTokenId, wallet.account);
+      if (existingSale?.configured) {
+        setConfiguredSale(existingSale);
+        setNotice("This release already has a primary sale configured. No transaction was submitted.");
+        return;
+      }
       validateSaleSupply(form.saleSupply || form.quantity, edition.maxSupply);
       const data = encodeConfigureSale({
         tokenId: publishedTokenId,
@@ -341,6 +381,7 @@ export function ArtistStudioPage() {
       await simulateConfigureSale(provider, { from: wallet.account, data });
       const transaction = await sendFujiTransaction({ provider, from: wallet.account, data, to: sale });
       setNotice(`Sale configured at ${formatAvax(form.priceWei)}. Transaction confirmed: ${transaction.hash}`);
+      setConfiguredSale(await readPrimarySale(provider, publishedTokenId, wallet.account));
     } catch (error) {
       setNotice(error.message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
@@ -426,6 +467,7 @@ export function ArtistStudioPage() {
   const uploadExperienceAudio = (file) => uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience audio stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`);
 
   const selectExistingRelease = (record) => {
+    if (record.release.status === "published" && openPublishedSale(ownedStudioCatalog, record.release.id)) return;
     const selection = selectReleaseTemplate(record);
     setSelectedReleaseId(selection.selectedReleaseId);
     setArtistId(selection.artistId);
@@ -762,21 +804,33 @@ export function ArtistStudioPage() {
               <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
                 Only the artist wallet recorded on this edition can configure its sale. Price is exact AVAX wei. Payment splits on-chain between the edition payout and the platform fee. Tokens are minted to the buyer. Nothing here is an ERC-20.
               </p>
-              <TextField title="Token id" value={publishedTokenId} onChange={setPublishedTokenId} readOnly={false} />
-              <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-              <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={form.quantity || "Edition supply"} />
-              <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} />
-              <TextField title="Start time (e.g. 6:00am, an ISO datetime, or unix seconds — optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave blank for no start" />
-              <TextField title="End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder="Leave blank for no end" />
-              <label style={label}>
-                <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
-              </label>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-                <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>
-                <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !publishedTokenId} onClick={configureSale}>
-                  {busy === "sale" ? "Configuring…" : "Set up sale"}
-                </button>
-              </div>
+              <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all" }}>Published token · {publishedTokenId}</p>
+              {configuredSale?.configured ? (
+                <div role="status" style={{ border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 }}>
+                  <strong>Primary sale configured</strong>
+                  <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
+                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.remaining.toString()} left of {configuredSale.maxSupply.toString()} · {configuredSale.perWalletLimit.toString()} per wallet{configuredSale.paused ? " · Sale paused" : ""}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This release does not have a primary sale yet. Configure it using the persisted published token above.</p>
+                  <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
+                  <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={form.quantity || "Edition supply"} />
+                  <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} />
+                  <TextField title="Start time (e.g. 6:00am, an ISO datetime, or unix seconds — optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave blank for no start" />
+                  <TextField title="End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)" value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder="Leave blank for no end" />
+                  <label style={label}>
+                    <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
+                  </label>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+                    <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>
+                    <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !publishedTokenId} onClick={configureSale}>
+                      {busy === "sale" ? "Configuring…" : "Configure Primary Sale"}
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </section>

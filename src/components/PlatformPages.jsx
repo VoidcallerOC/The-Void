@@ -277,6 +277,11 @@ export function EditionPage() {
               <PlayTokenButton track={previewTrack} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
             </div>
           )}
+          {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
+            <div style={{ marginTop: 18 }}>
+              <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
+            </div>
+          )}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>
       </div>
