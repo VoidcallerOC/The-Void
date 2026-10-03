@@ -1,6 +1,6 @@
 // A release is the catalog record. Each edition on that release is one distinct
-// track and, once published, one token. Mint quantity is copies of a token
-// that already exists. It is never how a new song gets onto the release.
+// track and, once published, one token. Supply is fixed at publish. Studio
+// does not mint extra copies of a token that already exists.
 export function tracksOnRelease(release, editions = []) {
   if (!release) return [];
   const onRelease = (editions || []).filter((edition) => edition?.releaseId === release.id);
