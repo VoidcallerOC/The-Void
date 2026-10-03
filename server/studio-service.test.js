@@ -136,7 +136,7 @@ describe("Artist Studio", () => {
     const edition = await instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", chainId: 43113, contractAddress: contract, tokenId: "7", quantity: "100", priceWei: "1000000000000000000" } });
     expect(edition).toMatchObject({ id: "edition-1", status: "DRAFT" });
     expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: certifiedFujiRelease, contractType: "ERC1155", chainId: 43113 }));
-    expect(certifiedFujiRelease).toBe("0x82b26da27136935454bdf1e40801190b521b82e5");
+    expect(certifiedFujiRelease).toBe("0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6");
     expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: expect.any(BigInt), metadataUri: null }));
 
     const experienceService = service({ rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] });

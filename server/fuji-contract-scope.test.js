@@ -17,7 +17,7 @@ import {
 describe("Fuji contract scope", () => {
   it("keeps V2, V1, and C-Chain addresses in separate buckets", () => {
     expect(CANONICAL_FUJI_CHAIN_ID).toBe(43113);
-    expect(isCanonicalFujiRelease("0x82b26Da27136935454Bdf1e40801190B521b82e5")).toBe(true);
+    expect(isCanonicalFujiRelease("0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6")).toBe(true);
     expect(isCanonicalFujiRelease(LEGACY_FUJI_V1_RELEASE)).toBe(false);
     expect(isLegacyFujiV1Release("0x262B774cf9a1949170B58E2d57F6189980FE757b")).toBe(true);
     expect(isOutOfScopeCChainCollection("0xd1b4367dd9f235f9ee61878019d66e31511e98ee")).toBe(true);
