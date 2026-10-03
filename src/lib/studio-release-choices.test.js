@@ -40,4 +40,15 @@ describe("Studio release picker", () => {
     expect(studioArtistChoices(artists).map((artist) => artist.id)).toEqual(["artist-real", "artist-alias"]);
     expect(studioArtistChoices([artists[2]]).map((artist) => artist.id)).toEqual(["artist-asdf"]);
   });
+
+  it("never offers archived duplicates, leaving the live release", () => {
+    const artists = [{ id: "voidcaller", name: "Voidcaller" }];
+    const releases = [
+      { id: "ff-18", artistId: "voidcaller", title: "Forgive & Forget", status: "published" },
+      { id: "ff-17", artistId: "voidcaller", title: "Forgive & Forget", status: "archived" },
+      { id: "ff-13", artistId: "voidcaller", title: "Forgive & Forget", status: "archived" },
+    ];
+    expect(studioReleaseChoices({ releases, artists, editions: [] }).map(({ release }) => release.id)).toEqual(["ff-18"]);
+    expect(studioReleaseChoices({ releases: releases.slice(1), artists, editions: [] })).toEqual([]);
+  });
 });
