@@ -115,6 +115,9 @@ export function ArtistStudioPage() {
   const [txEvidence, setTxEvidence] = useState(null);
   const [busy, setBusy] = useState("");
   const [fullTrack, setFullTrack] = useState(null);
+  // Private audio that collectors unlock through the experience (e.g. a demo).
+  // Falls back to the full track when the artist doesn't add a separate file.
+  const [experienceAudio, setExperienceAudio] = useState(null);
   // Edition whose catalog structure was saved with a private full track this session.
   const [gatedEditionId, setGatedEditionId] = useState("");
   // Outcome of "Save catalog structure", shown beside the button (the page notice is far above it).
@@ -237,10 +240,11 @@ export function ArtistStudioPage() {
       const alreadyGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
       // Holders unlock the private full track through this experience, so never
       // save it without one (that would publish a token that unlocks nothing).
-      if (!fullTrack && !alreadyGated) throw new Error("Upload the full track on the Tracks step first. It is what holders unlock.");
+      const unlockAudio = experienceAudio || fullTrack;
+      if (!unlockAudio && !alreadyGated) throw new Error("Upload the experience audio below (or the full track on the Tracks step). It is what holders unlock.");
       const ids = editionId ? { releaseId, editionId } : await saveDraft();
       if (!ids.editionId) throw new Error("Save the track draft before configuring its experience.");
-      if (!fullTrack && alreadyGated) {
+      if (!unlockAudio && alreadyGated) {
         const done = "Catalog already saved with its private full track. Continue to Supply.";
         setNotice(done); setCatalogStatus({ ok: true, message: done }); setStep("supply");
         return;
@@ -253,12 +257,12 @@ export function ArtistStudioPage() {
           experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
           productType: form.productType,
           requirements: [],
-          mediaConfig: fullTrack ? { protected: true, protectedMedia: [{ assetId: fullTrack.assetId, mediaType: "AUDIO", contentType: fullTrack.contentType }] } : {},
+          mediaConfig: { protected: true, protectedMedia: [{ assetId: unlockAudio.assetId, mediaType: "AUDIO", contentType: unlockAudio.contentType }] },
         },
         headers,
       });
       setGatedEditionId(ids.editionId);
-      const done = `Catalog saved: ${form.releaseTitle || "Untitled release"} now gates its full track to holders. Continue with supply and publishing.`;
+      const done = `Catalog saved: holders of ${form.releaseTitle || "this release"} unlock ${unlockAudio.filename || unlockAudio.assetId}. Continue with supply and publishing.`;
       setNotice(done);
       setCatalogStatus({ ok: true, message: done });
       setStep("supply");
@@ -404,18 +408,22 @@ export function ArtistStudioPage() {
     return uploaded;
   }, (uploaded) => `Public preview uploaded: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · ${uploaded.uri}`);
 
-  const uploadFullTrack = (file) => runUpload("full-track", file, async (owner) => {
+  // Private, token-gated audio: same verified pipeline for the full track and
+  // for experience audio (private storage, artist ownership, SHA-256).
+  const uploadPrivateAudio = (key, file, onUploaded, describe) => runUpload(key, file, async (owner) => {
     const progress = (event) => {
       const message = event.stage === "hashing" ? `Checking ${file.name} (${formatBytes(file.size)})…`
         : event.stage === "uploading" ? `Uploading ${file.name} privately… ${Math.floor((event.loaded / event.total) * 100)}% of ${formatBytes(event.total)}`
         : event.stage === "registering" ? `Registering ${file.name}…`
         : `Verifying ${file.name} in private storage…`;
-      setUploads((prior) => ({ ...prior, "full-track": { state: "uploading", message } }));
+      setUploads((prior) => ({ ...prior, [key]: { state: "uploading", message } }));
     };
     const uploaded = await uploadStudioFullTrack({ artistId: owner, file, headers, onProgress: progress });
-    setFullTrack(uploaded);
+    onUploaded(uploaded);
     return uploaded;
-  }, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to gate it to holders.`);
+  }, describe);
+  const uploadFullTrack = (file) => uploadPrivateAudio("full-track", file, setFullTrack, (uploaded) => `Full track stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}.`);
+  const uploadExperienceAudio = (file) => uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience audio stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`);
 
   const selectExistingRelease = (record) => {
     const selection = selectReleaseTemplate(record);
@@ -615,7 +623,7 @@ export function ArtistStudioPage() {
             {form.trackPreview && <audio controls preload="none" src={ipfsToHttp(form.trackPreview)} style={{ width: "100%", marginTop: 12 }} />}
           </div>
           <div style={{ marginTop: 16 }}>
-            <p style={{ margin: "0 0 8px" }}>Full track (private) — only wallets holding this track's token can stream it</p>
+            <p style={{ margin: "0 0 8px" }}>Full track (private master) — never public; holders unlock it unless you add separate experience audio on the Experiences step</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
                 {busy === "full-track" ? "Uploading…" : fullTrack ? "Replace full track" : "Upload full track"}
@@ -649,13 +657,25 @@ export function ArtistStudioPage() {
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--vc-bone-dim)" }}>
             Delivery · {experienceCategory(form.productType)?.deliveryType || "Not configured"}
           </p>
-          {/* The experience's audio is the private full track from the Tracks step. */}
-          <p role="status" style={{ color: fullTrack || editionGated ? "var(--vc-bone-dim)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
-            {fullTrack
-              ? `Holders unlock: ${fullTrack.filename || fullTrack.assetId} (private full track from the Tracks step).`
-              : editionGated
-                ? "This edition already gates its private full track to holders."
-                : "No full track attached yet. Upload it on the Tracks step; saving attaches it to this experience."}
+          <div style={{ marginTop: 16 }}>
+            <p style={{ margin: "0 0 8px" }}>Experience audio (private) — what collectors unlock, e.g. a new demo</p>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
+                {busy === "experience-audio" ? "Uploading…" : experienceAudio ? "Replace experience audio" : "Upload experience audio"}
+                <input type="file" accept={AUDIO_ACCEPT} disabled={busy !== "" || !canUseStudio} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) uploadExperienceAudio(file); }} />
+              </label>
+              <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`WAV, AIFF, FLAC or MP3 · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · holders only`}</span>
+            </div>
+            <UploadStatus status={uploads["experience-audio"]} signedIn={canUseStudio} />
+          </div>
+          <p role="status" style={{ color: experienceAudio || fullTrack || editionGated ? "var(--vc-bone-dim)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
+            {experienceAudio
+              ? `Holders unlock: ${experienceAudio.filename || experienceAudio.assetId}.`
+              : fullTrack
+                ? `Holders unlock: ${fullTrack.filename || fullTrack.assetId} (the full track). Upload experience audio above to unlock something else.`
+                : editionGated
+                  ? "This edition already unlocks private audio for holders."
+                  : "Nothing for holders to unlock yet. Upload the experience audio above."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>

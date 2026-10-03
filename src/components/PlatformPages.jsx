@@ -12,6 +12,7 @@ import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js"
 import { useAudio } from "../lib/audio.js";
 import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { CollectionMarketplaceCallout, DiscoveryMarketplaceCallout } from "./MarketplaceRails.jsx";
+import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
 import { PurchasePanel } from "./PurchasePanel.jsx";
 import { ListingPanel } from "./ListingPanel.jsx";
@@ -240,6 +241,9 @@ export function EditionPage() {
   const { edition, release, artist, experiences } = result;
   const secondary = resolveSecondaryStatus();
   const price = editionPriceLabel(edition);
+  // Public preview (the token's animation_url) for every visitor; full audio
+  // stays behind the experience's holder-only player.
+  const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token);
   return (
     <section style={shell}>
       <PlatformHeader eyebrow={`† ${release.productType || "Collectible release"}`} title={release.title}>
@@ -268,6 +272,11 @@ export function EditionPage() {
           <p className="vc-card-meta" style={{ marginTop: 10 }}>
             Secondary market · {marketplaceStatusLabel(secondary)}
           </p>
+          {previewTrack && (
+            <div style={{ marginTop: 16 }}>
+              <PlayTokenButton track={previewTrack} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
+            </div>
+          )}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>
       </div>
@@ -378,6 +387,7 @@ export function ExperiencePage() {
             <Link to="/my-collection" style={ghostBtn}>My collection</Link>
           </div>
           {playbackError && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6 }}>{playbackError}</p>}
+          {experience.media?.protected && edition && isCertifiedFujiEdition(edition) && <ProtectedExperiencePlayer experience={experience} />}
         </div>
       </div>
     </section>
