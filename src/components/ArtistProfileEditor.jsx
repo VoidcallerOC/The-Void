@@ -9,13 +9,17 @@ import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 const field = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,.04)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", padding: "12px 14px", fontSize: 15, marginTop: 6 };
 const label = { display: "block", marginTop: 16, fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)" };
 
+const gateNote = { color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.7 };
+
 // Shown on an artist's public page only to an authenticated wallet that owns
 // that artist (ownership comes from GET /studio/catalog, which the server
 // scopes to the signed-in wallet). Saves through PATCH /studio/artists/:id.
-export function ArtistProfileEditor({ artistId, onSaved }) {
+// `standalone` (the /studio/profile/:id page) opens the form straight away and
+// explains why it can't, instead of rendering nothing.
+export function ArtistProfileEditor({ artistId, onSaved, standalone = false }) {
   const wallet = useWallet() || {};
   const [owned, setOwned] = useState({ artistId: null, row: null });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(standalone);
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -34,7 +38,14 @@ export function ArtistProfileEditor({ artistId, onSaved }) {
   // Only the signed-in owner of this exact artist ever sees the editor.
   const row = signedIn && owned.artistId === artistId ? owned.row : null;
   const setRow = (next) => setOwned({ artistId, row: next });
-  if (!row) return null;
+  if (!row) {
+    if (!standalone) return null;
+    if (!signedIn) return <p style={gateNote}>Connect and authenticate the wallet that owns this artist profile to edit it.</p>;
+    if (owned.artistId !== artistId) return <p role="status" style={gateNote}>Loading your artist profile…</p>;
+    return <p style={{ ...gateNote, color: "var(--vc-crimson)" }}>This artist profile is not owned by the connected wallet.</p>;
+  }
+  // The standalone page opens straight into the form once the row arrives.
+  if (open && !form) setForm(profileFormFromRow(row));
 
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
   const setLink = (key, value) => setForm((prior) => ({ ...prior, links: { ...prior.links, [key]: value } }));
@@ -53,12 +64,13 @@ export function ArtistProfileEditor({ artistId, onSaved }) {
       const nextRow = { ...row, display_name: payload.name, bio: payload.bio, website_url: payload.websiteUrl, social_links: payload.links, profile_metadata: { ...payload.profileMetadata, profileArtwork: payload.profileArtwork } };
       setRow(nextRow);
       onSaved?.({ name: payload.name, bio: payload.bio, avatar: ipfsToHttp(payload.profileArtwork || ""), banner: ipfsToHttp(payload.profileMetadata.banner || ""), socials: profileSocials(payload.links, payload.websiteUrl) });
-      setOpen(false);
+      if (standalone) setForm(profileFormFromRow(nextRow));
+      else setOpen(false);
       setNotice("Profile saved.");
     } catch (error) { setNotice(error.message); } finally { setBusy(""); }
   };
 
-  if (!open) {
+  if (!open || !form) {
     return (
       <div style={{ margin: "20px 0 0", display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <button type="button" style={ghostBtn} onClick={() => { setForm(profileFormFromRow(row)); setOpen(true); setNotice(""); }}>Edit profile</button>
@@ -91,9 +103,9 @@ export function ArtistProfileEditor({ artistId, onSaved }) {
       {PROFILE_LINKS.map(([key, title]) => (
         <label key={key} style={label}>{title}<input value={form.links[key]} onChange={(event) => setLink(key, event.target.value)} placeholder="https://" style={field} /></label>
       ))}
-      {notice && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{notice}</p>}
+      {notice && <p role="status" style={{ color: notice === "Profile saved." ? "var(--vc-bone-dim)" : "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{notice}</p>}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-        <button type="button" style={ghostBtn} disabled={Boolean(busy)} onClick={() => setOpen(false)}>Cancel</button>
+        {!standalone && <button type="button" style={ghostBtn} disabled={Boolean(busy)} onClick={() => setOpen(false)}>Cancel</button>}
         <button type="button" style={primaryBtn} disabled={Boolean(busy)} onClick={save}>{busy === "save" ? "Saving…" : "Save profile"}</button>
       </div>
     </section>
