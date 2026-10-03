@@ -468,7 +468,7 @@ export function ArtistStudioPage() {
           {!canUseStudio ? <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to load your catalog.</p> : ownedStudioCatalog && !existingReleases.length ? <p style={{ color: "var(--vc-bone-dim)" }}>No albums or collections are available for this authenticated artist.</p> : null}
           <label style={label}>
             Select album / collection
-            <select value={mintReleaseId} onChange={(event) => { setMintReleaseId(event.target.value); setMintEditionId(""); setMintTrackIds([]); }} style={field} disabled={!existingReleases.length}>
+            <select value={mintReleaseId} onChange={(event) => { setMintReleaseId(event.target.value); setMintEditionId(""); setMintTrackIds([]); setMintStatus(null); setNotice(""); }} style={field} disabled={!existingReleases.length}>
               <option value="">Choose an existing catalog record</option>
               {existingReleases.map(({ release, artist }) => <option key={release.id} value={release.id}>{artist?.name ? `${artist.name} — ` : ""}{release.title}</option>)}
             </select>
@@ -479,7 +479,19 @@ export function ArtistStudioPage() {
               {mintTracks.length ? mintTracks.map((track) => {
                 const id = mintTrackKey(track);
                 return <label key={id} style={{ ...label, marginTop: 0, display: "flex", gap: 10, alignItems: "center", textTransform: "none", letterSpacing: 0, fontSize: 14 }}><input type="checkbox" checked={mintTrackIds.includes(id)} onChange={() => setMintTrackIds((prior) => prior.includes(id) ? prior.filter((item) => item !== id) : [...prior, id])} /> {track.title || "Untitled track"}{track.experienceId ? ` · ${track.experienceId}` : ""}</label>;
-              }) : <p style={{ color: "var(--vc-bone-dim)" }}>This catalog record has no track/token relationships yet. Define them in Create release first.</p>}
+              }) : (
+                <div>
+                  <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>Nothing to mint yet: this release has not been published on Fuji, so it has no token. Publishing creates the on-chain edition; its token then appears here.</p>
+                  <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => {
+                    const record = existingReleases.find((entry) => entry.release.id === mintReleaseId);
+                    if (!record) { setMintStatus({ ok: false, message: "This release could not be loaded into the editor." }); return; }
+                    selectExistingRelease(record);
+                    setWorkflow("catalog");
+                    setStep("publish");
+                    setNotice(`${record.release.title} is loaded. Publish it on Fuji, then come back to Add tracks / Mint.`);
+                  }}>Publish this release on Fuji →</button>
+                </div>
+              )}
             </div>
             <label style={label}>
               Select target contract
