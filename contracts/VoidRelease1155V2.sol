@@ -211,7 +211,9 @@ contract VoidRelease1155V2 {
         internal returns (uint256 tokenId)
     {
         if (releaseId == bytes32(0) || editionId == bytes32(0)) revert InvalidIdentifier();
-        if (maxSupply == 0) revert InvalidSupply();
+        // maxSupply 0 is an open edition: ERC-1155 does not require a cap.
+        // A primary sale of that edition must set an end time, which closes it.
+        // Already-created editions keep the supply they were published with.
         if (payout == address(0)) revert InvalidAddress();
         if (royaltyBps > MAX_ROYALTY_BPS) revert RoyaltyTooHigh(royaltyBps, MAX_ROYALTY_BPS);
         tokenId = tokenIdFor(releaseId, editionId);
@@ -235,8 +237,11 @@ contract VoidRelease1155V2 {
         Edition storage item = _editions[tokenId];
         if (!item.exists) revert EditionNotFound(tokenId);
         if (amount == 0) revert ZeroQuantity();
-        uint256 available = item.maxSupply - item.mintedSupply;
-        if (amount > available) revert ExceedsSupply(tokenId, available, amount);
+        // Open editions (maxSupply == 0) have no remaining-supply check.
+        if (item.maxSupply != 0) {
+            uint256 available = item.maxSupply - item.mintedSupply;
+            if (amount > available) revert ExceedsSupply(tokenId, available, amount);
+        }
         item.mintedSupply += amount;
     }
     function _checkOnERC1155Received(address operator, address from, address to, uint256 id, uint256 amount, bytes calldata data) private {

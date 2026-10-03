@@ -218,18 +218,31 @@ export async function simulateCreateFujiEdition(provider, { from, data }) {
   }
 }
 
+// Blank or 0 is an open edition (unlimited). A positive whole number is a cap.
+export function editionMaxSupply(maxSupply) {
+  if (maxSupply === null || maxSupply === undefined || String(maxSupply).trim() === "") return 0n;
+  let supply;
+  try {
+    supply = BigInt(maxSupply);
+  } catch {
+    throw new Error("Edition supply must be a whole number, or blank or 0 for unlimited.");
+  }
+  if (supply < 0n) throw new Error("Edition supply must be a whole number, or blank or 0 for unlimited.");
+  return supply;
+}
+
 export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps }) {
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
-  if (BigInt(maxSupply) <= 0n) throw new Error("Edition supply must be greater than zero.");
+  const supply = editionMaxSupply(maxSupply);
   const ids = fujiIds(releaseId, editionId);
   const tokenId = fujiTokenId(releaseId, editionId);
   if (payout === undefined && royaltyBps === undefined) {
-    return { tokenId, data: iface.encodeFunctionData("createEdition(bytes32,bytes32,uint256,string)", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri]) };
+    return { tokenId, data: iface.encodeFunctionData("createEdition(bytes32,bytes32,uint256,string)", [ids.releaseId, ids.editionId, supply, metadataUri]) };
   }
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
-  return { tokenId, data: v2CreateIface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, BigInt(maxSupply), metadataUri, ethers.getAddress(payout), bps]) };
+  return { tokenId, data: v2CreateIface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, supply, metadataUri, ethers.getAddress(payout), bps]) };
 }
 
 // Dry-run a release-contract call from this wallet so a revert surfaces its
