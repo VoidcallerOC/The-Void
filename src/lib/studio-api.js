@@ -22,7 +22,7 @@ export async function studioFetch(path, { method = "GET", payload, headers, fetc
 export const MAX_ARTWORK_BYTES = 3 * 1024 * 1024;
 export const ARTWORK_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
 
-function fileToBase64(file) {
+export function fileToBase64(file) {
   return file.arrayBuffer().then((buffer) => {
     const bytes = new Uint8Array(buffer);
     let binary = "";

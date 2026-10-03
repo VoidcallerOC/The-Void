@@ -1,4 +1,5 @@
 import { PURCHASE_STATE } from "./marketplace.js";
+import { ARTWORK_ACCEPT, MAX_ARTWORK_BYTES, fileToBase64 } from "./studio-api.js";
 
 function apiBase() {
   const configured = import.meta.env.VITE_API_ORIGIN;
@@ -146,4 +147,13 @@ export async function fetchMarketplacePresentationEditor({ authHeaders = {}, fet
 
 export async function saveMarketplacePresentation({ heroArtwork, authHeaders = {}, fetchImpl = fetch } = {}) {
   return request("/api/marketplace/presentation", { method: "POST", body: { heroArtwork }, headers: authHeaders, fetchImpl });
+}
+
+// Uploads an image file and makes it the marketplace hero in one request.
+export async function uploadMarketplaceHeroArtwork({ file, authHeaders = {}, fetchImpl = fetch } = {}) {
+  if (!file) throw new Error("Choose an image file to upload.");
+  if (!ARTWORK_ACCEPT.split(",").includes(file.type)) throw new Error("Artwork must be a PNG, JPEG, GIF or WebP image.");
+  if (file.size > MAX_ARTWORK_BYTES) throw new Error("Artwork must be 3 MB or smaller.");
+  const data = await fileToBase64(file);
+  return request("/api/marketplace/presentation/artwork", { method: "POST", body: { data, filename: file.name }, headers: authHeaders, fetchImpl });
 }

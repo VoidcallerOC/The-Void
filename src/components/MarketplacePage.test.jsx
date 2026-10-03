@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { baseCatalogs, mapPublishedCatalog, mergeCatalogs } from "../lib/catalog-source.js";
 import { EditionCard } from "./MarketplaceCards.jsx";
@@ -176,6 +176,8 @@ describe("marketplace hero artwork", () => {
     fetchEditor.mockResolvedValue({ admin: true });
     renderMarketplace();
     await waitFor(() => expect(screen.getByRole("button", { name: "Admin · Header artwork" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Admin · Header artwork" }));
+    expect(screen.getByLabelText("Upload header image").getAttribute("type")).toBe("file");
   });
 
   it("does not ask the server about admin rights for a signed-out visitor", async () => {
