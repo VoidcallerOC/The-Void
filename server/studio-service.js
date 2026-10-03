@@ -589,8 +589,13 @@ export class ArtistStudioService {
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
 
     // Idempotent: the same private object registers once.
-    const existing = await this.db.query("SELECT id, media_type, created_at FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artist.id, file.cid]);
-    if (existing.rows.length) return { id: existing.rows[0].id, mediaType: existing.rows[0].media_type || mediaType, byteSize: file.size, createdAt: existing.rows[0].created_at || null };
+    const existing = await this.db.query("SELECT id, media_type, metadata->>'contentSha256' AS content_sha256, created_at FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artist.id, file.cid]);
+    if (existing.rows.length) {
+      const row = existing.rows[0];
+      if (row.content_sha256 && String(row.content_sha256).toLowerCase() !== contentSha256) throw fail(409, "MEDIA_HASH_MISMATCH", "This private object is already registered with a different SHA-256.");
+      this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "ALREADY_REGISTERED", assetId: row.id, upstream });
+      return { id: row.id, mediaType: row.media_type || mediaType, byteSize: file.size, createdAt: row.created_at || null };
+    }
     const publicPreview = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'contentSha256'=$2 LIMIT 1", [artist.id, contentSha256]);
     if (publicPreview.rows.length) throw fail(409, "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW", "This exact file is already public as a preview, so it cannot be token-gated.");
 
