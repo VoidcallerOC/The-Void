@@ -267,7 +267,7 @@ export function ArtistStudioPage() {
         headers,
       });
       const provider = wallet.getProvider?.();
-      if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This authenticated artist wallet is not authorized to publish releases on Fuji.");
+      if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This wallet does not have ARTIST_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
       const encoded = fujiReleaseIsV2()
         ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
         : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
@@ -332,7 +332,7 @@ export function ArtistStudioPage() {
       if (!mintTrackIds.length) throw new Error("Select at least one existing track.");
       const target = assertFujiAddress(selectedMintEdition.contractAddress);
       const provider = wallet.getProvider?.();
-      if (!(await readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account))) throw new Error("This authenticated artist wallet is not authorized to mint on the selected Fuji contract.");
+      if (!(await readFujiRole(provider, FUJI_ROLES.ISSUER_ROLE, wallet.account))) throw new Error("This wallet does not have ISSUER_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
       // Same key the checkboxes use, so every ticked track is actually minted.
       const selected = mintTracks.filter((track) => mintTrackIds.includes(mintTrackKey(track)));
       if (!selected.length) throw new Error("None of the selected tracks could be matched. Re-select the tracks and try again.");

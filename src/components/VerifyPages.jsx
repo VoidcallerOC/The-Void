@@ -499,7 +499,7 @@ const REVIEW_ACTIONS = [
 // Verification is a database approval; publishing and minting on the certified
 // Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. A reviewer
 // holding the contract's admin role grants them here with their own wallet.
-function OnChainRolesPanel({ artistWallet }) {
+export function OnChainRolesPanel({ artistWallet }) {
   const wallet = useWallet();
   const [roles, setRoles] = useState(null);
   const [status, setStatus] = useState("");
