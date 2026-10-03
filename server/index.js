@@ -61,7 +61,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
-  const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator });
+  const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, artworkUploader });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
