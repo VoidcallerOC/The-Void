@@ -133,12 +133,15 @@ export class PrivateMediaStorage {
   // private download link. Proves the bytes in storage are the declared ones.
   async sha256OfPrivateObject({ cid, fetchImpl = fetch }) {
     const url = await this.signer(cid);
-    const response = await fetchImpl(url);
-    if (!response.ok || !response.body) throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", status: response.status } });
+    // Ask for the stored bytes exactly: a compressed or partial response would
+    // hash to something other than the uploaded file.
+    const response = await fetchImpl(url, { headers: { "accept-encoding": "identity" } });
+    const download = { status: response.status, contentLength: response.headers?.get?.("content-length") ?? null, contentEncoding: response.headers?.get?.("content-encoding") ?? null, contentType: response.headers?.get?.("content-type") ?? null };
+    if (response.status !== 200 || !response.body) throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", ...download } });
     const hash = createHash("sha256");
     let bytes = 0;
     for await (const chunk of response.body) { hash.update(chunk); bytes += chunk.length; }
-    return { sha256: hash.digest("hex"), bytes };
+    return { sha256: hash.digest("hex"), bytes, download };
   }
 
   async open({ storageKey, range = null, contentType = null }) {
