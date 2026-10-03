@@ -34,6 +34,15 @@ function TextField({ title, value, onChange, multiline = false, required = false
   );
 }
 
+function DayTimeField({ title, value, onChange, required = false }) {
+  return (
+    <label style={label}>
+      {title}
+      <input type="datetime-local" required={required} value={value} onChange={(event) => onChange(event.target.value)} style={{ ...field, colorScheme: "dark" }} />
+    </label>
+  );
+}
+
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1000))} KB`;
@@ -75,7 +84,7 @@ function isUnlimitedQuantity(value) {
 }
 
 function supplyLabel(value) {
-  return isUnlimitedQuantity(value) ? "Unlimited until the sale ends" : String(value);
+  return isUnlimitedQuantity(value) ? "Open. People can keep getting one until the sale ends." : `${value} copies. Then it's done.`;
 }
 
 function initialState() {
@@ -427,7 +436,7 @@ export function ArtistStudioPage() {
     }));
     setWorkflow("catalog");
     setStep("track");
-    setNotice(`${selectedMintRelease.title} stays the release. Name the new song below. Saving adds that track. It does not change the supply of a song already on this release.`);
+    setNotice(`${selectedMintRelease.title} stays the release. Name the new song below. Saving adds that song. It does not change a song that is already out.`);
   };
 
   // Runs one upload and records its outcome next to its own button.
@@ -508,7 +517,7 @@ export function ArtistStudioPage() {
         <button type="button" className={`vc-studio-action${workflow === "mint" ? " is-primary" : ""}`} onClick={() => { setWorkflow("mint"); setStep("mint"); setNotice(""); }}>
           <Eyebrow red>02</Eyebrow>
           <h2>Add tracks</h2>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Add another song to a release. Supply is fixed once that song is on-chain.</p>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Add another song. Each song is either limited or open, and you pick that when you publish it.</p>
         </button>
       </div>
 
@@ -549,7 +558,7 @@ export function ArtistStudioPage() {
         <section style={card} aria-label="Add a track">
           <Eyebrow red>Another song</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Add tracks</h2>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Pick the release, then add a new song. Once a song is on-chain, its edition supply is fixed. Studio will not mint more copies of it.</p>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Pick the release, then add a new song. A song that is already out stays the way you published it. You can't add more copies later.</p>
           {!canUseStudio ? <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to load your catalog.</p> : ownedStudioCatalog && !existingReleases.length ? <p style={{ color: "var(--vc-bone-dim)" }}>No albums or collections are available for this authenticated artist.</p> : null}
           <label style={label}>
             Select album / collection
@@ -563,10 +572,10 @@ export function ArtistStudioPage() {
             <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               {mintTracks.length ? mintTracks.map((track) => {
                 const onChain = track.tokenId !== undefined && track.tokenId !== null && track.tokenId !== "";
-                return <p key={track.editionId || track.id || track.title} style={{ margin: 0 }}>{track.title || "Untitled track"}{onChain ? ` · token ${track.tokenId} · supply fixed` : " · not on-chain yet"}</p>;
+                return <p key={track.editionId || track.id || track.title} style={{ margin: 0 }}>{track.title || "Untitled track"}{onChain ? ` · already out · token ${track.tokenId}` : " · not published yet"}</p>;
               }) : (
                 <div>
-                  <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>No songs on this release yet. Publishing creates the on-chain edition. After that, its supply cannot be increased.</p>
+                  <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>No songs on this release yet. Publishing is what puts a song out. After that, you can't add more copies.</p>
                   <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => {
                     const resumed = resumeOwnedRelease(ownedStudioCatalog, mintReleaseId);
                     if (!resumed) { setNotice("This release could not be loaded into the editor."); return; }
@@ -738,12 +747,12 @@ export function ArtistStudioPage() {
 
       {workflow === "catalog" && step === "supply" && (
         <section style={card}>
-          <Eyebrow red>Supply</Eyebrow>
-          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>How many relics</h2>
-          <TextField title="Quantity" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Blank or 0 for unlimited" />
+          <Eyebrow red>How many</Eyebrow>
+          <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Limited or open</h2>
+          <TextField title="How many copies?" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Leave empty for open" />
           <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-          <TextField title="Resale royalty (basis points, max 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
-          <p style={{ color: "var(--vc-bone-dim)" }}>Leave Quantity blank or 0 for an unlimited open edition. The edition stays open until the sale end time. A number above 0 is a fixed cap and cannot be changed after publish. Royalty is stored on VoidRelease1155V2 at publish and paid on later marketplace resales. It is ignored on the current V1 deployment, which has no ERC-2981.</p>
+          <TextField title="Your cut on a resale (0 to 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>Type a number if only that many should ever exist. Leave it empty if people should be able to keep getting one until the sale ends. You cannot change this after you publish. 1000 on the resale cut means 10%.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("experience")}>Back</button>
             <button type="button" style={primaryBtn} onClick={() => setStep("preview")}>Continue</button>
@@ -765,7 +774,7 @@ export function ArtistStudioPage() {
               <p><strong>Type</strong><br />EP</p>
               <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
               <p><strong>Experiences</strong><br />{form.experienceTitle || experienceCategoryLabel(form.productType)}</p>
-              <p><strong>Supply</strong><br />{supplyLabel(form.quantity)}</p>
+              <p><strong>How many</strong><br />{supplyLabel(form.quantity)}</p>
             </div>
           </div>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginTop: 24 }}>Publishing creates the on-chain collectible for this release. No blockchain knowledge required.</p>
@@ -781,7 +790,7 @@ export function ArtistStudioPage() {
           <Eyebrow red>Publish</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Publish release</h2>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-            Publishing creates your collectible release on The Void. Supply {supplyLabel(form.quantity)}. A published edition is fixed; an unlimited edition needs a new edition, not a change to one that already exists.
+            Publishing puts this song out. {supplyLabel(form.quantity)} You can't switch it later.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={() => saveDraft().catch(() => {})}>
@@ -810,27 +819,27 @@ export function ArtistStudioPage() {
           ) : (
             <>
               <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-                Only the artist wallet recorded on this edition can configure its sale. Price is exact AVAX wei. Payment splits on-chain between the edition payout and the platform fee. Tokens are minted to the buyer. Nothing here is an ERC-20.
+                This is the public sale. Set the price, when it starts, and when it stops. Buyers pay AVAX and get the song.
               </p>
               <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all" }}>Published token · {publishedTokenId}</p>
               {configuredSale?.configured ? (
                 <div role="status" style={{ border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 }}>
                   <strong>Primary sale configured</strong>
                   <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
-                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.maxSupply === 0n ? "No sale cap" : `${configuredSale.remaining.toString()} left of ${configuredSale.maxSupply.toString()}`} · {configuredSale.perWalletLimit === 0n ? "No per-wallet cap" : `${configuredSale.perWalletLimit.toString()} per wallet`}{configuredSale.paused ? " · Sale paused" : ""}
+                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.maxSupply === 0n ? "Open until it stops" : `${configuredSale.remaining.toString()} left of ${configuredSale.maxSupply.toString()}`} · {configuredSale.perWalletLimit === 0n ? "No limit per person" : `${configuredSale.perWalletLimit.toString()} per person`}{configuredSale.paused ? " · Sale paused" : ""}
                   </p>
                 </div>
               ) : (
                 <>
-                  <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This release does not have a primary sale yet. Configure it using the persisted published token above.</p>
+                  <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This song isn't for sale yet. Fill this in to put it on sale.</p>
                   <TextField title="Price (wei)" value={form.priceWei} onChange={(value) => set("priceWei", value)} />
-                  <TextField title="Sale supply" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Blank or 0 for no sale cap" : (form.quantity || "Edition supply")} />
-                  <TextField title="Per-wallet limit" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Blank or 0 for no per-wallet cap" : ""} />
-                  <TextField title="Start time (e.g. 6:00am, an ISO datetime, or unix seconds — optional)" value={form.saleStart} onChange={(value) => set("saleStart", value)} placeholder="Leave blank for no start" />
-                  <TextField title={isUnlimitedQuantity(form.quantity) ? "End time (required — this closes the edition)" : "End time (e.g. 11:59pm, an ISO datetime, or unix seconds — optional)"} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Required close time" : "Leave blank for no end"} required={isUnlimitedQuantity(form.quantity)} />
+                  <TextField title="Stop the sale early after this many?" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Leave empty to keep selling until the end" : (form.quantity || "Same as the copy limit")} />
+                  <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder="Leave empty for no limit" />
+                  <DayTimeField title="When can people start buying? Leave empty to start now." value={form.saleStart} onChange={(value) => set("saleStart", value)} />
+                  <DayTimeField title={isUnlimitedQuantity(form.quantity) ? "When does it stop? Required." : "When does it stop? Leave empty if it should stay up."} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} required={isUnlimitedQuantity(form.quantity)} />
                   {isUnlimitedQuantity(form.quantity) && (
                     <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-                      This edition is unlimited. Leave sale supply blank or 0 if the sale itself should not cap copies. The end time is required: after it, purchases revert and no further copies are minted. There is no separate mint button.
+                      This song is open. People can keep buying until the stop time. After that, it ends. There is no button to make more later.
                     </p>
                   )}
                   <label style={label}>
