@@ -573,7 +573,17 @@ export class ArtistStudioService {
     if (!file.cid || file.cid === "pending") throw fail(409, "MEDIA_CID_PENDING", "Private storage has the object but has not finished computing its CID.", { upstream });
     if (cid && file.cid !== cid) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object's CID does not match the upload.", { upstream });
     if (file.network !== "private") throw fail(409, "MEDIA_UPLOAD_NOT_PRIVATE", "The stored object is not private.", { upstream });
-    if (file.keyvalues.voidArtistId !== artist.id || file.keyvalues.voidUploadId !== uploadId) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through this artist's upload link.", { upstream });
+    // Pinata de-duplicates identical bytes: re-uploading a file returns the
+    // existing object (is_duplicate) still stamped with the upload id of the
+    // link that first stored it. That is acceptable only if that earlier link
+    // was also issued by this server to this same artist.
+    const storedUploadId = String(file.keyvalues.voidUploadId || "");
+    let stampedByThisArtist = file.keyvalues.voidArtistId === artist.id && storedUploadId === uploadId;
+    if (!stampedByThisArtist && file.keyvalues.voidArtistId === artist.id && /^upload-[0-9a-f-]{36}$/.test(storedUploadId)) {
+      const earlier = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uploadId'=$2 LIMIT 1", [artist.id, storedUploadId]);
+      stampedByThisArtist = earlier.rows.length > 0;
+    }
+    if (!stampedByThisArtist) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through this artist's upload link.", { upstream });
     if (!DIRECT_AUDIO_MIME_TYPES.includes(String(file.mimeType || "").toLowerCase())) throw fail(415, "AUDIO_TYPE_UNSUPPORTED", `The stored object is ${file.mimeType || "of unknown type"}, not supported audio.`, { upstream });
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw fail(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.", { upstream });
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
