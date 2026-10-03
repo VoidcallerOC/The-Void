@@ -155,7 +155,7 @@ describe("catalog source", () => {
     const published = mapPublishedCatalog({ artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", bio: "Saved bio", social_links: { discord: "https://discord.gg/abc" }, profile_metadata: { profileArtwork: "ipfs://avatar", banner: "ipfs://banner" }, verification_status: "VERIFIED" }] });
     const merged = mergeCatalogs([withPublishedArtistProfiles(VOIDCALLER_CATALOG, published), published]);
     const artist = merged.artists.find((item) => item.id === "voidcaller");
-    expect(artist).toMatchObject({ bio: "Saved bio", avatar: "ipfs://avatar", banner: "ipfs://banner", verified: true, socials: [{ name: "Discord", href: "https://discord.gg/abc" }] });
+    expect(artist).toMatchObject({ bio: "Saved bio", avatar: "https://gateway.pinata.cloud/ipfs/avatar", banner: "https://gateway.pinata.cloud/ipfs/banner", verified: true, socials: [{ name: "Discord", href: "https://discord.gg/abc" }] });
     expect(artist.handle).toBe("VoidcallerOC");
   });
 
