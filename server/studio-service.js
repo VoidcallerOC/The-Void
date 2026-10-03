@@ -627,28 +627,20 @@ export class ArtistStudioService {
     } catch (error) {
       throw fail(error.status || 502, error.code || "MEDIA_HASH_UNVERIFIED", `Could not read the private object to verify it: ${error.message}`, { upstream: error.upstream || upstream });
     }
-    // Pinata's gateway serves some audio (WAV) as a rewritten "streamable"
-    // representation without non-audio chunks, so its bytes cannot be hashed
-    // against the upload. Production evidence: Pinata size 65,874,601, gateway
-    // 200 with content-length 65,861,868 for two different uploads. When the
-    // gateway's length differs from the stored size, the hash is unverifiable;
-    // accept only if the browser's byte count equals Pinata's recorded size
-    // (identity, privacy and ownership were checked above) and record it.
-    let hashVerified = true;
-    let hashCheck = "MATCH";
-    if (stored.bytes === file.size) {
-      if (stored.sha256 !== contentSha256) throw fail(409, "MEDIA_HASH_MISMATCH", "The stored object's SHA-256 does not match the file the browser hashed.", { details: { storedBytes: stored.bytes, declaredBytes: file.size, download: stored.download || null } });
-    } else {
-      if (declaredBytes !== file.size) throw fail(409, "MEDIA_SIZE_MISMATCH", "The stored object's size does not match the file the browser uploaded.", { details: { storedSize: file.size, declaredBytes, gatewayBytes: stored.bytes } });
-      hashVerified = false;
-      hashCheck = "GATEWAY_TRANSFORMED";
+    // Compare the bytes the gateway returns with what the browser hashed.
+    // Pinata's `size` is the IPFS DAG size (file + UnixFS overhead; production:
+    // 65,874,601 for a 65,861,868-byte WAV), so it is not the file length.
+    if (stored.sha256 !== contentSha256 || (declaredBytes !== null && stored.bytes !== declaredBytes) || stored.bytes > file.size) {
+      throw fail(409, "MEDIA_HASH_MISMATCH", "The stored object's SHA-256 does not match the file the browser hashed.", { details: { gatewayBytes: stored.bytes, declaredBytes, pinataSize: file.size, download: stored.download || null } });
     }
+    const hashVerified = true;
+    const hashCheck = "MATCH";
 
     const id = `asset-${randomUUID()}`;
-    const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey: file.cid, mediaType, contentSha256, byteSize: file.size });
-    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: file.size, uploadId, pinataFileId: file.id, direct: true, hashVerified, hashCheck, gatewayBytes: stored.bytes } });
+    const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey: file.cid, mediaType, contentSha256, byteSize: stored.bytes });
+    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: stored.bytes, pinataSize: file.size, uploadId, pinataFileId: file.id, direct: true, hashVerified, hashCheck } });
     this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "REGISTERED", assetId: asset.id, hashVerified, hashCheck, gatewayBytes: stored.bytes, upstream });
-    return { id: asset.id, mediaType: asset.media_type || mediaType, byteSize: file.size, createdAt: asset.created_at || null };
+    return { id: asset.id, mediaType: asset.media_type || mediaType, byteSize: stored.bytes, createdAt: asset.created_at || null };
   }
 
   // Public release/track artwork. Unlike protected media it is pinned publicly,
