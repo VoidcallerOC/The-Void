@@ -183,6 +183,34 @@ function withUploadPhase(error, phase) {
   return wrapped;
 }
 
+// Private storage de-duplicates identical bytes, so re-uploading a master that
+// was first stored under another artist profile returns that copy, stamped for
+// that profile. For WAV (RIFF) and AIFF masters we append one small metadata
+// chunk naming this upload and fix the container size; the audio data and all
+// existing chunks are untouched and players skip unknown chunks. Anything else
+// (FLAC, MP3, a malformed header) is uploaded exactly as given.
+export async function tagPrivateMaster(file, tag) {
+  if (!file || typeof file.slice !== "function" || file.size < 12) return file;
+  let head;
+  try { head = new Uint8Array(await file.slice(0, 12).arrayBuffer()); } catch { return file; }
+  const ascii = (from, to) => String.fromCharCode(...head.slice(from, to));
+  const view = new DataView(head.buffer);
+  const riff = ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE";
+  const aiff = ascii(0, 4) === "FORM" && (ascii(8, 12) === "AIFF" || ascii(8, 12) === "AIFC");
+  if (!riff && !aiff) return file;
+  const declared = view.getUint32(4, riff);
+  if (declared + 8 !== file.size) return file; // size header disagrees: leave it alone
+  const text = new TextEncoder().encode(tag);
+  const padded = text.length + (text.length % 2);
+  const chunk = new Uint8Array(8 + padded);
+  chunk.set(new TextEncoder().encode(riff ? "void" : "ANNO"), 0);
+  new DataView(chunk.buffer).setUint32(4, text.length, riff);
+  chunk.set(text, 8);
+  const header = head.slice(0, 8);
+  new DataView(header.buffer).setUint32(4, declared + chunk.length, riff);
+  return new File([header, file.slice(8), chunk], file.name, { type: file.type });
+}
+
 // PRIVATE full-length track. The API issues a short-lived private upload link
 // to the artist's wallet, the browser sends the file straight to private
 // storage, and the API then records it. Only an asset id comes back, never a
@@ -204,11 +232,14 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
     const asset = await studioFetch(base, { method: "POST", payload: { mediaType: "AUDIO", filename: file.name, contentType, data }, headers, fetchImpl });
     return { assetId: asset.id, filename: file.name, contentType, byteSize: file.size };
   }
+  // Give this upload its own bytes (see tagPrivateMaster) so storage never
+  // hands back a copy first stored by another artist profile.
+  const master = await tagPrivateMaster(file, `void:${artistId}:${link.uploadId}`);
   onProgress?.({ stage: "hashing" });
-  const contentSha256 = await hash(file);
+  const contentSha256 = await hash(master);
   let stored;
   try {
-    stored = await sendToSignedUrl({ url: link.url, file, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
+    stored = await sendToSignedUrl({ url: link.url, file: master, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
   } catch (error) {
     throw withUploadPhase(error, "upload");
   }

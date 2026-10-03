@@ -147,3 +147,56 @@ describe("Studio API contract", () => {
     await expect(studioFetch("/studio/artists/a/audio-preview", { method: "POST", payload: {}, fetchImpl })).rejects.toMatchObject({ status: 413, message: "The file is too large for the upload route. Try a smaller file." });
   });
 });
+
+describe("tagging private masters so each upload is distinct", async () => {
+  const { tagPrivateMaster } = await import("./studio-api.js");
+  const riff = (payload) => {
+    const body = new Uint8Array([...new TextEncoder().encode("WAVEfmt "), ...payload]);
+    const out = new Uint8Array(8 + body.length);
+    out.set(new TextEncoder().encode("RIFF"), 0);
+    new DataView(out.buffer).setUint32(4, body.length, true);
+    out.set(body, 8);
+    return out;
+  };
+
+  it("appends one chunk to a WAV, keeps every original byte after the header, and fixes the RIFF size", async () => {
+    const original = riff([1, 2, 3, 4]);
+    const tagged = await tagPrivateMaster(new File([original], "master.wav", { type: "audio/wav" }), "void:artist-a:upload-1");
+    const bytes = new Uint8Array(await tagged.arrayBuffer());
+    expect(tagged.name).toBe("master.wav");
+    expect(new DataView(bytes.buffer).getUint32(4, true)).toBe(bytes.length - 8);
+    expect(Array.from(bytes.slice(8, original.length))).toEqual(Array.from(original.slice(8)));
+    const chunk = bytes.slice(original.length);
+    expect(new TextDecoder().decode(chunk.slice(0, 4))).toBe("void");
+    const length = new DataView(chunk.buffer).getUint32(4, true);
+    expect(new TextDecoder().decode(chunk.slice(8, 8 + length))).toBe("void:artist-a:upload-1");
+    expect(chunk.length % 2).toBe(0);
+  });
+
+  it("gives two uploads of the same WAV different bytes", async () => {
+    const original = riff([9, 9]);
+    const a = new Uint8Array(await (await tagPrivateMaster(new File([original], "m.wav"), "void:x:upload-1")).arrayBuffer());
+    const b = new Uint8Array(await (await tagPrivateMaster(new File([original], "m.wav"), "void:x:upload-2")).arrayBuffer());
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+  });
+
+  it("leaves non-RIFF/AIFF files and malformed headers untouched", async () => {
+    const flac = new File([new Uint8Array([0x66, 0x4c, 0x61, 0x43, 0, 0, 0, 0, 0, 0, 0, 0, 1])], "m.flac");
+    expect(await tagPrivateMaster(flac, "t")).toBe(flac);
+    const broken = riff([1, 2]);
+    new DataView(broken.buffer).setUint32(4, 999, true);
+    const bad = new File([broken], "bad.wav");
+    expect(await tagPrivateMaster(bad, "t")).toBe(bad);
+  });
+
+  it("uses a big-endian ANNO chunk for AIFF", async () => {
+    const body = new TextEncoder().encode("AIFFCOMM");
+    const aiff = new Uint8Array(8 + body.length);
+    aiff.set(new TextEncoder().encode("FORM"), 0);
+    new DataView(aiff.buffer).setUint32(4, body.length, false);
+    aiff.set(body, 8);
+    const bytes = new Uint8Array(await (await tagPrivateMaster(new File([aiff], "m.aiff"), "void:a:u")).arrayBuffer());
+    expect(new DataView(bytes.buffer).getUint32(4, false)).toBe(bytes.length - 8);
+    expect(new TextDecoder().decode(bytes.slice(aiff.length, aiff.length + 4))).toBe("ANNO");
+  });
+});
