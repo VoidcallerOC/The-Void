@@ -65,6 +65,7 @@ describe("Studio API contract", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0]).toMatchObject({ method: "POST", url: signed.url });
     expect(send.mock.calls[0][0].body.get("network")).toBe("private");
+    expect(JSON.parse(send.mock.calls[0][0].body.get("keyvalues"))).toEqual({ voidArtistId: "artist-a", voidUploadId: signed.uploadId, voidMediaType: "AUDIO" });
     expect(fetchImpl.mock.calls[1][0]).toBe("/api/studio/artists/artist-a/media/register");
     expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({ uploadId: signed.uploadId, contentSha256: sha });
     // The file bytes never go through the API.
@@ -83,6 +84,7 @@ describe("Studio API contract", () => {
     const [create, ...patches] = send.mock.calls.map(([call]) => call);
     expect(create.headers["Upload-Length"]).toBe(String(size));
     expect(atob(create.headers["Upload-Metadata"].split(",").find((entry) => entry.startsWith("network ")).split(" ")[1])).toBe("private");
+    expect(JSON.parse(atob(create.headers["Upload-Metadata"].split(",").find((entry) => entry.startsWith("keyvalues ")).split(" ")[1]))).toEqual({ voidArtistId: "artist-a", voidUploadId: signed.uploadId, voidMediaType: "AUDIO" });
     expect(patches.map((call) => call.url)).toEqual(Array(patches.length).fill("https://uploads.pinata.cloud/v3/files/tus/abc"));
     expect(patches.map((call) => Number(call.headers["Upload-Offset"]))).toEqual([0, 50 * 1024 * 1024]);
   });

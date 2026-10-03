@@ -117,12 +117,13 @@ export function xhrSend({ method, url, headers = {}, body, onProgress }) {
   });
 }
 
-async function sendToSignedUrl({ url, file, contentType, send, onProgress }) {
+async function sendToSignedUrl({ url, file, contentType, keyvalues, send, onProgress }) {
   const report = (loaded) => onProgress?.(Math.min(loaded, file.size), file.size);
   if (file.size <= CHUNKED_UPLOAD_THRESHOLD) {
     const form = new FormData();
     form.append("network", "private");
     form.append("name", file.name);
+    form.append("keyvalues", JSON.stringify(keyvalues));
     form.append("file", new Blob([file], { type: contentType }), file.name);
     const response = await send({ method: "POST", url, body: form, onProgress: report });
     if (!response.ok) throw new Error(`Private storage rejected the upload (HTTP ${response.status}).`);
@@ -130,7 +131,7 @@ async function sendToSignedUrl({ url, file, contentType, send, onProgress }) {
     return;
   }
   // tus resumable upload, the protocol Pinata uses for large files.
-  const metadata = [["filename", file.name], ["filetype", contentType], ["network", "private"]].map(([key, value]) => `${key} ${btoa(unescape(encodeURIComponent(value)))}`).join(",");
+  const metadata = [["filename", file.name], ["filetype", contentType], ["network", "private"], ["keyvalues", JSON.stringify(keyvalues)]].map(([key, value]) => `${key} ${btoa(unescape(encodeURIComponent(value)))}`).join(",");
   const created = await send({ method: "POST", url, headers: { "Upload-Length": String(file.size), "Upload-Metadata": metadata } });
   const location = created.header("Location");
   if (!created.ok || !location) throw new Error(`Private storage did not start the upload (HTTP ${created.status}).`);
@@ -188,7 +189,7 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   onProgress?.({ stage: "hashing" });
   const contentSha256 = await hash(file);
   try {
-    await sendToSignedUrl({ url: link.url, file, contentType, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
+  await sendToSignedUrl({ url: link.url, file, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
   } catch (error) {
     throw withUploadPhase(error, "upload");
   }
