@@ -43,6 +43,8 @@ export async function uploadStudioArtwork({ artistId, file, headers, fetchImpl =
 }
 
 export const AUDIO_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/flac,audio/x-flac,audio/aac,audio/mp4,audio/x-m4a,audio/ogg,audio/aiff,audio/x-aiff,.wav,.flac,.aif,.aiff,.mp3,.m4a,.ogg";
+export const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm";
+export const ARCHIVE_ACCEPT = "application/zip,application/x-zip-compressed,.zip";
 export const MAX_PREVIEW_AUDIO_BYTES = 5 * 1000 * 1000;
 export const MAX_PREVIEW_SECONDS = 35;
 // Full tracks go straight from the browser to private storage, so a lossless
@@ -63,6 +65,18 @@ export function audioContentType(file) {
   if (AUDIO_TYPES.has(file?.type)) return file.type;
   const extension = String(file?.name || "").toLowerCase().split(".").pop();
   return AUDIO_TYPE_BY_EXTENSION[extension] || null;
+}
+
+const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const VIDEO_TYPE_BY_EXTENSION = Object.freeze({ mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm" });
+const ARCHIVE_TYPES = new Set(["application/zip", "application/x-zip-compressed"]);
+
+export function protectedContentType(file, mediaType = "AUDIO") {
+  const type = String(mediaType || "AUDIO").toUpperCase();
+  const extension = String(file?.name || "").toLowerCase().split(".").pop();
+  if (type === "VIDEO") return VIDEO_TYPES.has(file?.type) ? file.type : (VIDEO_TYPE_BY_EXTENSION[extension] || null);
+  if (type === "STEMS" || type === "DOWNLOAD") return audioContentType(file) || (ARCHIVE_TYPES.has(file?.type) ? file.type : (extension === "zip" ? "application/zip" : null));
+  return audioContentType(file);
 }
 
 function assertAudioFile(file) {
@@ -215,22 +229,25 @@ export async function tagPrivateMaster(file, tag) {
 // to the artist's wallet, the browser sends the file straight to private
 // storage, and the API then records it. Only an asset id comes back, never a
 // storage address.
-export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl = fetch, send = xhrSend, hash = sha256Hex, onProgress }) {
+export async function uploadStudioFullTrack({ artistId, file, headers, mediaType = "AUDIO", fetchImpl = fetch, send = xhrSend, hash = sha256Hex, onProgress }) {
+  const kind = String(mediaType || "AUDIO").toUpperCase();
   if (!artistId) throw new Error("Create the release before uploading the full track.");
-  assertAudioFile(file);
-  if (!file.size) throw new Error("The audio file is empty.");
-  if (file.size > MAX_FULL_TRACK_BYTES) throw new Error(`The full track must be ${formatMegabytes(MAX_FULL_TRACK_BYTES)} or smaller.`);
-  const contentType = audioContentType(file);
+  if (kind === "AUDIO" || kind === "DEMO" || kind === "LIVE_RECORDING") assertAudioFile(file);
+  else if (!file) throw new Error("Choose a file to upload.");
+  if (!file.size) throw new Error("The file is empty.");
+  if (file.size > MAX_FULL_TRACK_BYTES) throw new Error(`The file must be ${formatMegabytes(MAX_FULL_TRACK_BYTES)} or smaller.`);
+  const contentType = protectedContentType(file, kind);
+  if (!contentType) throw new Error(kind === "VIDEO" ? "A music video must be MP4, MOV, or WebM." : kind === "STEMS" || kind === "DOWNLOAD" ? "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG." : "Choose an audio file to upload.");
   const base = `/studio/artists/${encodeURIComponent(artistId)}/media`;
   let link;
   try {
-    link = await studioFetch(`${base}/upload-url`, { method: "POST", payload: { mediaType: "AUDIO", filename: file.name, contentType, byteSize: file.size }, headers, fetchImpl });
+    link = await studioFetch(`${base}/upload-url`, { method: "POST", payload: { mediaType: kind, filename: file.name, contentType, byteSize: file.size }, headers, fetchImpl });
   } catch (error) {
     if (error.code !== "MEDIA_DIRECT_UPLOAD_UNAVAILABLE") throw error;
     if (file.size > MAX_FULL_TRACK_FALLBACK_BYTES) throw new Error("Large uploads need private storage configured on the API. This server only accepts files up to 15 MB.", { cause: error });
     const data = await fileToBase64(file);
-    const asset = await studioFetch(base, { method: "POST", payload: { mediaType: "AUDIO", filename: file.name, contentType, data }, headers, fetchImpl });
-    return { assetId: asset.id, filename: file.name, contentType, byteSize: file.size };
+    const asset = await studioFetch(base, { method: "POST", payload: { mediaType: kind, filename: file.name, contentType, data }, headers, fetchImpl });
+    return { assetId: asset.id, filename: file.name, contentType, mediaType: kind, byteSize: file.size };
   }
   // Give this upload its own bytes (see tagPrivateMaster) so storage never
   // hands back a copy first stored by another artist profile.
@@ -239,7 +256,7 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   const contentSha256 = await hash(master);
   let stored;
   try {
-    stored = await sendToSignedUrl({ url: link.url, file: master, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
+    stored = await sendToSignedUrl({ url: link.url, file: master, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: kind }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
   } catch (error) {
     throw withUploadPhase(error, "upload");
   }
@@ -249,7 +266,7 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   try {
     const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256, byteSize: master.size, pinataFileId: stored.fileId, cid: stored.cid, uploadReceipt: receiptOf(stored) }, headers, fetchImpl });
     onProgress?.({ stage: "registering" });
-    return { assetId: asset.id, filename: file.name, contentType, byteSize: asset.byteSize ?? file.size };
+    return { assetId: asset.id, filename: file.name, contentType, mediaType: kind, byteSize: asset.byteSize ?? file.size };
   } catch (error) {
     const upstream = error.details?.upstream;
     if (upstream) error.message = `${error.message} [${upstream.endpoint} → HTTP ${upstream.status}${upstream.error ? `: ${upstream.error}` : ""}]`;
