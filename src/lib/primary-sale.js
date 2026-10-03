@@ -64,7 +64,7 @@ export async function simulateConfigureSale(provider, { from, data, value = 0 } 
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
   const sale = fujiPrimarySaleAddress();
   if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
-  return provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)) }, "latest"] });
+  return provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)), gas: SIMULATION_GAS }, "latest"] });
 }
 
 export function encodePurchase(tokenId, qty = 1) {
@@ -171,6 +171,11 @@ export async function ensureFujiNetwork(provider) {
   }
 }
 
+// Explicit gas for dry runs: without one, a node can assume its full gas cap
+// and require cap x gasPrice + value, reporting "insufficient funds" for a
+// wallet that can easily afford the real purchase.
+export const SIMULATION_GAS = ethers.toQuantity(500_000n);
+
 export async function collectEdition({ provider, from, tokenId, qty, priceWei }) {
   const sale = fujiPrimarySaleAddress();
   if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
@@ -179,7 +184,7 @@ export async function collectEdition({ provider, from, tokenId, qty, priceWei })
   const value = purchaseCost(priceWei, quantity);
   const data = encodePurchase(tokenId, quantity);
   try {
-    await provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(value) }, "latest"] });
+    await provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(value), gas: SIMULATION_GAS }, "latest"] });
   } catch (error) {
     const explained = explainCollectError(error);
     if (explained.state !== "unavailable") throw Object.assign(new Error(explained.message), { state: explained.state, cause: error });
