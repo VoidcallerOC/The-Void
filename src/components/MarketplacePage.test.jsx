@@ -51,7 +51,7 @@ vi.mock("../lib/wallet-context.js", () => ({
 const realReleaseId = "release-8f6d5a9f-585d-4948-b05b-7098125d16cf";
 const realEditionId = "edition-ecf27444-94b7-40d5-bace-5f061792f55e";
 const realTokenId = "33778802922810732976408591241428358474475553907731009337085064305512658576739";
-const contractAddress = "0x82b26da27136935454bdf1e40801190b521b82e5";
+const contractAddress = "0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6";
 const seller = "0xaBd3746e8b852f55be52fc44faB6cAb908b1c174";
 
 function publicCatalog() {
