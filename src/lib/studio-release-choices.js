@@ -24,7 +24,8 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
   const editionCount = new Map();
   for (const edition of editions) editionCount.set(edition.releaseId, (editionCount.get(edition.releaseId) || 0) + 1);
   const rank = (release) => (release.status === "published" ? 2 : 0) + Math.min(1, editionCount.get(release.id) || 0);
-  const all = releases.map((release) => ({ release, artist: artistById.get(release.artistId) || null }));
+  // Archived releases are retired from the catalog (e.g. duplicates) and are never offered.
+  const all = releases.filter((release) => release.status !== "archived").map((release) => ({ release, artist: artistById.get(release.artistId) || null }));
   const real = all.filter(({ release, artist }) => !isHidden(release) && !isHidden(artist));
   const pool = real.length ? real : all;
   const chosen = new Map();
