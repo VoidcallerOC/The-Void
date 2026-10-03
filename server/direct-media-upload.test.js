@@ -14,12 +14,15 @@ const UPLOAD_ID = "upload-00000000-0000-4000-8000-000000000000";
 const SHA = "b".repeat(64);
 const CID = "bafybeiprivatemastercid0000000000000000000000000000";
 
-function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, existingSha = SHA, maxBytes = 500 * 1024 * 1024 } = {}) {
+function setup({ wallet = owner, file = null, previewHashes = [], existingKeys = [], issued = [UPLOAD_ID], storedSha = SHA, existingSha = SHA, existingArtist = "artist-1", ownedArtists = ["artist-1"], assetInUse = false, reassigned = [], maxBytes = 500 * 1024 * 1024 } = {}) {
   const db = { query: vi.fn(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes("STUDIO_MEDIA_UPLOAD_ISSUED")) return { rows: issued.includes(params[1]) ? [{ id: "audit-issued" }] : [] };
     if (text.includes("FROM audit_events")) return { rows: previewHashes.includes(params[1]) ? [{ id: "audit-1" }] : [] };
-    if (text.includes("FROM media_assets WHERE artist_id=$1 AND storage_key=$2")) return { rows: existingKeys.includes(params[1]) ? [{ id: "asset-existing", media_type: "AUDIO", content_sha256: existingSha }] : [] };
+    if (text.includes("FROM media_assets WHERE storage_key=$1")) return { rows: existingKeys.includes(params[0]) ? [{ id: "asset-existing", artist_id: existingArtist, media_type: "AUDIO", content_sha256: existingSha }] : [] };
+    if (text.includes("FROM artist_owners WHERE artist_id=$1 AND owner_wallet=$2")) return { rows: ownedArtists.includes(params[0]) && params[1] === wallet ? [{ "?column?": 1 }] : [] };
+    if (text.includes("FROM experiences WHERE media_config")) return { rows: assetInUse ? [{ "?column?": 1 }] : [] };
+    if (text.startsWith("UPDATE media_assets SET artist_id")) { reassigned.push(params); return { rows: [] }; }
     if (text.includes("FROM artists a JOIN artist_owners")) return { rows: params[1] === owner ? [artistRow] : [] };
     return { rows: [] };
   }) };
@@ -28,7 +31,7 @@ function setup({ wallet = owner, file = null, previewHashes = [], existingKeys =
   const direct = { maxBytes, sign: vi.fn(async () => "https://uploads.pinata.cloud/v3/files/signed-xyz"), get: vi.fn(async () => ({ file, upstream })), sha256: vi.fn(async () => ({ sha256: storedSha, bytes: file?.size })) };
   const logger = { info: vi.fn(), error: vi.fn() };
   const instance = new ArtistStudioService({ db: verifiedArtistDb(db), repository, directMediaUploads: direct, authenticator: vi.fn().mockResolvedValue({ wallet }), logger });
-  return { instance, repository, direct, logger };
+  return { instance, repository, direct, logger, reassigned };
 }
 
 const FILE_ID = "0198f2a4-1111-7222-8333-944455556666";
@@ -133,6 +136,24 @@ describe("registering a direct upload", () => {
     const { instance, repository } = setup({ file: stored({ keyvalues: { voidArtistId: "artist-1", voidUploadId: OTHER } }) });
     await expect(register(instance)).rejects.toMatchObject({ code: "MEDIA_UPLOAD_MISMATCH" });
     expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+
+  it("moves an unused asset from a sibling artist profile owned by the same wallet", async () => {
+    const EARLIER = "upload-11111111-1111-4111-8111-111111111111";
+    const reassigned = [];
+    const { instance, repository } = setup({ file: stored({ keyvalues: { voidArtistId: "artist-0", voidUploadId: EARLIER } }), issued: [UPLOAD_ID, EARLIER], existingKeys: [CID], existingArtist: "artist-0", ownedArtists: ["artist-1", "artist-0"], reassigned });
+    await expect(register(instance)).resolves.toMatchObject({ id: "asset-existing" });
+    expect(reassigned).toEqual([["artist-1", "asset-existing", "artist-0"]]);
+    expect(repository.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_MEDIA_REASSIGNED" }));
+  });
+
+  it("never takes an asset from an artist this wallet does not own, or one already used by a release", async () => {
+    const EARLIER = "upload-11111111-1111-4111-8111-111111111111";
+    const foreign = setup({ file: stored({ keyvalues: { voidArtistId: "artist-9", voidUploadId: EARLIER } }), issued: [UPLOAD_ID, EARLIER], existingKeys: [CID], existingArtist: "artist-9" });
+    await expect(register(foreign.instance)).rejects.toMatchObject({ code: "MEDIA_UPLOAD_MISMATCH" });
+    const used = setup({ file: stored({ keyvalues: { voidArtistId: "artist-0", voidUploadId: EARLIER } }), issued: [UPLOAD_ID, EARLIER], existingKeys: [CID], existingArtist: "artist-0", ownedArtists: ["artist-1", "artist-0"], assetInUse: true });
+    await expect(register(used.instance)).rejects.toMatchObject({ code: "MEDIA_ASSET_IN_USE" });
+    expect(used.reassigned).toEqual([]);
   });
 
   it("refuses when the stored bytes do not hash to the declared SHA-256", async () => {
