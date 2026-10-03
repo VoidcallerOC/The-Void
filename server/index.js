@@ -13,6 +13,7 @@ import { createProtectedMediaGateway } from "./media-gateway.js";
 import { createIndexedOwnershipVerifier } from "./ownership.js";
 import { createArtistStudioService } from "./studio-service.js";
 import { createArtistVerificationService } from "./verification-service.js";
+import { createMarketplacePresentationService } from "./marketplace-presentation-service.js";
 import { createNotificationStore, createVerificationNotifier } from "./verification-notifier.js";
 import { createXDmClient, loadXDmConfig } from "./x-dm.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
@@ -60,8 +61,9 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
+  const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
-  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
   return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier };
 }
