@@ -568,6 +568,12 @@ export function VerifyReviewApplicationPage() {
       </PageHeader>
       {!ready && <WalletGate message="Connect and authenticate a reviewer wallet to open this application." />}
       {error && <Alert>{error}</Alert>}
+      {app?.reviewerAlert && (
+        <p role="status" style={{ ...muted, fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".06em", margin: "0 0 18px" }}>
+          Reviewer alert · X DM to {app.reviewerAlert.recipient} · {app.reviewerAlert.status === "SENT" ? `sent ${new Date(app.reviewerAlert.sentAt).toLocaleString()}` : app.reviewerAlert.status.toLowerCase().replace("_", " ")}
+          {app.reviewerAlert.status !== "SENT" && app.reviewerAlert.lastError ? ` — ${app.reviewerAlert.lastError}` : ""}
+        </p>
+      )}
       {app && (
         <div style={{ display: "grid", gap: 24, gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)", alignItems: "start" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
