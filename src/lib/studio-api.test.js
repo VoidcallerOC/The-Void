@@ -51,12 +51,17 @@ describe("Studio API contract", () => {
   const json = (data, status = 200) => new Response(JSON.stringify(status < 400 ? { data } : { error: data }), { status, headers: { "content-type": "application/json" } });
   const signed = { uploadId: "upload-00000000-0000-4000-8000-000000000000", url: "https://uploads.pinata.cloud/v3/files/signed-abc", maxBytes: MAX_FULL_TRACK_BYTES };
   const sha = "a".repeat(64);
+  const FILE_ID = "0198f2a4-1111-7222-8333-944455556666";
+  const CID = "bafybeiprivatemastercid0000000000000000000000000000";
+  // What Pinata returns for a multipart private upload (Pinata SDK UploadResponse).
+  const pinataRecord = { id: FILE_ID, name: "master.wav", cid: CID, size: 4, number_of_files: 1, mime_type: "audio/wav", group_id: null, keyvalues: { voidUploadId: "upload-00000000-0000-4000-8000-000000000000" }, created_at: "2026-10-03T00:00:00Z", network: "private" };
+  const pinataOk = { ok: true, status: 200, header: () => null, text: JSON.stringify({ data: pinataRecord }) };
 
-  it("sends a WAV master straight to private storage, then registers it by upload id", async () => {
+  it("sends a WAV master straight to private storage, then registers the exact object Pinata returned", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json(signed))
       .mockResolvedValueOnce(json({ id: "asset-9", mediaType: "AUDIO", byteSize: 4 }));
-    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null, text: "{}" });
+    const send = vi.fn().mockResolvedValue(pinataOk);
     const progress = vi.fn();
     const file = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], "master.wav", { type: "audio/wav" });
     await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, onProgress: progress })).resolves.toEqual({ assetId: "asset-9", filename: "master.wav", contentType: "audio/wav", byteSize: 4 });
@@ -67,7 +72,10 @@ describe("Studio API contract", () => {
     expect(send.mock.calls[0][0].body.get("network")).toBe("private");
     expect(JSON.parse(send.mock.calls[0][0].body.get("keyvalues"))).toEqual({ voidArtistId: "artist-a", voidUploadId: signed.uploadId, voidMediaType: "AUDIO" });
     expect(fetchImpl.mock.calls[1][0]).toBe("/api/studio/artists/artist-a/media/register");
-    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({ uploadId: signed.uploadId, contentSha256: sha });
+    const registration = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(registration).toMatchObject({ uploadId: signed.uploadId, contentSha256: sha, pinataFileId: FILE_ID, cid: CID });
+    expect(registration.uploadReceipt).toMatchObject({ protocol: "multipart", status: 200, network: "private", name: "master.wav", keys: Object.keys(pinataRecord).sort() });
+    expect(JSON.stringify(registration.uploadReceipt)).not.toContain(CID);
     // The file bytes never go through the API.
     for (const [, options] of fetchImpl.mock.calls) expect(options.body).not.toContain("UklGRg");
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ stage: "uploading", total: 4 }));
@@ -79,8 +87,9 @@ describe("Studio API contract", () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(json(signed)).mockResolvedValueOnce(json({ id: "asset-10", byteSize: size }));
     const send = vi.fn(async ({ method }) => method === "POST"
       ? { ok: true, status: 201, header: (name) => (name === "Location" ? "/v3/files/tus/abc" : null) }
-      : { ok: true, status: 204, header: () => null });
+      : { ok: true, status: 204, header: (name) => (name === "Upload-CID" ? CID : null) });
     await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha })).resolves.toMatchObject({ assetId: "asset-10", contentType: "audio/wav", byteSize: size });
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toMatchObject({ pinataFileId: null, cid: CID, uploadReceipt: { protocol: "tus", status: 204 } });
     const [create, ...patches] = send.mock.calls.map(([call]) => call);
     expect(create.headers["Upload-Length"]).toBe(String(size));
     expect(atob(create.headers["Upload-Metadata"].split(",").find((entry) => entry.startsWith("network ")).split(" ")[1])).toBe("private");
@@ -89,43 +98,24 @@ describe("Studio API contract", () => {
     expect(patches.map((call) => Number(call.headers["Upload-Offset"]))).toEqual([0, 50 * 1024 * 1024]);
   });
 
-  it("waits for the stored file to appear before giving up", async () => {
+  it("registers once and reports the exact upstream status when the object is not found", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json(signed))
-      .mockResolvedValueOnce(json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409))
-      .mockResolvedValueOnce(json({ id: "asset-11" }));
-    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
-    const wait = vi.fn().mockResolvedValue();
+      .mockResolvedValueOnce(json({ code: "MEDIA_OBJECT_NOT_FOUND", message: "Private storage has no object for this upload.", details: { upstream: { endpoint: "GET /v3/files/private/{id}", status: 404, count: 0 } } }, 404));
+    const send = vi.fn().mockResolvedValue(pinataOk);
     const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
-    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).resolves.toMatchObject({ assetId: "asset-11" });
-    expect(wait).toHaveBeenCalledTimes(1);
-    expect(wait).toHaveBeenCalledWith(1000);
+    const error = await uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha }).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "MEDIA_OBJECT_NOT_FOUND", phase: "private-storage" });
+    expect(error.message).toContain("GET /v3/files/private/{id} → HTTP 404");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("uses bounded exponential backoff across repeated private-storage misses", async () => {
-    const retryable = () => json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409);
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(json(signed))
-      .mockImplementationOnce(retryable)
-      .mockImplementationOnce(retryable)
-      .mockImplementationOnce(retryable)
-      .mockResolvedValueOnce(json({ id: "asset-12" }));
-    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
-    const wait = vi.fn().mockResolvedValue();
+  it("fails at the upload step when Pinata returns no file id or CID", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json(signed));
+    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null, text: "{}" });
     const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
-    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).resolves.toMatchObject({ assetId: "asset-12" });
-    expect(wait.mock.calls.map(([delay]) => delay)).toEqual([1000, 2000, 4000]);
-  });
-
-  it("stops after the bounded retry window when private storage never appears", async () => {
-    const retryable = () => json({ code: "MEDIA_UPLOAD_NOT_FOUND", message: "not yet", details: { retryable: true } }, 409);
-    const fetchImpl = vi.fn().mockResolvedValueOnce(json(signed)).mockImplementation(retryable);
-    const send = vi.fn().mockResolvedValue({ ok: true, status: 200, header: () => null });
-    const wait = vi.fn().mockResolvedValue();
-    const file = new File([new Uint8Array([1, 2])], "song.flac", { type: "audio/flac" });
-    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha, wait })).rejects.toMatchObject({ code: "MEDIA_UPLOAD_NOT_FOUND", phase: "private-storage" });
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
-    expect(wait.mock.calls.map(([delay]) => delay)).toEqual([1000, 2000, 4000, 8000, 15000]);
+    await expect(uploadStudioFullTrack({ artistId: "artist-a", file, fetchImpl, send, hash: async () => sha })).rejects.toMatchObject({ phase: "upload", message: expect.stringContaining("no file id or CID") });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to the API route only for small files when direct upload is unavailable", async () => {

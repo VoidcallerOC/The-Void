@@ -532,36 +532,70 @@ export class ArtistStudioService {
     return { uploadId, url, maxBytes: direct.maxBytes, expiresAt: new Date(Date.now() + DIRECT_UPLOAD_TTL_SECONDS * 1000).toISOString() };
   }
 
-  // Step 2: record the uploaded file. The server finds it in private storage by
-  // the keyvalues it signed into the link, so a client cannot register a file
-  // it did not upload through this artist's link, or a public one.
+  // Step 2: record the uploaded file. The browser passes the identifier Pinata
+  // returned for the object it just created (file id from the multipart
+  // response, or the CID from the tus Upload-CID header). That is only a
+  // pointer: the server looks the object up itself in PRIVATE storage and
+  // accepts it only if it carries this artist's server-issued upload id, is
+  // audio, and its stored bytes hash to the declared SHA-256.
   async registerMediaUpload({ request, artistId, input }) {
     const { identity, artist } = await this.ownedArtist({ artistId, request });
     const direct = this.directMediaUploads;
-    if (!direct || typeof direct.find !== "function") throw new ApiError(503, "MEDIA_DIRECT_UPLOAD_UNAVAILABLE", "Direct protected media upload is not configured.");
+    if (!direct || typeof direct.get !== "function" || typeof direct.sha256 !== "function") throw new ApiError(503, "MEDIA_DIRECT_UPLOAD_UNAVAILABLE", "Direct protected media upload is not configured.");
     const uploadId = requiredText(input.uploadId, "uploadId", { max: 128 });
     if (!/^upload-[0-9a-f-]{36}$/.test(uploadId)) throw new ApiError(400, "INVALID_UPLOAD_ID", "uploadId is invalid.");
-    // Declared by the artist's browser (the server never downloads the master).
-    // It only feeds the preview/full-track separation check.
     const contentSha256 = requiredText(input.contentSha256, "contentSha256", { max: 64 }).toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(contentSha256)) throw new ApiError(400, "INVALID_CONTENT_HASH", "contentSha256 must be a SHA-256 hex digest.");
-    let file;
+    const fileId = optionalText(input.pinataFileId, "pinataFileId", { max: 64 }) || null;
+    const cid = optionalText(input.cid, "cid", { max: 128 }) || null;
+    if (fileId && !/^[0-9a-f-]{36}$/i.test(fileId)) throw new ApiError(400, "INVALID_PINATA_FILE_ID", "pinataFileId is invalid.");
+    if (cid && !/^(?:baf[a-z0-9]{20,}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(cid)) throw new ApiError(400, "INVALID_CID", "cid is invalid.");
+    if (!fileId && !cid) throw new ApiError(400, "UPLOAD_IDENTITY_REQUIRED", "Registration needs the file id or CID that private storage returned for the upload. Reload Studio and upload again.");
+    const receipt = input.uploadReceipt && typeof input.uploadReceipt === "object" && JSON.stringify(input.uploadReceipt).length <= 4000 ? input.uploadReceipt : null;
+    const evidence = { uploadId, artistId: artist.id, receipt, pinataFileId: fileId, cid };
+    const fail = (status, code, message, extra = {}) => {
+      this.logger.error?.("MEDIA_UPLOAD_VERIFY", { ...evidence, ...extra, outcome: code });
+      return new ApiError(status, code, message, extra.upstream ? { upstream: extra.upstream } : extra.details);
+    };
+
+    // The upload id must be one this server issued to this artist.
+    const issued = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uploadId'=$2 LIMIT 1", [artist.id, uploadId]);
+    if (!issued.rows.length) throw fail(403, "UPLOAD_NOT_ISSUED", "This upload id was not issued to this artist.");
+
+    let found;
     try {
-      file = await direct.find({ keyvalues: { voidArtistId: artist.id, voidUploadId: uploadId } });
+      found = await direct.get({ fileId, cid });
     } catch (error) {
-      throw new ApiError(error.status || 502, error.code || "MEDIA_UPLOAD_LOOKUP_FAILED", error.message || "Could not confirm the upload.");
+      throw fail(error.status || 502, error.code || "MEDIA_UPLOAD_LOOKUP_FAILED", error.message || "Could not look up the upload in private storage.", { upstream: error.upstream || null });
     }
-    if (!file || !file.cid) throw new ApiError(409, "MEDIA_UPLOAD_NOT_FOUND", "The upload has not reached private storage yet.", { retryable: true, reason: "PRIVATE_STORAGE_EVENTUAL_CONSISTENCY", retryAfterMs: 1000 });
-    if (file.network !== "private" || file.keyvalues.voidArtistId !== artist.id || file.keyvalues.voidUploadId !== uploadId) throw new ApiError(409, "MEDIA_UPLOAD_MISMATCH", "The stored file does not match this upload.");
-    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw new ApiError(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.");
+    const { file, upstream } = found;
+    if (!file) throw fail(404, "MEDIA_OBJECT_NOT_FOUND", `Private storage has no object for this upload (${upstream.endpoint} → HTTP ${upstream.status}, ${upstream.count} match).`, { upstream });
+    if (!file.cid || file.cid === "pending") throw fail(409, "MEDIA_CID_PENDING", "Private storage has the object but has not finished computing its CID.", { upstream });
+    if (cid && file.cid !== cid) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object's CID does not match the upload.", { upstream });
+    if (file.network !== "private") throw fail(409, "MEDIA_UPLOAD_NOT_PRIVATE", "The stored object is not private.", { upstream });
+    if (file.keyvalues.voidArtistId !== artist.id || file.keyvalues.voidUploadId !== uploadId) throw fail(409, "MEDIA_UPLOAD_MISMATCH", "The stored object was not uploaded through this artist's upload link.", { upstream });
+    if (!DIRECT_AUDIO_MIME_TYPES.includes(String(file.mimeType || "").toLowerCase())) throw fail(415, "AUDIO_TYPE_UNSUPPORTED", `The stored object is ${file.mimeType || "of unknown type"}, not supported audio.`, { upstream });
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > direct.maxBytes) throw fail(413, "MEDIA_UPLOAD_TOO_LARGE", "The stored file is empty or too large.", { upstream });
     const mediaType = enumValue(String(file.keyvalues.voidMediaType || "AUDIO").toUpperCase(), "mediaType", DIRECT_UPLOAD_MEDIA_TYPES);
+
+    // Idempotent: the same private object registers once.
     const existing = await this.db.query("SELECT id, media_type, created_at FROM media_assets WHERE artist_id=$1 AND storage_key=$2 LIMIT 1", [artist.id, file.cid]);
     if (existing.rows.length) return { id: existing.rows[0].id, mediaType: existing.rows[0].media_type || mediaType, byteSize: file.size, createdAt: existing.rows[0].created_at || null };
     const publicPreview = await this.db.query("SELECT id FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'contentSha256'=$2 LIMIT 1", [artist.id, contentSha256]);
-    if (publicPreview.rows.length) throw new ApiError(409, "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW", "This exact file is already public as a preview, so it cannot be token-gated.");
+    if (publicPreview.rows.length) throw fail(409, "PRIVATE_TRACK_MATCHES_PUBLIC_PREVIEW", "This exact file is already public as a preview, so it cannot be token-gated.");
+
+    let stored;
+    try {
+      stored = await direct.sha256({ cid: file.cid });
+    } catch (error) {
+      throw fail(error.status || 502, error.code || "MEDIA_HASH_UNVERIFIED", `Could not read the private object to verify it: ${error.message}`, { upstream: error.upstream || upstream });
+    }
+    if (stored.sha256 !== contentSha256 || stored.bytes !== file.size) throw fail(409, "MEDIA_HASH_MISMATCH", "The stored object's SHA-256 does not match the file the browser hashed.", { details: { storedBytes: stored.bytes, declaredBytes: file.size } });
+
     const id = `asset-${randomUUID()}`;
     const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey: file.cid, mediaType, contentSha256, byteSize: file.size });
-    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: file.size, uploadId, direct: true } });
+    await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: file.size, uploadId, pinataFileId: file.id, direct: true, hashVerified: true } });
+    this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "REGISTERED", assetId: asset.id, upstream });
     return { id: asset.id, mediaType: asset.media_type || mediaType, byteSize: file.size, createdAt: asset.created_at || null };
   }
 

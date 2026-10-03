@@ -126,9 +126,14 @@ async function sendToSignedUrl({ url, file, contentType, keyvalues, send, onProg
     form.append("keyvalues", JSON.stringify(keyvalues));
     form.append("file", new Blob([file], { type: contentType }), file.name);
     const response = await send({ method: "POST", url, body: form, onProgress: report });
-    if (!response.ok) throw new Error(`Private storage rejected the upload (HTTP ${response.status}).`);
+    if (!response.ok) throw new Error(`Private storage rejected the upload (HTTP ${response.status}): ${String(response.text || "").slice(0, 200)}`);
     report(file.size);
-    return;
+    // Pinata answers a multipart upload with the created file record.
+    let body = null;
+    try { body = JSON.parse(response.text || ""); } catch { /* handled below */ }
+    const data = body?.data && typeof body.data === "object" ? body.data : null;
+    if (!data?.id && !data?.cid) throw new Error(`Private storage accepted the upload but returned no file id or CID (HTTP ${response.status}).`);
+    return { protocol: "multipart", status: response.status, fileId: data.id || null, cid: data.cid || null, record: data };
   }
   // tus resumable upload, the protocol Pinata uses for large files.
   const metadata = [["filename", file.name], ["filetype", contentType], ["network", "private"], ["keyvalues", JSON.stringify(keyvalues)]].map(([key, value]) => `${key} ${btoa(unescape(encodeURIComponent(value)))}`).join(",");
@@ -150,10 +155,23 @@ async function sendToSignedUrl({ url, file, contentType, keyvalues, send, onProg
     if (!response?.ok) throw new Error(`Private storage rejected part of the upload (HTTP ${response?.status ?? "network"}).`);
     offset += chunk.size;
     report(offset);
+    // The final tus PATCH carries the object's CID (as the Pinata SDK reads it).
+    if (offset >= file.size) {
+      const cid = response.header("Upload-CID");
+      if (!cid) throw new Error(`Private storage finished the upload but returned no Upload-CID (HTTP ${response.status}).`);
+      return { protocol: "tus", status: response.status, fileId: null, cid, record: null };
+    }
   }
+  throw new Error("Private storage upload ended without a result.");
 }
 
-const PRIVATE_STORAGE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 4000, 8000, 15000]);
+// What Pinata said about the object, with identifiers shortened, so the API can
+// log the evidence for a failed registration. Never used as proof.
+function receiptOf(result) {
+  const short = (value) => (typeof value === "string" && value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value ?? null);
+  const record = result.record || {};
+  return { protocol: result.protocol, status: result.status, keys: Object.keys(record).sort(), id: short(result.fileId), cid: short(result.cid), name: record.name ?? null, network: record.network ?? null, mimeType: record.mime_type ?? null, size: record.size ?? null, keyvalues: record.keyvalues ?? null };
+}
 
 function withUploadPhase(error, phase) {
   if (error && typeof error === "object") {
@@ -169,7 +187,7 @@ function withUploadPhase(error, phase) {
 // to the artist's wallet, the browser sends the file straight to private
 // storage, and the API then records it. Only an asset id comes back, never a
 // storage address.
-export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl = fetch, send = xhrSend, hash = sha256Hex, onProgress, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl = fetch, send = xhrSend, hash = sha256Hex, onProgress }) {
   if (!artistId) throw new Error("Create the release before uploading the full track.");
   assertAudioFile(file);
   if (!file.size) throw new Error("The audio file is empty.");
@@ -188,23 +206,22 @@ export async function uploadStudioFullTrack({ artistId, file, headers, fetchImpl
   }
   onProgress?.({ stage: "hashing" });
   const contentSha256 = await hash(file);
+  let stored;
   try {
-  await sendToSignedUrl({ url: link.url, file, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
+    stored = await sendToSignedUrl({ url: link.url, file, contentType, keyvalues: { voidArtistId: artistId, voidUploadId: link.uploadId, voidMediaType: "AUDIO" }, send, onProgress: (loaded, total) => onProgress?.({ stage: "uploading", loaded, total }) });
   } catch (error) {
     throw withUploadPhase(error, "upload");
   }
+  // One registration: the server looks up exactly this object by the id/CID
+  // Pinata returned and verifies it (private, this artist's upload, SHA-256).
   onProgress?.({ stage: "verifying" });
-  for (let attempt = 0; attempt < PRIVATE_STORAGE_RETRY_DELAYS_MS.length; attempt += 1) {
-    if (attempt > 0) await wait(PRIVATE_STORAGE_RETRY_DELAYS_MS[attempt]);
-    try {
-      onProgress?.({ stage: "verifying", attempt: attempt + 1, totalAttempts: PRIVATE_STORAGE_RETRY_DELAYS_MS.length });
-      const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256 }, headers, fetchImpl });
-      onProgress?.({ stage: "registering" });
-      return { assetId: asset.id, filename: file.name, contentType, byteSize: asset.byteSize ?? file.size };
-    } catch (error) {
-      if (error.code !== "MEDIA_UPLOAD_NOT_FOUND" || error.details?.retryable !== true || attempt === PRIVATE_STORAGE_RETRY_DELAYS_MS.length - 1) {
-        throw withUploadPhase(error, error.code === "MEDIA_UPLOAD_NOT_FOUND" ? "private-storage" : "registration");
-      }
-    }
+  try {
+    const asset = await studioFetch(`${base}/register`, { method: "POST", payload: { uploadId: link.uploadId, contentSha256, pinataFileId: stored.fileId, cid: stored.cid, uploadReceipt: receiptOf(stored) }, headers, fetchImpl });
+    onProgress?.({ stage: "registering" });
+    return { assetId: asset.id, filename: file.name, contentType, byteSize: asset.byteSize ?? file.size };
+  } catch (error) {
+    const upstream = error.details?.upstream;
+    if (upstream) error.message = `${error.message} [${upstream.endpoint} → HTTP ${upstream.status}${upstream.error ? `: ${upstream.error}` : ""}]`;
+    throw withUploadPhase(error, ["MEDIA_OBJECT_NOT_FOUND", "MEDIA_CID_PENDING", "MEDIA_UPLOAD_LOOKUP_FAILED"].includes(error.code) ? "private-storage" : "registration");
   }
 }
