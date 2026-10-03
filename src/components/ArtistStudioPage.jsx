@@ -715,8 +715,8 @@ export function ArtistStudioPage() {
           </p>
           {(() => {
             const deliveryType = experienceCategory(form.productType)?.deliveryType || "AUDIO";
-            const fileAccept = deliveryType === "VIDEO" ? VIDEO_ACCEPT : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? `${ARCHIVE_ACCEPT},${AUDIO_ACCEPT}` : AUDIO_ACCEPT;
-            const hint = deliveryType === "VIDEO" ? "MP4, MOV or WebM" : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? "ZIP, or WAV, AIFF, FLAC or MP3" : "WAV, AIFF, FLAC or MP3";
+            const fileAccept = deliveryType === "VIDEO" ? VIDEO_ACCEPT : deliveryType === "DOWNLOAD" ? `${VIDEO_ACCEPT},${ARCHIVE_ACCEPT},${AUDIO_ACCEPT}` : deliveryType === "STEMS" ? `${ARCHIVE_ACCEPT},${AUDIO_ACCEPT}` : AUDIO_ACCEPT;
+            const hint = deliveryType === "VIDEO" ? "MP4, MOV or WebM" : deliveryType === "DOWNLOAD" ? "MP4, MOV, WebM, ZIP, or audio" : deliveryType === "STEMS" ? "ZIP, or WAV, AIFF, FLAC or MP3" : "WAV, AIFF, FLAC or MP3";
             const label = deliveryType === "VIDEO" ? "Experience video" : deliveryType === "STEMS" || deliveryType === "DOWNLOAD" ? "Experience file" : "Experience audio";
             return (
           <div style={{ marginTop: 16 }}>

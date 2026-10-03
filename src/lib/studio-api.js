@@ -75,7 +75,10 @@ export function protectedContentType(file, mediaType = "AUDIO") {
   const type = String(mediaType || "AUDIO").toUpperCase();
   const extension = String(file?.name || "").toLowerCase().split(".").pop();
   if (type === "VIDEO") return VIDEO_TYPES.has(file?.type) ? file.type : (VIDEO_TYPE_BY_EXTENSION[extension] || null);
-  if (type === "STEMS" || type === "DOWNLOAD") return audioContentType(file) || (ARCHIVE_TYPES.has(file?.type) ? file.type : (extension === "zip" ? "application/zip" : null));
+  const video = VIDEO_TYPES.has(file?.type) ? file.type : (VIDEO_TYPE_BY_EXTENSION[extension] || null);
+  const archive = audioContentType(file) || (ARCHIVE_TYPES.has(file?.type) ? file.type : (extension === "zip" ? "application/zip" : null));
+  if (type === "DOWNLOAD") return video || archive;
+  if (type === "STEMS") return archive;
   return audioContentType(file);
 }
 
@@ -237,7 +240,7 @@ export async function uploadStudioFullTrack({ artistId, file, headers, mediaType
   if (!file.size) throw new Error("The file is empty.");
   if (file.size > MAX_FULL_TRACK_BYTES) throw new Error(`The file must be ${formatMegabytes(MAX_FULL_TRACK_BYTES)} or smaller.`);
   const contentType = protectedContentType(file, kind);
-  if (!contentType) throw new Error(kind === "VIDEO" ? "A music video must be MP4, MOV, or WebM." : kind === "STEMS" || kind === "DOWNLOAD" ? "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG." : "Choose an audio file to upload.");
+  if (!contentType) throw new Error(kind === "VIDEO" ? "A music video must be MP4, MOV, or WebM." : kind === "DOWNLOAD" ? "A download must be MP4, MOV, WebM, a ZIP, or an audio file." : kind === "STEMS" ? "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG." : "Choose an audio file to upload.");
   const base = `/studio/artists/${encodeURIComponent(artistId)}/media`;
   let link;
   try {

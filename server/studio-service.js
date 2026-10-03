@@ -21,13 +21,15 @@ const DIRECT_UPLOAD_MEDIA_TYPES = Object.freeze(["AUDIO", "VIDEO", "STEMS", "DOW
 
 export function directUploadMimeTypes(mediaType) {
   if (mediaType === "VIDEO") return DIRECT_VIDEO_MIME_TYPES;
-  if (mediaType === "STEMS" || mediaType === "DOWNLOAD") return [...DIRECT_ARCHIVE_MIME_TYPES, ...DIRECT_AUDIO_MIME_TYPES];
+  if (mediaType === "DOWNLOAD") return [...DIRECT_VIDEO_MIME_TYPES, ...DIRECT_ARCHIVE_MIME_TYPES, ...DIRECT_AUDIO_MIME_TYPES];
+  if (mediaType === "STEMS") return [...DIRECT_ARCHIVE_MIME_TYPES, ...DIRECT_AUDIO_MIME_TYPES];
   return DIRECT_AUDIO_MIME_TYPES;
 }
 
 function unsupportedUpload(mediaType) {
   if (mediaType === "VIDEO") return ["MEDIA_TYPE_UNSUPPORTED", "A music video must be MP4, MOV, or WebM."];
-  if (mediaType === "STEMS" || mediaType === "DOWNLOAD") return ["MEDIA_TYPE_UNSUPPORTED", "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
+  if (mediaType === "DOWNLOAD") return ["MEDIA_TYPE_UNSUPPORTED", "A download must be MP4, MOV, WebM, a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
+  if (mediaType === "STEMS") return ["MEDIA_TYPE_UNSUPPORTED", "Upload a ZIP, or WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
   return ["AUDIO_TYPE_UNSUPPORTED", "Audio must be WAV, AIFF, FLAC, MP3, AAC/M4A or OGG."];
 }
 const DIRECT_UPLOAD_TTL_SECONDS = 900;

@@ -16,7 +16,9 @@ export function ProtectedExperiencePlayer({ experience, title, art, collection }
   const queueId = `protected:${experience.id}`;
   const playing = audio.queueId === queueId && audio.playing;
   const mediaType = String(experience.media?.type || "AUDIO").toUpperCase();
-  const playsAsAudio = mediaType === "AUDIO" || mediaType === "DEMO" || mediaType === "LIVE_RECORDING";
+  const contentType = String(experience.media?.contentType || "").toLowerCase();
+  const playsAsVideo = mediaType === "VIDEO" || contentType.startsWith("video/");
+  const playsAsAudio = !playsAsVideo && (mediaType === "AUDIO" || mediaType === "DEMO" || mediaType === "LIVE_RECORDING");
 
   const unlock = async () => {
     if (playsAsAudio && audio.queueId === queueId && audio.isBearer(audio.queue?.[0])) {
@@ -46,7 +48,7 @@ export function ProtectedExperiencePlayer({ experience, title, art, collection }
       ) : (
         <p style={{ color: "var(--vc-bone-dim)" }}>Connect the wallet that holds this edition to unlock it.</p>
       )}
-      {state.accessUrl && mediaType === "VIDEO" && <video controls src={state.accessUrl} style={{ width: "100%", marginTop: 12 }} />}
+      {state.accessUrl && playsAsVideo && <video controls src={state.accessUrl} style={{ width: "100%", marginTop: 12 }} />}
       {state.accessUrl && mediaType !== "VIDEO" && <p style={{ marginTop: 12 }}><a href={state.accessUrl} style={{ color: "var(--vc-bone)" }}>Download</a></p>}
       {state.error && <p role="status" style={{ color: "var(--vc-crimson)", lineHeight: 1.6 }}>{state.error}</p>}
     </div>

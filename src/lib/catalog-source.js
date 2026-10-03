@@ -193,14 +193,16 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     const gated = row.gated === true || asArray(row.requirements).length > 0;
     const declared = metadataOf(row, "media");
     const leaked = metadataOf(row, "media_config");
-    const protectedMedia = row.protected === true || declared.protected === true || leaked.protected === true || (Array.isArray(leaked.protectedMedia) && leaked.protectedMedia.length > 0);
+    const assets = Array.isArray(leaked.protectedMedia) ? leaked.protectedMedia : [];
+    const protectedMedia = row.protected === true || declared.protected === true || leaked.protected === true || assets.length > 0;
+    const contentType = typeof assets[0]?.contentType === "string" ? assets[0].contentType : "";
     return createExperience({
       id: row.id,
       experienceType: EXPERIENCE_TYPES[type] || EXPERIENCE_TYPES.AUDIO,
       title: row.title || row.id,
       description: row.description || "",
       requirements: gated ? [{ type: "erc1155-balance" }] : [],
-      media: protectedMedia ? { protected: true, type } : {},
+      media: protectedMedia ? { protected: true, type, ...(contentType ? { contentType } : {}) } : {},
       editionId: row.edition_id || row.editionId || null,
     });
   });

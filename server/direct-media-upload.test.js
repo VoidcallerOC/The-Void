@@ -73,8 +73,9 @@ describe("direct private upload link", () => {
     expect(stems.direct.sign.mock.calls[0][0].mimeTypes).toEqual(expect.arrayContaining(["application/zip", "audio/wav"]));
     expect(stems.direct.sign.mock.calls[0][0].keyvalues.voidMediaType).toBe("STEMS");
     const download = setup();
-    await download.instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "DOWNLOAD", filename: "master.wav", contentType: "audio/wav", byteSize: 10 } });
+    await download.instance.createMediaUploadUrl({ request, artistId: "artist-1", input: { mediaType: "DOWNLOAD", filename: "thanks.mp4", contentType: "video/mp4", byteSize: 10 } });
     expect(download.direct.sign.mock.calls[0][0].keyvalues.voidMediaType).toBe("DOWNLOAD");
+    expect(download.direct.sign.mock.calls[0][0].mimeTypes).toEqual(expect.arrayContaining(["video/mp4", "application/zip", "audio/wav"]));
   });
 
   it("is unavailable (so the client can fall back) when storage has no direct upload", async () => {
