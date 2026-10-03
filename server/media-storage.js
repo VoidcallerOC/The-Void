@@ -105,7 +105,7 @@ export class PrivateMediaStorage {
   async findSignedUpload({ keyvalues, fetchImpl = fetch }) {
     if (this.config.driver !== "pinata") throw Object.assign(new Error("Direct media upload is not available for this storage driver."), { status: 501, code: "MEDIA_DIRECT_UPLOAD_UNSUPPORTED" });
     const params = new URLSearchParams({ limit: "2" });
-    for (const [key, value] of Object.entries(keyvalues)) params.append(`keyvalues[${key}]`, String(value));
+    for (const [key, value] of Object.entries(keyvalues)) params.append(`metadata[${key}]`, String(value));
     const response = await fetchImpl(`https://api.pinata.cloud/v3/files/private?${params}`, { headers: { authorization: `Bearer ${this.config.pinata.jwt}` } });
     if (!response.ok) throw Object.assign(new Error(`Pinata private file lookup failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_UPLOAD_LOOKUP_FAILED" });
     const body = await response.json();

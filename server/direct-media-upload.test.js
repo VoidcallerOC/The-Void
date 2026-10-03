@@ -126,7 +126,7 @@ describe("Pinata signed upload requests", () => {
     await expect(storage.findSignedUpload({ keyvalues: { voidArtistId: "a", voidUploadId: "u" }, fetchImpl })).resolves.toEqual({ cid: "bafyx", size: 42, mimeType: "audio/wav", keyvalues: { voidUploadId: "u" }, network: "private" });
     const url = new URL(fetchImpl.mock.calls[0][0]);
     expect(url.origin + url.pathname).toBe("https://api.pinata.cloud/v3/files/private");
-    expect(url.searchParams.get("keyvalues[voidArtistId]")).toBe("a");
-    expect(url.searchParams.get("keyvalues[voidUploadId]")).toBe("u");
+    expect(url.searchParams.get("metadata[voidArtistId]")).toBe("a");
+    expect(url.searchParams.get("metadata[voidUploadId]")).toBe("u");
   });
 });
