@@ -106,6 +106,49 @@ function isInternal(item) {
   return isSummitDemoRecord(item) || isNonPublicTestRecord(item);
 }
 
+function normalizedReleaseTitle(release) {
+  return String(release?.title || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function releaseTimestamp(release, field) {
+  const value = Date.parse(release?.[field] || "");
+  return Number.isFinite(value) ? value : 0;
+}
+
+function releaseWinner(left, right) {
+  const published = releaseTimestamp(left, "publishedAt") - releaseTimestamp(right, "publishedAt");
+  if (published) return published > 0 ? left : right;
+  const updated = releaseTimestamp(left, "updatedAt") - releaseTimestamp(right, "updatedAt");
+  if (updated) return updated > 0 ? left : right;
+  return String(left?.id || "").localeCompare(String(right?.id || "")) <= 0 ? left : right;
+}
+
+export function deduplicatePublicReleases(catalog) {
+  const releases = catalog?.releases || [];
+  const winners = new Map();
+  for (const release of releases) {
+    const key = `${String(release?.artistId || "").toLowerCase()}::${normalizedReleaseTitle(release)}`;
+    const current = winners.get(key);
+    winners.set(key, current ? releaseWinner(current, release) : release);
+  }
+  const keptReleaseIds = new Set(winners.values().map((release) => release.id));
+  const sourceReleaseIds = new Set(releases.map((release) => release.id));
+  const editions = (catalog.editions || []).filter((edition) => !sourceReleaseIds.has(edition.releaseId) || keptReleaseIds.has(edition.releaseId));
+  const keptEditionIds = new Set(editions.map((edition) => edition.id));
+  const sourceEditionIds = new Set((catalog.editions || []).map((edition) => edition.id));
+  return {
+    ...catalog,
+    releases: releases.filter((release) => keptReleaseIds.has(release.id)),
+    editions,
+    tokens: (catalog.tokens || []).filter((token) => keptEditionIds.has(token.editionId)),
+    experiences: (catalog.experiences || []).filter((experience) => !sourceEditionIds.has(experience.editionId) || keptEditionIds.has(experience.editionId)),
+    collections: (catalog.collections || []).filter((collection) => (
+      !(collection.releaseIds || []).some((id) => !keptReleaseIds.has(id))
+      && !(collection.editionIds || []).some((id) => !keptEditionIds.has(id))
+    )),
+  };
+}
+
 /**
  * Remove internal/demo/test rows and their dependent public catalog objects.
  * This is a read projection only: it never deletes or mutates source records.
@@ -160,7 +203,7 @@ export function stripSummitDemoCatalog(catalog) {
 export function collapsePublicCatalog(catalog) {
   if (!catalog) return catalog;
   const stripped = stripSummitDemoCatalog(catalog);
-  if (isSummitDemoEnabled()) return stripped;
+  if (isSummitDemoEnabled()) return deduplicatePublicReleases(stripped);
   const hiddenAliasIds = new Set((stripped.artists || []).filter(isVoidcallerPublicAlias).map((artist) => artist.id));
   const artists = [];
   let canonical = null;
@@ -178,5 +221,5 @@ export function collapsePublicCatalog(catalog) {
       || isVoidcallerPublicAlias({ id: release.artistId, name: release.artistName, slug: release.artistSlug });
     return canonical && alias ? { ...release, artistId: canonical.id } : release;
   });
-  return { ...stripped, artists, releases };
+  return deduplicatePublicReleases({ ...stripped, artists, releases });
 }

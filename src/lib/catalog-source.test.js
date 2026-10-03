@@ -90,6 +90,29 @@ describe("catalog source", () => {
     expect(byStatus.artists[0].verified).toBe(true);
   });
 
+  it("selects the newest same-title release and removes duplicate dependencies", () => {
+    const published = mapPublishedCatalog({
+      artists: [{ id: "voidcaller", display_name: "Voidcaller" }],
+      releases: [
+        { id: "older", artist_id: "voidcaller", title: "Forgive & Forget", published_at: "2026-09-01T00:00:00Z" },
+        { id: "canonical", artist_id: "voidcaller", title: "Forgive & Forget", published_at: "2026-10-01T00:00:00Z" },
+      ],
+      editions: [
+        { id: "older-edition", release_id: "older", title: "Older", application_metadata: { fuji: { tokenId: "1" } } },
+        { id: "canonical-edition", release_id: "canonical", title: "Canonical", application_metadata: { fuji: { tokenId: "2" } } },
+      ],
+      experiences: [
+        { id: "older-experience", edition_id: "older-edition", title: "Older experience" },
+        { id: "canonical-experience", edition_id: "canonical-edition", title: "Canonical experience" },
+      ],
+    });
+    const collapsed = collapsePublicCatalog(published);
+    expect(collapsed.releases.map((release) => release.id)).toEqual(["canonical"]);
+    expect(collapsed.editions.map((edition) => edition.id)).toEqual(["canonical-edition"]);
+    expect(collapsed.experiences.map((experience) => experience.id)).toEqual(["canonical-experience"]);
+    expect(collapsed.editions[0].tokenIds).toEqual(["2"]);
+  });
+
   it("strips Summit records from published API catalog responses", async () => {
     const payload = (data) => ({ ok: true, json: async () => ({ data }) });
     const fetchImpl = async (url) => {

@@ -213,6 +213,25 @@ describe("reviewer notification count route", () => {
 });
 
 describe("API service trust boundaries", () => {
+  it("returns primary purchase evidence from the transaction endpoint", async () => {
+    const primaryPurchase = {
+      status: "CONFIRMED",
+      tokenId: "123",
+      editionId: "edition-1",
+      quantity: "1",
+      priceWei: "10000000000000000",
+      purchaser: wallet,
+    };
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ id: "tx-1", transaction_hash: transactionHash, purchases: [], primaryPurchases: [primaryPurchase] }] }) };
+    const service = new ApiService({ db, repository: {} });
+    await expect(service.getMarketplaceTransaction({ chainId: 43113, transactionHash })).resolves.toMatchObject({ primaryPurchases: [primaryPurchase] });
+    const sql = db.query.mock.calls[0][0];
+    expect(sql).toMatch(/FROM primary_purchases pp/i);
+    expect(sql).toMatch(/pp\.paid_wei/i);
+    expect(sql).toMatch(/LEFT JOIN editions e/i);
+    expect(sql).toMatch(/AS "primaryPurchases"/i);
+  });
+
   it("aggregates indexed primary and secondary monetary volume while excluding non-public catalog rows", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [{ primary_mint_volume_wei: "100", secondary_market_volume_wei: "250", overall_volume_wei: "350" }] }) };
     const service = new ApiService({ db, repository: {} });

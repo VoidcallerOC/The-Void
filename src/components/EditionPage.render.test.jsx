@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EditionPage } from "./PlatformPages.jsx";
+import { EditionPage, ExperiencePage } from "./PlatformPages.jsx";
 import { WalletCtx } from "../lib/wallet-context.js";
 import { baseCatalogs, fetchPublishedCatalog, mergeCatalogs } from "../lib/catalog-source.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
@@ -95,6 +95,24 @@ function renderEdition() {
   );
 }
 
+function renderExperience(experienceId = "missing-experience") {
+  return renderToStaticMarkup(
+    React.createElement(
+      WalletCtx.Provider,
+      { value: wallet },
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: [`/experience/${experienceId}`] },
+        React.createElement(
+          Routes,
+          null,
+          React.createElement(Route, { path: "/experience/:experience", element: React.createElement(ExperiencePage) }),
+        ),
+      ),
+    ),
+  );
+}
+
 describe("production EditionPage route render", () => {
   beforeEach(async () => {
     catalogState.current = await productionCatalog();
@@ -122,5 +140,12 @@ describe("production EditionPage route render", () => {
     expect(markup).not.toContain("PINATA CERTIFICATION");
     expect(button).toBeTruthy();
     expect(button).not.toContain("disabled");
+  });
+
+  it("keeps an experience route in loading state until the published catalog settles", () => {
+    catalogState.current = { ...catalogState.current, experiences: [], publishedLoading: true };
+    expect(renderExperience()).toContain("Loading experience");
+    catalogState.current = { ...catalogState.current, publishedLoading: false };
+    expect(renderExperience()).not.toContain("Loading experience");
   });
 });
