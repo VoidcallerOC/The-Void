@@ -198,13 +198,15 @@ export const VOIDCALLER_CATALOG = createCatalog({
   experiences: [voidcallerExperience, ...voidcallerTrackExperiences],
 });
 
-// Main-page volume is scoped to the published canonical Fuji VOIDCALLER edition.
-export const SELF_TITLED_EP_IDENTITY = Object.freeze({
-  releaseId: "release-8f6d5a9f-585d-4948-b05b-7098125d16cf",
-  editionId: "edition-ecf27444-94b7-40d5-bace-5f061792f55e",
+// Main-page "Fuji certified volume" is scoped to the published Fuji edition,
+// Forgive & Forget (forgive-forget-18). The earlier Fuji VOIDCALLER test edition
+// was archived by migration 027.
+export const FUJI_VOLUME_IDENTITY = Object.freeze({
+  releaseId: "release-b96d6a64-3379-4da0-b834-ae2e00bf9571",
+  editionId: "edition-e2e5abb4-bf03-42d1-9aea-c0b8492c3267",
   chainId: 43113,
   tokenContractAddress: "0x82b26Da27136935454Bdf1e40801190B521b82e5",
-  tokenIds: Object.freeze(["33778802922810732976408591241428358474475553907731009337085064305512658576739"]),
+  tokenIds: Object.freeze(["25004510451461692631068377573407424988089298285712621798954341372639713583607"]),
 });
 
 export const DISCOVERY_CATEGORIES = ["featured", "artists", "limited-editions"];

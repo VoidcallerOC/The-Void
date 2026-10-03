@@ -84,7 +84,7 @@ export function Footer() {
             { label: "Artist studio", to: "/studio" },
           ]],
           ["THE RELIC", [
-            { label: "I · Voidcaller (EP)", to: "/edition/edition-ecf27444-94b7-40d5-bace-5f061792f55e" },
+            { label: "I · Voidcaller (EP)", to: "/release/voidcaller-legacy-genesis" },
             { label: "II · Forthcoming" },
           ]],
           ["THE CHOIR", VC_DATA.socials.map(s => ({ label: s.name, href: s.href }))],
