@@ -32,3 +32,7 @@ broadcast/
 
 # Protected masters are deployment assets, never static web or repository content.
 private-media/
+
+# Admin-uploaded marketplace header files. The API serves them; do not commit the bytes.
+public/assets/marketplace-heroes/*
+!public/assets/marketplace-heroes/.gitkeep

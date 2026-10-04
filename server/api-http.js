@@ -24,6 +24,12 @@ function send(response, status, body, headers = {}) {
   response.end(JSON.stringify(body));
 }
 
+function sendFile(response, file, cors = {}) {
+  const body = Buffer.isBuffer(file.body) ? file.body : Buffer.from(file.body);
+  response.writeHead(200, { "content-type": file.contentType, "content-length": String(body.length), "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff", ...cors });
+  response.end(body);
+}
+
 async function sendMedia(response, media, cors = {}) {
   if (media.type === "redirect") {
     response.writeHead(302, { location: media.url, "cache-control": "no-store", "referrer-policy": "no-referrer", ...cors });
@@ -60,6 +66,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       if (method === "GET" && base.length === 2 && base[0] === "health" && base[1] === "ready") {
         const data = await service.getOperationalHealth();
         return send(response, data.ok ? 200 : 503, { data, requestId }, responseHeaders);
+      }
+      if (method === "GET" && base[0] === "marketplace" && base[1] === "heroes" && base.length === 3) {
+        if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
+        return sendFile(response, await marketplacePresentation.openHero({ filename: base[2] }), responseHeaders);
       }
       if (method === "GET" && base[0] === "media" && base.length === 2) {
         if (!mediaGateway) throw new ApiError(503, "MEDIA_GATEWAY_UNAVAILABLE", "Protected media gateway is unavailable.");
