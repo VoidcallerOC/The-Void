@@ -41,6 +41,17 @@ describe("audio gating", () => {
     expect(VC_AUDIO.isBearer(released)).toBe(true);
   });
 
+  it("does not start the public preview while an authenticated holder grant is pending", () => {
+    VC_AUDIO.setOwnership([1]);
+    VC_AUDIO.setMediaAuthorization({ wallet: "0xabc", authHeaders: { authorization: "Bearer session" } });
+    expect(VC_AUDIO.srcFor(released)).toBeNull();
+    expect(VC_AUDIO.isPreview(released)).toBe(true);
+  });
+
+  it("keeps the public preview for a visitor without holder authorization", () => {
+    expect(VC_AUDIO.srcFor(released)).toBe(released.previewSrc);
+  });
+
   it("re-locks protected playback when grants are removed", () => {
     VC_AUDIO.setOwnership([1]);
     VC_AUDIO.mediaGrants.set("voidcaller-full-ep:AUDIO:01", { grantId: "opaque-grant", accessUrl: "/api/media/opaque-grant", expiresAt: new Date(Date.now() + 60_000).toISOString() });

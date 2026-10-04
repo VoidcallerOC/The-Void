@@ -118,7 +118,14 @@ export const VC_AUDIO = {
   },
 
   srcFor(track) {
-    if (track?.protectedMedia) return this.mediaGrants.get(grantKey(track))?.accessUrl || track.previewSrc || null;
+    if (track?.protectedMedia) {
+      const accessUrl = this.mediaGrants.get(grantKey(track))?.accessUrl;
+      if (accessUrl) return accessUrl;
+      // A connected, authenticated holder is waiting for the protected grant.
+      // Do not start the public preview while that authorization is pending.
+      if (this.holdsChapterI() && this.mediaAuthorization?.wallet) return null;
+      return track.previewSrc || null;
+    }
     return this.isGated(track) ? (track.previewSrc || track.src) : track.src;
   },
 
@@ -197,6 +204,10 @@ export const VC_AUDIO = {
     const source = this.srcFor(track);
     const current = audio.getAttribute("src") || audio.src || "";
     if (source && !current.endsWith(source.split("/").pop())) audio.src = source;
+    else if (!source && current) {
+      audio.removeAttribute("src");
+      audio.load();
+    }
     this.applyMasterVolume(audio);
     if (track.protectedMedia && this.holdsChapterI()) {
       void this.resolveProtectedSource(track).then((authorizedSource) => {
