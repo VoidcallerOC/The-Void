@@ -5,7 +5,7 @@ vi.mock("../../config/fuji-release.json", async (importOriginal) => {
   const actual = await importOriginal();
   return { default: { ...actual.default, roleGranterAddress: "0x3333333333333333333333333333333333333333" } };
 });
-const { FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeFujiGrantRole, grantPublishingRoles } = await import("./fuji-release.js");
+const { FUJI_RELEASE_CONFIG, FUJI_ROLES, canMutateFujiPublishingRoles, encodeFujiGrantRole, grantPublishingRoles, readFujiRole } = await import("./fuji-release.js");
 
 const GRANTER = "0x3333333333333333333333333333333333333333";
 const REVIEWER = "0x4444444444444444444444444444444444444444";
@@ -52,6 +52,36 @@ function fakeProvider({ adminIsAdmin = true, artistRoles = {} } = {}) {
   });
   return { provider: { request }, sent };
 }
+
+
+describe("who may grant or revoke Fuji publishing roles", () => {
+  it("requires DEFAULT_ADMIN_ROLE on the certified Fuji release and nothing less", async () => {
+    expect(FUJI_RELEASE_CONFIG.contractAddress).toBe("0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6");
+    expect(FUJI_ROLES.DEFAULT_ADMIN_ROLE).toBe(`0x${"00".repeat(32)}`);
+    expect(canMutateFujiPublishingRoles(true)).toBe(true);
+    expect(canMutateFujiPublishingRoles(false)).toBe(false);
+    expect(canMutateFujiPublishingRoles(undefined)).toBe(false);
+    expect(canMutateFujiPublishingRoles(null)).toBe(false);
+
+    const calls = [];
+    const provider = {
+      request: vi.fn(async ({ method, params }) => {
+        if (method === "eth_chainId") return FUJI_RELEASE_CONFIG.chainHexId;
+        if (method === "eth_call") {
+          calls.push(params[0]);
+          return ethers.AbiCoder.defaultAbiCoder().encode(["bool"], [true]);
+        }
+        throw new Error(`unexpected ${method}`);
+      }),
+    };
+    await expect(readFujiRole(provider, FUJI_ROLES.DEFAULT_ADMIN_ROLE, ADMIN)).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].to).toBe("0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6");
+    const [role, account] = roleIface.decodeFunctionData("hasRole", calls[0].data);
+    expect(role).toBe(FUJI_ROLES.DEFAULT_ADMIN_ROLE);
+    expect(account).toBe(ethers.getAddress(ADMIN));
+  });
+});
 
 describe("granting Fuji publishing roles", () => {
   it("encodes grantRole for the artist wallet", () => {
