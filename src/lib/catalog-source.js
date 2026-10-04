@@ -14,6 +14,7 @@ import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import { ipfsToHttp } from "./web3.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
 import { isLegacyMainnetEdition } from "./legacy-genesis.js";
+import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -253,7 +254,7 @@ export function withoutShadowedLegacyAlbum(published, base = baseCatalogs()) {
 // Each deployment runs one release network (Fuji or C-Chain). Published
 // editions minted on the other network are hidden, with the experiences and
 // releases that only they carry. The legacy C-Chain collection always stays.
-export function onActiveReleaseNetwork(published, activeChainId = FUJI_RELEASE_CONFIG.chainId) {
+export function onActiveReleaseNetwork(published, activeChainId = RELEASE_DEPLOYMENT.chainId) {
   if (!published) return published;
   const editions = asArray(published.editions);
   const offNetwork = new Set(editions

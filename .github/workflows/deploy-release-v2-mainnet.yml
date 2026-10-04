@@ -1,0 +1,59 @@
+name: Deploy VoidRelease1155V2 + VoidPrimarySale + provenance anchor to Avalanche C-Chain
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_mainnet_deploy:
+        description: Type I_CONFIRM_MAINNET_DEPLOY to allow a production broadcast after all checks.
+        required: true
+        type: string
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: voidrelease1155v2-mainnet-deployment
+  cancel-in-progress: false
+env:
+  DEPLOY_NETWORK: mainnet
+  CONFIRM_MAINNET_DEPLOY: ${{ inputs.confirm_mainnet_deploy == 'I_CONFIRM_MAINNET_DEPLOY' && 'yes' || 'no' }}
+  AVALANCHE_MAINNET_RPC_URL: ${{ secrets.AVALANCHE_MAINNET_RPC_URL }}
+  DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+  RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
+  ADMIN_SAFE_ADDRESS: ${{ secrets.ADMIN_SAFE_ADDRESS }}
+  PLATFORM_FEE_RECIPIENT: ${{ secrets.PLATFORM_FEE_RECIPIENT }}
+  PLATFORM_FEE_BPS: ${{ secrets.PLATFORM_FEE_BPS }}
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out certified source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+      - name: Build and test before any broadcast
+        run: |
+          set -euo pipefail
+          forge build
+          forge test
+          npm test
+          npm run lint
+          npm run build
+      - name: Validate production inputs without printing secrets
+        run: |
+          set -euo pipefail
+          test "${DEPLOY_NETWORK}" = "mainnet"
+          test "${CONFIRM_MAINNET_DEPLOY}" = "yes"
+          for name in AVALANCHE_MAINNET_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS ADMIN_SAFE_ADDRESS PLATFORM_FEE_RECIPIENT PLATFORM_FEE_BPS; do
+            test -n "${!name:-}" || { echo "Missing required input: ${name}" >&2; exit 1; }
+          done
+          chain_id="$(cast chain-id --rpc-url "${AVALANCHE_MAINNET_RPC_URL}")"
+          test "${chain_id}" = "43114" || { echo "Refusing non-C-Chain chain: ${chain_id}" >&2; exit 1; }
+          echo "C-Chain preflight passed; secret values were not printed."
+      - name: Deploy, hand off, verify, and record only after the explicit gate
+        run: npm run deploy:release-v2-mainnet

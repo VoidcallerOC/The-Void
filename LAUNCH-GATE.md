@@ -159,3 +159,9 @@ curl.exe -sS -i "https://the-void-api-fuji.onrender.com/api/health/ready"
 ## References
 
 This gate is based on the repository implementation and local validation results described above. No external infrastructure state was queried or inferred.
+
+## C-Chain continuation status (PR #127)
+
+The release-network continuation adds a fail-closed C-Chain selection path, mainnet-specific provenance selection, catalog isolation, and a manual deployment workflow at `.github/workflows/deploy-release-v2-mainnet.yml`. The evidence-driven operator procedure is [docs/C-CHAIN-PRODUCTION-RUNBOOK.md](docs/C-CHAIN-PRODUCTION-RUNBOOK.md).
+
+**Current decision remains NO-GO.** `config/mainnet-release.json` intentionally contains no deployment evidence. The current reviewed `VoidPrimarySale` artifact has an `owner` but no `transferOwnership(address)` method, so `scripts/deploy-release-v2-mainnet.mjs` refuses to broadcast before deployment until a separately reviewed contract change supports the required Safe ownership handoff. Fuji remains unchanged and is not used as C-Chain provenance evidence.

@@ -18,6 +18,12 @@
   "adminHandoffTransactions": [],
   "platformFeeRecipient": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
   "platformFeeBps": 500,
+  "provenance": {
+    "anchorAddress": null,
+    "anchorDeploymentTransaction": null,
+    "anchorDeploymentBlock": null,
+    "rpcUrl": null
+  },
   "outOfScope": {
     "cChainVoidcallerCollection": "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
     "cChainImplementation": "0x2e61967a569bc18affc5e1b9f71e00af93a268c7",
