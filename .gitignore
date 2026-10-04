@@ -36,3 +36,7 @@ private-media/
 # Admin-uploaded marketplace header files. The API serves them; do not commit the bytes.
 public/assets/marketplace-heroes/*
 !public/assets/marketplace-heroes/.gitkeep
+
+# Artist profile pictures and banners. The API serves them; do not commit the bytes.
+public/assets/artist-portfolio/*
+!public/assets/artist-portfolio/.gitkeep

@@ -6,6 +6,7 @@
   ],
   "rewrites": [
     { "source": "/assets/marketplace-heroes/:file", "destination": "https://the-void-api-fuji.onrender.com/api/marketplace/heroes/:file" },
+    { "source": "/assets/artist-portfolio/:file", "destination": "https://the-void-api-fuji.onrender.com/api/artists/portfolio/:file" },
     { "source": "/api/:path*", "destination": "https://the-void-api-fuji.onrender.com/api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

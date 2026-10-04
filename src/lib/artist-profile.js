@@ -1,6 +1,22 @@
 // Artist profile: the one place an artist's own details live. Studio no
 // longer asks for them per release; the artist page edits them for its owner.
 
+import { ipfsToHttp } from "./web3.js";
+
+const LOCAL_PORTFOLIO_FILE = /^\/assets\/artist-portfolio\/(artist-portfolio-[a-f0-9]{16}\.(?:png|jpg|gif|webp))$/;
+
+/** Browser URL for a stored profile picture or banner.
+ *  New uploads are site files served by the API. Older ipfs:// values still resolve. */
+export function portfolioImageSrc(uri) {
+  const raw = String(uri ?? "").trim();
+  if (!raw) return "";
+  const local = LOCAL_PORTFOLIO_FILE.exec(raw);
+  if (!local) return ipfsToHttp(raw);
+  const configured = typeof import.meta !== "undefined" ? import.meta.env?.VITE_API_ORIGIN : "";
+  const base = configured ? String(configured).replace(/\/$/, "") : "";
+  return `${base}/api/artists/portfolio/${local[1]}`;
+}
+
 export const PROFILE_LINKS = Object.freeze([
   ["website", "Website"],
   ["x", "X"],

@@ -71,6 +71,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
         return sendFile(response, await marketplacePresentation.openHero({ filename: base[2] }), responseHeaders);
       }
+      if (method === "GET" && base[0] === "artists" && base[1] === "portfolio" && base.length === 3) {
+        if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+        return sendFile(response, await studioService.openPortfolioImage({ filename: base[2] }), responseHeaders);
+      }
       if (method === "GET" && base[0] === "media" && base.length === 2) {
         if (!mediaGateway) throw new ApiError(503, "MEDIA_GATEWAY_UNAVAILABLE", "Protected media gateway is unavailable.");
         return sendMedia(response, await mediaGateway.openMedia({ request: apiRequest, grantId: base[1] }), responseHeaders);
@@ -181,6 +185,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "POST" && base[0] === "studio" && base[1] === "artists" && base[3] === "media" && base[4] === "register" && base.length === 5) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.registerMediaUpload({ request: apiRequest, artistId: base[2], input: body });
+        }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "artists" && base[3] === "portfolio" && base.length === 4) {
+          if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+          data = await studioService.uploadPortfolioImage({ request: apiRequest, artistId: base[2], input: body });
         }
         else if (method === "POST" && base[0] === "studio" && base[1] === "artists" && base[3] === "artwork" && base.length === 4) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");

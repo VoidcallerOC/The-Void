@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CHUNKED_UPLOAD_THRESHOLD, MAX_FULL_TRACK_BYTES, audioContentType, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "./studio-api.js";
+import { CHUNKED_UPLOAD_THRESHOLD, MAX_FULL_TRACK_BYTES, audioContentType, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPortfolioImage, uploadStudioPreview } from "./studio-api.js";
 
 describe("Studio API contract", () => {
   it("calls the canonical metadata publication endpoint with POST", async () => {
@@ -21,6 +21,15 @@ describe("Studio API contract", () => {
     const [endpoint, options] = fetchImpl.mock.calls[0];
     expect(endpoint).toBe("/api/studio/artists/artist-a/artwork");
     expect(JSON.parse(options.body)).toEqual({ data: "iVBORw==", filename: "cover.png" });
+  });
+
+  it("uploads a profile picture to the site portfolio route, not the Pinata artwork route", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { uri: "/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "face.png", { type: "image/png" });
+    await expect(uploadStudioPortfolioImage({ artistId: "artist-a", file, headers: { authorization: "Bearer test" }, fetchImpl })).resolves.toEqual({ uri: "/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png" });
+    const [endpoint, options] = fetchImpl.mock.calls[0];
+    expect(endpoint).toBe("/api/studio/artists/artist-a/portfolio");
+    expect(JSON.parse(options.body)).toEqual({ data: "iVBORw==", filename: "face.png" });
   });
 
   it("rejects non-image and oversized artwork before any request", async () => {
