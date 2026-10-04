@@ -44,6 +44,19 @@ const NONPUBLIC_TEST_IDS = new Set([
   "edition-56dbb8af-7da2-46e3-9d59-db255362cd3e",
 ]);
 const TEST_PROFILE_LABELS = new Set(["wer", "sdfg", "qwe", "asdf"]);
+
+// forgive-forget-23 was published on the certified Fuji contract on
+// 2026-10-04 (release-1b4a2d71, edition-9362e29d, experience-d798300c).
+// The edition exists on chain and the primary sale was configured, so the
+// archive lock treats it as mintable and it must stay PUBLISHED. The sale
+// ended with nothing minted, and the public metadata was removed from
+// Pinata. This is a read-side exclusion only: the artist, the contract,
+// the token, and the sale are untouched.
+const WITHDRAWN_PUBLIC_LISTING_IDS = new Set([
+  "release-1b4a2d71-218f-47a2-afde-cd5171909ace",
+  "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1",
+  "experience-d798300c-37eb-4cc6-aad3-4b078b77135a",
+]);
 const PUBLIC_TEST_MARKER = /\b(?:test(?:ing)?|demo|e2e|certification)\b|fuji[\s_-]*e2e|pinata[\s_-]*(?:json[\s_-]*)?certif/i;
 
 export function isSummitDemoEnabled() {
@@ -72,6 +85,12 @@ export function isSummitDemoRecord(item) {
     .filter(Boolean)
     .join(" ");
   return SUMMIT_PUBLIC_LABEL.test(blob);
+}
+
+export function isWithdrawnPublicListing(item) {
+  if (!item) return false;
+  const ids = [item.id, item.release_id, item.releaseId, item.edition_id, item.editionId];
+  return ids.some((id) => WITHDRAWN_PUBLIC_LISTING_IDS.has(String(id || "")));
 }
 
 export function isNonPublicTestRecord(item) {
@@ -174,20 +193,26 @@ export function stripSummitDemoCatalog(catalog) {
       if (artistId) hiddenArtistIds.add(artistId);
     }
   }
+  // Withdrawn listings are omitted after the artist cascade. Hiding one
+  // release must not take its artist, or the real Voidcaller catalog, with it.
+  for (const release of releases) {
+    if (isWithdrawnPublicListing(release)) hiddenReleaseIds.add(release.id);
+  }
   const hiddenEditionIds = new Set(
     editions
-      .filter((item) => isInternal(item) || hiddenReleaseIds.has(item.releaseId || item.release_id))
+      .filter((item) => isInternal(item) || isWithdrawnPublicListing(item) || hiddenReleaseIds.has(item.releaseId || item.release_id))
       .map((item) => item.id),
   );
 
   return {
     ...catalog,
     artists: artists.filter((item) => !hiddenArtistIds.has(item.id) && !isInternal(item)),
-    releases: releases.filter((item) => !hiddenReleaseIds.has(item.id) && !isInternal(item)),
-    editions: editions.filter((item) => !hiddenEditionIds.has(item.id) && !isInternal(item)),
-    tokens: tokens.filter((item) => !hiddenEditionIds.has(item.editionId || item.edition_id) && !isInternal(item)),
+    releases: releases.filter((item) => !hiddenReleaseIds.has(item.id) && !isInternal(item) && !isWithdrawnPublicListing(item)),
+    editions: editions.filter((item) => !hiddenEditionIds.has(item.id) && !isInternal(item) && !isWithdrawnPublicListing(item)),
+    tokens: tokens.filter((item) => !hiddenEditionIds.has(item.editionId || item.edition_id) && !isInternal(item) && !isWithdrawnPublicListing(item)),
     experiences: experiences.filter((item) => (
       !isInternal(item)
+      && !isWithdrawnPublicListing(item)
       && !hiddenReleaseIds.has(item.releaseId || item.release_id)
       && !hiddenEditionIds.has(item.editionId || item.edition_id)
     )),

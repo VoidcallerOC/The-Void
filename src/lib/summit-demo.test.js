@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VOIDCALLER_CATALOG } from "../data.js";
 import { FUJI_INTEGRATION_CATALOG } from "./fixtures/summit-fuji-catalog.js";
-import { isSummitDemoEnabled, isSummitDemoRecord, stripSummitDemoCatalog, collapsePublicCatalog, SUMMIT_DEMO_IDS } from "./summit-demo.js";
+import { isSummitDemoEnabled, isSummitDemoRecord, isNonPublicTestRecord, isWithdrawnPublicListing, stripSummitDemoCatalog, collapsePublicCatalog, SUMMIT_DEMO_IDS } from "./summit-demo.js";
 
 describe("summit demo boundary", () => {
   it("is off by default", () => {
@@ -98,5 +98,33 @@ describe("summit demo boundary", () => {
     const publicCatalog = collapsePublicCatalog(leaked);
     expect(publicCatalog.artists.map((item) => item.id)).toEqual(["voidcaller", "forge"]);
     expect(publicCatalog.artists[0].verified).toBe(true);
+  });
+
+  it("drops the withdrawn Fuji Forgive & Forget listing and keeps VOIDCALLER", () => {
+    const releaseId = "release-1b4a2d71-218f-47a2-afde-cd5171909ace";
+    const editionId = "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1";
+    const experienceId = "experience-d798300c-37eb-4cc6-aad3-4b078b77135a";
+    const source = {
+      artists: [{ id: "voidcaller", name: "Voidcaller", slug: "voidcaller" }],
+      releases: [
+        { id: "voidcaller-legacy-genesis", artistId: "voidcaller", title: "VOIDCALLER", status: "published" },
+        { id: releaseId, artistId: "voidcaller", slug: "forgive-forget-23", title: "Forgive & Forget", status: "published" },
+      ],
+      editions: [
+        { id: "voidcaller-legacy-edition", releaseId: "voidcaller-legacy-genesis", title: "Chapter I · The Relic", status: "minted" },
+        { id: editionId, releaseId, title: "Forgive & Forget", status: "published" },
+      ],
+      tokens: [{ id: "forgive-token", editionId }],
+      experiences: [{ id: experienceId, releaseId, editionId, title: "Stranger Things" }],
+      collections: [],
+    };
+    const result = collapsePublicCatalog(source);
+    expect(isWithdrawnPublicListing({ id: editionId })).toBe(true);
+    expect(isNonPublicTestRecord({ id: editionId, title: "Forgive & Forget" })).toBe(false);
+    expect(result.artists.map((item) => item.id)).toEqual(["voidcaller"]);
+    expect(result.releases.map((item) => item.id)).toEqual(["voidcaller-legacy-genesis"]);
+    expect(result.editions.map((item) => item.id)).toEqual(["voidcaller-legacy-edition"]);
+    expect(result.tokens).toEqual([]);
+    expect(result.experiences).toEqual([]);
   });
 });

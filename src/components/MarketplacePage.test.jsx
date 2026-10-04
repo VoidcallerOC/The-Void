@@ -63,11 +63,13 @@ function publicCatalog() {
     ],
     releases: [
       { id: realReleaseId, artist_id: "artist-cf2c2990-b0b0-4933-bcac-556cf55c0724", artist_slug: "voidcaller-7", artist_name: "Voidcaller", title: "VOIDCALLER", description: "The first call. The first relic. One relic unlocks the full EP.", status: "PUBLISHED" },
+      { id: "release-1b4a2d71-218f-47a2-afde-cd5171909ace", artist_id: "voidcaller", artist_slug: "voidcaller", artist_name: "Voidcaller", title: "Forgive & Forget", description: "The space between Silence and Sound/", status: "PUBLISHED" },
       { id: "release-b4bb9c4f-b683-4145-9a9c-9fe32ad609f7", artist_id: "artist-bdd37451-a70a-42a2-9fc6-0a8eb770c0e3", artist_slug: "voidcaller-8", artist_name: "Voidcaller", title: "Marketplace Fuji E2E Test", description: "One-copy end-to-end test edition", status: "PUBLISHED" },
       { id: "release-7f12ecfb-99eb-4b05-9b07-f862480829c5", artist_id: "artist-845101ad-8dbd-40ad-9c64-b60cbcfe183e", artist_slug: "wer", artist_name: "wer", title: "PINATA CERTIFICATION 2026-09-27", description: "Metadata certification test", status: "PUBLISHED" },
     ],
     editions: [
       { id: realEditionId, release_id: realReleaseId, title: "VOIDCALLER", description: "Official Fuji V2 edition", status: "PUBLISHED", supply: "25", chain_id: "43113", contract_address: contractAddress, token_id: realTokenId, application_metadata: { artwork: "/assets/voidcaller_art_4.png", includes: ["Full self-titled EP", "Collector Reliquary access", "Token-gated music experiences"], priceWei: "10000000000000000" } },
+      { id: "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1", release_id: "release-1b4a2d71-218f-47a2-afde-cd5171909ace", title: "Forgive & Forget", status: "PUBLISHED", supply: "0", chain_id: "43113", contract_address: contractAddress, token_id: "5539478311145551066997171016458124004742133628133122798593311459807321372836" },
       { id: "edition-b87f40b1-9419-4e90-8e2f-5b8986df043c", release_id: "release-b4bb9c4f-b683-4145-9a9c-9fe32ad609f7", title: "Marketplace Fuji E2E Test", status: "PUBLISHED", chain_id: "43113", contract_address: contractAddress, token_id: "69621777096996404494569967715110965261109496187347335164928263396549073080909" },
       { id: "edition-8ed9867c-e102-49c5-97a0-54ccf15605d2", release_id: "release-7f12ecfb-99eb-4b05-9b07-f862480829c5", title: "wer", status: "PUBLISHED", chain_id: "43113", contract_address: contractAddress, token_id: "86336109522257422783953313092869910591261689395232051112421244253165221467155" },
     ],
@@ -108,6 +110,8 @@ describe("public marketplace inventory", () => {
     expect(container.textContent).toMatch(/Avalanche Fuji.*43113|Fuji.*43113/i);
     expect(container.textContent).toContain("0.01 AVAX");
     expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION|\bwer\b|\bqwe\b/i);
+    expect(container.textContent).not.toMatch(/Forgive & Forget/);
+    expect(container.querySelectorAll("[data-edition-id='edition-9362e29d-341d-4e84-a64b-45753e7d0ff1']")).toHaveLength(0);
     expect(container.textContent).not.toMatch(/Recently listed|Add tracks|Open artist studio|From the artists/i);
     expect(container.textContent).not.toMatch(/Overall Mint Volume|Floor over mint|25x|25×/i);
     expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);

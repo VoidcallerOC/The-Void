@@ -6,7 +6,7 @@ import { checkDatabaseHealth } from "./db.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
 import { certifiedContractParams, certifiedTokenJoinSql } from "./fuji-contract-scope.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { isHiddenPublicArtist } from "../src/lib/summit-demo.js";
+import { isHiddenPublicArtist, isWithdrawnPublicListing } from "../src/lib/summit-demo.js";
 import { isPublicLegacyArtwork } from "../src/lib/legacy-genesis.js";
 
 const PUBLIC_STATUS = "PUBLISHED";
@@ -193,40 +193,40 @@ export class ApiService {
   async getRelease({ idOrSlug }) {
     const key = requiredText(idOrSlug, "release");
     const { rows } = await this.db.query(`SELECT ${RELEASE_PUBLIC_SELECT} FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND (r.id=$2 OR r.slug=$2) LIMIT 1`, [PUBLIC_STATUS, key]);
-    if (!rows[0]) throw new ApiError(404, "RELEASE_NOT_FOUND", "Release was not found.");
+    if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "RELEASE_NOT_FOUND", "Release was not found.");
     return toPublicRow(rows[0], RELEASE_PUBLIC_FIELDS);
   }
 
   async listReleases({ artistId = null, limit, offset }) {
     const values = [PUBLIC_STATUS, artistId, limitValue(limit), offsetValue(offset)];
     const { rows } = await this.db.query(`SELECT ${RELEASE_PUBLIC_SELECT} FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND ($2::text IS NULL OR r.artist_id=$2) ORDER BY r.published_at DESC NULLS LAST, r.title ASC LIMIT $3 OFFSET $4`, values);
-    return rows.map((row) => toPublicRow(row, RELEASE_PUBLIC_FIELDS));
+    return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicRow(row, RELEASE_PUBLIC_FIELDS));
   }
 
   async getEdition({ id }) {
     const key = requiredText(id, "edition");
     const [canonicalContract, canonicalChain] = certifiedContractParams();
     const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN tokens ${certifiedTokenJoinSql({ contractParam: 3, chainParam: 4 })} WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key, canonicalContract, canonicalChain]);
-    if (!rows[0]) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
+    if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
     return toPublicEdition(rows[0]);
   }
 
   async listEditions({ releaseId = null, limit, offset }) {
     const [canonicalContract, canonicalChain] = certifiedContractParams();
     const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN tokens ${certifiedTokenJoinSql({ contractParam: 2, chainParam: 3 })} WHERE e.status=$1 AND ($4::text IS NULL OR e.release_id=$4) ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`, [PUBLIC_STATUS, canonicalContract, canonicalChain, releaseId, limitValue(limit), offsetValue(offset)]);
-    return rows.map((row) => toPublicEdition(row));
+    return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicEdition(row));
   }
 
   async getExperience({ id }) {
     const key = requiredText(id, "experience");
     const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
-    if (!rows[0]) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
+    if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
     return toPublicRow(rows[0], EXPERIENCE_PUBLIC_FIELDS);
   }
 
   async listExperiences({ editionId = null, releaseId = null, limit, offset }) {
     const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND ($2::text IS NULL OR edition_id=$2) AND ($3::text IS NULL OR release_id=$3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, [PUBLIC_STATUS, editionId, releaseId, limitValue(limit), offsetValue(offset)]);
-    return rows.map((row) => toPublicRow(row, EXPERIENCE_PUBLIC_FIELDS));
+    return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicRow(row, EXPERIENCE_PUBLIC_FIELDS));
   }
 
   async listListings({ chainId: rawChainId = null, tokenContractAddress = null, tokenId = null, sellerWallet = null, status = ACTIVE_LISTING, limit, offset }) {
