@@ -132,6 +132,31 @@ describe("Artist Studio", () => {
     expect(draft.repo.saveRelease).not.toHaveBeenCalled();
   });
 
+  it("refuses to archive the original mainnet VOIDCALLER catalog but still archives a Fuji release with that title", async () => {
+    const legacy = { id: "voidcaller-legacy-genesis", artist_id: "artist-1", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-09-01T00:00:00.000Z") };
+    const bySlug = service({ rows: [legacy] });
+    await expect(bySlug.instance.updateRelease({ request, releaseId: legacy.id, input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
+    expect(bySlug.repo.saveRelease).not.toHaveBeenCalled();
+    expect(bySlug.db.query.mock.calls.map(([sql]) => String(sql)).some((sql) => /UPDATE editions SET status = 'ARCHIVED'/i.test(sql))).toBe(false);
+
+    const byContract = service({ rows: [{ ...legacy, id: "release-copy", slug: "not-the-legacy-slug", title: "VOIDCALLER" }] });
+    byContract.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (/FROM editions/i.test(text) && /JOIN contracts/i.test(text)) return { rows: [{ chain_id: 43114, contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee" }] };
+      return { rows: [{ ...legacy, id: "release-copy", slug: "not-the-legacy-slug", title: "VOIDCALLER" }] };
+    });
+    await expect(byContract.instance.updateRelease({ request, releaseId: "release-copy", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
+    expect(byContract.repo.saveRelease).not.toHaveBeenCalled();
+
+    const fuji = service({ rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-10-01T00:00:00.000Z") }] });
+    fuji.db.query.mockImplementation(async (sql) => {
+      const text = String(sql);
+      if (/FROM editions/i.test(text) && /JOIN contracts/i.test(text)) return { rows: [{ chain_id: 43113, contract_address: certifiedFujiRelease }] };
+      return { rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-10-01T00:00:00.000Z") }] };
+    });
+    await expect(fuji.instance.updateRelease({ request, releaseId: "fuji-voidcaller", input: { status: "ARCHIVED" } })).resolves.toMatchObject({ status: "ARCHIVED" });
+  });
+
   it("derives a title-only release slug and resolves collisions without client input", async () => {
     const first = service({ rows: [{ id: "artist-1", artist_id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
     await expect(first.instance.createRelease({ request, artistId: "artist-1", input: { title: "The Void — Summit Demo" } })).resolves.toMatchObject({ status: "DRAFT" });
