@@ -65,6 +65,58 @@ export class PersistenceRepository {
     return rows[0];
   }
 
+  // A release contract is an immutable application binding: a retry may advance
+  // evidence/status for the same deployment, but it may never silently point a
+  // release at another ERC-1155 address or release key.
+  async saveReleaseContract({
+    releaseId,
+    chainId: rawChainId,
+    releaseContractId,
+    factoryContractId = null,
+    primarySaleContractId = null,
+    provenanceAnchorContractId = null,
+    releaseKey,
+    artistWallet,
+    implementationAddress,
+    implementationVersion,
+    deploymentTxHash = null,
+    deploymentBlockNumber = null,
+    creationLogIndex = null,
+    status = "PENDING",
+    metadata = {},
+  }) {
+    const selectedChainId = chainId(rawChainId);
+    const values = [
+      requiredText(releaseId, "releaseContract.releaseId"),
+      selectedChainId,
+      requiredText(releaseContractId, "releaseContract.releaseContractId"),
+      factoryContractId,
+      primarySaleContractId,
+      provenanceAnchorContractId,
+      requiredText(releaseKey, "releaseContract.releaseKey", { max: 66 }).toLowerCase(),
+      walletAddress(artistWallet, "releaseContract.artistWallet"),
+      walletAddress(implementationAddress, "releaseContract.implementationAddress"),
+      Number(implementationVersion),
+      optionalText(deploymentTxHash, "releaseContract.deploymentTxHash", { max: 128 })?.toLowerCase() || null,
+      deploymentBlockNumber === null ? null : nonNegativeBigInt(deploymentBlockNumber, "releaseContract.deploymentBlockNumber"),
+      creationLogIndex === null ? null : Number(creationLogIndex),
+      enumValue(status, "releaseContract.status", ["PENDING", "DEPLOYED", "VERIFIED", "FAILED", "LEGACY_SHARED"]),
+      normalizeJson(metadata),
+    ];
+    if (!Number.isInteger(values[9]) || values[9] <= 0 || values[9] > 32767) throw new PersistenceValidationError("releaseContract.implementationVersion must be a positive small integer.", "releaseContract.implementationVersion");
+    if (values[12] !== null && (!Number.isInteger(values[12]) || values[12] < 0)) throw new PersistenceValidationError("releaseContract.creationLogIndex must be a non-negative integer.", "releaseContract.creationLogIndex");
+    try {
+      const { rows } = await this.db.query(`INSERT INTO release_contracts (release_id, chain_id, release_contract_id, factory_contract_id, primary_sale_contract_id, provenance_anchor_contract_id, release_key, artist_wallet, implementation_address, implementation_version, deployment_tx_hash, deployment_block_number, creation_log_index, status, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (release_id, chain_id) DO UPDATE SET factory_contract_id=EXCLUDED.factory_contract_id, primary_sale_contract_id=EXCLUDED.primary_sale_contract_id, provenance_anchor_contract_id=EXCLUDED.provenance_anchor_contract_id, implementation_address=EXCLUDED.implementation_address, implementation_version=EXCLUDED.implementation_version, deployment_tx_hash=COALESCE(EXCLUDED.deployment_tx_hash, release_contracts.deployment_tx_hash), deployment_block_number=COALESCE(EXCLUDED.deployment_block_number, release_contracts.deployment_block_number), creation_log_index=COALESCE(EXCLUDED.creation_log_index, release_contracts.creation_log_index), status=EXCLUDED.status, metadata=EXCLUDED.metadata, updated_at=now() WHERE release_contracts.release_contract_id=EXCLUDED.release_contract_id AND release_contracts.release_key=EXCLUDED.release_key AND release_contracts.artist_wallet=EXCLUDED.artist_wallet RETURNING *`, values);
+      if (!rows[0]) throw new PersistenceConflictError("A release contract binding is immutable and cannot be reassigned.");
+      return rows[0];
+    } catch (error) { throw normalizeDbError(error, "Release contract already belongs to another release or has conflicting chain identity."); }
+  }
+
+  async getReleaseContract({ releaseId, chainId: rawChainId }) {
+    const { rows } = await this.db.query(`SELECT rc.*, release_contract.address AS release_contract_address, factory_contract.address AS factory_address, sale_contract.address AS primary_sale_address, anchor_contract.address AS provenance_anchor_address FROM release_contracts rc JOIN contracts release_contract ON release_contract.id=rc.release_contract_id LEFT JOIN contracts factory_contract ON factory_contract.id=rc.factory_contract_id LEFT JOIN contracts sale_contract ON sale_contract.id=rc.primary_sale_contract_id LEFT JOIN contracts anchor_contract ON anchor_contract.id=rc.provenance_anchor_contract_id WHERE rc.release_id=$1 AND rc.chain_id=$2 LIMIT 1`, [requiredText(releaseId, "releaseContract.releaseId"), chainId(rawChainId)]);
+    return rows[0] || null;
+  }
+
   async saveEdition({ id, releaseId, contractId = null, title, tier = null, description = null, supply = null, status = "DRAFT", metadata = {} }) {
     const values = [requiredText(id, "edition.id"), requiredText(releaseId, "edition.releaseId"), contractId, requiredText(title, "edition.title"), optionalText(tier, "edition.tier"), optionalText(description, "edition.description", { max: 20000 }), supply === null ? null : nonNegativeBigInt(supply, "edition.supply"), enumValue(status, "edition.status", APPLICATION_STATUSES), normalizeJson(metadata)];
     const { rows } = await this.db.query(`INSERT INTO editions (id, release_id, contract_id, title, tier, description, supply, status, application_metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET release_id=EXCLUDED.release_id, contract_id=EXCLUDED.contract_id, title=EXCLUDED.title, tier=EXCLUDED.tier, description=EXCLUDED.description, supply=EXCLUDED.supply, status=EXCLUDED.status, application_metadata=EXCLUDED.application_metadata, updated_at=now() RETURNING *`, values);

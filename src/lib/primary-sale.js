@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG, assertFujiProvider, fujiExplorerUrl, sendFujiTransaction } from "./fuji-release.js";
+import { assertReleaseProvider, releaseAssetIdentity } from "./release-asset.js";
 import { normalizeSaleTimeToUnixSeconds } from "./sale-time.js";
 
 export const FUJI_RPC_TIMEOUT_MS = 10_000;
@@ -284,6 +285,29 @@ export async function readPrimarySale(provider, tokenId, account) {
   return { ...decoded, purchased, remaining, unlimited, address: sale };
 }
 
+/**
+ * Reads a dedicated sale using the selected release's full on-chain identity.
+ * New release-per-contract flows must use this instead of the singleton Fuji
+ * config helper above; equal token IDs are safe only when their sale/release
+ * addresses remain part of the request.
+ */
+export async function readReleasePrimarySale(provider, releaseAsset, account) {
+  const target = releaseAssetIdentity(releaseAsset);
+  await assertReleaseProvider(provider, target.chainId);
+  const saleData = saleIface.encodeFunctionData("sales", [target.tokenId]);
+  const saleResult = await provider.request({ method: "eth_call", params: [{ to: target.primarySaleAddress, data: saleData }, "latest"] });
+  const decoded = decodeSale(saleResult);
+  let purchased = 0n;
+  if (account && ethers.isAddress(account)) {
+    const walletData = saleIface.encodeFunctionData("walletPurchased", [target.tokenId, account]);
+    const walletResult = await provider.request({ method: "eth_call", params: [{ to: target.primarySaleAddress, data: walletData }, "latest"] });
+    purchased = BigInt(saleIface.decodeFunctionResult("walletPurchased", walletResult)[0]);
+  }
+  const unlimited = decoded.maxSupply === 0n;
+  const remaining = unlimited ? null : (decoded.maxSupply > decoded.sold ? decoded.maxSupply - decoded.sold : 0n);
+  return { ...decoded, purchased, remaining, unlimited, address: target.primarySaleAddress, releaseContractAddress: target.releaseContractAddress, chainId: target.chainId, tokenId: target.tokenId };
+}
+
 export async function ensureFujiNetwork(provider) {
   try {
     await assertFujiProvider(provider);
@@ -319,6 +343,25 @@ export async function collectEdition({ provider, from, tokenId, qty, priceWei })
     throw error;
   }
   return sendFujiTransaction({ provider, from, data, to: sale, value });
+}
+
+/** Sends a purchase only to the dedicated sale attached to the selected release. */
+export async function collectReleaseEdition({ provider, from, releaseAsset, qty, priceWei }) {
+  const target = releaseAssetIdentity(releaseAsset);
+  await assertReleaseProvider(provider, target.chainId);
+  if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
+  const quantity = BigInt(qty);
+  const value = purchaseCost(priceWei, quantity);
+  const data = encodePurchase(target.tokenId, quantity);
+  try {
+    await provider.request({ method: "eth_call", params: [{ from, to: target.primarySaleAddress, data, value: ethers.toQuantity(value), gas: SIMULATION_GAS }, "latest"] });
+  } catch (error) {
+    const explained = explainCollectError(error);
+    if (explained.state !== "unavailable") throw Object.assign(new Error(explained.message), { state: explained.state, cause: error });
+    throw error;
+  }
+  const hash = await provider.request({ method: "eth_sendTransaction", params: [{ from, to: target.primarySaleAddress, data, value: ethers.toQuantity(value) }] });
+  return { hash };
 }
 
 export { fujiExplorerUrl };

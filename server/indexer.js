@@ -1,5 +1,5 @@
 import { zeroAddress, retry } from "./indexer-utils.js";
-import { collectionIndexerConfig } from "./config.js";
+import { collectionIndexerConfig, primarySaleIndexerConfig, releaseIndexerConfig } from "./config.js";
 import { decodeMarketplaceLog } from "./marketplace-events.js";
 import { reconcileMarketplaceListing } from "./marketplace-reconcile.js";
 
@@ -19,6 +19,7 @@ function word(data, index) { const value = cleanHex(data).slice(index * 64, inde
 function uintWord(value) { return BigInt(`0x${value}`).toString(); }
 function topicAddress(value) { const hex = cleanHex(value); if (hex.length < 40) throw new Error("Indexed address is malformed."); return `0x${hex.slice(-40)}`.toLowerCase(); }
 function words(data) { const hex = cleanHex(data); if (hex.length % 64 !== 0) throw new Error("Event data is not word-aligned."); return hex.match(/.{64}/g) || []; }
+function addressWord(data, index) { return topicAddress(`0x${word(data, index)}`); }
 function arrayFromOffset(data, offsetWord) { const bytesOffset = Number(BigInt(`0x${offsetWord}`)); if (!Number.isSafeInteger(bytesOffset) || bytesOffset % 32 !== 0) throw new Error("ABI dynamic offset is invalid."); const start = bytesOffset / 32; const listLength = Number(BigInt(`0x${word(data, start)}`)); if (!Number.isSafeInteger(listLength) || listLength > 10000) throw new Error("ABI dynamic array length is invalid."); return Array.from({ length: listLength }, (_, index) => uintWord(word(data, start + 1 + index))); }
 
 export function decodeTransferLog(log, { chainId, blockTimestamp, eventTopics = {} }) {
@@ -105,6 +106,25 @@ export function decodeCollectionCreatedLog(log, { eventTopic }) {
   };
 }
 
+/** VoidReleaseFactory.ReleaseCreated(releaseContract, releaseKey, artist, sale, anchor, implementation, index, version). */
+export function decodeReleaseCreatedLog(log, { eventTopic }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  if (!eventTopic || topic !== String(eventTopic).toLowerCase()) return null;
+  if (!Array.isArray(log.topics) || log.topics.length < 4) throw new Error("ReleaseCreated requires release contract, release key and artist topics.");
+  return {
+    eventType: "ReleaseCreated",
+    factoryAddress: String(log.address || "").toLowerCase(),
+    releaseContractAddress: topicAddress(log.topics[1]),
+    releaseKey: `0x${cleanHex(log.topics[2]).padStart(64, "0")}`.toLowerCase(),
+    artistWallet: topicAddress(log.topics[3]),
+    primarySaleAddress: addressWord(log.data, 0),
+    provenanceAnchorAddress: addressWord(log.data, 1),
+    implementationAddress: addressWord(log.data, 2),
+    releaseIndex: uintWord(word(log.data, 3)),
+    implementationVersion: Number(BigInt(`0x${word(log.data, 4)}`)),
+  };
+}
+
 /** VoidPrimarySaleV2.Purchased(collection, tokenId, buyer, qty, paid, artistCut, platformCut). */
 export function decodePurchasedV2Log(log, { chainId, blockTimestamp, eventTopic }) {
   const topic = String(log?.topics?.[0] || "").toLowerCase();
@@ -160,9 +180,10 @@ export class BlockchainIndexer {
   // creation block in the same cycle; collections found earlier are reloaded once.
   async syncAll() {
     if (!this.collectionsLoaded) await this.loadRegisteredCollections();
+    if (!this.releasesLoaded) await this.loadRegisteredReleases();
     const results = [];
-    for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY")) results.push(await this.syncContract(config));
-    for (const config of this.configs.filter((item) => item.contractType !== "COLLECTION_FACTORY")) results.push(await this.syncContract(config));
+    for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY" || item.contractType === "RELEASE_FACTORY")) results.push(await this.syncContract(config));
+    for (const config of this.configs.filter((item) => item.contractType !== "COLLECTION_FACTORY" && item.contractType !== "RELEASE_FACTORY")) results.push(await this.syncContract(config));
     return results;
   }
 
@@ -178,6 +199,22 @@ export class BlockchainIndexer {
     return true;
   }
 
+  addRelease({ chainId, address, startBlock, factoryAddress }) {
+    const normalized = String(address).toLowerCase();
+    if (this.configs.some((item) => String(item.address).toLowerCase() === normalized)) return false;
+    this.configs.push(releaseIndexerConfig({ chainId, address: normalized, startBlock, skipMintOperators: this.saleOperators(), factoryAddress }));
+    this.logger.info?.("indexer.release.added", { chainId: Number(chainId), address: normalized, startBlock: Number(startBlock) });
+    return true;
+  }
+
+  addPrimarySale({ chainId, address, startBlock, tokenAddress }) {
+    const normalized = String(address).toLowerCase();
+    if (this.configs.some((item) => String(item.address).toLowerCase() === normalized)) return false;
+    this.configs.push(primarySaleIndexerConfig({ chainId, address: normalized, startBlock, tokenAddress }));
+    this.logger.info?.("indexer.primary-sale.added", { chainId: Number(chainId), address: normalized, tokenAddress: String(tokenAddress).toLowerCase(), startBlock: Number(startBlock) });
+    return true;
+  }
+
   async loadRegisteredCollections() {
     if (!this.store.listFactoryCollections) { this.collectionsLoaded = true; return; }
     for (const factory of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY")) {
@@ -185,6 +222,19 @@ export class BlockchainIndexer {
       for (const row of rows) this.addCollection({ chainId: factory.chainId, address: row.address, startBlock: Number(row.deployment_block_number ?? factory.startBlock ?? 0), factoryAddress: factory.address });
     }
     this.collectionsLoaded = true;
+  }
+
+  async loadRegisteredReleases() {
+    if (!this.store.listFactoryReleases) { this.releasesLoaded = true; return; }
+    for (const factory of this.configs.filter((item) => item.contractType === "RELEASE_FACTORY")) {
+      const rows = await this.store.listFactoryReleases({ chainId: Number(factory.chainId), factoryAddress: factory.address });
+      for (const row of rows) {
+        const startBlock = Number(row.deployment_block_number ?? factory.startBlock ?? 0);
+        if (row.primary_sale_address) this.addPrimarySale({ chainId: factory.chainId, address: row.primary_sale_address, startBlock, tokenAddress: row.release_contract_address });
+        this.addRelease({ chainId: factory.chainId, address: row.release_contract_address, startBlock, factoryAddress: factory.address });
+      }
+    }
+    this.releasesLoaded = true;
   }
 
   async syncContract(config) {
@@ -323,6 +373,40 @@ export class BlockchainIndexer {
       await this.store.registerCollection({ chainId, factoryAddress: created.factoryAddress, collectionAddress: created.collectionAddress, artistWallet: created.artistWallet, name: created.name, symbol: created.symbol, contractUri: created.contractUri, collectionIndex: created.collectionIndex, blockNumber: base.blockNumber, transactionHash: base.transactionHash });
       const added = this.addCollection({ chainId, address: created.collectionAddress, startBlock: base.blockNumber, factoryAddress: created.factoryAddress });
       return { duplicate: !inserted, eventType: "CollectionCreated", collection: created.collectionAddress, added };
+    }
+    if (config.contractType === "RELEASE_FACTORY") {
+      let created;
+      try {
+        created = decodeReleaseCreatedLog(log, { eventTopic: config.eventTopics?.ReleaseCreated });
+      } catch (error) {
+        await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
+        await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_RELEASE_FACTORY_EVENT", message: error.message, payload: log });
+        return { duplicate: false, malformed: true };
+      }
+      if (!created) {
+        const inserted = await this.store.recordEvent({ ...base, eventType: "UNKNOWN", eventData: {}, isMalformed: false });
+        return { duplicate: !inserted, eventType: "UNKNOWN" };
+      }
+      if (created.factoryAddress !== String(config.address).toLowerCase()) throw new Error("ReleaseCreated came from an unconfigured factory.");
+      const inserted = await this.store.recordEvent({ ...base, eventType: "ReleaseCreated", eventData: created, isMalformed: false });
+      if (!this.store.registerRelease) throw new Error("Indexer store cannot persist factory releases.");
+      await this.store.registerRelease({
+        chainId,
+        factoryAddress: created.factoryAddress,
+        releaseContractAddress: created.releaseContractAddress,
+        releaseKey: created.releaseKey,
+        artistWallet: created.artistWallet,
+        primarySaleAddress: created.primarySaleAddress,
+        provenanceAnchorAddress: created.provenanceAnchorAddress,
+        implementationAddress: created.implementationAddress,
+        releaseIndex: created.releaseIndex,
+        implementationVersion: created.implementationVersion,
+        blockNumber: base.blockNumber,
+        transactionHash: base.transactionHash,
+      });
+      const saleAdded = this.addPrimarySale({ chainId, address: created.primarySaleAddress, startBlock: base.blockNumber, tokenAddress: created.releaseContractAddress });
+      const added = this.addRelease({ chainId, address: created.releaseContractAddress, startBlock: base.blockNumber, factoryAddress: created.factoryAddress });
+      return { duplicate: !inserted, eventType: "ReleaseCreated", release: created.releaseContractAddress, added, saleAdded };
     }
     if (config.contractType === "PRIMARY_SALE_V2") {
       let purchased;
