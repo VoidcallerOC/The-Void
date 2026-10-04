@@ -132,29 +132,43 @@ describe("Artist Studio", () => {
     expect(draft.repo.saveRelease).not.toHaveBeenCalled();
   });
 
-  it("refuses to archive the original mainnet VOIDCALLER catalog but still archives a Fuji release with that title", async () => {
-    const legacy = { id: "voidcaller-legacy-genesis", artist_id: "artist-1", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-09-01T00:00:00.000Z") };
+  it("refuses to archive a published mintable release and still archives one that is not mintable yet", async () => {
+    const publishedAt = new Date("2026-10-01T00:00:00.000Z");
+    const legacy = { id: "voidcaller-legacy-genesis", artist_id: "artist-1", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt };
     const bySlug = service({ rows: [legacy] });
-    await expect(bySlug.instance.updateRelease({ request, releaseId: legacy.id, input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
+    await expect(bySlug.instance.updateRelease({ request, releaseId: legacy.id, input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
     expect(bySlug.repo.saveRelease).not.toHaveBeenCalled();
     expect(bySlug.db.query.mock.calls.map(([sql]) => String(sql)).some((sql) => /UPDATE editions SET status = 'ARCHIVED'/i.test(sql))).toBe(false);
 
     const byContract = service({ rows: [{ ...legacy, id: "release-copy", slug: "not-the-legacy-slug", title: "VOIDCALLER" }] });
     byContract.db.query.mockImplementation(async (sql) => {
-      const text = String(sql);
-      if (/FROM editions/i.test(text) && /JOIN contracts/i.test(text)) return { rows: [{ chain_id: 43114, contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee" }] };
+      if (/FROM editions/i.test(sql)) return { rows: [{ release_id: "release-copy", status: "PUBLISHED", chain_id: 43114, contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", token_id: "1" }] };
       return { rows: [{ ...legacy, id: "release-copy", slug: "not-the-legacy-slug", title: "VOIDCALLER" }] };
     });
-    await expect(byContract.instance.updateRelease({ request, releaseId: "release-copy", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
+    await expect(byContract.instance.updateRelease({ request, releaseId: "release-copy", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
     expect(byContract.repo.saveRelease).not.toHaveBeenCalled();
 
-    const fuji = service({ rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-10-01T00:00:00.000Z") }] });
+    const fuji = service({ rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] });
     fuji.db.query.mockImplementation(async (sql) => {
-      const text = String(sql);
-      if (/FROM editions/i.test(text) && /JOIN contracts/i.test(text)) return { rows: [{ chain_id: 43113, contract_address: certifiedFujiRelease }] };
-      return { rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: new Date("2026-10-01T00:00:00.000Z") }] };
+      if (/FROM editions/i.test(sql)) return { rows: [{ release_id: "fuji-voidcaller", status: "PUBLISHED", chain_id: 43113, contract_address: certifiedFujiRelease, token_id: "9", buyable_sale: false }] };
+      return { rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] };
     });
-    await expect(fuji.instance.updateRelease({ request, releaseId: "fuji-voidcaller", input: { status: "ARCHIVED" } })).resolves.toMatchObject({ status: "ARCHIVED" });
+    await expect(fuji.instance.updateRelease({ request, releaseId: "fuji-voidcaller", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
+    expect(fuji.repo.saveRelease).not.toHaveBeenCalled();
+
+    const saleOnly = service({ rows: [{ id: "fuji-sale", artist_id: "artist-1", slug: "open-sale", title: "Open sale", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] });
+    saleOnly.db.query.mockImplementation(async (sql) => {
+      if (/FROM editions/i.test(sql)) return { rows: [{ release_id: "fuji-sale", status: "DRAFT", chain_id: 43113, contract_address: certifiedFujiRelease, token_id: null, buyable_sale: true }] };
+      return { rows: [{ id: "fuji-sale", artist_id: "artist-1", slug: "open-sale", title: "Open sale", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] };
+    });
+    await expect(saleOnly.instance.updateRelease({ request, releaseId: "fuji-sale", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
+
+    const pending = service({ rows: [{ id: "fuji-pending", artist_id: "artist-1", slug: "not-out-yet", title: "Not out yet", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] });
+    pending.db.query.mockImplementation(async (sql) => {
+      if (/FROM editions/i.test(sql)) return { rows: [{ release_id: "fuji-pending", status: "DRAFT", chain_id: 43113, contract_address: certifiedFujiRelease, token_id: "9", buyable_sale: false }] };
+      return { rows: [{ id: "fuji-pending", artist_id: "artist-1", slug: "not-out-yet", title: "Not out yet", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] };
+    });
+    await expect(pending.instance.updateRelease({ request, releaseId: "fuji-pending", input: { status: "ARCHIVED" } })).resolves.toMatchObject({ status: "ARCHIVED" });
   });
 
   it("derives a title-only release slug and resolves collisions without client input", async () => {
