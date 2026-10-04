@@ -1,5 +1,5 @@
 import { isLegacyMainnetCatalogRelease, isLegacyMainnetEdition } from "./legacy-genesis.js";
-import { isNonPublicTestRecord, isSummitDemoRecord } from "./summit-demo.js";
+import { isNonPublicTestRecord, isSummitDemoRecord, isWithdrawnPublicListing } from "./summit-demo.js";
 
 // Studio's release picker and "Publishing as" list hide the same test and
 // certification records the public catalog already hides (test profiles such
@@ -75,6 +75,7 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
     rememberTitle(retiredByArtistName, normalizedText(artist?.name), title);
   }
   const live = releases.filter((release) => {
+    if (isWithdrawnPublicListing(release)) return false;
     if (normalizedText(release.status) === "archived") return false;
     return !retiredByArchivedTitle(release, artistFor(release), retiredByArtistId, retiredByArtistName);
   });
