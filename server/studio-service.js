@@ -11,6 +11,7 @@ import { assertProvenanceConsistency, persistPublicationProof, publicationView }
 import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
 import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
+import { isLegacyMainnetCatalogRelease, isLegacyMainnetEdition } from "../src/lib/legacy-genesis.js";
 import { releaseIsMintable } from "../src/lib/studio-release-choices.js";
 
 // Full-length audio the browser may upload straight to private storage. WAV
@@ -192,7 +193,7 @@ export class ArtistStudioService {
       this.db.query("SELECT a.id, a.slug, a.display_name, a.status, ao.owner_wallet, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY a.display_name LIMIT 100", [owner]),
       this.db.query("SELECT r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY r.created_at DESC LIMIT 500", [owner]),
       // token_id only for PUBLISHED editions: a draft's token does not exist on-chain yet.
-      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
     ]);
     return { artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows };
@@ -433,6 +434,9 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     assertPublishedMayChange(release.status, input, "Published releases cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, release.status, "release");
+    if (status === "ARCHIVED" && await this.legacyCatalogStaysOnSite(release)) {
+      throw new ApiError(409, "LEGACY_CATALOG_LOCKED", "The original mainnet VOIDCALLER catalog stays on the site.");
+    }
     if (status === "ARCHIVED" && await this.collectorsCanStillBuy(release)) {
       throw new ApiError(409, "MINTABLE_RELEASE_LOCKED", "A published release collectors can still buy stays on the site.");
     }
@@ -510,14 +514,22 @@ export class ArtistStudioService {
     return saved;
   }
 
-  // Published and mintable: an on-chain token (token id only counts once the
-  // edition is published), a primary sale collectors can buy, or the original
-  // mainnet catalog. A published release that is not mintable yet can still
-  // be archived.
+  // The seeded C-Chain catalog (id/slug voidcaller-legacy-genesis, or an
+  // edition on that mainnet contract). Kept as its own lock, ahead of the
+  // broader mintable rule.
+  async legacyCatalogStaysOnSite(release) {
+    if (isLegacyMainnetCatalogRelease(release)) return true;
+    const { rows } = await this.db.query("SELECT c.chain_id, c.address AS contract_address FROM editions e JOIN contracts c ON c.id = e.contract_id WHERE e.release_id = $1", [release.id]);
+    return rows.some((row) => isLegacyMainnetEdition(row));
+  }
+
+  // Any other published release that already has an on-chain token or a
+  // primary sale collectors can buy. A published release that is not
+  // mintable yet can still be archived. The legacy catalog is not decided
+  // here; legacyCatalogStaysOnSite already rejected it.
   async collectorsCanStillBuy(release) {
-    if (releaseIsMintable(release)) return true;
     const { rows } = await this.db.query("SELECT e.release_id, e.status, e.application_metadata, c.chain_id, c.address AS contract_address, CASE WHEN upper(e.status) = 'PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id = e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e LEFT JOIN contracts c ON c.id = e.contract_id WHERE e.release_id = $1", [release.id]);
-    return releaseIsMintable(release, rows, { editionsAreScoped: true });
+    return rows.some((row) => releaseIsMintable({ id: row.release_id || release.id }, [row], { editionsAreScoped: true }));
   }
 
   // Same effect as the archive migrations: lifecycle only. Tokens, sales,
