@@ -88,6 +88,7 @@ const issuerRole = ethers.id("ISSUER_ROLE");
 const defaultAdminRole = ethers.ZeroHash;
 const grantIssuerTx = await release.grantRole(issuerRole, saleAddress);
 const grantIssuerReceipt = await receiptOf(grantIssuerTx, "ISSUER_ROLE grant");
+if ((await sale.owner()).toLowerCase() !== deployerAdmin.toLowerCase()) throw new Error("Primary-sale owner is not the expected deployer before Safe handoff.");
 const transferSaleTx = await sale.transferOwnership(safe);
 const transferSaleReceipt = await receiptOf(transferSaleTx, "primary-sale Safe ownership handoff");
 const grantAdminTx = await release.grantRole(defaultAdminRole, safe);
