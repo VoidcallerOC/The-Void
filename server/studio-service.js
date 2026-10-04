@@ -11,6 +11,7 @@ import { assertProvenanceConsistency, persistPublicationProof, publicationView }
 import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
 import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
+import { isLegacyMainnetCatalogRelease, isLegacyMainnetEdition } from "../src/lib/legacy-genesis.js";
 
 // Full-length audio the browser may upload straight to private storage. WAV
 // masters are far larger than an API request body can carry.
@@ -432,6 +433,9 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     assertPublishedMayChange(release.status, input, "Published releases cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, release.status, "release");
+    if (status === "ARCHIVED" && await this.legacyCatalogStaysOnSite(release)) {
+      throw new ApiError(409, "LEGACY_CATALOG_LOCKED", "The original mainnet VOIDCALLER catalog stays on the site.");
+    }
     const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
@@ -504,6 +508,15 @@ export class ArtistStudioService {
     const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, version: Number(experience.version || 1) + 1, status });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_UPDATED", subjectType: "experience", subjectId: experience.id });
     return saved;
+  }
+
+  // The seeded C-Chain catalog (id/slug voidcaller-legacy-genesis, or an
+  // edition on that mainnet contract). Other published releases, including
+  // a Fuji release titled VOIDCALLER, can still be archived.
+  async legacyCatalogStaysOnSite(release) {
+    if (isLegacyMainnetCatalogRelease(release)) return true;
+    const { rows } = await this.db.query("SELECT c.chain_id, c.address AS contract_address FROM editions e JOIN contracts c ON c.id = e.contract_id WHERE e.release_id = $1", [release.id]);
+    return rows.some((row) => isLegacyMainnetEdition(row));
   }
 
   // Same effect as the archive migrations: lifecycle only. Tokens, sales,

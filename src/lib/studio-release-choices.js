@@ -1,3 +1,4 @@
+import { isLegacyMainnetCatalogRelease } from "./legacy-genesis.js";
 import { isNonPublicTestRecord, isSummitDemoRecord } from "./summit-demo.js";
 
 // Studio's release picker and "Publishing as" list hide the same test and
@@ -41,4 +42,11 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
   // Keep the API's order for the survivors.
   const keep = new Set([...chosen.values()].map((record) => record.release.id));
   return pool.filter((record) => keep.has(record.release.id));
+}
+
+// "Take this off the site" is for a release this artist published on Fuji.
+// The original mainnet VOIDCALLER catalog stays on the site.
+export function canTakeReleaseOffTheSite(release, editions = []) {
+  if (String(release?.status || "").trim().toLowerCase() !== "published") return false;
+  return !isLegacyMainnetCatalogRelease(release, editions);
 }

@@ -111,6 +111,21 @@ export function isLegacyMainnetEdition(edition) {
   });
 }
 
+// The live original catalog: release id or slug voidcaller-legacy-genesis,
+// or any edition of that release on the legacy mainnet contract. Title is
+// not an identity. A later Fuji release can be named VOIDCALLER.
+export function isLegacyMainnetCatalogRelease(release, editions = []) {
+  if (!release || typeof release !== "object") return false;
+  const id = String(release.id ?? "").trim();
+  const slug = String(release.slug ?? "").trim();
+  if (id === LEGACY_ALBUM_ID || slug === LEGACY_ALBUM_ID) return true;
+  if (!id) return false;
+  return editions.some((edition) => {
+    const editionReleaseId = String(edition?.releaseId ?? edition?.release_id ?? "").trim();
+    return editionReleaseId === id && isLegacyMainnetEdition(edition);
+  });
+}
+
 export function publicLegacyTracks() {
   return LEGACY_TOKENS.map((track) => ({
     n: track.n,
