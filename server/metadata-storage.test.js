@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canonicalMetadata, PinataMetadataStorage } from "./metadata-storage.js";
+import { canonicalMetadata, PinataMetadataStorage, resolveTrackDescription } from "./metadata-storage.js";
 
 const input = {
   artist: { name: "Voidcaller" },
@@ -10,6 +10,38 @@ const input = {
   artwork: "https://cdn.example/summit.png",
   releaseType: "EP",
 };
+
+describe("track description fallback", () => {
+  it("uses the release description when the track description is blank", () => {
+    expect(resolveTrackDescription("", "The space between Silence and Sound")).toBe("The space between Silence and Sound");
+  });
+
+  it("lets a non-empty track description win", () => {
+    expect(resolveTrackDescription("A different description for this song", "The space between Silence and Sound")).toBe("A different description for this song");
+  });
+
+  it("returns null when both descriptions are empty", () => {
+    expect(resolveTrackDescription("", "")).toBeNull();
+  });
+
+  it("resumes the release fallback after a custom track description is cleared", () => {
+    expect(resolveTrackDescription("   ", "The space between Silence and Sound")).toBe("The space between Silence and Sound");
+  });
+
+  it("uses the current release description when a track has no custom description", () => {
+    expect(resolveTrackDescription(null, "An updated release description")).toBe("An updated release description");
+  });
+
+  it("does not mutate the release description while building track metadata", () => {
+    const release = { title: "The Record", description: "The space between Silence and Sound" };
+    const edition = { title: "Track One", description: "   ", supply: "10" };
+    const originalRelease = structuredClone(release);
+    const generated = canonicalMetadata({ release, edition, artist: { name: "Voidcaller" } });
+    expect(generated.metadata.description).toBe("The space between Silence and Sound");
+    expect(release).toEqual(originalRelease);
+    expect(release.description).toBe("The space between Silence and Sound");
+  });
+});
 
 describe("metadata storage", () => {
   it("generates deterministic canonical metadata from domain fields", () => {

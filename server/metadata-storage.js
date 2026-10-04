@@ -9,6 +9,12 @@ function text(value, max = 20000) {
   return result ? result.slice(0, max) : null;
 }
 
+export function resolveTrackDescription(trackDescription, releaseDescription) {
+  const track = text(trackDescription);
+  if (track) return track;
+  return text(releaseDescription);
+}
+
 function providerFailure(response, body) {
   let parsed = null;
   try { parsed = JSON.parse(body); } catch { /* provider may return plain text */ }
@@ -45,7 +51,7 @@ export function canonicalMetadata(input) {
   const edition = input.edition;
   const metadata = {
     name: text(edition.title, 256) || text(release.title, 256),
-    description: text(edition.description || release.description, 20000),
+    description: resolveTrackDescription(edition.description, release.description),
     image: text(input.artwork || release.artwork || edition.artwork, 2048),
     artist: text(input.artist?.name || input.artist?.display_name, 256),
     release: {

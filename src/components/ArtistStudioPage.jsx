@@ -695,7 +695,8 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Track details</h2>
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}. {editionId ? "Editing this track." : releaseId ? "Saving adds a new track on this release. It does not change the songs already on it." : ""}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
-          <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
+          <TextField title="Track description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
+          <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>Optional. If left blank, this track will use the release description.</p>
           <ArtworkField title="Track artwork (optional)" helper="Leave this empty and the track uses the release artwork; only upload here if this track needs a different image." value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
           <div style={{ marginTop: 16 }}>
             <p style={{ margin: "0 0 8px" }}>Public preview (~30 seconds) — played by wallets and marketplaces from the token metadata</p>
