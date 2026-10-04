@@ -5,6 +5,7 @@ import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } from "../domain/models.js";
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
+import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, fujiPrimarySaleAddress, weiToAvax, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
@@ -178,13 +179,13 @@ export function ArtistStudioPage() {
     studioFetch("/studio/catalog", { headers })
       .then((payload) => {
         if (cancelled) return;
-        const catalog = mapPublishedCatalog(payload);
+        const catalog = studioCatalogForConnectedWallet(mapPublishedCatalog(payload), wallet.account);
         setOwnedStudioCatalog(catalog);
         if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
       })
       .catch((error) => { if (!cancelled) setNotice(error.message); });
     return () => { cancelled = true; };
-  }, [canUseStudio, headers, requestedReleaseId]);
+  }, [canUseStudio, headers, requestedReleaseId, wallet.account]);
 
   useEffect(() => {
     let cancelled = false;
