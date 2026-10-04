@@ -231,7 +231,14 @@ export const VC_AUDIO = {
     }
   },
 
-  play(index) {
+  async play(index) {
+    const track = this.queue?.[typeof index === "number" ? index : this.idx];
+    if (track?.protectedMedia && this.isProtectedHolder(track)) {
+      if (!this.hasAuthorizedSource(track)) {
+        if (!this.mediaAuthorization?.wallet) throw new Error("Authenticate the holder wallet before playing protected media.");
+        await this.resolveProtectedSource(track);
+      }
+    }
     if (typeof index === "number") this.setTrack(index);
     else {
       this.ensure();

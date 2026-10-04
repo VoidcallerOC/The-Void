@@ -49,6 +49,27 @@ describe("audio gating", () => {
     expect(VC_AUDIO.isPreview(released)).toBe(true);
   });
 
+  it("awaits the protected grant before direct audio.play starts a holder track", async () => {
+    VC_AUDIO.setOwnership([1]);
+    VC_AUDIO.setMediaAuthorization({ wallet: "0xabc", authHeaders: { authorization: "Bearer session" } });
+    VC_AUDIO.mediaGrants.set("voidcaller-full-ep:AUDIO:01", { grantId: "opaque-grant", accessUrl: "/api/media/opaque-grant", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    VC_AUDIO.el = fakeElement();
+    VC_AUDIO.setQueue([released], "direct-holder-q");
+
+    await VC_AUDIO.play(0);
+
+    expect(VC_AUDIO.el.src).toBe("/api/media/opaque-grant");
+    expect(VC_AUDIO.el.src).not.toBe(released.previewSrc);
+  });
+
+  it("does not start direct protected playback before holder authentication", async () => {
+    VC_AUDIO.setOwnership([1]);
+    VC_AUDIO.setQueue([released], "unauthenticated-holder-q");
+
+    await expect(VC_AUDIO.play(0)).rejects.toThrow(/Authenticate the holder wallet/);
+    expect(VC_AUDIO.el).toBeNull();
+  });
+
   it("keeps the public preview for a visitor without holder authorization", () => {
     expect(VC_AUDIO.srcFor(released)).toBe(released.previewSrc);
   });
