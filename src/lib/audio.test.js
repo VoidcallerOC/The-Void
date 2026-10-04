@@ -6,6 +6,7 @@ const released = {
   title: "The Hollow",
   tokenId: 1,
   previewSrc: "/assets/audio-preview/ep1-01-the-hollow-preview.mp3",
+  preview: true,
   protectedMedia: { experienceId: "voidcaller-full-ep", mediaType: "AUDIO" },
 };
 const unreleased = { n: "01", title: "Warning Signs", preview: true, src: "/assets/audio-preview/ep2-01.mp3" };
