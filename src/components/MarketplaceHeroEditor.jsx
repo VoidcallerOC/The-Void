@@ -66,7 +66,7 @@ export function MarketplaceHeroEditor({ current, onSaved }) {
             {state.busy ? "Uploading…" : "Upload image"}
             <input type="file" accept={ARTWORK_ACCEPT} disabled={state.busy} aria-label="Upload header image" onChange={(event) => { void upload(event.target.files?.[0]); event.target.value = ""; }} style={{ display: "none" }} />
           </label>
-          <p className="vc-card-meta" style={{ margin: 0 }}>PNG, JPEG, GIF or WebP, up to 3 MB.</p>
+          <p className="vc-card-meta" style={{ margin: 0 }}>PNG, JPEG, GIF or WebP, up to 3 MB. Saved as a site file, not uploaded to IPFS.</p>
           <label htmlFor="market-hero-artwork" className="vc-card-meta" style={{ marginTop: 6 }}>Or paste a link (ipfs://, https:// or /assets/ path)</label>
           <input id="market-hero-artwork" value={value} onChange={(event) => setValue(event.target.value)} placeholder="ipfs://…" style={{ padding: 10, background: "var(--vc-void)", color: "var(--vc-bone)", border: "1px solid var(--vc-ash)" }} />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

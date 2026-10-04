@@ -21,6 +21,8 @@ describe("marketplace hero artwork", () => {
 
   it("resolves only the configured artwork, with no fallback image", () => {
     expect(marketplaceHeroImage({ heroArtwork: "ipfs://bafybeidedfcwz6qykwzqoqcs37zsqbjj3wpadyytee4didw2ocnur7veni" })).toBe("https://gateway.pinata.cloud/ipfs/bafybeidedfcwz6qykwzqoqcs37zsqbjj3wpadyytee4didw2ocnur7veni");
+    expect(marketplaceHeroImage({ heroArtwork: "/assets/voidcaller_art_6.png" })).toBe("/assets/voidcaller_art_6.png");
+    expect(marketplaceHeroImage({ heroArtwork: "/assets/marketplace-heroes/marketplace-hero-0123456789abcdef.jpg" })).toBe("/api/marketplace/heroes/marketplace-hero-0123456789abcdef.jpg");
     expect(marketplaceHeroImage({ heroArtwork: null })).toBeNull();
     expect(marketplaceHeroImage(null)).toBeNull();
   });

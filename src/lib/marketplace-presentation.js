@@ -19,7 +19,19 @@ export function validateMarketplaceArtwork(value) {
   return { ok: false, error: "Use an https:// image URL, an ipfs:// URI, or a /assets/ image path." };
 }
 
+const LOCAL_HERO_FILE = /^\/assets\/marketplace-heroes\/(marketplace-hero-[a-f0-9]{16}\.(?:png|jpg|gif|webp))$/;
+
 export function marketplaceHeroImage(presentation) {
   const checked = validateMarketplaceArtwork(presentation?.heroArtwork);
-  return checked.ok && checked.value ? ipfsToHttp(checked.value) : null;
+  if (!checked.ok || !checked.value) return null;
+  const local = LOCAL_HERO_FILE.exec(checked.value);
+  if (local) {
+    // Uploaded header files live on the site (public/assets/marketplace-heroes)
+    // and are served by the API, which is what the Vercel host proxies. They
+    // are not Pinata gateway URLs.
+    const configured = typeof import.meta !== "undefined" ? import.meta.env?.VITE_API_ORIGIN : "";
+    const base = configured ? String(configured).replace(/\/$/, "") : "";
+    return `${base}/api/marketplace/heroes/${local[1]}`;
+  }
+  return ipfsToHttp(checked.value);
 }

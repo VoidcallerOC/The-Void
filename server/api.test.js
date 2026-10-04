@@ -318,3 +318,27 @@ describe("API service trust boundaries", () => {
     expect(() => limiter.check("wallet")).toThrow(ApiError);
   });
 });
+
+describe("marketplace hero file route", () => {
+  it("serves a stored header image without JSON wrapping", async () => {
+    const body = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const marketplacePresentation = { openHero: vi.fn().mockResolvedValue({ body, contentType: "image/png", filename: "marketplace-hero-0123456789abcdef.png" }) };
+    const handler = createApiHandler({ service: {}, marketplacePresentation });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/marketplace/heroes/marketplace-hero-0123456789abcdef.png" }), response);
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/png");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(Buffer.compare(response.body, body)).toBe(0);
+    expect(marketplacePresentation.openHero).toHaveBeenCalledWith({ filename: "marketplace-hero-0123456789abcdef.png" });
+  });
+
+  it("returns not found when the header file is missing", async () => {
+    const marketplacePresentation = { openHero: vi.fn().mockRejectedValue(new ApiError(404, "HERO_FILE_NOT_FOUND", "Marketplace hero file was not found.")) };
+    const handler = createApiHandler({ service: {}, marketplacePresentation });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/marketplace/heroes/nope.png" }), response);
+    expect(response.status).toBe(404);
+    expect(JSON.parse(response.body).error.code).toBe("HERO_FILE_NOT_FOUND");
+  });
+});
