@@ -55,6 +55,20 @@ export function positiveBigInt(value, field) {
   return parsed;
 }
 
+// Studio supply screen: a positive whole number is a hard cap. 0, blank, or
+// null is the open-edition signal (maxSupply 0, mint until the sale ends).
+// undefined means the client did not send a supply. Callers must keep an
+// existing hard cap in that case instead of turning it into an open edition.
+export function editionQuantity(value, field = "edition.quantity") {
+  if (value === undefined) return undefined;
+  if (value === null || String(value).trim() === "") return "0";
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) {
+    throw new PersistenceValidationError(`${field} must be a whole number. Use 0, or leave it blank, for an open edition.`, field);
+  }
+  return BigInt(text).toString();
+}
+
 export function enumValue(value, field, values) {
   if (!values.includes(value)) throw new PersistenceValidationError(`${field} must be one of: ${values.join(", ")}.`, field);
   return value;

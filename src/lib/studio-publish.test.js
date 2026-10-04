@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "./studio-publish.js";
+import { ethers } from "ethers";
+import { encodeCreateFujiEdition } from "./fuji-release.js";
+import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "./studio-publish.js";
 
 const validInput = {
   release: { title: "Voidcaller Full EP", type: "ep" },
@@ -34,6 +36,21 @@ describe("Release-native Studio publish validation", () => {
     expect(validateReleasePublish({ ...validInput, supply: "0" }).supply).toBe("0");
     expect(() => validateReleasePublish({ ...validInput, supply: "-1" })).toThrow(/unlimited/);
     expect(() => validateReleasePublish({ ...validInput, supply: "1.5" })).toThrow(/unlimited/);
+  });
+
+  it("sends createEdition maxSupply 0 for an open edition and a positive cap otherwise", () => {
+    const payout = "0x0000000000000000000000000000000000000001";
+    const iface = new ethers.Interface(["function createEdition(bytes32,bytes32,uint256,string,address,uint96)"]);
+    for (const supply of ["", "0", 0, null]) {
+      const quantity = normalizeEditionSupply(supply);
+      expect(quantity).toBe("0");
+      const encoded = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: quantity, metadataUri: "ipfs://test", payout, royaltyBps: 0 });
+      expect(iface.decodeFunctionData("createEdition", encoded.data)[2]).toBe(0n);
+    }
+    const capped = normalizeEditionSupply("25");
+    expect(capped).toBe("25");
+    const encoded = encodeCreateFujiEdition({ releaseId: "fuji-test-release-001", editionId: "fuji-test-edition-001", maxSupply: capped, metadataUri: "ipfs://test", payout, royaltyBps: 0 });
+    expect(iface.decodeFunctionData("createEdition", encoded.data)[2]).toBe(25n);
   });
 
   it("does not describe a release as fully published while provenance is pending or failed", () => {
