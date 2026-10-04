@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profileFormFromRow, profilePayload, profileSocials, safeHttpUrl } from "./artist-profile.js";
+import { portfolioImageSrc, profileFormFromRow, profilePayload, profileSocials, safeHttpUrl } from "./artist-profile.js";
 
 describe("artist profile", () => {
   it("only ever allows http(s) links", () => {
@@ -34,4 +34,12 @@ describe("artist profile", () => {
     expect(() => profilePayload({ ...form, name: "  " })).toThrow(/name is required/);
     expect(() => profilePayload({ ...form, links: { ...form.links, instagram: "javascript:alert(1)" } })).toThrow(/Instagram must be a full http\(s\) link/);
   });
+
+  it("serves a new portfolio image from the site and still resolves an older ipfs URI", () => {
+    expect(portfolioImageSrc("/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png")).toBe("/api/artists/portfolio/artist-portfolio-0123456789abcdef.png");
+    expect(portfolioImageSrc("ipfs://bafyavatar")).toBe("https://gateway.pinata.cloud/ipfs/bafyavatar");
+    expect(portfolioImageSrc("/assets/voidcaller_art_4.png")).toBe("/assets/voidcaller_art_4.png");
+    expect(portfolioImageSrc("")).toBe("");
+  });
 });
+

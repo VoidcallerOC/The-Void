@@ -4,14 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WalletCtx } from "../lib/wallet-context.js";
 
 const studioFetch = vi.fn();
-vi.mock("../lib/studio-api.js", async (importOriginal) => ({ ...(await importOriginal()), studioFetch: (...args) => studioFetch(...args) }));
+const uploadStudioPortfolioImage = vi.fn();
+vi.mock("../lib/studio-api.js", async (importOriginal) => ({ ...(await importOriginal()), studioFetch: (...args) => studioFetch(...args), uploadStudioPortfolioImage: (...args) => uploadStudioPortfolioImage(...args) }));
 const { ArtistProfileEditor } = await import("./ArtistProfileEditor.jsx");
 
 const ownerRow = { id: "artist-a", display_name: "Voidcaller", bio: "Old bio", website_url: null, social_links: {}, profile_metadata: { profileArtwork: "ipfs://avatar", keep: true } };
 const signedIn = { connected: true, authenticated: true, authHeaders: { authorization: "Bearer session" } };
 const renderWith = (wallet, props = {}) => render(<WalletCtx.Provider value={wallet}><ArtistProfileEditor artistId="artist-a" {...props} /></WalletCtx.Provider>);
 
-afterEach(() => { cleanup(); studioFetch.mockReset(); });
+afterEach(() => { cleanup(); studioFetch.mockReset(); uploadStudioPortfolioImage.mockReset(); });
 
 describe("artist profile editor", () => {
   it("is hidden from visitors who are not signed in", async () => {
@@ -41,6 +42,20 @@ describe("artist profile editor", () => {
     expect(path).toBe("/studio/artists/artist-a");
     expect(options).toMatchObject({ method: "PATCH", payload: { name: "Voidcaller", bio: "New bio", links: { x: "https://x.com/vc" }, profileArtwork: "ipfs://avatar", profileMetadata: { keep: true } } });
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ bio: "New bio", socials: [{ name: "X", href: "https://x.com/vc" }] }));
+  });
+
+  it("uploads the profile picture through the site portfolio route", async () => {
+    studioFetch.mockResolvedValue({ artists: [ownerRow] });
+    uploadStudioPortfolioImage.mockResolvedValue({ uri: "/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png" });
+    renderWith(signedIn);
+    fireEvent.click(await screen.findByText("Edit profile"));
+    const input = document.querySelector('input[type="file"]');
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "face.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(uploadStudioPortfolioImage).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-a", file })));
+    expect(await screen.findByAltText("Profile picture preview")).toBeTruthy();
+    expect(screen.getByAltText("Profile picture preview").getAttribute("src")).toBe("/api/artists/portfolio/artist-portfolio-0123456789abcdef.png");
+    expect(studioFetch.mock.calls.some(([path]) => String(path).includes("/artwork"))).toBe(false);
   });
 
   describe("standalone edit page mode", () => {

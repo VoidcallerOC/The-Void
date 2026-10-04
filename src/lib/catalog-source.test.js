@@ -159,6 +159,14 @@ describe("catalog source", () => {
     expect(artist.handle).toBe("VoidcallerOC");
   });
 
+  it("serves a saved portfolio image from the site instead of IPFS", () => {
+    const file = "artist-portfolio-0123456789abcdef.png";
+    const catalog = mapPublishedCatalog({ artists: [{ id: "artist-a", slug: "a", display_name: "A", profile_metadata: { profileArtwork: `/assets/artist-portfolio/${file}`, banner: `/assets/artist-portfolio/${file}` } }] });
+    expect(catalog.artists[0].avatar).toBe(`/api/artists/portfolio/${file}`);
+    expect(catalog.artists[0].banner).toBe(`/api/artists/portfolio/${file}`);
+    expect(catalog.artists[0].savedProfile.avatar).toBe(`/api/artists/portfolio/${file}`);
+  });
+
   it("keeps a built-in artist's artwork when no profile image was saved", () => {
     const published = mapPublishedCatalog({ artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", bio: "Saved bio" }] });
     const artist = withPublishedArtistProfiles(VOIDCALLER_CATALOG, published).artists.find((item) => item.id === "voidcaller");
