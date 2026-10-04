@@ -107,6 +107,17 @@ function certifiedTokenId(releaseSlug, editionSlug) {
   const tokenId = BigInt(digest);
   return tokenId === 0n ? 1n : tokenId;
 }
+function releaseCloneTokenId(editionSlug) {
+  const editionId = ethers.encodeBytes32String(requiredText(editionSlug, "edition.slug", { max: 31 }));
+  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", editionId]));
+  const tokenId = BigInt(digest);
+  return tokenId === 0n ? 1n : tokenId;
+}
+function releaseKey(value, field = "releaseKey") {
+  const key = requiredText(value, field, { max: 66 }).toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(key) || /^0x0{64}$/.test(key)) throw new ApiError(400, "INVALID_RELEASE_KEY", `${field} must be a non-zero bytes32 value.`);
+  return key;
+}
 
 function lifecycle(value, field = "status") { return enumValue(String(value || "").toUpperCase(), field, LIFECYCLE); }
 // Taking a release off the public site is the only step backward from PUBLISHED.
@@ -214,6 +225,45 @@ export class ArtistStudioService {
     await this.repository.appendAuditEvent({ eventType, actorWallet: identity.wallet, subjectType, subjectId, requestId: request.requestId || null, payload });
   }
 
+  // A verified binding is the source of truth for all new release-contract flows.
+  // Legacy releases have no row and continue to use the certified shared contract.
+  async releaseContractBinding(releaseId) {
+    const { rows } = await this.db.query("SELECT rc.*, c.address AS release_contract_address FROM release_contracts rc JOIN contracts c ON c.id=rc.release_contract_id WHERE rc.release_id=$1 AND rc.status IN ('DEPLOYED','VERIFIED') ORDER BY rc.implementation_version DESC, rc.created_at DESC LIMIT 1", [releaseId]);
+    const binding = rows[0];
+    // Treat any incomplete row as absent. This protects legacy records and makes
+    // the release-contract path opt-in only after the full factory tuple exists.
+    if (!binding?.release_contract_id || !ethers.isAddress(binding.release_contract_address || "") || !Number.isSafeInteger(Number(binding.chain_id)) || Number(binding.chain_id) <= 0 || !/^0x[0-9a-f]{64}$/i.test(String(binding.release_key || ""))) return null;
+    return binding;
+  }
+
+  /**
+   * Binds an artist-owned Studio release to an already-indexed factory deployment.
+   * Deployment remains an external/Safe operation; the Studio accepts no arbitrary
+   * addresses and only persists the immutable tuple emitted by the configured factory.
+   */
+  async bindReleaseContract({ request, releaseId, input = {} }) {
+    const identity = await this.identity(request);
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot bind a contract for this release.");
+    if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_CONTRACT_LOCKED", "A published release cannot be rebound to a different contract.");
+    const selectedChainId = chainId(input.chainId, "chainId");
+    const selectedReleaseAddress = contractAddress(input.releaseContractAddress, "releaseContractAddress");
+    const selectedReleaseKey = releaseKey(input.releaseKey);
+    const indexed = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND release_contract_address=$2 AND release_key=$3 AND lower(artist_wallet)=lower($4) LIMIT 1", [selectedChainId, selectedReleaseAddress, selectedReleaseKey, identity.wallet]);
+    const deployment = indexed.rows[0];
+    if (!deployment) throw new ApiError(409, "RELEASE_DEPLOYMENT_NOT_INDEXED", "This release contract is not a confirmed factory deployment for the authenticated artist.");
+    const saved = await this.repository.inTransaction(async (repository) => {
+      const releaseContract = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.release_contract_address, contractType: "ERC1155", name: "VoidRelease1155V4", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { source: "RELEASE_FACTORY", factory: deployment.factory_address, releaseKey: deployment.release_key, implementation: deployment.implementation_address, implementationVersion: deployment.implementation_version } });
+      const factory = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.factory_address, contractType: "OTHER", name: "VoidReleaseFactory", deploymentTxHash: null, deploymentBlockNumber: null, metadata: { role: "RELEASE_FACTORY" } });
+      const primarySale = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.primary_sale_address, contractType: "OTHER", name: "VoidPrimarySale", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PRIMARY_SALE", releaseContract: deployment.release_contract_address } });
+      const anchor = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.provenance_anchor_address, contractType: "OTHER", name: "VoidProvenanceAnchor", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PROVENANCE_ANCHOR", releaseContract: deployment.release_contract_address } });
+      return repository.saveReleaseContract({ releaseId: release.id, chainId: selectedChainId, releaseContractId: releaseContract.id, factoryContractId: factory.id, primarySaleContractId: primarySale.id, provenanceAnchorContractId: anchor.id, releaseKey: deployment.release_key, artistWallet: deployment.artist_wallet, implementationAddress: deployment.implementation_address, implementationVersion: deployment.implementation_version, deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, creationLogIndex: input.creationLogIndex ?? null, status: "DEPLOYED", metadata: { factoryIndex: deployment.factory_index } });
+    });
+    await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CONTRACT_BOUND", subjectType: "release", subjectId: release.id, payload: { chainId: selectedChainId, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, releaseKey: deployment.release_key } });
+    return { ...saved, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, provenanceAnchorAddress: deployment.provenance_anchor_address };
+  }
+
   async bindProtectedAssets(artistId, protectedMedia) {
     const { rows } = await this.db.query("SELECT id, artist_id, storage_key, media_type FROM media_assets WHERE artist_id=$1", [artistId]);
     return protectedMedia.map((asset) => {
@@ -234,6 +284,19 @@ export class ArtistStudioService {
       for (const tokenId of requirement.tokenIds) {
         const owned = rows.some((row) => row.contract_address === requirement.contract && String(row.token_id) === String(tokenId) && (requirement.chainId === undefined || Number(row.chain_id) === Number(requirement.chainId)));
         if (!owned) throw new ApiError(400, "REQUIREMENT_TOKEN_NOT_OWNED", "Requirements may only reference token IDs from this artist's editions.");
+      }
+    }
+  }
+
+  // A protected experience is attached to one edition, so its entitlement may
+  // not be redirected to a different release merely because the same artist
+  // also owns that other token. The tuple remains (chain, contract, tokenId).
+  async assertEditionRequirements(editionId, requirements) {
+    const { rows } = await this.db.query("SELECT t.token_id::text AS token_id, lower(c.address) AS contract_address, c.chain_id FROM tokens t JOIN contracts c ON c.id=t.contract_id WHERE t.edition_id=$1", [editionId]);
+    for (const requirement of requirements) {
+      for (const tokenId of requirement.tokenIds) {
+        const belongsToEdition = rows.some((row) => row.contract_address === requirement.contract && String(row.token_id) === String(tokenId) && (requirement.chainId === undefined || Number(row.chain_id) === Number(requirement.chainId)));
+        if (!belongsToEdition) throw new ApiError(400, "REQUIREMENT_TOKEN_NOT_IN_EDITION", "Protected media must require the exact token from its own edition.");
       }
     }
   }
@@ -283,15 +346,19 @@ export class ArtistStudioService {
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
-    const publishTokenId = certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
-    await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: CERTIFIED_CONTRACT, chainId: CERTIFIED_CHAIN_ID, tokenId: publishTokenId });
+    const binding = await this.releaseContractBinding(release.id);
+    if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
+    const publishChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
+    const publishContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
+    const publishTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
+    await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: publishContract, chainId: publishChainId, tokenId: publishTokenId });
     const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
     await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: publishTokenId, metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
     assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: metadataDocument, provenanceRoot: provenance.root });
     const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: certifiedTokenId(release.slug, editionSlug).toString(), metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -311,19 +378,23 @@ export class ArtistStudioService {
       throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release is already published and its provenance is verified.");
     }
     try {
+      const binding = await this.releaseContractBinding(release.id);
+      if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
+      const publicationChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
+      const publicationContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
+      const expectedTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
+      const expectedReleaseId = binding ? binding.release_key : ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
       const provider = this.publicationChain || new ethers.JsonRpcProvider(deployment.rpcUrl);
       const receipt = await provider.getTransactionReceipt(transactionHash);
       if (!receipt || receipt.status !== 1) throw new Error("receipt unavailable or unsuccessful");
       const eventInterface = new ethers.Interface([...deployment.abi, "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
-      const expectedTokenId = certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
-      const expectedReleaseId = ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
       const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
-      // Only the certified release contract's own logs count; any contract can emit a look-alike event.
-      const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === CERTIFIED_CONTRACT).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
+      // Only the exact release contract's own logs count; any other contract can emit a look-alike event.
+      const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === publicationContract).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === edition.metadata_uri);
       if (!event) throw new Error("expected EditionCreated event was not found");
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
-        : await new ethers.Contract(CERTIFIED_CONTRACT, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
+        : await new ethers.Contract(publicationContract, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
       if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
       // The edition, as stored on the certified contract, must have been created by a wallet of this release's own artist.
       const creator = String(onChain[2] || "").toLowerCase();
@@ -353,12 +424,12 @@ export class ArtistStudioService {
             proof = await this.provenanceRecords.recordVerifiedAnchor({
               id: proof.id,
               creatorWallet: identity.wallet,
-              chainKey: deployment.chainKey || "fuji",
-              chainId: deployment.chainId,
+              chainKey: binding ? String(publicationChainId) : (deployment.chainKey || "fuji"),
+              chainId: publicationChainId,
               transactionHash,
               blockNumber: receipt.blockNumber,
               blockTimestamp: anchor.anchorBlockTimestamp,
-              anchorContract: CERTIFIED_CONTRACT,
+              anchorContract: publicationContract,
               anchorEvent: anchor.anchorEvent,
               mechanism: anchor.mechanism,
               metadataCid: anchor.metadataCid,
@@ -384,8 +455,8 @@ export class ArtistStudioService {
       await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: edition.application_metadata || {} });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
-      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), provenanceRoot: provenance.root } });
-      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, anchorEvent: "EditionCreated", copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
+      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root } });
+      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, chainId: publicationChainId, releaseContractAddress: publicationContract, anchorEvent: "EditionCreated", copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
@@ -456,15 +527,18 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
-    const selectedChainId = CERTIFIED_CHAIN_ID;
-    const address = CERTIFIED_CONTRACT;
+    const binding = await this.releaseContractBinding(release.id);
+    const selectedChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
+    const address = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
     const editionName = requiredText(input.trackTitle || input.title || input.name || release.title, "track.title", { max: 256 });
     const editionSlug = generatedSlug(editionName, "track title");
-    const tokenId = certifiedTokenId(release.slug, editionSlug);
+    const tokenId = binding ? releaseCloneTokenId(editionSlug) : certifiedTokenId(release.slug, editionSlug);
     await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: address, chainId: selectedChainId, tokenId });
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
     const edition = await this.repository.inTransaction(async (repository) => {
-      const contract = await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
+      const contract = binding
+        ? { id: binding.release_contract_id }
+        : await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
       const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: editionQuantity(input.quantity, "edition.quantity") ?? "0", status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
       await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
       return saved;
@@ -496,6 +570,7 @@ export class ArtistStudioService {
     if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
     const requirements = await this.defaultEditionRequirements({ editionId: edition.id, mediaConfig: input.mediaConfig, requirements: input.requirements });
     const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements });
+    if (Array.isArray(bound.mediaConfig?.protectedMedia) && bound.mediaConfig.protectedMedia.length) await this.assertEditionRequirements(edition.id, bound.requirements);
     const mediaConfig = { ...bound.mediaConfig, ...(productType ? { productType, deliveryType: mappedType } : {}) };
     const experience = await this.repository.saveExperience({ id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, status: "DRAFT" });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_CREATED", subjectType: "experience", subjectId: experience.id, payload: { editionId: edition.id } });
@@ -513,6 +588,7 @@ export class ArtistStudioService {
     const mappedType = productType ? PRODUCT_TYPES[productType] : (input.type === undefined && input.experienceType === undefined ? experience.experience_type : String(input.type || input.experienceType).toUpperCase());
     if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
     const bound = await this.bindProtectedExperience({ artistId: experience.artist_id, mediaConfig: input.mediaConfig === undefined ? experience.media_config : input.mediaConfig, requirements: input.requirements === undefined ? experience.requirements : input.requirements });
+    if (Array.isArray(bound.mediaConfig?.protectedMedia) && bound.mediaConfig.protectedMedia.length) await this.assertEditionRequirements(experience.edition_id, bound.requirements);
     const mediaConfig = productType ? { ...bound.mediaConfig, productType, deliveryType: mappedType } : bound.mediaConfig;
     const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, version: Number(experience.version || 1) + 1, status });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_UPDATED", subjectType: "experience", subjectId: experience.id });

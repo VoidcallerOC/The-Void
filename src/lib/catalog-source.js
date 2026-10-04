@@ -177,6 +177,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       tokenIds: legacyTokenIds.length ? legacyTokenIds : tokenId !== undefined && tokenId !== null && tokenId !== "" ? [String(tokenId)] : [],
       contractAddress,
       chainId,
+      primarySaleAddress: row.primary_sale_address || fuji.primarySaleAddress || "",
       chain: chainId === FUJI_RELEASE_CONFIG.chainId ? FUJI_RELEASE_CONFIG.networkName : "AVALANCHE",
       supply: row.supply != null ? String(row.supply) : null,
       status: legacy ? "minted" : String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),

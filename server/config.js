@@ -31,12 +31,25 @@ const PRIMARY_SALE_V2_EVENT_TOPICS = Object.freeze({
 const COLLECTION_FACTORY_EVENT_TOPICS = Object.freeze({
   CollectionCreated: id("CollectionCreated(address,address,uint256,string,string,string)")
 });
-const INDEXED_CONTRACT_TYPES = new Set(["ERC1155", "MARKETPLACE", "PRIMARY_SALE", "PRIMARY_SALE_V2", "COLLECTION_FACTORY"]);
+const RELEASE_FACTORY_EVENT_TOPICS = Object.freeze({
+  ReleaseCreated: id("ReleaseCreated(address,bytes32,address,address,address,address,uint256,uint16)")
+});
+const INDEXED_CONTRACT_TYPES = new Set(["ERC1155", "MARKETPLACE", "PRIMARY_SALE", "PRIMARY_SALE_V2", "COLLECTION_FACTORY", "RELEASE_FACTORY"]);
 const SALE_CONTRACT_TYPES = new Set(["PRIMARY_SALE", "PRIMARY_SALE_V2"]);
 
 /** Indexer config for a collection discovered through VoidCollectionFactory. */
 export function collectionIndexerConfig({ chainId, address, startBlock, skipMintOperators = [], factoryAddress }) {
   return Object.freeze({ chainId: Number(chainId), address: String(address).toLowerCase(), contractType: "ERC1155", startBlock: Number(startBlock), platformFeeBps: null, tokenAddress: null, reconcileListings: true, eventTopics: ERC1155_EVENT_TOPICS, skipMintOperators: Object.freeze([...skipMintOperators]), factoryAddress: String(factoryAddress).toLowerCase() });
+}
+
+/** Indexer config for a release discovered through VoidReleaseFactory. */
+export function releaseIndexerConfig({ chainId, address, startBlock, skipMintOperators = [], factoryAddress }) {
+  return Object.freeze({ chainId: Number(chainId), address: String(address).toLowerCase(), contractType: "ERC1155", startBlock: Number(startBlock), platformFeeBps: null, tokenAddress: null, reconcileListings: true, eventTopics: ERC1155_EVENT_TOPICS, skipMintOperators: Object.freeze([...skipMintOperators]), releaseFactoryAddress: String(factoryAddress).toLowerCase() });
+}
+
+/** Indexer config for the dedicated VoidPrimarySale deployed with a release clone. */
+export function primarySaleIndexerConfig({ chainId, address, startBlock, tokenAddress }) {
+  return Object.freeze({ chainId: Number(chainId), address: String(address).toLowerCase(), contractType: "PRIMARY_SALE", startBlock: Number(startBlock), platformFeeBps: null, tokenAddress: String(tokenAddress).toLowerCase(), reconcileListings: false, eventTopics: PRIMARY_SALE_EVENT_TOPICS, skipMintOperators: Object.freeze([]) });
 }
 
 export class ConfigurationError extends Error {
@@ -99,14 +112,14 @@ function parseIndexerContracts(value, { chainId }) {
     if (addresses.has(address)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON contains duplicate address ${address}.`);
     addresses.add(address);
     const contractType = String(contract.contractType || "").trim().toUpperCase();
-    if (!INDEXED_CONTRACT_TYPES.has(contractType)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].contractType must be ERC1155, MARKETPLACE, PRIMARY_SALE, PRIMARY_SALE_V2, or COLLECTION_FACTORY.`);
+    if (!INDEXED_CONTRACT_TYPES.has(contractType)) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].contractType must be ERC1155, MARKETPLACE, PRIMARY_SALE, PRIMARY_SALE_V2, COLLECTION_FACTORY, or RELEASE_FACTORY.`);
     const declaredChainId = contract.chainId === undefined ? chainId : Number(contract.chainId);
     if (declaredChainId !== chainId) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].chainId must match INDEXER_CHAIN_ID.`);
     const startBlock = nonNegativeInteger(contract.startBlock, null, `INDEXER_CONTRACTS_JSON[${index}].startBlock`);
     const platformFeeBps = contract.platformFeeBps === undefined || contract.platformFeeBps === null ? null : nonNegativeInteger(contract.platformFeeBps, null, `INDEXER_CONTRACTS_JSON[${index}].platformFeeBps`, { max: 10_000 });
     const tokenAddress = contractType === "PRIMARY_SALE" ? evmAddress(contract.tokenAddress, `INDEXER_CONTRACTS_JSON[${index}].tokenAddress`) : null;
     if (tokenAddress && tokenAddress === address) throw new ConfigurationError(`INDEXER_CONTRACTS_JSON[${index}].tokenAddress must be the ERC1155 release, not the sale contract.`);
-    const eventTopics = { ERC1155: ERC1155_EVENT_TOPICS, PRIMARY_SALE: PRIMARY_SALE_EVENT_TOPICS, PRIMARY_SALE_V2: PRIMARY_SALE_V2_EVENT_TOPICS, COLLECTION_FACTORY: COLLECTION_FACTORY_EVENT_TOPICS }[contractType];
+    const eventTopics = { ERC1155: ERC1155_EVENT_TOPICS, PRIMARY_SALE: PRIMARY_SALE_EVENT_TOPICS, PRIMARY_SALE_V2: PRIMARY_SALE_V2_EVENT_TOPICS, COLLECTION_FACTORY: COLLECTION_FACTORY_EVENT_TOPICS, RELEASE_FACTORY: RELEASE_FACTORY_EVENT_TOPICS }[contractType];
     return Object.freeze({ chainId, address, contractType, startBlock, platformFeeBps, tokenAddress, reconcileListings: contract.reconcileListings !== false, eventTopics });
   });
   const saleAddresses = Object.freeze(contracts.filter((contract) => SALE_CONTRACT_TYPES.has(contract.contractType)).map((contract) => contract.address));

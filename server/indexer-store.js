@@ -177,6 +177,37 @@ export class IndexerStore {
     return rows;
   }
 
+  // A release discovered from VoidReleaseFactory.ReleaseCreated. The durable registry
+  // retains the full tuple required to reconstruct clone indexing after a restart.
+  async registerRelease({ chainId, factoryAddress, releaseContractAddress, releaseKey, artistWallet, primarySaleAddress, provenanceAnchorAddress, implementationAddress, releaseIndex, implementationVersion, blockNumber, transactionHash }) {
+    const factory = address(factoryAddress, "factoryAddress");
+    const release = address(releaseContractAddress, "releaseContractAddress");
+    const artist = address(artistWallet, "artistWallet");
+    const primarySale = address(primarySaleAddress, "primarySaleAddress");
+    const provenanceAnchor = address(provenanceAnchorAddress, "provenanceAnchorAddress");
+    const implementation = address(implementationAddress, "implementationAddress");
+    const key = lower(releaseKey);
+    if (!/^0x[0-9a-f]{64}$/.test(key)) throw new Error("releaseKey is invalid.");
+    const index = numeric(releaseIndex, "releaseIndex");
+    const version = Number(implementationVersion);
+    if (!Number.isInteger(version) || version <= 0 || version > 32767) throw new Error("implementationVersion is invalid.");
+    const deploymentBlock = Number(blockNumber);
+    if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) throw new Error("blockNumber is invalid.");
+    const tx = lower(transactionHash);
+    if (!/^0x[0-9a-f]{64}$/.test(tx)) throw new Error("transactionHash is invalid.");
+    return withTransaction(this.db, async (client) => {
+      await client.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name, deployment_tx_hash, deployment_block_number, metadata) VALUES ($1, $1::text, $2, 'ERC1155', 'VoidRelease1155V4', $3, $4, $5) ON CONFLICT (chain_id, address) DO UPDATE SET metadata = contracts.metadata || EXCLUDED.metadata, deployment_block_number = COALESCE(contracts.deployment_block_number, EXCLUDED.deployment_block_number), updated_at = now()", [chainId, release, tx, deploymentBlock, { source: "RELEASE_FACTORY", factory, releaseKey: key, artist, primarySale, provenanceAnchor, implementation, implementationVersion: version, releaseIndex: index }]);
+      const { rows } = await client.query("INSERT INTO factory_releases (chain_id, factory_address, release_contract_address, release_key, artist_wallet, primary_sale_address, provenance_anchor_address, implementation_address, factory_index, implementation_version, deployment_block_number, transaction_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (chain_id, factory_address, release_contract_address) DO UPDATE SET updated_at=now() WHERE factory_releases.release_key=EXCLUDED.release_key AND factory_releases.artist_wallet=EXCLUDED.artist_wallet AND factory_releases.primary_sale_address=EXCLUDED.primary_sale_address AND factory_releases.provenance_anchor_address=EXCLUDED.provenance_anchor_address AND factory_releases.implementation_address=EXCLUDED.implementation_address AND factory_releases.factory_index=EXCLUDED.factory_index AND factory_releases.implementation_version=EXCLUDED.implementation_version AND factory_releases.deployment_block_number=EXCLUDED.deployment_block_number AND factory_releases.transaction_hash=EXCLUDED.transaction_hash RETURNING *", [chainId, factory, release, key, artist, primarySale, provenanceAnchor, implementation, index, version, deploymentBlock, tx]);
+      if (!rows[0]) throw new Error("Release factory event conflicts with an immutable registry row.");
+      return rows[0];
+    });
+  }
+
+  async listFactoryReleases({ chainId, factoryAddress }) {
+    const { rows } = await this.db.query("SELECT release_contract_address, primary_sale_address, deployment_block_number FROM factory_releases WHERE chain_id=$1 AND factory_address=$2 ORDER BY deployment_block_number ASC, release_contract_address ASC", [chainId, address(factoryAddress, "factoryAddress")]);
+    return rows;
+  }
+
   async applyMarketplaceEvent(event) {
     return withTransaction(this.db, async (client) => {
       const marker = await client.query(`INSERT INTO marketplace_event_projections (chain_id, marketplace_address, transaction_hash, log_index, listing_id, event_type) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING *`, [event.chainId, address(event.marketplaceAddress, "marketplaceAddress"), lower(event.transactionHash), event.logIndex, numeric(event.listingId, "listingId", { positive: true }), event.eventType]);
