@@ -11,7 +11,7 @@ import { assertProvenanceConsistency, persistPublicationProof, publicationView }
 import { verifyEditionPublication } from "./publication-anchor.js";
 import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./artist-authorization.js";
 import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
-import { isLegacyMainnetCatalogRelease, isLegacyMainnetEdition } from "../src/lib/legacy-genesis.js";
+import { releaseIsMintable } from "../src/lib/studio-release-choices.js";
 
 // Full-length audio the browser may upload straight to private storage. WAV
 // masters are far larger than an API request body can carry.
@@ -433,8 +433,8 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     assertPublishedMayChange(release.status, input, "Published releases cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, release.status, "release");
-    if (status === "ARCHIVED" && await this.legacyCatalogStaysOnSite(release)) {
-      throw new ApiError(409, "LEGACY_CATALOG_LOCKED", "The original mainnet VOIDCALLER catalog stays on the site.");
+    if (status === "ARCHIVED" && await this.collectorsCanStillBuy(release)) {
+      throw new ApiError(409, "MINTABLE_RELEASE_LOCKED", "A published release collectors can still buy stays on the site.");
     }
     const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
@@ -510,13 +510,14 @@ export class ArtistStudioService {
     return saved;
   }
 
-  // The seeded C-Chain catalog (id/slug voidcaller-legacy-genesis, or an
-  // edition on that mainnet contract). Other published releases, including
-  // a Fuji release titled VOIDCALLER, can still be archived.
-  async legacyCatalogStaysOnSite(release) {
-    if (isLegacyMainnetCatalogRelease(release)) return true;
-    const { rows } = await this.db.query("SELECT c.chain_id, c.address AS contract_address FROM editions e JOIN contracts c ON c.id = e.contract_id WHERE e.release_id = $1", [release.id]);
-    return rows.some((row) => isLegacyMainnetEdition(row));
+  // Published and mintable: an on-chain token (token id only counts once the
+  // edition is published), a primary sale collectors can buy, or the original
+  // mainnet catalog. A published release that is not mintable yet can still
+  // be archived.
+  async collectorsCanStillBuy(release) {
+    if (releaseIsMintable(release)) return true;
+    const { rows } = await this.db.query("SELECT e.release_id, e.status, e.application_metadata, c.chain_id, c.address AS contract_address, CASE WHEN upper(e.status) = 'PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id = e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e LEFT JOIN contracts c ON c.id = e.contract_id WHERE e.release_id = $1", [release.id]);
+    return releaseIsMintable(release, rows, { editionsAreScoped: true });
   }
 
   // Same effect as the archive migrations: lifecycle only. Tokens, sales,
