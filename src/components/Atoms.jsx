@@ -112,10 +112,11 @@ export function Btn({ kind = "primary", children, onClick, style, disabled }) {
 }
 
 // Square transport button used by the sticky player and The Bleed.
-export function PlayerBtn({ children, primary, onClick }) {
+export function PlayerBtn({ children, primary, onClick, label }) {
   const [hover, setHover] = useState(false);
   return (
     <button
+      aria-label={label}
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={(e) => { setHover(false); e.currentTarget.style.transform = "translateY(0)"; }}
