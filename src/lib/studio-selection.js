@@ -1,3 +1,10 @@
+// Stored 0 is an open edition. Null means the supply was never sent, so a
+// limited draft keeps its form default instead of becoming open.
+export function quantityFromSupply(supply) {
+  if (supply == null || supply === "") return undefined;
+  return String(supply);
+}
+
 export function selectReleaseTemplate(record) {
   const release = record?.release || {};
   return {
@@ -43,7 +50,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
       form: {
         releaseTitle: release.title || "",
         releaseDescription: release.description || "",
-        quantity: edition?.supply ? String(edition.supply) : "",
+        quantity: quantityFromSupply(edition?.supply) ?? "",
         priceWei: edition?.priceWei ? String(edition.priceWei) : undefined,
       },
     };
@@ -62,7 +69,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
       releaseArtwork: release.artwork && !release.artwork.startsWith("/assets/") ? release.artwork : "",
       trackTitle: edition?.title || release.title || "",
       trackPreview: edition?.previewAudio || "",
-      ...(edition?.supply ? { quantity: String(edition.supply) } : {}),
+      ...(quantityFromSupply(edition?.supply) === undefined ? {} : { quantity: quantityFromSupply(edition.supply) }),
       ...(includes ? { includes } : {}),
     },
   };

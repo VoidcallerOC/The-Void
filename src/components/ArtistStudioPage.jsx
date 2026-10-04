@@ -8,7 +8,7 @@ import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, fujiPrimarySaleAddress, weiToAvax, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
-import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
+import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
@@ -241,11 +241,12 @@ export function ArtistStudioPage() {
     }
   };
 
-  const saveDraft = async (knownIds = null) => {
-    setBusy("draft"); setNotice("");
+  const saveDraft = async (knownIds = null, { manageBusy = true, quantity = undefined } = {}) => {
+    if (manageBusy) { setBusy("draft"); setNotice(""); }
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = knownIds || await ensureArtistAndRelease();
+      const supply = quantity === undefined ? normalizeEditionSupply(form.quantity) : quantity;
       const record = await studioFetch(editionId ? `/studio/editions/${encodeURIComponent(editionId)}` : `/studio/releases/${encodeURIComponent(ids.releaseId)}/editions`, {
           method: editionId ? "PATCH" : "POST",
           payload: {
@@ -253,7 +254,7 @@ export function ArtistStudioPage() {
             title: form.trackTitle || form.releaseTitle,
             description: form.trackDescription,
             artwork: form.trackArtwork,
-            quantity: form.quantity,
+            quantity: supply,
             priceWei: avaxToWei(form.priceWei),
             marketplace: {},
             metadata: { includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), artwork: form.trackArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}) },
@@ -261,13 +262,13 @@ export function ArtistStudioPage() {
           headers,
         });
       setEditionId(record.id);
-      setNotice(`Track draft saved: ${form.trackTitle || form.releaseTitle}.`);
+      if (manageBusy) setNotice(`Track draft saved: ${form.trackTitle || form.releaseTitle}.`);
       return { releaseId: ids.releaseId, editionId: record.id };
     } catch (error) {
       setNotice(error.message);
       throw error;
     } finally {
-      setBusy("");
+      if (manageBusy) setBusy("");
     }
   };
 
@@ -317,14 +318,16 @@ export function ArtistStudioPage() {
       // preview and the gated full track must be in place before publishing.
       if (!form.trackPreview) throw new Error("Upload the public preview clip on the Tracks step before publishing. A token's metadata cannot be changed after it is published.");
       if (!editionId || (gatedEditionId !== editionId && !editionHasGatedTrack(ownedStudioCatalog, editionId))) throw new Error("Save the catalog structure with the private full track before publishing, so holders can unlock it.");
-      validateReleasePublish({
+      const checked = validateReleasePublish({
         release: { title: form.releaseTitle, type: "ep" },
         tracks: [{ title: form.trackTitle || form.releaseTitle }],
         supply: form.quantity,
         metadata: { artwork: form.trackArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
       });
       const ids = await ensureArtistAndRelease();
-      const saved = editionId ? { releaseId: ids.releaseId, editionId } : await saveDraft(ids);
+      // Persist the open-edition 0 before createEdition. A saved hard cap must
+      // not stay behind while the chain is minted unlimited.
+      const saved = await saveDraft(ids, { manageBusy: false, quantity: checked.supply });
       const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
         payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
@@ -333,8 +336,8 @@ export function ArtistStudioPage() {
       const provider = wallet.getProvider?.();
       if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This wallet does not have ARTIST_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
       const encoded = fujiReleaseIsV2()
-        ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
-        : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: form.quantity, metadataUri: metadata.metadataUri });
+        ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
+        : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri });
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.

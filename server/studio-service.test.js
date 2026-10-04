@@ -214,6 +214,38 @@ describe("Artist Studio", () => {
     expect(repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ title: "Voidcaller Full EP", supply: "25" }));
   });
 
+  it("saves quantity 0 or a blank supply as an open edition and keeps a hard cap", async () => {
+    const release = { id: "release-1", artist_id: "artist-1", slug: "voidcaller-full-ep", title: "Voidcaller Full EP" };
+    for (const quantity of [0, "0", "", "  ", null]) {
+      const { instance, repo } = service({ rows: [release] });
+      await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Open", quantity, priceWei: "1" } })).resolves.toMatchObject({ status: "DRAFT" });
+      expect(repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "0" }));
+    }
+    const omitted = service({ rows: [release] });
+    await omitted.instance.createEdition({ request, releaseId: "release-1", input: { name: "Open omitted", priceWei: "1" } });
+    expect(omitted.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "0" }));
+
+    const capped = service({ rows: [release] });
+    await capped.instance.createEdition({ request, releaseId: "release-1", input: { name: "Capped", quantity: "40", priceWei: "1" } });
+    expect(capped.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "40" }));
+    await expect(capped.instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", quantity: "-1", priceWei: "1" } })).rejects.toThrow(/open edition/);
+    await expect(capped.instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", quantity: "1.5", priceWei: "1" } })).rejects.toThrow(/open edition/);
+
+    const existing = { id: "edition-1", release_id: "release-1", contract_id: "contract-1", title: "Chapter I", description: null, tier: null, supply: "25", status: "DRAFT", application_metadata: {} };
+    const kept = service({ rows: [existing] });
+    await kept.instance.updateEdition({ request, editionId: "edition-1", input: { description: "still limited" } });
+    expect(kept.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "25" }));
+
+    for (const quantity of [0, "0", ""]) {
+      const opened = service({ rows: [existing] });
+      await opened.instance.updateEdition({ request, editionId: "edition-1", input: { quantity } });
+      expect(opened.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "0" }));
+    }
+    const stillCapped = service({ rows: [existing] });
+    await stillCapped.instance.updateEdition({ request, editionId: "edition-1", input: { quantity: "10" } });
+    expect(stillCapped.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ supply: "10" }));
+  });
+
   it("ignores artist blockchain fields and derives the certified contract and token", async () => {
     const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     await expect(instance.createEdition({ request, releaseId: "release-1", input: { name: "Bad", slug: "bad", chainId: 1, contractAddress: "not-an-address", tokenId: "-1", quantity: "1", priceWei: "1" } })).resolves.toMatchObject({ id: expect.stringMatching(/^edition-/) });
