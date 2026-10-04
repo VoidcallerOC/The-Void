@@ -49,6 +49,7 @@ export function StickyPlayer() {
   const preview = audio.isPreview(cur);
   const bearer = audio.isBearer(cur);
   const t = audio.el?.currentTime || 0;
+  const total = dur ? fmt(dur) : cur.time;
   const frac = dur ? t / dur : 0;
   // Pick eyebrow label from queueId
   const label = audio.queueLabel || (audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION");
@@ -100,7 +101,7 @@ export function StickyPlayer() {
       >
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "0 0 12px var(--vc-crimson)" }} />
       </div>
-      <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {preview && dur ? fmt(dur) : cur.time}</span>
+      <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {total}</span>
       <div className="vc-sticky-controls" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
         <MasterVolume audio={audio} />
         <div style={{ display: "flex", gap: 6 }}>

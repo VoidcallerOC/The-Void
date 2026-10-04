@@ -16,6 +16,8 @@ afterEach(() => {
   localStorage.clear();
   VC_AUDIO.volumePercent = null;
   VC_AUDIO.el = null;
+  VC_AUDIO.queue = null;
+  VC_AUDIO.mediaGrants.clear();
   VC_AUDIO.playing = false;
 });
 
@@ -63,5 +65,18 @@ describe("sticky player master volume", () => {
     expect(controls.querySelector('[aria-label="Play"]')).toBeTruthy();
     expect(controls.querySelector('[aria-label="Previous track"]')).toBeTruthy();
     expect(controls.querySelector('[aria-label="Next track"]')).toBeTruthy();
+  });
+
+  it("shows the native duration for a protected bearer track", () => {
+    const track = { n: "full", title: "Stranger Things", protectedMedia: { experienceId: "experience-1", mediaType: "AUDIO" } };
+    VC_AUDIO.queue = [track];
+    VC_AUDIO.queueId = "protected:experience-1";
+    VC_AUDIO.el = { currentTime: 5, duration: 60 };
+    VC_AUDIO.mediaGrants.set("experience-1:AUDIO:full", { accessUrl: "/api/media/grant-1", expiresAt: new Date(Date.now() + 60_000).toISOString() });
+
+    render(<StickyPlayer />);
+
+    expect(screen.getByText("00:05 / 01:00")).toBeTruthy();
+    expect(screen.getByText("BEARER")).toBeTruthy();
   });
 });
