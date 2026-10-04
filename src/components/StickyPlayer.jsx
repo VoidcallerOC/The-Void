@@ -1,7 +1,7 @@
 import { VC_DATA } from "../data.js";
 import { useAudio, fmt } from "../lib/audio.js";
 import { PlayerBtn, TrackArt } from "./Atoms.jsx";
-import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
 
 function Mark({ children, on }) {
   return (
@@ -14,6 +14,29 @@ function Mark({ children, on }) {
     }}>
       {children}
     </span>
+  );
+}
+
+function MasterVolume({ audio }) {
+  const value = audio.masterVolumePercent();
+  const Icon = value === 0 ? VolumeX : Volume2;
+  return (
+    <label className="vc-sticky-volume" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <Icon size={16} strokeWidth={1.75} aria-hidden="true" />
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        aria-label="Master volume"
+        aria-valuetext={`${value} percent`}
+        onChange={(e) => audio.setMasterVolumePercent(e.target.value)}
+      />
+      <span aria-hidden="true" style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.08em", color: "var(--vc-bone-dim)", minWidth: 32, textAlign: "right" }}>
+        {value}%
+      </span>
+    </label>
   );
 }
 
@@ -78,14 +101,17 @@ export function StickyPlayer() {
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "0 0 12px var(--vc-crimson)" }} />
       </div>
       <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {preview && dur ? fmt(dur) : cur.time}</span>
-      <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
-        <PlayerBtn onClick={() => audio.prev()}><SkipBack size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
-        <PlayerBtn primary onClick={() => audio.toggle()}>
-          {audio.playing
-            ? <Pause size={20} strokeWidth={1.75} fill="currentColor" />
-            : <Play size={20} strokeWidth={1.75} fill="currentColor" style={{ marginLeft: 2 }} />}
-        </PlayerBtn>
-        <PlayerBtn onClick={() => audio.next()}><SkipForward size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
+        <MasterVolume audio={audio} />
+        <div style={{ display: "flex", gap: 6 }}>
+          <PlayerBtn label="Previous track" onClick={() => audio.prev()}><SkipBack size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
+          <PlayerBtn primary label={audio.playing ? "Pause" : "Play"} onClick={() => audio.toggle()}>
+            {audio.playing
+              ? <Pause size={20} strokeWidth={1.75} fill="currentColor" />
+              : <Play size={20} strokeWidth={1.75} fill="currentColor" style={{ marginLeft: 2 }} />}
+          </PlayerBtn>
+          <PlayerBtn label="Next track" onClick={() => audio.next()}><SkipForward size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
+        </div>
       </div>
     </div>
   );
