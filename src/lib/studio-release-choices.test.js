@@ -71,16 +71,19 @@ describe("Studio release picker", () => {
 });
 
 describe("Take this off the site", () => {
-  const fujiEdition = { releaseId: "fuji-voidcaller", chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress };
-  const legacyEdition = { releaseId: LEGACY_ALBUM_ID, chainId: LEGACY_CHAIN_ID, contractAddress: LEGACY_CONTRACT };
+  const legacyEdition = { releaseId: LEGACY_ALBUM_ID, chainId: LEGACY_CHAIN_ID, contractAddress: LEGACY_CONTRACT, status: "minted", tokenIds: ["0"] };
+  const fujiMintable = { releaseId: "fuji-voidcaller", chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress, status: "available", tokenIds: ["9"] };
+  const notMintableYet = { releaseId: "fuji-pending", chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress, status: "draft" };
 
-  it("hides the button on the original mainnet VOIDCALLER catalog and keeps it for a Fuji release with the same title", () => {
-    const editions = [legacyEdition, fujiEdition];
+  it("shows the button only for a published release that is not mintable yet", () => {
+    const editions = [legacyEdition, fujiMintable, notMintableYet];
     expect(canTakeReleaseOffTheSite({ id: LEGACY_ALBUM_ID, title: "VOIDCALLER", status: "published" }, editions)).toBe(false);
     expect(canTakeReleaseOffTheSite({ id: "other", slug: LEGACY_ALBUM_ID, title: "Something else", status: "PUBLISHED" }, editions)).toBe(false);
-    expect(canTakeReleaseOffTheSite({ id: "renamed-legacy", title: "VOIDCALLER", status: "published" }, [{ ...legacyEdition, releaseId: "renamed-legacy" }])).toBe(false);
-    expect(canTakeReleaseOffTheSite({ id: "fuji-voidcaller", slug: "voidcaller", title: "VOIDCALLER", status: "published" }, editions)).toBe(true);
+    expect(canTakeReleaseOffTheSite({ id: "renamed-legacy", title: "Chapter", status: "published" }, [{ ...legacyEdition, releaseId: "renamed-legacy" }])).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "fuji-voidcaller", slug: "voidcaller", title: "VOIDCALLER", status: "published" }, editions)).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "fuji-sale", title: "Open sale", status: "published" }, [{ releaseId: "fuji-sale", status: "draft", primarySale: true }])).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "fuji-pending", title: "Not out yet", status: "published" }, editions)).toBe(true);
     expect(canTakeReleaseOffTheSite({ id: "ff-18", title: "Forgive & Forget", status: "published" }, editions)).toBe(true);
-    expect(canTakeReleaseOffTheSite({ id: "ff-draft", title: "Forgive & Forget", status: "draft" }, editions)).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "ff-draft", title: "Forgive & Forget", status: "draft" }, [{ releaseId: "ff-draft", status: "draft", tokenIds: ["4"] }])).toBe(false);
   });
 });
