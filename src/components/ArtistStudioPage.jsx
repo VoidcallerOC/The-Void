@@ -11,7 +11,7 @@ import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleErro
 import { publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
-import { studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
+import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 
@@ -645,7 +645,7 @@ export function ArtistStudioPage() {
                       <strong style={{ display: "block", marginTop: 6 }}>{record.release.title}</strong>
                     </div>
                   </button>
-                  {String(record.release.status || "").trim().toLowerCase() === "published" && (
+                  {canTakeReleaseOffTheSite(record.release, ownedStudioCatalog?.editions || []) && (
                     <button type="button" className="vc-release-pick-archive" disabled={busy !== ""} onClick={() => takeReleaseOffSite(record)}>
                       {busy === `archive:${record.release.id}` ? "Taking it off…" : "Take this off the site"}
                     </button>

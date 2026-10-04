@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { studioArtistChoices, studioReleaseChoices } from "./studio-release-choices.js";
+import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT } from "./legacy-genesis.js";
+import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
+import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "./studio-release-choices.js";
 
 // Mirrors the Studio picker the user reported: real releases buried among
 // test profiles, certification runs and repeated "VOIDCALLER" drafts.
@@ -65,5 +67,20 @@ describe("Studio release picker", () => {
       artists: [{ id: "voidcaller", name: "Voidcaller" }],
       editions: [],
     })).toEqual([]);
+  });
+});
+
+describe("Take this off the site", () => {
+  const fujiEdition = { releaseId: "fuji-voidcaller", chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress };
+  const legacyEdition = { releaseId: LEGACY_ALBUM_ID, chainId: LEGACY_CHAIN_ID, contractAddress: LEGACY_CONTRACT };
+
+  it("hides the button on the original mainnet VOIDCALLER catalog and keeps it for a Fuji release with the same title", () => {
+    const editions = [legacyEdition, fujiEdition];
+    expect(canTakeReleaseOffTheSite({ id: LEGACY_ALBUM_ID, title: "VOIDCALLER", status: "published" }, editions)).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "other", slug: LEGACY_ALBUM_ID, title: "Something else", status: "PUBLISHED" }, editions)).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "renamed-legacy", title: "VOIDCALLER", status: "published" }, [{ ...legacyEdition, releaseId: "renamed-legacy" }])).toBe(false);
+    expect(canTakeReleaseOffTheSite({ id: "fuji-voidcaller", slug: "voidcaller", title: "VOIDCALLER", status: "published" }, editions)).toBe(true);
+    expect(canTakeReleaseOffTheSite({ id: "ff-18", title: "Forgive & Forget", status: "published" }, editions)).toBe(true);
+    expect(canTakeReleaseOffTheSite({ id: "ff-draft", title: "Forgive & Forget", status: "draft" }, editions)).toBe(false);
   });
 });
