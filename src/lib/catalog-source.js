@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { profileSocials } from "./artist-profile.js";
+import { portfolioImageSrc, profileSocials } from "./artist-profile.js";
 import {
   createArtist,
   createCatalog,
@@ -101,9 +101,10 @@ function savedProfileOf(row, meta) {
   const saved = {};
   if (row.display_name) saved.name = row.display_name;
   if (typeof row.bio === "string") saved.bio = row.bio;
-  // Saved images are ipfs:// URIs; browsers cannot load those in <img> or url().
-  if (meta.profileArtwork) saved.avatar = ipfsToHttp(meta.profileArtwork);
-  if (meta.banner) saved.banner = ipfsToHttp(meta.banner);
+  // Profile pictures are site files (or older ipfs:// URIs). Either way the
+  // browser needs an http(s) URL, never a raw ipfs:// string.
+  if (meta.profileArtwork) saved.avatar = portfolioImageSrc(meta.profileArtwork);
+  if (meta.banner) saved.banner = portfolioImageSrc(meta.banner);
   if (row.social_links != null || row.website_url != null) saved.socials = profileSocials(row.social_links, row.website_url);
   if (row.verified === true || row.verification_status === "VERIFIED") saved.verified = true;
   return saved;
@@ -130,8 +131,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       name: row.display_name || row.name || row.slug || row.id,
       handle: row.slug || row.handle || row.id,
       bio: row.bio || "",
-      avatar: ipfsToHttp(meta.profileArtwork || meta.artwork) || "/assets/voidcaller_art_4.png",
-      banner: ipfsToHttp(meta.banner || meta.profileArtwork) || "/assets/voidcaller_art_6.png",
+      avatar: portfolioImageSrc(meta.profileArtwork || meta.artwork) || "/assets/voidcaller_art_4.png",
+      banner: portfolioImageSrc(meta.banner || meta.profileArtwork) || "/assets/voidcaller_art_6.png",
       socials: profileSocials(row.social_links, row.website_url),
       verified: row.verified === true || row.verification_status === "VERIFIED",
       savedProfile: savedProfileOf(row, meta),

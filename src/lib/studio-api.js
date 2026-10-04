@@ -31,6 +31,17 @@ export function fileToBase64(file) {
   });
 }
 
+// Uploads an artist profile picture or banner as a site file (not Pinata/IPFS).
+// The server re-checks type and size from the file's bytes; these checks fail fast.
+export async function uploadStudioPortfolioImage({ artistId, file, headers, fetchImpl = fetch }) {
+  if (!artistId) throw new Error("Open your artist profile before uploading an image.");
+  if (!file) throw new Error("Choose an image file to upload.");
+  if (!ARTWORK_ACCEPT.split(",").includes(file.type)) throw new Error("Artwork must be a PNG, JPEG, GIF or WebP image.");
+  if (file.size > MAX_ARTWORK_BYTES) throw new Error("Artwork must be 3 MB or smaller.");
+  const data = await fileToBase64(file);
+  return studioFetch(`/studio/artists/${encodeURIComponent(artistId)}/portfolio`, { method: "POST", payload: { data, filename: file.name }, headers, fetchImpl });
+}
+
 // Uploads public release/track artwork and returns its ipfs:// URI. The server
 // re-checks type and size from the file's bytes; these checks fail fast.
 export async function uploadStudioArtwork({ artistId, file, headers, fetchImpl = fetch }) {
