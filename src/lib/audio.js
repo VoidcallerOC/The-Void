@@ -87,6 +87,9 @@ export const VC_AUDIO = {
   holdsChapterI() {
     return RELIC_TOKEN_IDS.some((id) => this.owned.has(id));
   },
+  isProtectedHolder(track) {
+    return Boolean(track?.protectedMedia && (this.holdsChapterI() || (track.tokenId != null && this.owned.has(String(track.tokenId)))));
+  },
 
   setMediaAuthorization({ wallet = null, authHeaders = {} } = {}) {
     const normalizedWallet = wallet?.toLowerCase() || null;
@@ -114,7 +117,7 @@ export const VC_AUDIO = {
     if (!track) return false;
     if (track.protectedMedia) return !this.hasAuthorizedSource(track);
     if (track.tokenId != null && RELIC_TOKEN_IDS.includes(track.tokenId)) return !!(track.previewSrc && !this.holdsChapterI());
-    return !!(track.previewSrc && track.tokenId != null && !this.owned.has(track.tokenId));
+    return !!(track.previewSrc && track.tokenId != null && !this.owned.has(String(track.tokenId)));
   },
 
   srcFor(track) {
@@ -123,7 +126,7 @@ export const VC_AUDIO = {
       if (accessUrl) return accessUrl;
       // A connected, authenticated holder is waiting for the protected grant.
       // Do not start the public preview while that authorization is pending.
-      if (this.holdsChapterI() && this.mediaAuthorization?.wallet) return null;
+      if (this.isProtectedHolder(track) && this.mediaAuthorization?.wallet) return null;
       return track.previewSrc || null;
     }
     return this.isGated(track) ? (track.previewSrc || track.src) : track.src;
@@ -138,7 +141,7 @@ export const VC_AUDIO = {
   },
 
   async resolveProtectedSource(track) {
-    if (!track?.protectedMedia || !this.holdsChapterI() || !this.mediaAuthorization?.wallet) return null;
+    if (!track?.protectedMedia || !this.isProtectedHolder(track) || !this.mediaAuthorization?.wallet) return null;
     const key = grantKey(track);
     const existing = this.mediaGrants.get(key);
     if (existing && new Date(existing.expiresAt).getTime() > Date.now()) return existing.accessUrl;
@@ -161,7 +164,7 @@ export const VC_AUDIO = {
   },
 
   setOwnership(tokenIds) {
-    this.owned = new Set(tokenIds || []);
+    this.owned = new Set((tokenIds || []).map((tokenId) => String(tokenId)));
     const track = this.queue && this.queue[this.idx];
     if (this.el && track) this.setTrack(this.idx);
     this.notify();
@@ -209,7 +212,7 @@ export const VC_AUDIO = {
       audio.load();
     }
     this.applyMasterVolume(audio);
-    if (track.protectedMedia && this.holdsChapterI()) {
+    if (track.protectedMedia && this.isProtectedHolder(track)) {
       void this.resolveProtectedSource(track).then((authorizedSource) => {
         if (!authorizedSource || this.queue?.[this.idx] !== track) return;
         const currentSource = audio.getAttribute("src") || audio.src || "";

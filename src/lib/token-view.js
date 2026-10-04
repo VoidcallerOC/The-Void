@@ -52,11 +52,14 @@ export function tokenView(catalog, { edition = null, release = null, tokenId = n
  * catalog track (public preview, upgraded to the gated full track for
  * holders). Published tokens play their public preview (animation_url).
  */
-export function playableTrackFor(token, { artwork = "" } = {}) {
+export function playableTrackFor(token, { artwork = "", protectedExperience = null } = {}) {
   if (!token) return null;
   const legacy = token.editionId === "voidcaller-chapter-i" ? VC_DATA.firstEPTracks.find((track) => sameId(track.tokenId, token.tokenId)) : null;
   if (legacy) return legacy;
   const preview = ipfsToHttp(token.metadata?.animationUrl || token.media?.previewSrc || "");
   if (!preview) return null;
-  return { n: String(token.tokenId), title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
+  const protectedMedia = protectedExperience?.media?.protected
+    ? { experienceId: protectedExperience.id, mediaType: protectedExperience.media.type || "AUDIO" }
+    : null;
+  return { n: String(token.tokenId), tokenId: token.tokenId, title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, ...(protectedMedia ? { protectedMedia } : {}), art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
 }

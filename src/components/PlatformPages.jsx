@@ -200,6 +200,7 @@ export function ReleasePage({ children = null } = {}) {
             {release.tracks.map((track) => {
               const view = tokenView(catalog, { edition: editionItems[0]?.edition, release, tokenId: track.tokenId });
               const experienceId = track.experienceId || view.token?.experiences?.[0];
+              const experience = catalog.experiences.find((item) => item.id === experienceId);
               const to = experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`;
               return <article key={track.tokenId} className="vc-market-card">
                 <Link to={to} style={{ color: "inherit", textDecoration: "none", display: "block" }}>
@@ -210,7 +211,7 @@ export function ReleasePage({ children = null } = {}) {
                   <h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}><Link to={to} style={{ color: "inherit", textDecoration: "none" }}>{track.title}</Link></h3>
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 14px" }}>{track.time}</p>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <PlayTokenButton track={playableTrackFor(view.token)} queueId={`token:${view.token?.id || track.tokenId}`} collection={release.title} primary />
+                    <PlayTokenButton track={playableTrackFor(view.token, { protectedExperience: experience })} protectedExperience={experience} queueId={`token:${view.token?.id || track.tokenId}`} collection={release.title} primary />
                     <Link to={to} style={ghostBtn}>Song experience</Link>
                   </div>
                 </div>
@@ -244,9 +245,10 @@ export function EditionPage() {
   const { edition, release, artist, experiences } = result;
   const secondary = resolveSecondaryStatus();
   const price = editionPriceLabel(edition);
-  // Public preview (the token's animation_url) for every visitor; full audio
-  // stays behind the experience's holder-only player.
-  const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token);
+  // Non-holders retain the tokenURI preview; entitled holders are upgraded
+  // through the same protected experience grant used by the player.
+  const previewExperience = experiences[0] || null;
+  const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
   return (
     <section style={shell}>
       <PlatformHeader eyebrow={`† ${release.productType || "Collectible release"}`} title={release.title}>
@@ -277,7 +279,7 @@ export function EditionPage() {
           </p>
           {previewTrack && (
             <div style={{ marginTop: 16 }}>
-              <PlayTokenButton track={previewTrack} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
+              <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
             </div>
           )}
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
@@ -335,7 +337,7 @@ export function ExperiencePage() {
   const tracks = tracksForRelease(release, experience);
   const view = tokenView(catalog, { edition, release, experience });
   // A one-token experience plays that token's song; the full-EP experience keeps the queue below.
-  const tokenTrack = playableTrackFor(view.token);
+  const tokenTrack = playableTrackFor(view.token, { protectedExperience: protectedMedia ? experience : null });
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
@@ -387,7 +389,7 @@ export function ExperiencePage() {
             </ol>
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            {tokenTrack && <PlayTokenButton track={tokenTrack} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
+            {tokenTrack && <PlayTokenButton track={tokenTrack} protectedExperience={protectedMedia ? experience : null} protectedOnly={Boolean(protectedMedia)} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
             {!tokenTrack && tracks.length > 0 && (
               <button type="button" style={primaryBtn} onClick={hear}>
                 {isPlaying ? "Pause experience" : owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}
@@ -513,7 +515,7 @@ export function MyCollectionPage() {
                 <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{view.token ? view.name : release?.title || edition.title}</h3>
                 <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-                  <PlayTokenButton track={playableTrackFor(view.token)} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
+                  <PlayTokenButton track={playableTrackFor(view.token, { protectedExperience: experience })} protectedExperience={experience} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
                   <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>
                   {experience && <Link to={`/experience/${experience.id}`} style={ghostBtn}>Open experience</Link>}
                 </div>
