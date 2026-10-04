@@ -342,3 +342,39 @@ describe("marketplace hero file route", () => {
     expect(JSON.parse(response.body).error.code).toBe("HERO_FILE_NOT_FOUND");
   });
 });
+
+describe("artist portfolio file route", () => {
+  it("serves a stored profile image without JSON wrapping", async () => {
+    const body = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const studioService = { openPortfolioImage: vi.fn().mockResolvedValue({ body, contentType: "image/png", filename: "artist-portfolio-0123456789abcdef.png" }) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/artists/portfolio/artist-portfolio-0123456789abcdef.png" }), response);
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/png");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(Buffer.compare(response.body, body)).toBe(0);
+    expect(studioService.openPortfolioImage).toHaveBeenCalledWith({ filename: "artist-portfolio-0123456789abcdef.png" });
+  });
+
+  it("returns not found when the portfolio file is missing", async () => {
+    const studioService = { openPortfolioImage: vi.fn().mockRejectedValue(new ApiError(404, "PORTFOLIO_FILE_NOT_FOUND", "Artist portfolio image was not found.")) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ url: "/api/artists/portfolio/nope.png" }), response);
+    expect(response.status).toBe(404);
+    expect(JSON.parse(response.body).error.code).toBe("PORTFOLIO_FILE_NOT_FOUND");
+  });
+
+  it("posts a portfolio upload to the studio service and not the release artwork uploader", async () => {
+    const studioService = { uploadPortfolioImage: vi.fn().mockResolvedValue({ uri: "/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png" }), uploadArtwork: vi.fn() };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/artists/artist-1/portfolio", body: JSON.stringify({ data: "aQ==", filename: "face.png" }) }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data.uri).toBe("/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png");
+    expect(studioService.uploadPortfolioImage).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", input: { data: "aQ==", filename: "face.png" } }));
+    expect(studioService.uploadArtwork).not.toHaveBeenCalled();
+  });
+});
+

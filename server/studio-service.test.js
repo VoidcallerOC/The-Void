@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createLocalArtistPortfolioStore } from "./artist-portfolio-storage.js";
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG } from "../src/lib/fuji-release.js";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
@@ -402,6 +406,84 @@ describe("Artist Studio", () => {
       await expect(instance.uploadArtwork({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 403, code: "ARTIST_ACCESS_DENIED" });
       expect(db.query).toHaveBeenCalledWith(expect.stringContaining("ao.owner_wallet=$2"), ["artist-1", "0x2222222222222222222222222222222222222222"]);
       expect(instance.artworkUploader).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("portfolio image upload", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const artistRow = { id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" };
+
+    it("stores a profile picture as a local site file and does not call Pinata", async () => {
+      const { instance, repo } = service({ rows: [artistRow] });
+      const files = new Map();
+      instance.portfolioStore = {
+        async save({ body, filename, contentType }) {
+          files.set(filename, { body, contentType });
+          return { uri: `/assets/artist-portfolio/${filename}` };
+        },
+        async read({ filename }) {
+          const file = files.get(filename);
+          if (!file) throw Object.assign(new Error("missing"), { status: 404, code: "PORTFOLIO_FILE_NOT_FOUND" });
+          return { ...file, filename };
+        },
+      };
+      instance.artworkUploader = vi.fn(async () => { throw new Error("Pinata must not be called"); });
+      const result = await instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64"), filename: "face.png" } });
+      expect(result.uri).toMatch(/^\/assets\/artist-portfolio\/artist-portfolio-[a-f0-9]{16}\.png$/);
+      expect(result.contentType).toBe("image/png");
+      expect(files.size).toBe(1);
+      expect(instance.artworkUploader).not.toHaveBeenCalled();
+      expect(repo.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_PORTFOLIO_IMAGE_UPLOADED", payload: expect.objectContaining({ uri: result.uri }) }));
+      const opened = await instance.openPortfolioImage({ filename: result.uri.split("/").pop() });
+      expect(opened.contentType).toBe("image/png");
+      expect(opened.body.equals(png)).toBe(true);
+    });
+
+    it("rejects an IPFS URI from portfolio storage", async () => {
+      const { instance, repo } = service({ rows: [artistRow] });
+      instance.portfolioStore = { async save() { return { uri: "ipfs://bafybeidedfcwz6qykwzqoqcs37zsqbjj3wpadyytee4didw2ocnur7veni" }; } };
+      instance.artworkUploader = vi.fn();
+      await expect(instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 502, code: "PORTFOLIO_UPLOAD_FAILED" });
+      expect(instance.artworkUploader).not.toHaveBeenCalled();
+      expect(repo.appendAuditEvent).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-image and an upload when storage is not configured", async () => {
+      const { instance } = service({ rows: [artistRow] });
+      instance.portfolioStore = { save: vi.fn() };
+      await expect(instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: Buffer.from("<svg/>").toString("base64") } })).rejects.toMatchObject({ code: "ARTWORK_TYPE_UNSUPPORTED" });
+      expect(instance.portfolioStore.save).not.toHaveBeenCalled();
+      const unconfigured = service({ rows: [artistRow] });
+      await expect(unconfigured.instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64") } })).rejects.toMatchObject({ status: 503, code: "PORTFOLIO_UPLOAD_UNAVAILABLE" });
+    });
+
+    it("writes the image under public/assets and serves those bytes back", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "artist-portfolio-"));
+      try {
+        const { instance } = service({ rows: [artistRow] });
+        const rows = new Map();
+        const db = { query: vi.fn(async (sql, params = []) => {
+          if (String(sql).includes("INSERT INTO artist_portfolio_files")) {
+            rows.set(params[0], { content_type: params[1], body: params[3] });
+            return { rows: [] };
+          }
+          if (String(sql).includes("FROM artist_portfolio_files")) {
+            const row = rows.get(params[0]);
+            return { rows: row ? [row] : [] };
+          }
+          return { rows: [artistRow] };
+        }) };
+        instance.portfolioStore = createLocalArtistPortfolioStore({ root: directory, db });
+        instance.artworkUploader = vi.fn();
+        const saved = await instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64") } });
+        const filename = saved.uri.split("/").pop();
+        const opened = await instance.openPortfolioImage({ filename });
+        expect(opened.body.subarray(0, 4).toString("hex")).toBe("89504e47");
+        await expect(instance.openPortfolioImage({ filename: "../secrets.png" })).rejects.toMatchObject({ status: 400, code: "PORTFOLIO_FILE_INVALID" });
+        expect(instance.artworkUploader).not.toHaveBeenCalled();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     });
   });
 });

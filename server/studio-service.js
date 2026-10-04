@@ -171,7 +171,7 @@ function profileInput(input, existing = {}) {
 /** Artist-controlled application records. Contract addresses and token IDs are
  * validated infrastructure fields; artists work in releases and editions. */
 export class ArtistStudioService {
-  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, directMediaUploads = null, artworkUploader = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator, metadataStorage = null, mediaUploader = null, directMediaUploads = null, artworkUploader = null, portfolioStore = null, provenanceRecords = null, publicationChain = null, metadataFetcher = null, logger = console } = {}) {
     if (!db?.query || !repository || typeof authenticator !== "function") throw new TypeError("ArtistStudioService requires persistence and wallet authentication.");
     this.db = db;
     this.repository = repository;
@@ -180,6 +180,7 @@ export class ArtistStudioService {
     this.mediaUploader = mediaUploader;
     this.directMediaUploads = directMediaUploads;
     this.artworkUploader = artworkUploader;
+    this.portfolioStore = portfolioStore;
     this.provenanceRecords = provenanceRecords;
     this.publicationChain = publicationChain;
     this.metadataFetcher = metadataFetcher;
@@ -715,6 +716,48 @@ export class ArtistStudioService {
     await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256, byteSize: stored.bytes, pinataSize: file.size, uploadId, pinataFileId: file.id, direct: true, hashVerified, hashCheck } });
     this.logger.info?.("MEDIA_UPLOAD_VERIFY", { ...evidence, outcome: "REGISTERED", assetId: asset.id, hashVerified, hashCheck, gatewayBytes: stored.bytes, upstream });
     return { id: asset.id, mediaType: asset.media_type || mediaType, byteSize: stored.bytes, createdAt: asset.created_at || null };
+  }
+
+
+  // Artist profile picture and banner. Stored as a site file and served by
+  // this API. This never calls Pinata or any other IPFS uploader. Release
+  // artwork still goes through uploadArtwork.
+  async uploadPortfolioImage({ request, artistId, input }) {
+    const { identity, artist } = await this.ownedArtist({ artistId, request });
+    if (typeof this.portfolioStore?.save !== "function") throw new ApiError(503, "PORTFOLIO_UPLOAD_UNAVAILABLE", "Portfolio image upload is not configured.");
+    if (String(input.data ?? "").length > Math.ceil(MAX_ARTWORK_BYTES / 3) * 4 + 4) throw new ApiError(413, "ARTWORK_TOO_LARGE", "Artwork must be 3 MB or smaller.");
+    const body = Buffer.from(requiredText(input.data, "data", { max: 20_000_000 }), "base64");
+    if (!body.length) throw new ApiError(400, "ARTWORK_UPLOAD_EMPTY", "Artwork upload was empty.");
+    if (body.length > MAX_ARTWORK_BYTES) throw new ApiError(413, "ARTWORK_TOO_LARGE", "Artwork must be 3 MB or smaller.");
+    const image = sniffArtwork(body);
+    if (!image) throw new ApiError(400, "ARTWORK_TYPE_UNSUPPORTED", "Artwork must be a PNG, JPEG, GIF or WebP image.");
+    const contentSha256 = createHash("sha256").update(body).digest("hex");
+    const filename = `artist-portfolio-${contentSha256.slice(0, 16)}${image.extension}`;
+    let stored;
+    try {
+      stored = await this.portfolioStore.save({ body, filename, contentType: image.contentType });
+    } catch (error) {
+      throw new ApiError(error.status || 502, error.code || "PORTFOLIO_UPLOAD_FAILED", error.message || "Portfolio image upload failed.");
+    }
+    const uri = requiredText(stored?.uri, "uri", { max: 1024 });
+    if (!uri.startsWith("/assets/artist-portfolio/")) throw new ApiError(502, "PORTFOLIO_UPLOAD_FAILED", "Portfolio image upload did not return a local site file.");
+    await this.audit({ identity, request, eventType: "STUDIO_PORTFOLIO_IMAGE_UPLOADED", subjectType: "artist", subjectId: artist.id, payload: { uri, contentType: image.contentType, contentSha256, byteSize: body.length } });
+    return { uri, contentType: image.contentType, byteSize: body.length };
+  }
+
+  // Public bytes for a profile picture or banner this service stored. Not a Pinata gateway.
+  async openPortfolioImage({ filename }) {
+    if (typeof this.portfolioStore?.read !== "function") throw new ApiError(404, "PORTFOLIO_FILE_NOT_FOUND", "Artist portfolio image was not found.");
+    let file;
+    try {
+      file = await this.portfolioStore.read({ filename });
+    } catch (error) {
+      if (error?.status && error?.code) throw new ApiError(error.status, error.code, error.message);
+      throw new ApiError(404, "PORTFOLIO_FILE_NOT_FOUND", "Artist portfolio image was not found.");
+    }
+    const allowed = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+    if (!file?.body?.length || !allowed.has(file.contentType)) throw new ApiError(404, "PORTFOLIO_FILE_NOT_FOUND", "Artist portfolio image was not found.");
+    return { body: file.body, contentType: file.contentType, filename: file.filename };
   }
 
   // Public release/track artwork. Unlike protected media it is pinned publicly,
