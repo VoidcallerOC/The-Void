@@ -62,11 +62,12 @@ export function UploadStatus({ status, signedIn = true }) {
 
 // Artwork is either uploaded here (pinned publicly, stored as ipfs://) or an
 // existing image URL pasted into the field.
-function ArtworkField({ title, value, onChange, onUpload, uploading, disabled, status, signedIn }) {
+export function ArtworkField({ title, value, onChange, onUpload, uploading, disabled, status, signedIn, helper = "" }) {
   const preview = ipfsToHttp(value);
   return (
     <div style={{ marginTop: 16 }}>
       <TextField title={title} value={value} onChange={onChange} placeholder="Upload an image or paste an image URL" />
+      {helper && <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>{helper}</p>}
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <label style={{ ...ghostBtn, cursor: disabled || uploading ? "not-allowed" : "pointer", opacity: disabled || uploading ? 0.6 : 1 }}>
           {uploading ? "Uploading…" : "Upload artwork"}
@@ -462,7 +463,7 @@ export function ArtistStudioPage() {
     const uploaded = await uploadStudioArtwork({ artistId: owner, file, headers });
     set(key, uploaded.uri);
     return uploaded;
-  }, (uploaded) => `Uploaded ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · ${uploaded.uri}`);
+  }, (uploaded) => `Uploaded ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}).`);
 
   const uploadPreview = (file) => runUpload("preview", file, async (owner) => {
     const uploaded = await uploadStudioPreview({ artistId: owner, file, headers });
@@ -695,7 +696,7 @@ export function ArtistStudioPage() {
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}. {editionId ? "Editing this track." : releaseId ? "Saving adds a new track on this release. It does not change the songs already on it." : ""}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
           <TextField title="Description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
-          <ArtworkField title="Track artwork (optional — uses the release artwork if empty)" value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
+          <ArtworkField title="Track artwork (optional)" helper="Leave this empty and the track uses the release artwork; only upload here if this track needs a different image." value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
           <div style={{ marginTop: 16 }}>
             <p style={{ margin: "0 0 8px" }}>Public preview (~30 seconds) — played by wallets and marketplaces from the token metadata</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
