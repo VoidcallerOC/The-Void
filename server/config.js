@@ -3,6 +3,19 @@ import { resolve } from "node:path";
 import { id } from "ethers";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
+
+// The one chain production runs on: Fuji by default, C-Chain only with an
+// explicit RELEASE_NETWORK=mainnet. Anything else fails closed.
+export function productionChainId(env = process.env) {
+  const network = String(env.RELEASE_NETWORK || "fuji").trim().toLowerCase();
+  if (network === "fuji") return 43113;
+  if (network === "mainnet") return 43114;
+  throw new ConfigurationError('RELEASE_NETWORK must be "fuji" or "mainnet".');
+}
+
+function chainLabel(chainId) {
+  return chainId === 43114 ? "Avalanche C-Chain (43114)" : "Avalanche Fuji (43113)";
+}
 const PLACEHOLDER_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001";
 const ERC1155_EVENT_TOPICS = Object.freeze({
   TransferSingle: id("TransferSingle(address,address,address,uint256,uint256)"),
@@ -109,9 +122,10 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   if (authUri.origin !== publicApp.origin) throw new ConfigurationError("AUTH_URI must share the PUBLIC_APP_URL origin.");
   const authDomain = String(env.AUTH_DOMAIN || publicApp.host).trim().toLowerCase();
   if (authDomain !== publicApp.host.toLowerCase()) throw new ConfigurationError("AUTH_DOMAIN must match the PUBLIC_APP_URL host.");
-  const authAllowedChainIds = allowedChainIds(env.AUTH_ALLOWED_CHAIN_IDS, "43113");
-  if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== 43113)) {
-    throw new ConfigurationError("Production wallet authentication requires HTTPS and Avalanche Fuji (43113) only.");
+  const releaseChainId = productionChainId(env);
+  const authAllowedChainIds = allowedChainIds(env.AUTH_ALLOWED_CHAIN_IDS, String(releaseChainId));
+  if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== releaseChainId)) {
+    throw new ConfigurationError(`Production wallet authentication requires HTTPS and ${chainLabel(releaseChainId)} only.`);
   }
   // MAINNET_RPC_URL is optional and read ONLY for live Avalanche C-Chain (43114)
   // reads against the original Voidcaller collection (legacy balanceOf and
@@ -144,10 +158,10 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
 
 export function loadIndexerConfig(env = process.env, { requireConfiguration = true } = {}) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
-  const defaultChainId = 43113;
+  const defaultChainId = productionChainId(env);
   const chainId = Number(env.INDEXER_CHAIN_ID || defaultChainId);
   if (!AVALANCHE_AUTH_CHAIN_IDS.has(chainId)) throw new ConfigurationError("INDEXER_CHAIN_ID may contain only Avalanche Fuji (43113) or C-Chain (43114).");
-  if (appEnvironment === "production" && chainId !== 43113) throw new ConfigurationError("Production indexing requires Avalanche Fuji (43113).");
+  if (appEnvironment === "production" && chainId !== defaultChainId) throw new ConfigurationError(`Production indexing requires ${chainLabel(defaultChainId)}.`);
   const rpcUrlValue = String(env.INDEXER_RPC_URL || "").trim();
   const contractsValue = String(env.INDEXER_CONTRACTS_JSON || "").trim();
   if (!rpcUrlValue || !contractsValue) {

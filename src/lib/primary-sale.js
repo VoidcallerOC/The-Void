@@ -223,8 +223,8 @@ export function explainCollectError(error) {
   if (code === 4001 || code === "ACTION_REJECTED" || /user rejected|user denied|rejected the request/i.test(message)) {
     return { state: "rejected", message: "Transaction rejected in the wallet. Nothing was collected." };
   }
-  if (/switch your wallet|wrong network|chain 43113|avalanche fuji/i.test(message)) {
-    return { state: "wrong-network", message: "Switch your wallet to Avalanche Fuji (chain 43113) before collecting." };
+  if (/switch your wallet|wrong network|chain 4311[34]|avalanche fuji|avalanche c-chain/i.test(message)) {
+    return { state: "wrong-network", message: `Switch your wallet to ${FUJI_RELEASE_CONFIG.networkName} (chain ${FUJI_RELEASE_CONFIG.chainId}) before collecting.` };
   }
   const data = revertData(error);
   if (data) {
