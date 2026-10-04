@@ -68,8 +68,6 @@ artifactMethod(releaseArtifact, "grantRole(bytes32,address)", "VoidRelease1155V2
 artifactMethod(releaseArtifact, "renounceRole(bytes32)", "VoidRelease1155V2 artifact");
 artifactMethod(releaseArtifact, "hasRole(bytes32,address)", "VoidRelease1155V2 artifact");
 artifactMethod(saleArtifact, "owner()", "VoidPrimarySale artifact");
-// The currently reviewed VoidPrimarySale.sol does not expose transferOwnership.
-// Refusing here prevents a deployment that cannot complete the required Safe handoff.
 artifactMethod(saleArtifact, "transferOwnership(address)", "VoidPrimarySale artifact");
 artifactMethod(anchorArtifact, "releaseContract()", "VoidProvenanceAnchor artifact");
 
