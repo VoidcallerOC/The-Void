@@ -14,7 +14,7 @@ import {
   submitVerificationApplication,
 } from "../lib/verification-api.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { fujiExplorerUrl, grantPublishingRoles, readPublishingRoles } from "../lib/fuji-release.js";
+import { FUJI_ROLES, canMutateFujiPublishingRoles, fujiExplorerUrl, grantPublishingRoles, readFujiRole, readPublishingRoles } from "../lib/fuji-release.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -497,33 +497,41 @@ const REVIEW_ACTIONS = [
 ];
 
 // Verification is a database approval; publishing and minting on the certified
-// Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. A reviewer
-// grants them here with their own wallet: through VoidRoleGranter when they
-// are listed on it (no admin role needed), or directly as the contract admin.
+// Fuji contract also need ARTIST_ROLE and ISSUER_ROLE on-chain. Granting or
+// revoking those roles is a DEFAULT_ADMIN_ROLE action on the Fuji release.
+// Other connected wallets, including reviewers, may see the status only.
 export function OnChainRolesPanel({ artistWallet }) {
   const wallet = useWallet();
   const [roles, setRoles] = useState(null);
+  const [adminForAccount, setAdminForAccount] = useState(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [txs, setTxs] = useState([]);
   const [checked, setChecked] = useState(0);
   const provider = wallet.connected ? wallet.getProvider?.() : null;
   const account = wallet.account;
+  const isContractAdmin = Boolean(wallet.connected && account && adminForAccount?.account === account && adminForAccount.admin);
+  const mayMutateRoles = canMutateFujiPublishingRoles(isContractAdmin);
 
   useEffect(() => {
     const current = wallet.connected ? wallet.getProvider?.() : null; // re-read only when the connection or account changes
-    if (!current) return undefined;
+    if (!current || !account) return undefined;
     let cancelled = false;
     readPublishingRoles(current, artistWallet)
       .then((next) => { if (!cancelled) setRoles(next); })
       .catch((error) => { if (!cancelled) setStatus(error.message); });
+    readFujiRole(current, FUJI_ROLES.DEFAULT_ADMIN_ROLE, account)
+      .then((admin) => { if (!cancelled) setAdminForAccount({ account, admin: admin === true }); })
+      .catch(() => { if (!cancelled) setAdminForAccount({ account, admin: false }); });
     return () => { cancelled = true; };
   }, [wallet.connected, account, artistWallet, checked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grant = async () => {
     setBusy(true); setStatus(""); setTxs([]);
     try {
-      if (!provider || !account) throw new Error("Connect your reviewer wallet first.");
+      if (!provider || !account) throw new Error("Connect the contract admin wallet first.");
+      const admin = await readFujiRole(provider, FUJI_ROLES.DEFAULT_ADMIN_ROLE, account);
+      if (!canMutateFujiPublishingRoles(admin)) throw new Error("Only the Fuji release contract admin can grant or revoke on-chain publishing roles.");
       const results = await grantPublishingRoles({ provider, from: account, account: artistWallet, onProgress: setStatus });
       setTxs(results.filter((result) => result.hash));
       setStatus(results.every((result) => result.alreadyHeld) ? "This wallet already holds both roles." : "Roles granted on Fuji. The artist can now publish and mint.");
@@ -539,7 +547,7 @@ export function OnChainRolesPanel({ artistWallet }) {
       <p style={{ ...muted, fontSize: 13 }}>
         {roles ? `ARTIST_ROLE ${roles.ARTIST_ROLE ? "✓" : "✕"} · ISSUER_ROLE ${roles.ISSUER_ROLE ? "✓" : "✕"}` : provider ? "Checking roles on Fuji…" : "Connect a wallet to check roles on Fuji."}
       </p>
-      {!held && <button type="button" style={primaryBtn} disabled={busy} onClick={grant}>{busy ? "Granting…" : "Grant publishing roles"}</button>}
+      {mayMutateRoles && !held && <button type="button" style={primaryBtn} disabled={busy} onClick={grant}>{busy ? "Granting…" : "Grant publishing roles"}</button>}
       {status && <p role="status" style={{ ...muted, fontFamily: "var(--font-mono)", fontSize: 11, marginTop: 12 }}>{status}</p>}
       {txs.map((tx) => <p key={tx.hash} style={{ fontFamily: "var(--font-mono)", fontSize: 11, wordBreak: "break-all", margin: "4px 0" }}>{tx.role}: <a href={fujiExplorerUrl("tx", tx.hash)} target="_blank" rel="noreferrer">{tx.hash}</a></p>)}
     </section>
