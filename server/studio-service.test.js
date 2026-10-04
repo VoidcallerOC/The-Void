@@ -405,3 +405,60 @@ describe("Artist Studio", () => {
     });
   });
 });
+
+describe("Studio catalog wallet ownership", () => {
+  it("listCatalog hides Voidcaller Forgive & Forget from the admin deployer wallet", async () => {
+    const admin = "0xabd3746e8b852f55be52fc44fab6cab908b1c174";
+    const { instance, db } = service({ authenticatedWallet: admin });
+    db.query.mockImplementation(async (sql) => {
+      if (sql.includes("FROM artists a JOIN artist_owners")) {
+        return { rows: [
+          { id: "artist-7fa23525-21a5-4b68-ae56-b2ed4acc2495", slug: "voidcaller-5", display_name: "Voidcaller", status: "ACTIVE", owner_wallet: admin },
+          { id: "artist-other", slug: "other-band", display_name: "Other Band", status: "ACTIVE", owner_wallet: admin },
+        ] };
+      }
+      if (sql.includes("FROM releases r JOIN artist_owners")) {
+        return { rows: [
+          { id: "ff", artist_id: "artist-7fa23525-21a5-4b68-ae56-b2ed4acc2495", slug: "forgive-forget", title: "Forgive & Forget", description: null, status: "DRAFT", release_metadata: {} },
+          { id: "other", artist_id: "artist-other", slug: "other-song", title: "Other Song", description: null, status: "DRAFT", release_metadata: {} },
+        ] };
+      }
+      if (sql.includes("FROM editions e JOIN releases")) {
+        return { rows: [
+          { id: "ed-ff", release_id: "ff", title: "Forgive & Forget", description: null, supply: 25, status: "DRAFT", application_metadata: {} },
+          { id: "ed-other", release_id: "other", title: "Other Song", description: null, supply: 10, status: "DRAFT", application_metadata: {} },
+        ] };
+      }
+      if (sql.includes("FROM experiences x JOIN artist_owners")) {
+        return { rows: [
+          { id: "xp-ff", artist_id: "artist-7fa23525-21a5-4b68-ae56-b2ed4acc2495", release_id: "ff", edition_id: "ed-ff", title: "Full", description: null, experience_type: "AUDIO", requirements: [], media_config: {}, status: "DRAFT" },
+        ] };
+      }
+      return { rows: [] };
+    });
+    const catalog = await instance.listCatalog({ request });
+    expect(catalog.artists.map((artist) => artist.id)).toEqual(["artist-other"]);
+    expect(catalog.releases.map((release) => release.id)).toEqual(["other"]);
+    expect(catalog.releases.some((release) => release.title === "Forgive & Forget")).toBe(false);
+    expect(catalog.editions.map((edition) => edition.id)).toEqual(["ed-other"]);
+    expect(catalog.experiences).toEqual([]);
+  });
+
+  it("listCatalog keeps Voidcaller Forgive & Forget for the platform artist wallet", async () => {
+    const artistWallet = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
+    const { instance, db } = service({ authenticatedWallet: artistWallet });
+    db.query.mockImplementation(async (sql) => {
+      if (sql.includes("FROM artists a JOIN artist_owners")) {
+        return { rows: [{ id: "artist-7fa23525-21a5-4b68-ae56-b2ed4acc2495", slug: "voidcaller-5", display_name: "Voidcaller", status: "ACTIVE", owner_wallet: artistWallet }] };
+      }
+      if (sql.includes("FROM releases r JOIN artist_owners")) {
+        return { rows: [{ id: "ff", artist_id: "artist-7fa23525-21a5-4b68-ae56-b2ed4acc2495", slug: "forgive-forget", title: "Forgive & Forget", description: null, status: "DRAFT", release_metadata: {} }] };
+      }
+      if (sql.includes("FROM editions e JOIN releases")) return { rows: [] };
+      if (sql.includes("FROM experiences x JOIN artist_owners")) return { rows: [] };
+      return { rows: [] };
+    });
+    const catalog = await instance.listCatalog({ request });
+    expect(catalog.releases.map((release) => release.title)).toEqual(["Forgive & Forget"]);
+  });
+});
