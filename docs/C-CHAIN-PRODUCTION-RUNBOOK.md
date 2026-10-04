@@ -14,7 +14,7 @@ Fuji (`43113`) remains the staging environment and must not be repointed.
 
 **NO-GO.** `config/mainnet-release.json` is intentionally incomplete because no real C-Chain deployment has been performed. Do not replace nulls with placeholders.
 
-The current reviewed `contracts/VoidPrimarySale.sol` exposes `owner` but does not expose `transferOwnership(address)`. The mainnet deployment script therefore refuses to broadcast before deployment. This is intentional: the required Safe ownership handoff cannot be proven with the current contract artifact. A reviewed contract change adding a safe ownership transfer path, followed by Solidity review and regression tests, is required before deployment readiness.
+The source-level ownership blocker is resolved by a minimal manual `transferOwnership(address)` path with current-owner authorization, zero-address rejection, and an `OwnershipTransferred` event. The existing Fuji deployment remains unchanged; this source change affects only future deployments or an explicitly authorized redeployment. Deployment remains no-go until the updated artifact passes Solidity validation and a real C-Chain handoff is verified.
 
 ## 1. Prerequisite checks
 

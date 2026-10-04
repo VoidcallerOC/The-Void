@@ -193,6 +193,33 @@ contract VoidPrimarySaleTest {
         require(price == PRICE, "unchanged");
     }
 
+    function testInitialOwnerAndAuthorizedSafeTransfer() public {
+        address safe = address(0x5AFE);
+        require(sale.owner() == admin, "deployer is initial owner");
+        sale.transferOwnership(safe);
+        require(sale.owner() == safe, "safe is final owner");
+        vm.prank(admin);
+        try sale.setPlatformFeeBps(100) {
+            revert("old owner retained control");
+        } catch {}
+        vm.prank(safe);
+        sale.setPlatformFeeBps(100);
+        require(sale.platformFeeBps() == 100, "safe owner controls fee");
+    }
+
+    function testUnauthorizedAndZeroAddressOwnershipTransfersRevert() public {
+        address safe = address(0x5AFE);
+        vm.prank(buyer);
+        try sale.transferOwnership(safe) {
+            revert("unauthorized transfer");
+        } catch {}
+        require(sale.owner() == admin, "unauthorized changed owner");
+        try sale.transferOwnership(address(0)) {
+            revert("zero owner accepted");
+        } catch {}
+        require(sale.owner() == admin, "zero transfer changed owner");
+    }
+
     function testFeeCanBeLoweredButNotRaisedAboveTheCap() public {
         require(sale.platformFeeCapBps() == 250, "cap");
         sale.setPlatformFeeBps(100);

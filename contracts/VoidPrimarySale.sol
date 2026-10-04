@@ -30,7 +30,7 @@ abstract contract ReentrancyGuard {
 }
 
 /// @title The-Void primary sale
-/// @notice Fuji-only sale desk for VoidRelease1155V2. This contract is expected to hold
+/// @notice Native-AVAX sale desk for VoidRelease1155V2. This contract is expected to hold
 /// ISSUER_ROLE. It does not custody already-minted tokens and does not settle resales.
 /// Fans pay native AVAX. Proceeds are pull payments, split between the edition payout
 /// and the platform recipient. The token itself stays ERC-1155.
@@ -89,6 +89,7 @@ contract VoidPrimarySale is ReentrancyGuard {
     );
     event Purchased(uint256 indexed tokenId, address indexed buyer, uint256 qty, uint256 paid, uint256 artistCut, uint256 platformCut);
     event PlatformFeeUpdated(uint256 previousBps, uint256 nextBps);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event Withdrawn(address indexed account, uint256 amount);
 
     constructor(address releases_, address platformRecipient_, uint256 platformFeeBps_) {
@@ -99,6 +100,15 @@ contract VoidPrimarySale is ReentrancyGuard {
         platformFeeCapBps = platformFeeBps_;
         platformFeeBps = platformFeeBps_;
         owner = msg.sender;
+        emit OwnershipTransferred(address(0), msg.sender);
+    }
+
+    function transferOwnership(address newOwner) external {
+        if (msg.sender != owner) revert NotOwner();
+        if (newOwner == address(0)) revert InvalidAddress();
+        address previousOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(previousOwner, newOwner);
     }
 
     function setPlatformFeeBps(uint256 nextBps) external {
