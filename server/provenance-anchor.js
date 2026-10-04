@@ -3,12 +3,11 @@ import process from "node:process";
 import { ApiError } from "./api-errors.js";
 import { requireWalletAuth } from "./api-runtime.js";
 import { ConfigurationError } from "./config.js";
-import fujiRelease from "../config/fuji-release.json" with { type: "json" };
+import { releaseDeploymentFor } from "../config/release-network.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { publicationView } from "./studio-publication.js";
 
-const FUJI_RELEASE = fujiRelease.contractAddress.toLowerCase();
 const EVENT_NAME = "ProvenanceAnchored";
 export const ANCHOR_ABI = Object.freeze([
   "function anchor(bytes32 releaseId, bytes32 editionId, bytes32 provenanceRoot)",
@@ -51,32 +50,30 @@ export function encodeAnchorCall({ releaseSlug, editionTitleSlug, provenanceRoot
 
 export function loadProvenanceAnchorConfig(env = process.env) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
-  const chainId = Number(env.PROVENANCE_ANCHOR_CHAIN_ID || 43113);
-  if (!Number.isSafeInteger(chainId) || ![43113, 43114].includes(chainId)) {
-    throw new ConfigurationError("PROVENANCE_ANCHOR_CHAIN_ID may contain only Avalanche Fuji (43113) or C-Chain (43114).");
+  const selectedNetwork = String(env.RELEASE_NETWORK || "fuji").trim().toLowerCase();
+  let deployment;
+  try {
+    deployment = releaseDeploymentFor(selectedNetwork);
+  } catch (error) {
+    throw new ConfigurationError(`Release network configuration is incomplete: ${error.message}`);
   }
-  if (appEnvironment === "production" && chainId !== 43113) {
-    throw new ConfigurationError("Production provenance anchoring requires Avalanche Fuji (43113), separate from C-Chain reads.");
-  }
-  const network = String(env.PROVENANCE_ANCHOR_NETWORK || (chainId === 43113 ? "fuji" : "")).trim().toLowerCase();
-  if (chainId === 43113 && network !== "fuji") throw new ConfigurationError("Fuji anchoring must use the fuji network name.");
-  if (chainId === 43114 && network !== "avalanche") throw new ConfigurationError("C-Chain anchoring must use the avalanche network name.");
-  const releaseContract = chainId === 43113
-    ? FUJI_RELEASE
-    : String(env.PROVENANCE_RELEASE_CONTRACT || "").trim().toLowerCase();
+  const chainId = Number(deployment.chainId);
+  const configuredChainId = env.PROVENANCE_ANCHOR_CHAIN_ID === undefined ? chainId : Number(env.PROVENANCE_ANCHOR_CHAIN_ID);
+  if (configuredChainId !== chainId) throw new ConfigurationError("PROVENANCE_ANCHOR_CHAIN_ID must match RELEASE_NETWORK.");
+  const network = String(env.PROVENANCE_ANCHOR_NETWORK || deployment.network || selectedNetwork).trim().toLowerCase();
+  if (network !== selectedNetwork) throw new ConfigurationError("PROVENANCE_ANCHOR_NETWORK must match RELEASE_NETWORK.");
+  const releaseContract = String(env.PROVENANCE_RELEASE_CONTRACT || deployment.contractAddress || "").trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(releaseContract)) throw new ConfigurationError("The release contract for this network is not configured.");
-  if (chainId !== 43113 && releaseContract === FUJI_RELEASE) {
-    throw new ConfigurationError("The certified Fuji release contract cannot be used on another network.");
-  }
-  const address = String(env.PROVENANCE_ANCHOR_ADDRESS || "").trim().toLowerCase();
-  const rpcUrl = String(env.PROVENANCE_ANCHOR_RPC_URL || "").trim();
+  const configured = deployment.provenance || {};
+  const address = String(env.PROVENANCE_ANCHOR_ADDRESS || configured.anchorAddress || "").trim().toLowerCase();
+  const rpcUrl = String(env.PROVENANCE_ANCHOR_RPC_URL || configured.rpcUrl || "").trim();
   if (!address && !rpcUrl) {
     return Object.freeze({ enabled: false, chainId, network, releaseContract, eventName: EVENT_NAME });
   }
   if (!address || !rpcUrl || !/^0x[0-9a-f]{40}$/.test(address)) {
     throw new ConfigurationError("PROVENANCE_ANCHOR_ADDRESS and PROVENANCE_ANCHOR_RPC_URL must be set together.");
   }
-  if (address === releaseContract || address === FUJI_RELEASE) {
+  if (address === releaseContract) {
     throw new ConfigurationError("The provenance anchor contract must not be the release contract.");
   }
   let parsed;

@@ -15,6 +15,12 @@
   "primarySaleIssuerGrantTransaction": "0x47338566334db37d48a9d39d1e7eee145a23f03958a0ee3beb02834ea452decf",
   "platformFeeRecipient": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
   "platformFeeBps": 500,
+  "provenance": {
+    "anchorAddress": null,
+    "anchorDeploymentTransaction": null,
+    "anchorDeploymentBlock": null,
+    "rpcUrl": null
+  },
   "legacyV1": {
     "contractName": "VoidRelease1155",
     "contractAddress": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
