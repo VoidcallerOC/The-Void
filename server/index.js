@@ -1,5 +1,6 @@
 import process from "node:process";
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 import { createApiHandler } from "./api-http.js";
 import { createStructuredLogger, createRateLimiter } from "./api-runtime.js";
 import { loadIndexerConfig, loadMediaConfig, loadMetadataConfig, loadServerConfig } from "./config.js";
@@ -14,6 +15,7 @@ import { createIndexedOwnershipVerifier } from "./ownership.js";
 import { createArtistStudioService } from "./studio-service.js";
 import { createArtistVerificationService } from "./verification-service.js";
 import { createMarketplacePresentationService } from "./marketplace-presentation-service.js";
+import { createLocalMarketplaceHeroStore } from "./marketplace-hero-storage.js";
 import { createNotificationStore, createVerificationNotifier } from "./verification-notifier.js";
 import { createXDmClient, loadXDmConfig } from "./x-dm.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
@@ -61,7 +63,9 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
-  const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, artworkUploader });
+  // Header art is a local site file. Release artwork still uses artworkUploader (Pinata).
+  const marketplaceHeroStore = createLocalMarketplaceHeroStore({ root: fileURLToPath(new URL("../public/assets/marketplace-heroes", import.meta.url)), db: pool });
+  const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, heroStore: marketplaceHeroStore });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);

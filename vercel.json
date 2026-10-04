@@ -5,6 +5,7 @@
     { "src": "/assets/audio-preview/(?!.*-preview\\.mp3$).*", "status": 404 }
   ],
   "rewrites": [
+    { "source": "/assets/marketplace-heroes/:file", "destination": "https://the-void-api-fuji.onrender.com/api/marketplace/heroes/:file" },
     { "source": "/api/:path*", "destination": "https://the-void-api-fuji.onrender.com/api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
