@@ -133,7 +133,7 @@ export const VC_AUDIO = {
   },
 
   isPreview(track) {
-    return !!(track && (track.preview || this.isGated(track)));
+    return !!(track && !this.hasAuthorizedSource(track) && (track.preview || this.isGated(track)));
   },
 
   isBearer(track) {
