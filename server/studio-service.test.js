@@ -136,7 +136,7 @@ describe("Artist Studio", () => {
     const publishedAt = new Date("2026-10-01T00:00:00.000Z");
     const legacy = { id: "voidcaller-legacy-genesis", artist_id: "artist-1", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt };
     const bySlug = service({ rows: [legacy] });
-    await expect(bySlug.instance.updateRelease({ request, releaseId: legacy.id, input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
+    await expect(bySlug.instance.updateRelease({ request, releaseId: legacy.id, input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
     expect(bySlug.repo.saveRelease).not.toHaveBeenCalled();
     expect(bySlug.db.query.mock.calls.map(([sql]) => String(sql)).some((sql) => /UPDATE editions SET status = 'ARCHIVED'/i.test(sql))).toBe(false);
 
@@ -145,7 +145,7 @@ describe("Artist Studio", () => {
       if (/FROM editions/i.test(sql)) return { rows: [{ release_id: "release-copy", status: "PUBLISHED", chain_id: 43114, contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", token_id: "1" }] };
       return { rows: [{ ...legacy, id: "release-copy", slug: "not-the-legacy-slug", title: "VOIDCALLER" }] };
     });
-    await expect(byContract.instance.updateRelease({ request, releaseId: "release-copy", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "MINTABLE_RELEASE_LOCKED" });
+    await expect(byContract.instance.updateRelease({ request, releaseId: "release-copy", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "LEGACY_CATALOG_LOCKED" });
     expect(byContract.repo.saveRelease).not.toHaveBeenCalled();
 
     const fuji = service({ rows: [{ id: "fuji-voidcaller", artist_id: "artist-1", slug: "voidcaller", title: "VOIDCALLER", description: null, status: "PUBLISHED", release_metadata: {}, published_at: publishedAt }] });
