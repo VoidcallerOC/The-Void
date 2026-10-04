@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import deployment from "../config/fuji-release.json" with { type: "json" };
+import { RELEASE_DEPLOYMENT as deployment } from "../config/release-network.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";

@@ -174,3 +174,33 @@ describe("catalog source", () => {
     expect(artist.bio).toBe("Saved bio");
   });
 });
+
+describe("active release network", () => {
+  it("hides editions, their releases and experiences from the other network, but keeps the legacy C-Chain collection", async () => {
+    const { onActiveReleaseNetwork } = await import("./catalog-source.js");
+    const published = mapPublishedCatalog({
+      releases: [
+        { id: "rel-fuji", artist_id: "voidcaller", title: "Fuji Song", status: "PUBLISHED" },
+        { id: "rel-main", artist_id: "voidcaller", title: "Mainnet Song", status: "PUBLISHED" },
+      ],
+      editions: [
+        { id: "ed-fuji", release_id: "rel-fuji", title: "Fuji Song", status: "PUBLISHED", chain_id: "43113", contract_address: "0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6", token_id: "1" },
+        { id: "ed-main", release_id: "rel-main", title: "Mainnet Song", status: "PUBLISHED", chain_id: "43114", contract_address: "0x1111111111111111111111111111111111111111", token_id: "2" },
+        { id: "voidcaller-legacy-edition", release_id: "voidcaller-legacy-genesis", title: "Chapter I", status: "PUBLISHED", chain_id: "43114", contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", application_metadata: { tokenIds: ["0", "1"] } },
+      ],
+      experiences: [
+        { id: "x-fuji", release_id: "rel-fuji", edition_id: "ed-fuji", title: "Demo", experience_type: "AUDIO" },
+        { id: "x-main", release_id: "rel-main", edition_id: "ed-main", title: "Demo", experience_type: "AUDIO" },
+      ],
+    });
+
+    const mainnet = onActiveReleaseNetwork(published, 43114);
+    expect(mainnet.editions.map((edition) => edition.id).sort()).toEqual(["ed-main", "voidcaller-legacy-edition"]);
+    expect(mainnet.releases.map((release) => release.id)).toEqual(["rel-main"]);
+    expect(mainnet.experiences.map((experience) => experience.id)).toEqual(["x-main"]);
+
+    const fuji = onActiveReleaseNetwork(published, 43113);
+    expect(fuji.editions.map((edition) => edition.id).sort()).toEqual(["ed-fuji", "voidcaller-legacy-edition"]);
+    expect(fuji.releases.map((release) => release.id)).toEqual(["rel-fuji"]);
+  });
+});

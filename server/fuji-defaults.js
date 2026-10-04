@@ -1,5 +1,5 @@
 import process from "node:process";
-import deployment from "../config/fuji-release.json" with { type: "json" };
+import { RELEASE_DEPLOYMENT as deployment } from "../config/release-network.js";
 
 export const FUJI_RELEASE_DEPLOYMENT = Object.freeze(deployment);
 
