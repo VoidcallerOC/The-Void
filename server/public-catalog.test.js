@@ -77,4 +77,29 @@ describe("public catalog reads", () => {
     expect(String(experiences.db.query.mock.calls[0][0])).toContain("id, artist_id");
     expect(String(experiences.db.query.mock.calls[0][0])).not.toMatch(/,\s*requirements\b/);
   });
+
+  it("omits the withdrawn Fuji Forgive & Forget release from public collect reads", async () => {
+    const releaseId = "release-1b4a2d71-218f-47a2-afde-cd5171909ace";
+    const editionId = "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1";
+    const experienceId = "experience-d798300c-37eb-4cc6-aad3-4b078b77135a";
+    const forgiveRelease = { id: releaseId, artist_id: "voidcaller", slug: "forgive-forget-23", title: "Forgive & Forget", status: "PUBLISHED", artist_slug: "voidcaller", artist_name: "Voidcaller" };
+    const legacyRelease = { id: "voidcaller-legacy-genesis", artist_id: "voidcaller", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", status: "PUBLISHED", artist_slug: "voidcaller", artist_name: "Voidcaller" };
+    const forgiveEdition = { id: editionId, release_id: releaseId, title: "Forgive & Forget", status: "PUBLISHED", chain_id: 43113, contract_address: "0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6", token_id: "1" };
+    const legacyEdition = { id: "voidcaller-legacy-edition", release_id: "voidcaller-legacy-genesis", title: "Chapter I · The Relic", status: "PUBLISHED", chain_id: 43114, contract_address: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee" };
+    const forgiveExperience = { id: experienceId, artist_id: "voidcaller", release_id: releaseId, edition_id: editionId, title: "Stranger Things", status: "PUBLISHED", experience_type: "DEMO" };
+
+    const releases = service(forgiveRelease);
+    releases.db.query.mockResolvedValue({ rows: [forgiveRelease, legacyRelease] });
+    await expect(releases.instance.getRelease({ idOrSlug: "forgive-forget-23" })).rejects.toMatchObject({ code: "RELEASE_NOT_FOUND", status: 404 });
+    await expect(releases.instance.listReleases({})).resolves.toEqual([expect.objectContaining({ id: "voidcaller-legacy-genesis", title: "VOIDCALLER" })]);
+
+    const editions = service(forgiveEdition);
+    editions.db.query.mockResolvedValue({ rows: [forgiveEdition, legacyEdition] });
+    await expect(editions.instance.getEdition({ id: editionId })).rejects.toMatchObject({ code: "EDITION_NOT_FOUND", status: 404 });
+    await expect(editions.instance.listEditions({})).resolves.toEqual([expect.objectContaining({ id: "voidcaller-legacy-edition", title: "Chapter I · The Relic" })]);
+
+    const experiences = service(forgiveExperience);
+    await expect(experiences.instance.getExperience({ id: experienceId })).rejects.toMatchObject({ code: "EXPERIENCE_NOT_FOUND", status: 404 });
+    await expect(experiences.instance.listExperiences({})).resolves.toEqual([]);
+  });
 });
