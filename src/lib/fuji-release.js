@@ -499,6 +499,11 @@ export async function readPublishingRoles(provider, account) {
   return Object.fromEntries(entries);
 }
 
+/** Grant and revoke of on-chain publishing roles require DEFAULT_ADMIN_ROLE on the certified Fuji release. */
+export function canMutateFujiPublishingRoles(hasDefaultAdminRole) {
+  return hasDefaultAdminRole === true;
+}
+
 /** Grants each missing publishing role to `account`, one transaction per role. */
 const roleGranterIface = new ethers.Interface([
   "function isReviewer(address) view returns (bool)",
