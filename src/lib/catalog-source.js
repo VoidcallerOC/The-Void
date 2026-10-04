@@ -186,6 +186,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       artwork: ipfsToHttp(meta.artwork) || ipfsToHttp(row.token_metadata?.image || ""),
       tokenMetadata: row.token_metadata && typeof row.token_metadata === "object" ? row.token_metadata : null,
       priceWei: meta.priceWei ?? meta.primaryPriceWei ?? meta.marketplace?.priceWei ?? null,
+      ...(row.buyable_sale === true || row.buyableSale === true ? { buyableSale: true } : {}),
     });
   });
   const mappedExperiences = asArray(experiences).filter((row) => row?.id).map((row) => {
