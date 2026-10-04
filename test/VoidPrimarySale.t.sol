@@ -5,6 +5,7 @@ import {VoidRelease1155V2} from "../contracts/VoidRelease1155V2.sol";
 import {VoidPrimarySale} from "../contracts/VoidPrimarySale.sol";
 
 interface Vm {
+    function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData) external;
     function prank(address) external;
     function deal(address, uint256) external;
     function warp(uint256) external;
@@ -64,6 +65,7 @@ contract ReenteringPayee {
 
 contract VoidPrimarySaleTest {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     VoidRelease1155V2 internal token;
     VoidPrimarySale internal sale;
     address internal admin = address(this);
@@ -196,6 +198,8 @@ contract VoidPrimarySaleTest {
     function testInitialOwnerAndAuthorizedSafeTransfer() public {
         address safe = address(0x5AFE);
         require(sale.owner() == admin, "deployer is initial owner");
+        vm.expectEmit(true, true, false, true);
+        emit OwnershipTransferred(admin, safe);
         sale.transferOwnership(safe);
         require(sale.owner() == safe, "safe is final owner");
         vm.prank(admin);
