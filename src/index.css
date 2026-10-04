@@ -138,6 +138,7 @@ body { padding-bottom: 72px; }
   .vc-nav-burger { display: inline-flex !important; }
 }
 @media (max-width: 768px) {
+  body { padding-bottom: 132px; }
   .vc-nav-links,
   .vc-chain-badge,
   .vc-nav-cta {
@@ -167,16 +168,26 @@ body { padding-bottom: 72px; }
   }
   .vc-sticky-player {
     gap: 12px !important;
+    flex-wrap: wrap !important;
   }
   /* With the seek bar hidden, let the track meta absorb the slack so the
      title ellipsis-truncates instead of pushing the transport controls off
      the right edge of the screen. */
   .vc-sticky-meta {
-    flex: 1 1 auto !important;
+    flex: 1 1 0 !important;
     min-width: 0 !important;
   }
+  .vc-sticky-controls {
+    flex: 1 1 100% !important;
+    min-width: 0;
+    margin-left: 0 !important;
+    justify-content: space-between;
+  }
+  .vc-sticky-volume {
+    min-width: 0;
+  }
   .vc-sticky-volume input[type="range"] {
-    width: 64px;
+    width: clamp(48px, 18vw, 64px);
   }
   /* Hero content is taller than the viewport on phones, so vertical centering
      pins its top under the fixed nav and clips the eyebrow. Top-align with

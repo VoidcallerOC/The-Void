@@ -101,7 +101,7 @@ export function StickyPlayer() {
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "0 0 12px var(--vc-crimson)" }} />
       </div>
       <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {preview && dur ? fmt(dur) : cur.time}</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
+      <div className="vc-sticky-controls" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
         <MasterVolume audio={audio} />
         <div style={{ display: "flex", gap: 6 }}>
           <PlayerBtn label="Previous track" onClick={() => audio.prev()}><SkipBack size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
