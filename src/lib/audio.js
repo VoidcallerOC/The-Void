@@ -5,6 +5,48 @@ import { requestProtectedMediaGrant, revokeProtectedMediaGrant } from "./media-a
 
 function grantKey(track) { return `${track?.protectedMedia?.experienceId || ""}:${track?.protectedMedia?.mediaType || "AUDIO"}:${track?.n || ""}`; }
 
+// Percent, not basis points. 80 is audible and not muted when nothing is stored.
+export const MASTER_VOLUME_STORAGE_KEY = "the-void.master-volume";
+export const DEFAULT_MASTER_VOLUME_PERCENT = 80;
+
+function browserStorage() {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+// null when the value is not a real level. 0 is a valid mute.
+export function parseMasterVolumePercent(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    value = trimmed;
+  }
+  const level = Number(value);
+  if (!Number.isFinite(level)) return null;
+  return Math.min(100, Math.max(0, Math.round(level)));
+}
+
+export function readMasterVolumePercent(store = browserStorage()) {
+  try {
+    const raw = store?.getItem?.(MASTER_VOLUME_STORAGE_KEY);
+    if (raw == null) return DEFAULT_MASTER_VOLUME_PERCENT;
+    return parseMasterVolumePercent(raw) ?? DEFAULT_MASTER_VOLUME_PERCENT;
+  } catch {
+    return DEFAULT_MASTER_VOLUME_PERCENT;
+  }
+}
+
+export function writeMasterVolumePercent(percent, store = browserStorage()) {
+  try {
+    store?.setItem?.(MASTER_VOLUME_STORAGE_KEY, String(percent));
+  } catch {
+    // Private mode and blocked storage still keep the in-memory level for this session.
+  }
+}
+
 // Shared audio state lives in a module-level singleton so the StickyPlayer
 // can mirror it without React lifting state up the tree. Full media URLs are
 // never present in the catalog; bearer playback is resolved through the API.
@@ -20,6 +62,27 @@ export const VC_AUDIO = {
   mediaAuthorization: null,
   mediaGrants: new Map(),
   mediaRequests: new Map(),
+  // null until the first read so a stored level wins over the default.
+  volumePercent: null,
+
+  masterVolumePercent() {
+    if (this.volumePercent == null) this.volumePercent = readMasterVolumePercent();
+    return this.volumePercent;
+  },
+
+  applyMasterVolume(audio = this.el) {
+    if (!audio) return;
+    audio.volume = this.masterVolumePercent() / 100;
+  },
+
+  setMasterVolumePercent(percent) {
+    const next = parseMasterVolumePercent(percent);
+    if (next == null) return;
+    this.volumePercent = next;
+    writeMasterVolumePercent(next);
+    this.applyMasterVolume();
+    this.notify();
+  },
 
   holdsChapterI() {
     return RELIC_TOKEN_IDS.some((id) => this.owned.has(id));
@@ -109,6 +172,7 @@ export const VC_AUDIO = {
     audio.addEventListener("pause", () => { this.playing = false; this.notify(); });
     audio.addEventListener("loadedmetadata", () => this.notify());
     this.el = audio;
+    this.applyMasterVolume(audio);
     return audio;
   },
 
@@ -133,6 +197,7 @@ export const VC_AUDIO = {
     const source = this.srcFor(track);
     const current = audio.getAttribute("src") || audio.src || "";
     if (source && !current.endsWith(source.split("/").pop())) audio.src = source;
+    this.applyMasterVolume(audio);
     if (track.protectedMedia && this.holdsChapterI()) {
       void this.resolveProtectedSource(track).then((authorizedSource) => {
         if (!authorizedSource || this.queue?.[this.idx] !== track) return;
@@ -141,6 +206,7 @@ export const VC_AUDIO = {
         const wasPlaying = !audio.paused;
         const time = audio.currentTime || 0;
         audio.src = authorizedSource;
+        this.applyMasterVolume(audio);
         const resume = () => {
           try { audio.currentTime = Math.min(time, audio.duration || time); } catch { /* Metadata may not be available yet. */ }
           if (wasPlaying) audio.play().catch(() => {});
@@ -157,6 +223,7 @@ export const VC_AUDIO = {
       this.ensure();
       if (!this.el.src) this.setTrack(this.idx);
     }
+    this.applyMasterVolume();
     return this.el.play().catch((error) => {
       this.notify();
       throw error;

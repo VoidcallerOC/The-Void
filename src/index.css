@@ -121,6 +121,13 @@ body { padding-bottom: 72px; }
 /* Reliquary: reveal the play overlay on hover over an owned relic's art */
 .vc-relic-art:hover .vc-relic-playbtn { opacity: 1 !important; }
 
+.vc-sticky-volume input[type="range"] {
+  width: 92px;
+  height: 16px;
+  accent-color: var(--vc-crimson);
+  cursor: pointer;
+}
+
 /* ============================================================
    RESPONSIVE OVERRIDES
    ============================================================ */
@@ -167,6 +174,9 @@ body { padding-bottom: 72px; }
   .vc-sticky-meta {
     flex: 1 1 auto !important;
     min-width: 0 !important;
+  }
+  .vc-sticky-volume input[type="range"] {
+    width: 64px;
   }
   /* Hero content is taller than the viewport on phones, so vertical centering
      pins its top under the fixed nav and clips the eyebrow. Top-align with
