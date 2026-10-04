@@ -87,6 +87,27 @@ describe("Studio release picker", () => {
       editions: [],
     })).toEqual([]);
   });
+
+  it("hides a withdrawn published history row while keeping a valid same-title release selectable", () => {
+    const withdrawn = {
+      id: "release-1b4a2d71-218f-47a2-afde-cd5171909ace",
+      artistId: "voidcaller",
+      title: "Forgive & Forget",
+      status: "published",
+    };
+    const fresh = {
+      id: "release-fresh-forgive-forget",
+      artistId: "voidcaller",
+      title: "Forgive & Forget",
+      status: "published",
+    };
+    const choices = studioReleaseChoices({
+      releases: [withdrawn, fresh],
+      artists: [{ id: "voidcaller", name: "Voidcaller" }],
+      editions: [],
+    });
+    expect(choices.map(({ release }) => release.id)).toEqual(["release-fresh-forgive-forget"]);
+  });
 });
 
 describe("Take this off the site", () => {
