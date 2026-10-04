@@ -54,6 +54,25 @@ describe("Studio release picker", () => {
     expect(studioReleaseChoices({ releases: releases.slice(1), artists, editions: [] })).toEqual([]);
   });
 
+  it("hides an unpublished release when this artist already archived that title", () => {
+    const artists = [
+      { id: "voidcaller", name: "VOIDCALLER" },
+      { id: "voidcaller-alias", name: "voidcaller" },
+      { id: "other", name: "Other Artist" },
+    ];
+    const releases = [
+      { id: "ff-draft", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" },
+      { id: "ff-alias", artistId: "voidcaller-alias", title: "forgive & forget ", status: "draft" },
+      { id: "ff-archived", artistId: "VOIDCALLER", title: "FORGIVE & FORGET", status: "Archived" },
+      { id: "voidcaller-legacy-genesis", artistId: "voidcaller", title: "VOIDCALLER", status: "published" },
+      { id: "ff-other", artistId: "other", title: "Forgive & Forget", status: "draft" },
+    ];
+    expect(studioReleaseChoices({ releases, artists, editions: [] }).map(({ release }) => release.id)).toEqual([
+      "voidcaller-legacy-genesis",
+      "ff-other",
+    ]);
+  });
+
   it("treats ARCHIVED as archived and does not fall back to it when nothing live remains", () => {
     const artists = [{ id: "voidcaller", name: "Voidcaller" }, { id: "e2e", name: "E2E" }];
     const releases = [
