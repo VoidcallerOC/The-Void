@@ -1,3 +1,12 @@
+// Blank or 0 is an open edition (createEdition maxSupply 0). A positive whole
+// number is a hard cap. The sale end time, not this field, closes an open edition.
+export function normalizeEditionSupply(supply) {
+  const rawSupply = String(supply ?? "").trim();
+  if (rawSupply === "" || /^0+$/.test(rawSupply)) return "0";
+  if (!/^\d+$/.test(rawSupply)) throw new Error("Supply must be a positive whole number, or blank or 0 for an unlimited edition.");
+  return BigInt(rawSupply).toString();
+}
+
 function requiredText(value, field) {
   if (!String(value ?? "").trim()) throw new Error(`${field} is required.`);
   return String(value).trim();
@@ -10,10 +19,7 @@ export function validateReleasePublish({ release, tracks, supply, metadata } = {
   tracks.forEach((track, index) => {
     requiredText(track?.title, `Track ${index + 1} title`);
   });
-  const rawSupply = String(supply ?? "").trim();
-  // Blank or 0 is an open edition. The sale end time, not this field, closes it.
-  const quantity = rawSupply === "" || /^0+$/.test(rawSupply) ? "0" : rawSupply;
-  if (!/^\d+$/.test(quantity)) throw new Error("Supply must be a positive whole number, or blank or 0 for an unlimited edition.");
+  const quantity = normalizeEditionSupply(supply);
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Release metadata is required.");
   requiredText(metadata.artwork, "Release artwork");
   return { title, tracks, supply: quantity, metadata };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resumeOwnedRelease, selectReleaseTemplate } from "./studio-selection.js";
+import { quantityFromSupply, resumeOwnedRelease, selectReleaseTemplate } from "./studio-selection.js";
 
 describe("Studio release selection", () => {
   it("loads a public release as a new wallet-owned template without reusing server IDs", () => {
@@ -58,5 +58,22 @@ describe("Studio release selection", () => {
     };
 
     expect(resumeOwnedRelease(catalog, "release-1")).toMatchObject({ published: true, tokenId: "" });
+  });
+
+  it("reloads a stored open edition as quantity 0 and does not turn a missing supply into open", () => {
+    expect(quantityFromSupply(0)).toBe("0");
+    expect(quantityFromSupply("0")).toBe("0");
+    expect(quantityFromSupply(null)).toBeUndefined();
+    expect(quantityFromSupply(undefined)).toBeUndefined();
+    const catalog = {
+      releases: [{ id: "release-1", artistId: "artist-1", title: "Open single", status: "draft" }],
+      editions: [{ id: "edition-1", releaseId: "release-1", title: "Open single", status: "draft", supply: "0" }],
+    };
+    expect(resumeOwnedRelease(catalog, "release-1").form.quantity).toBe("0");
+    const missing = {
+      releases: [{ id: "release-2", artistId: "artist-1", title: "Unset", status: "draft" }],
+      editions: [{ id: "edition-2", releaseId: "release-2", title: "Unset", status: "draft", supply: null }],
+    };
+    expect(resumeOwnedRelease(missing, "release-2").form).not.toHaveProperty("quantity");
   });
 });
