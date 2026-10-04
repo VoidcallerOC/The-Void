@@ -13,6 +13,7 @@ import { assertArtistMayPublish, assertTokenNotOwnedByAnotherArtist } from "./ar
 import { MAX_ARTWORK_BYTES, MAX_PREVIEW_AUDIO_BYTES, sniffArtwork, sniffAudio } from "./artwork-storage.js";
 import { isLegacyMainnetCatalogRelease, isLegacyMainnetEdition } from "../src/lib/legacy-genesis.js";
 import { releaseIsMintable } from "../src/lib/studio-release-choices.js";
+import { studioCatalogForConnectedWallet } from "../src/lib/studio-wallet-catalog.js";
 
 // Full-length audio the browser may upload straight to private storage. WAV
 // masters are far larger than an API request body can carry.
@@ -196,7 +197,10 @@ export class ArtistStudioService {
       this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
     ]);
-    return { artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows };
+    // artist_owners already scopes the rows to this wallet. The admin/deployer
+    // wallet still drops Voidcaller artist profiles so those releases stay with
+    // the platform artist wallet.
+    return studioCatalogForConnectedWallet({ artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows }, owner);
   }
   async ownedArtist({ artistId, request, lock = false }) {
     const identity = await this.identity(request);
