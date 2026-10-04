@@ -53,4 +53,15 @@ describe("sticky player master volume", () => {
     VC_AUDIO.applyMasterVolume();
     expect(element.volume).toBe(0.15);
   });
+
+  it("keeps volume and transport controls in a dedicated responsive row", () => {
+    const { container } = render(<StickyPlayer />);
+    const controls = container.querySelector(".vc-sticky-controls");
+
+    expect(controls).toBeTruthy();
+    expect(controls.querySelector('input[type="range"]')).toBeTruthy();
+    expect(controls.querySelector('[aria-label="Play"]')).toBeTruthy();
+    expect(controls.querySelector('[aria-label="Previous track"]')).toBeTruthy();
+    expect(controls.querySelector('[aria-label="Next track"]')).toBeTruthy();
+  });
 });
