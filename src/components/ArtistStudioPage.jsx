@@ -520,7 +520,8 @@ export function ArtistStudioPage() {
     setEditionId(selection.editionId);
     setForm((prior) => ({ ...prior, ...selection.form }));
     setStep("track");
-    setNotice(`Release template loaded: ${selection.form.releaseTitle}. Create it under the authenticated artist wallet before publishing.`);
+    const title = selection.form.releaseTitle || "This release";
+    setNotice(canUseStudio ? `${title} is loaded. Finish it, then publish.` : "Connect the artist wallet to publish.");
   };
 
   return (
