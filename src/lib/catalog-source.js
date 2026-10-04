@@ -211,6 +211,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     editionId: edition.id,
     tokenId,
     name: edition.tokenMetadata?.name || edition.title,
+    experiences: mappedExperiences.filter((experience) => experience.editionId === edition.id).map((experience) => experience.id),
     // Published token metadata (public by definition: it is the tokenURI
     // document). animation_url there is only ever the vetted public preview.
     metadata: edition.tokenMetadata ? { name: edition.tokenMetadata.name || "", description: edition.tokenMetadata.description || "", image: edition.tokenMetadata.image || "", animationUrl: edition.tokenMetadata.animation_url || "" } : null,
