@@ -119,6 +119,10 @@ function releaseKey(value, field = "releaseKey") {
   return key;
 }
 
+function requiresFactoryRelease(release) {
+  return String(release?.release_metadata?.publicationArchitecture || "").trim().toLowerCase() === "release-per-contract";
+}
+
 function lifecycle(value, field = "status") { return enumValue(String(value || "").toUpperCase(), field, LIFECYCLE); }
 // Taking a release off the public site is the only step backward from PUBLISHED.
 // DRAFT and REVIEW stay unreachable, and publication still requires the on-chain confirm path.
@@ -347,6 +351,7 @@ export class ArtistStudioService {
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
     const binding = await this.releaseContractBinding(release.id);
+    if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
     if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
     const publishChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
     const publishContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
@@ -358,7 +363,7 @@ export class ArtistStudioService {
     const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -379,6 +384,7 @@ export class ArtistStudioService {
     }
     try {
       const binding = await this.releaseContractBinding(release.id);
+      if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
       if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
       const publicationChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
       const publicationContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
@@ -498,7 +504,7 @@ export class ArtistStudioService {
     // Release slugs become the on-chain releaseId (bytes32), which is shared by every
     // artist on the canonical contract, so they are allocated platform-wide.
     const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
-    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
+    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), publicationArchitecture: "release-per-contract", ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return release;
   }
@@ -528,6 +534,7 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
     const binding = await this.releaseContractBinding(release.id);
+    if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "Create and bind the release through VoidReleaseFactory before creating an edition. No legacy shared contract fallback is allowed.");
     const selectedChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
     const address = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
     const editionName = requiredText(input.trackTitle || input.title || input.name || release.title, "track.title", { max: 256 });
