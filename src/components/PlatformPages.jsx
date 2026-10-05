@@ -75,16 +75,16 @@ export function DiscoverPage() {
           <button key={item} onClick={() => setCategory(item)} style={{ ...ghostBtn, background: category === item ? "var(--vc-crimson)" : "transparent", borderColor: category === item ? "var(--vc-crimson)" : "var(--vc-ash)", color: category === item ? "#fff" : "var(--vc-bone)" }}>{item.replace("-", " ")}</button>
         ))}
       </nav>
-      <div className="vc-market-grid">
+      <div className={category === "artists" || category === "limited-editions" ? "vc-market-grid" : "vc-release-rail"}>
         {category === "artists" && items.map((artist) => <ArtistCard key={artist.id} artist={artist} releases={catalog.releases.filter((release) => release.artistId === artist.id)} />)}
         {category === "limited-editions" && items.map((item) => <EditionCard key={item.edition.id} item={item} secondaryStatus={secondary} />)}
         {category !== "artists" && category !== "limited-editions" && items.map((record) => (
-          <Link key={record.release.id} to={`/release/${record.release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
-            <img src={record.release.artwork} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-            <div style={{ padding: 20 }}>
-              <Status>{record.release.status}</Status>
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{record.release.title}</h2>
-              <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{record.release.subtitle}</p>
+          <Link key={record.release.id} to={`/release/${record.release.id}`} className="vc-featured-release" style={{ color: "inherit", textDecoration: "none" }}>
+            <img src={record.release.artwork} alt={`${record.release.title} artwork`} />
+            <div className="vc-featured-release-copy">
+              <Status>The record</Status>
+              <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(40px, 6vw, 72px)", lineHeight: 0.9, margin: "8px 0", textTransform: "uppercase" }}>{record.release.title}</h2>
+              <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{record.release.subtitle || record.release.description}</p>
             </div>
           </Link>
         ))}
@@ -497,7 +497,7 @@ export function MyCollectionPage() {
         </div>
       ) : owned.length === 0 ? (
         <div style={card}>
-          <p style={{ color: "var(--vc-bone-dim)" }}>{wallet.loadingOwnership ? "Reading the chain…" : "The reliquary is empty. Connect a wallet that holds a pressing, or leave it closed."}</p>
+          <div className="vc-reliquary-empty"><Eyebrow red>† Reliquary</Eyebrow><h2>{wallet.loadingOwnership ? "Reading the chain…" : "Nothing held"}</h2><p style={{ color: "var(--vc-bone-dim)", maxWidth: 460 }}>{wallet.loadingOwnership ? "Reading the chain…" : "The reliquary is empty. Connect a wallet that holds a pressing, or leave it closed."}</p></div>
           <Link to="/marketplace" style={primaryBtn}>Enter marketplace</Link>
         </div>
       ) : (

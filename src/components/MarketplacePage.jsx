@@ -125,9 +125,9 @@ export function MarketplacePage() {
 
   return (
     <section>
-      <header className="vc-market-hero-bleed">
+      <header className={heroImage ? "vc-market-hero-bleed" : "vc-market-mast"}>
         {heroImage && <div className="vc-market-hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden />}
-        <div className="vc-market-hero-shade" aria-hidden />
+        {heroImage && <div className="vc-market-hero-shade" aria-hidden />}
         <div className="vc-market-hero-copy">
           <Eyebrow red>† The catalog</Eyebrow>
           <h1 className="vc-market-hero-title">Releases</h1>
@@ -143,6 +143,20 @@ export function MarketplacePage() {
       </header>
 
       <div style={contentShell}>
+        <section aria-label="The shelf">
+          <SectionHead eyebrow="The shelf" title="Pressings">
+            Every public pressing. Relic and rehearsal are marked. Collect only appears when a pressing can actually be taken.
+          </SectionHead>
+          {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).length > 0 ? (
+            <div className="vc-market-grid">
+              {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).map((item) => (
+                <EditionCard key={`shelf-${item.edition.id}`} item={item} owned={editionOwnedByWallet(item, wallet)} />
+              ))}
+            </div>
+          ) : (
+            <EmptyRail title="The shelf is empty">No held or completed pressings sit outside the collectable list.</EmptyRail>
+          )}
+        </section>
         <section aria-labelledby="official-editions-heading">
           <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
             Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out or zero-supply object is not offered as collectable.
