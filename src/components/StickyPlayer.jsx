@@ -61,7 +61,7 @@ export function StickyPlayer() {
   };
   return (
     <div
-      className="vc-sticky-player"
+      className="vc-sticky-player vc-player-needle"
       style={{
         position: "fixed",
         bottom: 0,
@@ -77,7 +77,7 @@ export function StickyPlayer() {
         gap: 18,
       }}
     >
-      <TrackArt art={art} vid={cur?.artVid} style={{ width: 44, height: 44, objectFit: "cover", filter: "contrast(1.1)", flexShrink: 0, display: "block" }} />
+      <TrackArt art={art} vid={cur?.artVid} style={{ width: 56, height: 56, objectFit: "cover", filter: "contrast(1.1)", flexShrink: 0, display: "block" }} />
       <div className="vc-sticky-meta" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {label}
@@ -99,7 +99,7 @@ export function StickyPlayer() {
         onClick={onSeek}
         style={{ flex: 1, height: 4, background: "var(--vc-ash)", maxWidth: 260, marginLeft: 24, position: "relative", cursor: "pointer" }}
       >
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "0 0 12px var(--vc-crimson)" }} />
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "none" }} />
       </div>
       <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {total}</span>
       <div className="vc-sticky-controls" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>

@@ -11,7 +11,7 @@ import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
 import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
-import { CollectionMarketplaceCallout, DiscoveryMarketplaceCallout } from "./MarketplaceRails.jsx";
+import { CollectionMarketplaceCallout } from "./MarketplaceRails.jsx";
 import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
 import { PurchasePanel } from "./PurchasePanel.jsx";
@@ -67,9 +67,9 @@ export function DiscoverPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Discovery" title="Find the next record">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>Artists, releases, and editions. Marketplace is where you collect them.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>What is on the shelf is what exists. One pressing, presented as a pressing.</p>
       </PlatformHeader>
-      <DiscoveryMarketplaceCallout />
+      <div style={{ margin: "0 0 28px" }}><Link to="/marketplace" style={ghostBtn}>Enter marketplace</Link></div>
       <nav aria-label="Discovery categories" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 28 }}>
         {DISCOVERY_CATEGORIES.map((item) => (
           <button key={item} onClick={() => setCategory(item)} style={{ ...ghostBtn, background: category === item ? "var(--vc-crimson)" : "transparent", borderColor: category === item ? "var(--vc-crimson)" : "var(--vc-ash)", color: category === item ? "#fff" : "var(--vc-bone)" }}>{item.replace("-", " ")}</button>
@@ -98,7 +98,7 @@ export function ArtistsPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Artists" title="Artists">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>Artists are the roots of every release and experience. The verified mark is branded on-chain to the artist wallet that signed — it is not assigned by the catalog.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The verified mark is branded to the wallet that signed. It is not a name anyone can type.</p>
         <div style={{ marginTop: 22 }}>
           <Link to="/verify" style={ghostBtn}>Become verified</Link>
         </div>
@@ -252,60 +252,57 @@ export function EditionPage() {
   // through the same protected experience grant used by the player.
   const previewExperience = experiences[0] || null;
   const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
+  const chainId = String(edition.chainId || "");
+  const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
+  const supplyClosed = edition.supply !== undefined && edition.supply !== null && edition.supply !== "" && Number(edition.supply) === 0;
   return (
     <section style={shell}>
-      <PlatformHeader eyebrow={`† ${release.productType || "Collectible release"}`} title={release.title}>
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>{edition.description}</p>
-        <p>
-          <Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>{artist.name}</Link>
-          {" · "}
-          <Link to={`/release/${release.id}`} style={{ color: "var(--vc-bone)" }}>{release.title}</Link>
-        </p>
-      </PlatformHeader>
-      <div className="vc-grid-2col" style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(280px, 1.1fr)", gap: 28, alignItems: "start" }}>
-        <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} style={{ width: "100%", minHeight: 320, aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)", display: "block" }} />
-        <div style={card}>
+      <Eyebrow red>† {objectLabel}</Eyebrow>
+      <div className="vc-edition-plate" style={{ marginTop: 18 }}>
+        <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} />
+        <div>
+          <p className="vc-card-kicker">{artist.name}</p>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(48px, 8vw, 88px)", lineHeight: 0.9, textTransform: "uppercase", margin: "8px 0 12px" }}>{release.title}</h1>
+          <p className="vc-card-release"><Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{edition.title}</Link></p>
+          {edition.description && <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>{edition.description}</p>}
+          <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyClosed ? "No pressings remain" : `Supply ${edition.supply || "Open"}`}{price ? ` · ${price}` : ""}</p>
+          <div style={{ margin: "18px 0" }}>
+            <Eyebrow>Listen</Eyebrow>
+            {previewTrack ? (
+              <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
+            ) : <p className="vc-card-meta">No preview is attached to this pressing.</p>}
+          </div>
           <Eyebrow>Collector receives</Eyebrow>
-          <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 2 }}>
+          <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 1.8 }}>
             {(edition.includes || []).map((item) => <li key={item}>{item}</li>)}
           </ul>
-          <Eyebrow>Experience</Eyebrow>
-          <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 2 }}>
-            {experiences.length ? experiences.map((experience) => <li key={experience.id}>{experience.title}</li>) : <li>No attached experiences.</li>}
-          </ul>
-          <p className="vc-card-meta" style={{ marginTop: 16 }}>
-            {editionTypeLabel(edition)} · Supply {edition.supply || "Open"}
-            {price ? ` · ${price}` : ""}
-          </p>
-          <p className="vc-card-meta" style={{ marginTop: 10 }}>
-            Secondary market · {marketplaceStatusLabel(secondary)}
-          </p>
-          {previewTrack && (
-            <div style={{ marginTop: 16 }}>
-              <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
-            </div>
-          )}
+          {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>This object cannot be collected. Supply is zero.</p>}
+          <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
-            <div style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 12 }}>
               <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
             </div>
           )}
           {releaseBindingFor(edition).valid && (
-            <div style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 12 }}>
               <Link to={`/claim/${edition.id}`} style={ghostBtn}>Open claim page</Link>
             </div>
           )}
-          <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>
       </div>
-      {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
-      <ListingPanel edition={edition} />
       {experiences.length > 0 && (
         <>
-          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>What this unlocks</h2>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 56, textTransform: "uppercase" }}>What this unlocks</h2>
           <ExperienceList experiences={experiences} />
         </>
       )}
+      <details className="vc-colophon" style={{ marginTop: 36 }}>
+        <summary>Provenance · colophon</summary>
+        <p>Secondary market · {marketplaceStatusLabel(secondary)}</p>
+        <p>{release.productType || "Collectible release"} · <Link to={`/artist/${artist.id}`} style={{ color: "inherit" }}>{artist.name}</Link></p>
+      </details>
+      {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
+      <ListingPanel edition={edition} />
     </section>
   );
 }
@@ -438,7 +435,7 @@ export function CollectionPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Catalog" title="The Void">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>A music catalog of collections, releases, songs, and the experiences attached to each token.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>Collections as records. Open one to see the pressing.</p>
       </PlatformHeader>
       <div className="vc-market-grid">
         {catalog.collections.map((collection) => {
@@ -500,7 +497,7 @@ export function MyCollectionPage() {
         </div>
       ) : owned.length === 0 ? (
         <div style={card}>
-          <p style={{ color: "var(--vc-bone-dim)" }}>{wallet.loadingOwnership ? "Reading the chain…" : "No supported editions found for this wallet yet."}</p>
+          <p style={{ color: "var(--vc-bone-dim)" }}>{wallet.loadingOwnership ? "Reading the chain…" : "The reliquary is empty. Connect a wallet that holds a pressing, or leave it closed."}</p>
           <Link to="/marketplace" style={primaryBtn}>Enter marketplace</Link>
         </div>
       ) : (

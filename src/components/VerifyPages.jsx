@@ -106,7 +106,7 @@ export function VerifyLanding() {
   return (
     <section style={shell}>
       <PageHeader eyebrow="† Artist verification" title="Become verified">
-        <p style={{ ...muted, maxWidth: 640 }}>Establish your identity. Authenticate your work. The mark is branded to the wallet that signs.</p>
+        <p style={{ ...muted, maxWidth: 640 }}>The mark is a colophon, not a status badge. It is branded to the wallet that signs.</p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 28 }}>
           <Link to="/verify/apply" style={primaryBtn}>Apply for verification</Link>
           <Link to="/verify/dashboard" style={ghostBtn}>View application status</Link>
@@ -119,7 +119,7 @@ export function VerifyLanding() {
           <p style={muted}>Artist verification establishes that an artist identity is controlled by the person or team representing it. Verification does not constitute an endorsement of the artist, their work, or their commercial activity.</p>
         </article>
         <article>
-          <Eyebrow>The chain</Eyebrow>
+          <Eyebrow>The path</Eyebrow>
           <ol style={{ listStyle: "none", padding: 0, margin: "18px 0 0", display: "flex", flexDirection: "column", gap: 12, fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: ".12em", textTransform: "uppercase" }}>
             {["01  Connect a wallet", "02  Submit an application", "03  Human review", "04  Decision", "05  Mark branded to the wallet"].map((step) => (
               <li key={step} style={{ borderLeft: "1px solid var(--vc-ash)", paddingLeft: 16 }}>{step}</li>

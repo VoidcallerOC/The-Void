@@ -72,7 +72,7 @@ export function Nav() {
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
           {links.map(([label, path]) => (
-            <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
+            <NavLink key={label} to={path} end={path === "/"} className={`vc-navlink${["/verify", "/studio"].includes(path) ? " vc-nav-secondary" : ""}`}>
               {label}
               {badge(path)}
             </NavLink>
@@ -81,7 +81,7 @@ export function Nav() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span className="vc-nav-cta" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span className="vc-nav-cta vc-nav-wallet" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <WalletButton />
         </span>
         <button

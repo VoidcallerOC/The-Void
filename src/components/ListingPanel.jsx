@@ -461,7 +461,7 @@ export function ListingPanel({ edition }) {
   return (
     <section id="secondary-listing" aria-labelledby="secondary-listing-title" style={{ marginTop: 40, borderTop: "1px solid var(--vc-ash)", paddingTop: 28, scrollMarginTop: 110 }}>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>Secondary collection · owner action</div>
-      <h2 id="secondary-listing-title" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(28px, 4vw, 42px)", textTransform: "uppercase", lineHeight: 1, margin: "12px 0" }}>List for sale</h2>
+      <h2 id="secondary-listing-title" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(22px, 3vw, 28px)", textTransform: "uppercase", lineHeight: 1, margin: "12px 0" }}>List for sale</h2>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65 }}>{ownerIntro} {ownershipDetail}</p>
       <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".08em", overflowWrap: "anywhere" }}>{identity}</p>
       {(!candidate || !marketplaceConfigured) && <Btn kind="ash" disabled>LIST FOR SALE</Btn>}

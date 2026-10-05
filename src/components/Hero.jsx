@@ -159,12 +159,18 @@ export function Hero() {
           </Link>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
-          {[...VC_DATA.heroStats, [volume ? formatWeiAsAvax(volume.overallVolumeWei) : "—", "FUJI CERTIFIED VOLUME"]].map(([v, k]) => (
+          {VC_DATA.heroStats.map(([v, k]) => (
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 16, color: "var(--vc-bone)", letterSpacing: "0.04em" }}>{v}</span>
               <Eyebrow>{k}</Eyebrow>
             </div>
           ))}
+          {volume && formatWeiAsAvax(volume.overallVolumeWei) && !/^0(?:\.0+)? AVAX$/i.test(formatWeiAsAvax(volume.overallVolumeWei)) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, opacity: 0.55 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--vc-bone-dim)", letterSpacing: "0.04em" }}>{formatWeiAsAvax(volume.overallVolumeWei)}</span>
+              <Eyebrow>Certified volume</Eyebrow>
+            </div>
+          )}
         </div>
       </div>
     </section>

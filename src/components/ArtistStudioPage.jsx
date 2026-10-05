@@ -623,7 +623,7 @@ export function ArtistStudioPage() {
         <Eyebrow red>† Artist studio</Eyebrow>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 9vw, 92px)", textTransform: "uppercase", lineHeight: 0.9, margin: "16px 0" }}>Create the relic</h1>
         <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 }}>
-          Artist → Release → Track → Experience → Collect. The Void handles the infrastructure underneath and never reports success without a receipt.
+          Backstage. The same steps — release, track, experience — without looking like account settings. A receipt is still required before anything is called done.
         </p>
       </header>
 
