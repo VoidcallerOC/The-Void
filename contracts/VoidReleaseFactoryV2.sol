@@ -67,13 +67,21 @@ contract VoidReleaseFactoryV2 {
         if (releaseKey == bytes32(0)) revert InvalidReleaseKey();
         bytes32 expectedKey = keccak256(abi.encode("the-void:studio-release:v2", block.chainid, address(this), applicationReleaseId, artist));
         if (releaseKey != expectedKey) revert ReleaseKeyMismatch(expectedKey, releaseKey);
+        return _createRelease(artist, releaseKey, name, symbol, contractURI);
+    }
+
+    function _createRelease(
+        address artist,
+        bytes32 releaseKey,
+        string calldata name,
+        string calldata symbol,
+        string calldata contractURI
+    ) private returns (address releaseContract, address primarySale, address provenanceAnchor) {
         address existing = releaseContractOf[releaseKey];
         if (existing != address(0)) revert ReleaseAlreadyExists(releaseKey, existing);
 
-        releaseContract = _clone(implementation);
-        primarySale = address(new VoidPrimarySale(releaseContract, platformRecipient, PLATFORM_FEE_BPS));
-        provenanceAnchor = address(new VoidProvenanceAnchor(releaseContract));
-        VoidRelease1155V4(releaseContract).initializeRelease(artist, primarySale, releaseKey, name, symbol, contractURI);
+        (releaseContract, primarySale, provenanceAnchor) = _deployInfrastructure();
+        _initializeRelease(releaseContract, artist, primarySale, releaseKey, name, symbol, contractURI);
         // The fee setter is owned by this Factory. Since V2 exposes no generic
         // call/admin function, nobody can change the fixed 250 bps split; sale
         // configuration itself remains gated by the artist role on the clone.
@@ -93,6 +101,27 @@ contract VoidReleaseFactoryV2 {
     function releaseCount() external view returns (uint256) { return _releases.length; }
     function releaseAt(uint256 index) external view returns (address) { return _releases[index]; }
     function releasesOf(address artist) external view returns (address[] memory) { return _releasesByArtist[artist]; }
+
+    function _deployInfrastructure()
+        private
+        returns (address releaseContract, address primarySale, address provenanceAnchor)
+    {
+        releaseContract = _clone(implementation);
+        primarySale = address(new VoidPrimarySale(releaseContract, platformRecipient, PLATFORM_FEE_BPS));
+        provenanceAnchor = address(new VoidProvenanceAnchor(releaseContract));
+    }
+
+    function _initializeRelease(
+        address releaseContract,
+        address artist,
+        address primarySale,
+        bytes32 releaseKey,
+        string calldata name,
+        string calldata symbol,
+        string calldata contractURI
+    ) private {
+        VoidRelease1155V4(releaseContract).initializeRelease(artist, primarySale, releaseKey, name, symbol, contractURI);
+    }
 
     /// @dev EIP-1167 minimal proxy.
     function _clone(address target) private returns (address instance) {
