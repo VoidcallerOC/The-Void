@@ -25,6 +25,7 @@ import { createPinataArtworkUploader } from "./artwork-storage.js";
 import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./provenance-anchor.js";
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
+import { createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
   const pool = db || createDatabasePool(config);
@@ -66,13 +67,19 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
+  let genesisClaim = null;
+  try {
+    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env) });
+  } catch (error) {
+    logger.error?.("genesis.claim.disabled", { error: error.message });
+  }
   // Header art is a local site file. Release artwork still uses artworkUploader (Pinata).
   const marketplaceHeroStore = createLocalMarketplaceHeroStore({ root: fileURLToPath(new URL("../public/assets/marketplace-heroes", import.meta.url)), db: pool });
   const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, heroStore: marketplaceHeroStore });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
-  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, genesisClaim, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
-  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier };
+  return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier, genesisClaim };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

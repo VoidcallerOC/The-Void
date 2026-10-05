@@ -6,9 +6,41 @@ import { useWallet } from "../lib/wallet-context.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { findMarketplaceEdition } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { readReleaseBalance } from "../lib/release-asset.js";
 import { FUJI_RELEASE_FACTORY_CONFIG } from "../lib/fuji-release.js";
-import { claimState, claimStateLabel, CLAIM_STATES, releaseBindingFor } from "../lib/claim-state.js";
+import { releaseBindingFor } from "../lib/claim-state.js";
+import { checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
+
+const CLAIM_PHASES = Object.freeze({
+  DISCONNECTED: "disconnected",
+  CHECKING: "checking",
+  WRONG_NETWORK: "wrong-network",
+  ELIGIBLE: "eligible",
+  ACCESS_DENIED: "access-denied",
+  ELIGIBILITY_UNAVAILABLE: "eligibility-unavailable",
+  CLAIM_UNAVAILABLE: "claim-unavailable",
+  INVALID_BINDING: "invalid-binding",
+  ALREADY_CLAIMED: "already-claimed",
+  AUTHORIZED: "authorized",
+  PENDING: "pending",
+  OWNED: "owned",
+  ERROR: "error",
+});
+
+const PHASE_LABELS = Object.freeze({
+  [CLAIM_PHASES.DISCONNECTED]: "Wallet disconnected",
+  [CLAIM_PHASES.CHECKING]: "Checking Genesis eligibility",
+  [CLAIM_PHASES.WRONG_NETWORK]: "Wrong network",
+  [CLAIM_PHASES.ELIGIBLE]: "Eligible",
+  [CLAIM_PHASES.ACCESS_DENIED]: "Access denied",
+  [CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE]: "Eligibility unavailable",
+  [CLAIM_PHASES.CLAIM_UNAVAILABLE]: "Claim unavailable",
+  [CLAIM_PHASES.INVALID_BINDING]: "Invalid release binding",
+  [CLAIM_PHASES.ALREADY_CLAIMED]: "Already claimed",
+  [CLAIM_PHASES.AUTHORIZED]: "Claim authorized",
+  [CLAIM_PHASES.PENDING]: "Transaction pending",
+  [CLAIM_PHASES.OWNED]: "Owned",
+  [CLAIM_PHASES.ERROR]: "Claim error",
+});
 
 function shortAddress(value) {
   const text = String(value || "");
@@ -16,9 +48,9 @@ function shortAddress(value) {
 }
 
 function StateMark({ state }) {
-  const positive = state === CLAIM_STATES.CLAIM_AVAILABLE || state === CLAIM_STATES.ALREADY_CLAIMED;
-  const attention = state === CLAIM_STATES.WRONG_NETWORK || state === CLAIM_STATES.ERROR || state === CLAIM_STATES.INVALID_RELEASE_BINDING;
-  return <Tag kind={positive ? "crimson" : attention ? "outline" : "ash"}>{claimStateLabel(state)}</Tag>;
+  const positive = [CLAIM_PHASES.ELIGIBLE, CLAIM_PHASES.AUTHORIZED, CLAIM_PHASES.OWNED, CLAIM_PHASES.ALREADY_CLAIMED].includes(state);
+  const attention = [CLAIM_PHASES.WRONG_NETWORK, CLAIM_PHASES.ERROR, CLAIM_PHASES.INVALID_BINDING, CLAIM_PHASES.ACCESS_DENIED, CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE].includes(state);
+  return <Tag kind={positive ? "crimson" : attention ? "outline" : "ash"}>{PHASE_LABELS[state] || "Checking claim"}</Tag>;
 }
 
 function InfoRow({ label, children, mono = false }) {
@@ -28,6 +60,19 @@ function InfoRow({ label, children, mono = false }) {
       <div className={mono ? "vc-claim-value vc-claim-mono" : "vc-claim-value"}>{children}</div>
     </div>
   );
+}
+
+function sameAddress(left, right) {
+  return String(left || "").toLowerCase() === String(right || "").toLowerCase();
+}
+
+function classifyError(error) {
+  if (error?.code === "ELIGIBILITY_UNAVAILABLE") return CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE;
+  if (error?.code === "ACCESS_DENIED") return CLAIM_PHASES.ACCESS_DENIED;
+  if (error?.code === "ALREADY_CLAIMED") return CLAIM_PHASES.ALREADY_CLAIMED;
+  if (error?.code === "INVALID_RELEASE_BINDING" || error?.code === "CLAIM_BINDING_MISMATCH") return CLAIM_PHASES.INVALID_BINDING;
+  if (error?.code === "CLAIM_UNAVAILABLE" || error?.code === "CLAIM_AUTHORIZATION_UNAVAILABLE") return CLAIM_PHASES.CLAIM_UNAVAILABLE;
+  return CLAIM_PHASES.ERROR;
 }
 
 export function ClaimPage() {
@@ -41,38 +86,145 @@ export function ClaimPage() {
   const release = item?.release || null;
   const artist = item?.artist || null;
   const binding = useMemo(() => releaseBindingFor(edition), [edition]);
-  const [ownershipRead, setOwnershipRead] = useState({ key: "", balance: null, error: "" });
-  const networkReady = wallet.connected && Number(wallet.chainId) === binding.chainId;
-  const ownershipKey = `${edition?.id || ""}:${wallet.account || ""}:${binding.releaseContractAddress}:${binding.tokenId || ""}`;
+  const [phase, setPhase] = useState(CLAIM_PHASES.DISCONNECTED);
+  const [message, setMessage] = useState("Connect a wallet to verify Genesis ownership.");
+  const [target, setTarget] = useState(null);
+  const [voucher, setVoucher] = useState(null);
+  const [signature, setSignature] = useState("");
+  const [eligibleTokenIds, setEligibleTokenIds] = useState([]);
+  const [transactionHash, setTransactionHash] = useState("");
+  const [ownershipBalance, setOwnershipBalance] = useState(null);
+
+  const account = wallet.account || "";
+  const connected = Boolean(wallet.connected && account);
+  const provider = wallet.getProvider?.();
 
   useEffect(() => {
     let live = true;
-    if (!binding.valid || !networkReady || !wallet.account) return undefined;
-    const provider = wallet.getProvider?.();
-    if (!provider) return undefined;
-    readReleaseBalance(provider, binding, wallet.account)
-      .then((value) => { if (live) setOwnershipRead({ key: ownershipKey, balance: value, error: "" }); })
-      .catch((error) => { if (live) setOwnershipRead({ key: ownershipKey, balance: null, error: error?.message || "Ownership could not be verified on chain." }); });
+    async function synchronizeClaimState() {
+      setVoucher(null);
+      setSignature("");
+      setTransactionHash("");
+      setOwnershipBalance(null);
+      setEligibleTokenIds([]);
+      setTarget(null);
+      if (!edition) return;
+      if (!connected) {
+        setPhase(CLAIM_PHASES.DISCONNECTED);
+        setMessage("Connect a wallet to verify Genesis ownership.");
+        return;
+      }
+      if (!binding.valid) {
+        setPhase(CLAIM_PHASES.INVALID_BINDING);
+        setMessage(binding.reason);
+        return;
+      }
+      if (Number(wallet.chainId) !== binding.chainId) {
+        setPhase(CLAIM_PHASES.WRONG_NETWORK);
+        setMessage(`Switch your wallet to ${binding.chainId === 43113 ? FUJI_RELEASE_FACTORY_CONFIG.networkName : `chain ${binding.chainId}`} (${binding.chainId}) to claim.`);
+        return;
+      }
+      if (!provider) {
+        setPhase(CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE);
+        setMessage("Wallet provider is unavailable; Genesis eligibility was not verified.");
+        return;
+      }
+      setPhase(CLAIM_PHASES.CHECKING);
+      setMessage("Checking the Genesis collection on Avalanche C-Chain and the destination claim state.");
+      try {
+        const configuredTarget = await fetchGenesisClaimConfig();
+        if (!live) return;
+        if (configuredTarget.destinationChainId !== binding.chainId
+          || !sameAddress(configuredTarget.releaseContract, binding.releaseContractAddress)
+          || !sameAddress(configuredTarget.primarySale, binding.primarySaleAddress)
+          || String(configuredTarget.tokenId) !== String(binding.tokenId)) {
+          const error = new Error("This page does not match the server-authorized claim release target.");
+          error.code = "INVALID_RELEASE_BINDING";
+          throw error;
+        }
+        const alreadyClaimed = await readGenesisClaimed(provider, configuredTarget, account);
+        if (!live) return;
+        if (alreadyClaimed) {
+          setTarget(configuredTarget);
+          setPhase(CLAIM_PHASES.ALREADY_CLAIMED);
+          setMessage("This wallet has already used its one Genesis-holder claim.");
+          return;
+        }
+        const result = await checkGenesisEligibility(account);
+        if (!live) return;
+        setTarget(configuredTarget);
+        setEligibleTokenIds(result.eligibleTokenIds || []);
+        if (!result.eligible) {
+          setPhase(CLAIM_PHASES.ACCESS_DENIED);
+          setMessage("Access denied. This wallet holds none of Genesis token IDs 0, 1, 2, or 3.");
+          return;
+        }
+        setPhase(CLAIM_PHASES.ELIGIBLE);
+        setMessage(`Genesis ownership verified for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one claim.`);
+      } catch (error) {
+        if (!live) return;
+        setPhase(classifyError(error));
+        setMessage(error?.message || "Claim eligibility could not be verified.");
+      }
+    }
+    void synchronizeClaimState();
     return () => { live = false; };
-  }, [binding, networkReady, ownershipKey, wallet, wallet.account, wallet.connected, wallet.getProvider]);
+  }, [account, binding, connected, edition, provider, wallet.chainId]);
 
-  const balance = ownershipRead.key === ownershipKey ? ownershipRead.balance : null;
-  const readError = ownershipRead.key === ownershipKey ? ownershipRead.error : "";
-  const reading = Boolean(binding.valid && networkReady && wallet.account && ownershipRead.key !== ownershipKey);
+  async function onClaimAction() {
+    if (phase === CLAIM_PHASES.ELIGIBLE && !voucher) {
+      setPhase(CLAIM_PHASES.CHECKING);
+      setMessage("Requesting a signed claim authorization from the server.");
+      try {
+        const issued = await requestGenesisVoucher(account);
+        if (!issued?.voucher || !issued?.signature || !target) throw new Error("The claim service returned an incomplete authorization.");
+        if (!sameAddress(issued.voucher.claimant, account)
+          || !sameAddress(issued.voucher.releaseContract, target.releaseContract)
+          || String(issued.voucher.destinationChainId) !== String(target.destinationChainId)
+          || String(issued.voucher.tokenId) !== String(target.tokenId)) {
+          const error = new Error("The signed voucher does not match the connected wallet and release target.");
+          error.code = "INVALID_RELEASE_BINDING";
+          throw error;
+        }
+        setVoucher(issued.voucher);
+        setSignature(issued.signature);
+        setPhase(CLAIM_PHASES.AUTHORIZED);
+        setMessage("A short-lived EIP-712 voucher is ready. Confirm the free claim transaction in your wallet.");
+      } catch (error) {
+        setPhase(classifyError(error));
+        setMessage(error?.message || "Claim authorization could not be obtained.");
+      }
+      return;
+    }
 
-  const result = claimState({
-    edition,
-    walletConnected: wallet.connected,
-    chainId: wallet.chainId,
-    balance,
-    // There is deliberately no claim executor in this repository. Keeping this
-    // false makes the CTA honest and leaves the UI ready for a future executor.
-    executorAvailable: false,
-    error: readError,
-  });
-  const state = reading && result.state !== CLAIM_STATES.INVALID_RELEASE_BINDING ? CLAIM_STATES.WALLET_CONNECTED : result.state;
-  const actionDisabled = state !== CLAIM_STATES.CLAIM_AVAILABLE;
+    if (phase !== CLAIM_PHASES.AUTHORIZED || !voucher || !signature || !target) return;
+    setPhase(CLAIM_PHASES.PENDING);
+    setMessage("Confirm the transaction in your wallet. The claim will not show as successful until the receipt and token ownership are verified.");
+    try {
+      const result = await executeGenesisClaim(provider, target, voucher, signature);
+      setTransactionHash(result.transactionHash);
+      setOwnershipBalance(result.balance);
+      setPhase(CLAIM_PHASES.OWNED);
+      setMessage("Receipt confirmed and the target release token is owned by this wallet.");
+    } catch (error) {
+      setPhase(classifyError(error));
+      setMessage(error?.message || "The claim transaction did not complete.");
+    }
+  }
+
   const artwork = artworkFor(edition, release);
+  const actionDisabled = ![CLAIM_PHASES.ELIGIBLE, CLAIM_PHASES.AUTHORIZED].includes(phase);
+  const actionText = phase === CLAIM_PHASES.ELIGIBLE && !voucher
+    ? "REQUEST CLAIM AUTHORIZATION"
+    : phase === CLAIM_PHASES.AUTHORIZED
+      ? "CLAIM FREE"
+      : phase === CLAIM_PHASES.PENDING
+        ? "TRANSACTION PENDING"
+        : phase === CLAIM_PHASES.OWNED
+          ? "OWNED"
+          : phase === CLAIM_PHASES.ALREADY_CLAIMED
+            ? "ALREADY CLAIMED"
+            : "CLAIM UNAVAILABLE";
 
   if (!edition) {
     return (
@@ -92,7 +244,7 @@ export function ClaimPage() {
           <Eyebrow red>† Claim · release identity</Eyebrow>
           <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Claim</h1>
         </div>
-        <StateMark state={state} />
+        <StateMark state={phase} />
       </header>
       <div className="vc-claim-layout">
         <figure className="vc-claim-artwork">
@@ -109,29 +261,35 @@ export function ClaimPage() {
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">
               <Eyebrow red>Claim status</Eyebrow>
-              <StateMark state={state} />
+              <StateMark state={phase} />
             </div>
-            <p className="vc-claim-status-message">{result.message}</p>
-            {!wallet.connected && <WalletButton />}
-            {wallet.connected && <p className="vc-claim-wallet vc-claim-mono">Wallet · {shortAddress(wallet.account)}</p>}
-            {wallet.connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {FUJI_RELEASE_FACTORY_CONFIG.networkName} ({binding.chainId}).</p>}
-            {readError && <p className="vc-claim-warning">Ownership read failed closed. No claim action was enabled.</p>}
+            <p className="vc-claim-status-message">{message}</p>
+            {phase === CLAIM_PHASES.AUTHORIZED && <p className="vc-claim-wallet">No claim price; the wallet will pay the destination network’s normal transaction gas.</p>}
+            {!connected && <WalletButton />}
+            {connected && <p className="vc-claim-wallet vc-claim-mono">Wallet · {shortAddress(account)}</p>}
+            {connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {FUJI_RELEASE_FACTORY_CONFIG.networkName} ({binding.chainId}).</p>}
+            {phase === CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE && <p className="vc-claim-warning">An RPC or ownership-read failure is not treated as ineligibility. No voucher or transaction was produced.</p>}
+            {phase === CLAIM_PHASES.PENDING && <p className="vc-claim-warning">Waiting for the destination-chain receipt. Do not close this page until confirmation completes.</p>}
+            {transactionHash && <p className="vc-claim-wallet vc-claim-mono">Receipt · {transactionHash}</p>}
+            {phase === CLAIM_PHASES.OWNED && ownershipBalance !== null && <p className="vc-claim-wallet">Owned balance · {ownershipBalance.toString()}</p>}
           </div>
 
           <div className="vc-claim-action">
-            <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled}>
-              {state === CLAIM_STATES.ALREADY_CLAIMED ? "CLAIMED" : state === CLAIM_STATES.CLAIM_AVAILABLE ? "CLAIM" : "CLAIM UNAVAILABLE"}
+            <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
+              {actionText}
             </button>
             <Link to={`/edition/${edition.id}`} style={ghostBtn}>View release</Link>
           </div>
 
           <div className="vc-claim-supporting">
             <Eyebrow red>Supporting information</Eyebrow>
-            <InfoRow label="Ownership">{balance !== null ? `${balance.toString()} token${balance === 1n ? "" : "s"} held` : "Not verified"}</InfoRow>
+            <InfoRow label="Genesis eligibility">{eligibleTokenIds.length ? `Verified token${eligibleTokenIds.length === 1 ? "" : "s"} ${eligibleTokenIds.join(", ")}` : "Not verified"}</InfoRow>
+            <InfoRow label="Claims per wallet">One · enforced by the destination claim contract</InfoRow>
             <InfoRow label="Provenance">Factory-created release binding required</InfoRow>
             <InfoRow label="Release contract" mono>{binding.valid ? binding.releaseContractAddress : "UNVERIFIED · CLOSED"}</InfoRow>
             <InfoRow label="Token identity" mono>{binding.valid ? `${binding.chainId}:${binding.releaseContractAddress}:${binding.tokenId}` : "UNVERIFIED"}</InfoRow>
             <InfoRow label="Network">{binding.chainId === 43113 ? "Avalanche Fuji · 43113" : `Chain ${binding.chainId || "—"}`}</InfoRow>
+            {target && <InfoRow label="Genesis reserved allocation">{target.allocation}</InfoRow>}
           </div>
         </div>
       </div>
