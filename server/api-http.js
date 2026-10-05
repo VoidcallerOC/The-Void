@@ -4,6 +4,7 @@ import { createRequestId, createRateLimiter } from "./api-runtime.js";
 import { ApiError, apiErrorFrom, errorResponse } from "./api-errors.js";
 
 const challengeLimiter = createRateLimiter({ limit: 8, windowMs: 10 * 60 * 1000 });
+const claimVoucherLimiter = createRateLimiter({ limit: 6, windowMs: 10 * 60 * 1000 });
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 
 async function readJson(request) {
@@ -44,7 +45,7 @@ async function sendMedia(response, media, cors = {}) {
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
-export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, marketplacePresentation = null, contractOwnerVerification = null, provenanceAnchor = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
+export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, marketplacePresentation = null, contractOwnerVerification = null, provenanceAnchor = null, genesisClaim = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
   if (!service) throw new TypeError("createApiHandler requires an ApiService.");
   return async function handle(request, response) {
     const requestId = request.headers["x-request-id"] || createRequestId();
@@ -66,6 +67,11 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       if (method === "GET" && base.length === 2 && base[0] === "health" && base[1] === "ready") {
         const data = await service.getOperationalHealth();
         return send(response, data.ok ? 200 : 503, { data, requestId }, responseHeaders);
+      }
+      if (method === "GET" && base.join("/") === "claims/config") {
+        if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
+        await genesisClaim.verifyContractBindings();
+        return send(response, 200, { data: genesisClaim.config, requestId }, responseHeaders);
       }
       if (method === "GET" && base[0] === "marketplace" && base[1] === "heroes" && base.length === 3) {
         if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
@@ -133,6 +139,16 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "POST" && base.join("/") === "auth/verify") {
           if (!authService) throw new ApiError(503, "AUTH_UNAVAILABLE", "Wallet authentication is unavailable.");
           data = await authService.verifyChallenge({ ...body, requestId });
+        }
+        else if (method === "POST" && base.join("/") === "claims/eligibility") {
+          if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
+          claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-eligibility`);
+          data = await genesisClaim.checkEligibility(body.wallet);
+        }
+        else if (method === "POST" && base.join("/") === "claims/vouchers") {
+          if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
+          claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-voucher`);
+          data = await genesisClaim.issueVoucher(body.wallet);
         }
         else if (method === "POST" && base[0] === "artists" && base.length === 3 && base[2] === "verify") {
           if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");

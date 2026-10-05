@@ -74,6 +74,40 @@ describe("HTTP API boundary", () => {
     expect(JSON.parse(unavailableResponse.body).error.code).toBe("AUTH_UNAVAILABLE");
   });
 
+  it("serves only configured claim targets and routes eligibility and voucher requests", async () => {
+    const genesisClaim = {
+      config: { enabled: true, genesisChainId: 43114, destinationChainId: 43113, releaseContract: seller, tokenId: "77" },
+      verifyContractBindings: vi.fn().mockResolvedValue(undefined),
+      checkEligibility: vi.fn().mockResolvedValue({ eligible: true, eligibleTokenIds: ["2"] }),
+      issueVoucher: vi.fn().mockResolvedValue({ voucher: { claimant: wallet, quantity: "1" }, signature: "0xsignature" }),
+    };
+    const handler = createApiHandler({ service: {}, genesisClaim });
+
+    const configResponse = responseDouble();
+    await handler(requestDouble({ url: "/api/claims/config" }), configResponse);
+    expect(configResponse.status).toBe(200);
+    expect(JSON.parse(configResponse.body).data).toEqual(genesisClaim.config);
+    expect(genesisClaim.verifyContractBindings).toHaveBeenCalledOnce();
+
+    const eligibilityResponse = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/claims/eligibility", body: JSON.stringify({ wallet }) }), eligibilityResponse);
+    expect(eligibilityResponse.status).toBe(200);
+    expect(JSON.parse(eligibilityResponse.body).data).toEqual({ eligible: true, eligibleTokenIds: ["2"] });
+    expect(genesisClaim.checkEligibility).toHaveBeenCalledWith(wallet);
+
+    const voucherResponse = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/claims/vouchers", body: JSON.stringify({ wallet }) }), voucherResponse);
+    expect(voucherResponse.status).toBe(200);
+    expect(JSON.parse(voucherResponse.body).data).toMatchObject({ voucher: { claimant: wallet, quantity: "1" }, signature: "0xsignature" });
+    expect(genesisClaim.issueVoucher).toHaveBeenCalledWith(wallet);
+
+    const unavailable = createApiHandler({ service: {} });
+    const unavailableResponse = responseDouble();
+    await unavailable(requestDouble({ url: "/api/claims/config" }), unavailableResponse);
+    expect(unavailableResponse.status).toBe(503);
+    expect(JSON.parse(unavailableResponse.body).error.code).toBe("CLAIM_UNAVAILABLE");
+  });
+
   it("exposes persisted indexer health without treating it as API liveness", async () => {
     const service = { getIndexerHealth: vi.fn().mockResolvedValue([{ chain_id: 43114, current_indexed_block: "100", latest_known_block: "104", finalized_block: "92", indexer_lag: "4", rpc_failures: "2", database_failures: "1", last_error: "temporary RPC failure" }]) };
     const handler = createApiHandler({ service });
@@ -377,4 +411,3 @@ describe("artist portfolio file route", () => {
     expect(studioService.uploadArtwork).not.toHaveBeenCalled();
   });
 });
-
