@@ -1,8 +1,10 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 
 export const FUJI_RELEASE_CONFIG = Object.freeze({ ...deployment, network: deployment.networkName });
+export const FUJI_RELEASE_FACTORY_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT, network: FUJI_RELEASE_PER_CONTRACT.networkName });
 export const FUJI_RELEASE_ABI = Object.freeze(deployment.abi);
 
 export const FUJI_ROLES = Object.freeze({
@@ -112,6 +114,9 @@ export async function requestWithTimeout(provider, request, timeoutMs = PROVIDER
 }
 
 const v2CreateIface = new ethers.Interface([
+  "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
+]);
+const v4CreateIface = new ethers.Interface([
   "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
 ]);
 
@@ -245,6 +250,20 @@ export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metad
   return { tokenId, data: v2CreateIface.encodeFunctionData("createEdition", [ids.releaseId, ids.editionId, supply, metadataUri, ethers.getAddress(payout), bps]) };
 }
 
+/** Encode a createEdition call for one factory-created V4 clone. V4 derives
+ * token IDs from the edition ID alone and rejects a mismatched release key. */
+export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0 }) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for this release.");
+  if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
+  if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
+  const bps = BigInt(royaltyBps ?? 0);
+  if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const edition = bytes32(editionId, "editionId");
+  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
+  const tokenId = BigInt(digest);
+  return { tokenId: tokenId === 0n ? 1n : tokenId, data: v4CreateIface.encodeFunctionData("createEdition", [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps]) };
+}
+
 // Dry-run a release-contract call from this wallet so a revert surfaces its
 // decoded reason before anything is broadcast.
 export async function simulateFujiCall(provider, { from, to, data }) {
@@ -255,6 +274,20 @@ export async function simulateFujiCall(provider, { from, to, data }) {
   } catch (error) {
     const explained = explainFujiEditionError(error);
     throw Object.assign(new Error(explained.message || `This transaction would revert on Fuji${explained.code ? ` (${explained.code})` : ""}. Nothing was sent.`), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
+  }
+}
+
+/** Simulate a transaction against an address discovered from VoidReleaseFactory. */
+export async function simulateReleaseCall(provider, { from, to, data, chainId = FUJI_RELEASE_FACTORY_CONFIG.chainId }) {
+  if (Number(chainId) !== FUJI_RELEASE_FACTORY_CONFIG.chainId) throw new Error("Release contracts must run on Fuji.");
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("The indexed release contract address is invalid.");
+  if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
+  try {
+    await provider.request({ method: "eth_call", params: [{ from, to: ethers.getAddress(to), data }, "latest"] });
+  } catch (error) {
+    const explained = explainFujiEditionError(error);
+    throw Object.assign(new Error(explained.message || "This release transaction would revert on Fuji. Nothing was sent."), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
   }
 }
 
@@ -405,6 +438,17 @@ export async function sendFujiTransaction({ provider, from, data, to, value, anc
   return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };
 }
 
+export async function sendReleaseTransaction({ provider, from, to, data, receiptProvider = provider }) {
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("The indexed release contract address is invalid.");
+  if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
+  const target = ethers.getAddress(to);
+  const hash = await requestWithTimeout(provider, { method: "eth_sendTransaction", params: [{ from, to: target, data }] });
+  const receipt = await waitForReceipt(receiptProvider, hash);
+  if (!receipt || receipt.status !== "0x1") throw Object.assign(new Error("The release transaction did not receive a successful Fuji receipt."), { transactionHash: hash, contractAddress: target, chainId: FUJI_RELEASE_FACTORY_CONFIG.chainId, receipt });
+  return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };
+}
+
 export async function readFujiBalance(provider, account, tokenId) {
   await assertFujiProvider(provider);
   const data = iface.encodeFunctionData("balanceOf", [account, BigInt(tokenId)]);
@@ -477,6 +521,19 @@ export async function verifyFujiEditionCreation(provider, { transactionHash, rel
   const edition = await readFujiEdition(provider, tokenId);
   if (!edition?.exists) throw new Error("EditionCreated was emitted, but edition(tokenId) is not available on Fuji.");
   return { receipt, event, edition };
+}
+
+export async function verifyReleaseEditionCreation(provider, { transactionHash, releaseContractAddress, releaseKey, editionId, tokenId }) {
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(releaseContractAddress) || !/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("The indexed release identity is incomplete.");
+  const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
+  if (!receipt || receipt.status !== "0x1") throw new Error("Create Edition did not receive a successful Fuji receipt.");
+  const expectedEditionId = bytes32(editionId, "editionId");
+  const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === releaseContractAddress.toLowerCase()).map((log) => {
+    try { return editionIface.parseLog(log); } catch { return null; }
+  }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === BigInt(tokenId) && parsed.args.releaseId.toLowerCase() === String(releaseKey).toLowerCase() && parsed.args.editionId === expectedEditionId);
+  if (!event) throw new Error("Create Edition receipt succeeded, but the expected release-local EditionCreated event was not found.");
+  return { receipt, event };
 }
 
 export function fujiExplorerUrl(kind, value) { return `${FUJI_RELEASE_CONFIG.explorer}/${kind}/${value}`; }

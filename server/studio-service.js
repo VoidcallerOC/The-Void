@@ -358,7 +358,7 @@ export class ArtistStudioService {
     const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
   }
 
   async confirmPublication({ request, releaseId, input }) {
