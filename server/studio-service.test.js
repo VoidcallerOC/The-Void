@@ -103,10 +103,25 @@ describe("Artist Studio", () => {
     await expect(unauthenticated.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
+  it("fails closed instead of publishing a new Studio release through the shared Fuji contract", async () => {
+    const release = { id: "release-factory", artist_id: "artist-a", slug: "factory-release", title: "Factory Release", description: "The record.", status: "DRAFT", release_metadata: { publicationArchitecture: "release-per-contract" }, published_at: null, display_name: "Voidcaller" };
+    const edition = { id: "edition-factory", release_id: release.id, contract_id: "contract-legacy", title: "Factory Release", description: "The record.", tier: "standard", supply: "1", application_metadata: {}, metadata_uri: null, metadata_version: null };
+    const metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://factory-metadata-cid" }) };
+    const harness = service({ metadataStorage });
+    harness.db.query
+      .mockResolvedValueOnce({ rows: [release] })
+      .mockResolvedValueOnce({ rows: [edition] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(harness.instance.publishMetadata({ request, releaseId: release.id, input: { releaseType: "EP" } })).rejects.toMatchObject({ code: "RELEASE_CONTRACT_BINDING_REQUIRED" });
+    expect(metadataStorage.write).not.toHaveBeenCalled();
+  });
+
   it("creates a release, validates lifecycle publishing, and prevents regression", async () => {
     const { instance, repo } = service({ rows: [{ id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }] });
     await expect(instance.createRelease({ request, artistId: "artist-1", input: { id: "release-1", title: "The Record", slug: "the-record" } })).resolves.toMatchObject({ id: "release-1", status: "DRAFT" });
-    expect(repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", status: "DRAFT" }));
+    expect(repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", status: "DRAFT", metadata: expect.objectContaining({ publicationArchitecture: "release-per-contract" }) }));
 
     const published = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record", description: null, status: "REVIEW", release_metadata: {}, published_at: null }] });
     await expect(published.instance.updateRelease({ request, releaseId: "release-1", input: { status: "PUBLISHED" } })).rejects.toMatchObject({ code: "PUBLICATION_REQUIRES_CONFIRMATION" });
