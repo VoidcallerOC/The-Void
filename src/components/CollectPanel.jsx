@@ -29,6 +29,7 @@ import {
 } from "../lib/primary-sale.js";
 import { readReleaseBalance, readReleasePaused } from "../lib/release-asset.js";
 import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
+import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
 
 function saleFacts(sale, saleAddress) {
   if (!saleAddress) return "Primary sale is not configured for this release yet.";
@@ -244,6 +245,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}
         {variant === "hero" && linkedExperience && !primaryOpensExperience && <Link to={`/experience/${linkedExperience.id}`} style={ghostBtn}>Open experience</Link>}
+        {owned && isReleasePerContractCandidate(edition) && <Link to={`/edition/${edition.id}#secondary-listing`} style={primaryBtn}>List for sale</Link>}
         {variant !== "hero" && owned && (
           <>
             <Link to={experienceHref} style={ghostBtn}>{experienceLabel}</Link>
@@ -251,6 +253,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
           </>
         )}
       </div>
+      {owned && isReleasePerContractCandidate(edition) && <p style={{ marginTop: 12, color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>You own this edition. You can list it for resale.</p>}
       {notCreated && (
         <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
           <strong style={{ display: "block", letterSpacing: ".08em" }}>NOT YET PUBLISHED</strong>

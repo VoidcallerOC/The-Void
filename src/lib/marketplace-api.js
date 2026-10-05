@@ -125,6 +125,75 @@ export function classifyAuthoritativePurchaseTransaction(transaction, expected =
   return { state: PURCHASE_STATE.CONFIRMED, message: "The authoritative marketplace index confirmed the purchase settlement." };
 }
 
+const LISTING_SETTLED_STATUSES = new Set(["CONFIRMED", "FINALIZED", "RECONCILED"]);
+const LISTING_FAILURE_STATUSES = new Set(["FAILED", "REVERTED", "REPLACED", "STALE", "REORGED", "RECONCILIATION_REQUIRED"]);
+
+function sameListingIdentity(listing, expected, status) {
+  if (!listing
+    || Number(listing.chain) !== Number(expected.chainId)
+    || !sameAddress(listing.marketplace, expected.marketplaceAddress)
+    || !sameAddress(listing.tokenContract, expected.contract)
+    || String(listing.tokenId) !== String(expected.tokenId)
+    || !sameAddress(listing.seller, expected.seller)
+    || String(listing.price) !== String(expected.price)
+    || String(listing.status || "").toUpperCase() !== status
+    || listing.authority !== "INDEXED") return false;
+
+  const indexedInitialAmount = String(listing.initialAmount ?? listing.amount);
+  const expectedInitialAmount = String(expected.initialAmount ?? expected.amount);
+  if (indexedInitialAmount !== expectedInitialAmount) return false;
+  if (expected.exactRemainingAmount) return String(listing.amount) === String(expected.amount);
+  try {
+    return BigInt(listing.amount) > 0n && BigInt(listing.amount) <= BigInt(expected.amount);
+  } catch {
+    return false;
+  }
+}
+
+export function classifyAuthoritativeListingTransaction(transaction, listing, expected = {}) {
+  const identityMatches = transaction
+    && String(transaction.chain_id) === String(expected.chainId)
+    && sameAddress(transaction.transaction_hash, expected.transactionHash)
+    && String(transaction.transaction_type).toUpperCase() === "LISTING_CREATE"
+    && sameAddress(transaction.from_wallet, expected.seller)
+    && sameAddress(transaction.to_address, expected.marketplaceAddress);
+  if (!identityMatches) {
+    return { state: "RECONCILIATION_REQUIRED", message: "The authoritative transaction does not match this listing. Do not submit again; reconciliation is required." };
+  }
+
+  const status = String(transaction.status || "").toUpperCase();
+  if (LISTING_FAILURE_STATUSES.has(status)) {
+    return { state: status, message: `The authoritative marketplace index reports ${status} for this listing transaction. Do not resubmit until the transaction is reviewed.` };
+  }
+  if (!LISTING_SETTLED_STATUSES.has(status)) return null;
+  if (!sameListingIdentity(listing, expected, "ACTIVE")) {
+    return { state: "RECONCILIATION_REQUIRED", message: "The index confirmed the transaction but did not return the matching active listing identity. Do not resubmit; reconciliation is required." };
+  }
+  return { state: "LISTED", listing, message: "The authoritative marketplace index confirmed this listing." };
+}
+
+export function classifyAuthoritativeCancellationTransaction(transaction, listing, expected = {}) {
+  const identityMatches = transaction
+    && String(transaction.chain_id) === String(expected.chainId)
+    && sameAddress(transaction.transaction_hash, expected.transactionHash)
+    && String(transaction.transaction_type).toUpperCase() === "LISTING_CANCEL"
+    && sameAddress(transaction.from_wallet, expected.seller)
+    && sameAddress(transaction.to_address, expected.marketplaceAddress);
+  if (!identityMatches) {
+    return { state: "RECONCILIATION_REQUIRED", message: "The authoritative cancellation transaction does not match this seller or marketplace. Do not submit again; reconciliation is required." };
+  }
+
+  const status = String(transaction.status || "").toUpperCase();
+  if (LISTING_FAILURE_STATUSES.has(status)) {
+    return { state: status, message: `The authoritative marketplace index reports ${status} for this cancellation. Review it before taking further action.` };
+  }
+  if (!LISTING_SETTLED_STATUSES.has(status)) return null;
+  if (!sameListingIdentity(listing, expected, "CANCELLED")) {
+    return { state: "RECONCILIATION_REQUIRED", message: "The index confirmed cancellation but did not return the matching cancelled listing identity. Do not submit again; reconciliation is required." };
+  }
+  return { state: "CANCELLED", listing, message: "The authoritative marketplace index confirmed cancellation." };
+}
+
 export async function createAuthoritativePurchaseIntent({ listing, wallet, quantity, marketplaceAddress, authHeaders, fetchImpl = fetch } = {}) {
   return request("/api/purchases/intents", { method: "POST", headers: authHeaders, fetchImpl, body: { listingId: listing?.id, buyerWallet: wallet, quantity: String(quantity), idempotencyKey: crypto.randomUUID(), marketplaceAddress } });
 }

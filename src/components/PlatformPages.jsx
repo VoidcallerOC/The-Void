@@ -23,6 +23,7 @@ import { TokenArtwork } from "./TokenArtwork.jsx";
 import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
 import { releaseBindingFor } from "../lib/claim-state.js";
+import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
 function PlatformHeader({ eyebrow, title, children }) {
@@ -244,6 +245,7 @@ export function EditionPage() {
   }
   if (!result) return <Navigate to="/marketplace" replace />;
   const { edition, release, artist, experiences } = result;
+  const releaseMarketplaceAsset = isReleasePerContractCandidate(edition);
   const secondary = resolveSecondaryStatus();
   const price = editionPriceLabel(edition);
   // Non-holders retain the tokenURI preview; entitled holders are upgraded
@@ -296,14 +298,13 @@ export function EditionPage() {
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
         </div>
       </div>
-      {secondary === MARKETPLACE_STATE.LIVE && (
-        <>
-          <PurchasePanel edition={edition} />
-          <ListingPanel edition={edition} />
-        </>
-      )}
-      {secondary !== MARKETPLACE_STATE.LIVE && (
+      {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
+      {releaseMarketplaceAsset && <ListingPanel edition={edition} />}
+      {secondary !== MARKETPLACE_STATE.LIVE && !releaseMarketplaceAsset && (
         <p className="vc-card-meta" style={{ marginTop: 28 }}>Secondary market · not yet live. No listings are shown or invented.</p>
+      )}
+      {secondary === MARKETPLACE_STATE.LIVE && !releaseMarketplaceAsset && (
+        <p className="vc-card-meta" style={{ marginTop: 28 }}>Secondary market · ReleaseMarketplaceV3 accepts only editions registered by the per-release factory. This edition is not offered through that market.</p>
       )}
       {experiences.length > 0 && (
         <>
