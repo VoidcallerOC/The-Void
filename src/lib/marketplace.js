@@ -1,3 +1,4 @@
+import { Interface } from "ethers";
 import { isValidAddress, switchChain, waitForReceipt } from "./web3.js";
 
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
@@ -17,7 +18,13 @@ export const MARKETPLACE_CONFIG = Object.freeze({
 });
 
 const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
+const MAX_UINT256 = (1n << 256n) - 1n;
 const LISTING_CREATED_TOPIC = "0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19";
+const LISTING_EVENT_INTERFACE = new Interface([
+  "event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt)",
+  "event ListingCancelled(uint256 indexed listingId)",
+]);
+const LISTING_CANCELLED_TOPIC = LISTING_EVENT_INTERFACE.getEvent("ListingCancelled").topicHash.toLowerCase();
 const LISTING_SOLD_TOPIC = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const addressWord = (address) => address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
@@ -29,9 +36,9 @@ export function createListingRecord({ listingId = "", seller, chain, contract, t
 export function validateListingDraft({ seller, contract, tokenId, amount, price, currency = "native", expiresAt = 0, now = Date.now() }) {
   if (!isValidAddress(seller)) return "Connect a valid seller wallet.";
   if (!isValidAddress(contract)) return "This edition does not have a valid ERC-1155 contract.";
-  if (!Number.isInteger(Number(tokenId)) || Number(tokenId) < 0) return "Token ID must be a non-negative integer.";
-  if (!Number.isInteger(Number(amount)) || Number(amount) <= 0) return "Quantity must be a positive integer.";
-  if (!/^[0-9]+$/.test(String(price)) || BigInt(price) <= 0n) return "Price must be a positive whole-unit amount.";
+  if (!/^[0-9]+$/.test(String(tokenId)) || BigInt(tokenId) > MAX_UINT256) return "Token ID must be a valid uint256.";
+  if (!/^\d+$/.test(String(amount)) || BigInt(amount) <= 0n || BigInt(amount) > MAX_UINT256) return "Quantity must be a positive uint256 whole number.";
+  if (!/^[0-9]+$/.test(String(price)) || BigInt(price) <= 0n || BigInt(price) > MAX_UINT256) return "Price must be a positive uint256 amount in the smallest currency unit.";
   if (currency !== "native") return "Only native currency listings are supported in this phase.";
   if (expiresAt && Number(expiresAt) <= now) return "Expiration must be in the future.";
   return null;
@@ -47,6 +54,49 @@ export async function fetchListings({ signal, filters = {} } = {}) { const query
 export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) { if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] }); return waitForReceipt(provider, txHash); }
 export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) { const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 }); if (error) throw new Error(error); if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] }); return waitForReceipt(provider, txHash); }
 export function listingIdFromReceipt(receipt) { const log = receipt?.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_CREATED_TOPIC); return log?.topics?.[1] ? BigInt(log.topics[1]).toString() : null; }
+function assertSuccessfulMarketplaceReceipt(receipt, marketplace, sender) {
+  if (!receipt || BigInt(receipt.status ?? 0) !== 1n) throw Object.assign(new Error("Marketplace transaction did not succeed on chain."), { code: "MARKETPLACE_TX_REVERTED" });
+  if (receipt.to && receipt.to.toLowerCase() !== marketplace.toLowerCase()) throw Object.assign(new Error("Transaction receipt target did not match the configured marketplace."), { code: "MARKETPLACE_RECEIPT_MISMATCH" });
+  if (receipt.from && sender && receipt.from.toLowerCase() !== sender.toLowerCase()) throw Object.assign(new Error("Transaction receipt sender did not match the connected wallet."), { code: "MARKETPLACE_RECEIPT_MISMATCH" });
+}
+export function verifyListingReceipt(receipt, { seller, marketplace, contract, tokenId, amount, price, expiresAt = 0 }) {
+  assertSuccessfulMarketplaceReceipt(receipt, marketplace, seller);
+  const log = receipt.logs?.find((item) => item.address?.toLowerCase() === marketplace.toLowerCase() && item.topics?.[0]?.toLowerCase() === LISTING_CREATED_TOPIC);
+  let parsed;
+  try { parsed = log && LISTING_EVENT_INTERFACE.parseLog({ topics: log.topics, data: log.data }); } catch { parsed = null; }
+  if (!parsed) throw Object.assign(new Error("Successful receipt did not contain a valid ListingCreated event from the configured marketplace."), { code: "LISTING_RECEIPT_UNVERIFIED" });
+  const actual = {
+    listingId: BigInt(parsed.args.listingId).toString(),
+    seller: String(parsed.args.seller).toLowerCase(),
+    contract: String(parsed.args.tokenContract).toLowerCase(),
+    tokenId: BigInt(parsed.args.tokenId).toString(),
+    amount: BigInt(parsed.args.amount).toString(),
+    price: BigInt(parsed.args.price).toString(),
+    expiresAt: BigInt(parsed.args.expiresAt).toString(),
+  };
+  const expected = {
+    seller: String(seller).toLowerCase(),
+    contract: String(contract).toLowerCase(),
+    tokenId: String(tokenId),
+    amount: String(amount),
+    price: String(price),
+    expiresAt: String(expiresAt),
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    if (actual[key] !== value) throw Object.assign(new Error(`Listing receipt verification failed for ${key}.`), { code: "LISTING_RECEIPT_MISMATCH" });
+  }
+  return actual;
+}
+export function verifyCancelReceipt(receipt, { marketplace, seller, listingId }) {
+  assertSuccessfulMarketplaceReceipt(receipt, marketplace, seller);
+  const log = receipt.logs?.find((item) => item.address?.toLowerCase() === marketplace.toLowerCase() && item.topics?.[0]?.toLowerCase() === LISTING_CANCELLED_TOPIC);
+  let parsed;
+  try { parsed = log && LISTING_EVENT_INTERFACE.parseLog({ topics: log.topics, data: log.data }); } catch { parsed = null; }
+  if (!parsed || BigInt(parsed.args.listingId).toString() !== String(listingId)) {
+    throw Object.assign(new Error("Cancellation receipt did not verify the expected marketplace listing."), { code: "LISTING_CANCEL_RECEIPT_UNVERIFIED" });
+  }
+  return { listingId: String(listingId) };
+}
 export async function submitCancel({ provider, owner, marketplace, listingId }) { const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCancelListing(listingId) }] }); return waitForReceipt(provider, txHash); }
 export async function readListing({ provider, marketplace, listingId }) { const result = await provider.request({ method: "eth_call", params: [{ to: marketplace, data: SELECTORS.getListing + word(listingId) }, "latest"] }); const words = result.replace(/^0x/, "").match(/.{64}/g) || []; if (words.length < 9) throw new Error("Marketplace returned an invalid listing."); const tokenContract = decodeAddress(words[2]); return { listingId: decodeUint(words[0]).toString(), seller: decodeAddress(words[1]), tokenContract, contract: tokenContract, tokenId: decodeUint(words[3]).toString(), amount: decodeUint(words[4]).toString(), price: decodeUint(words[5]).toString(), createdAt: Number(decodeUint(words[6])), expiresAt: Number(decodeUint(words[7])), status: [LISTING_STATUS.ACTIVE, LISTING_STATUS.SOLD, LISTING_STATUS.CANCELLED, LISTING_STATUS.EXPIRED][Number(decodeUint(words[8]))] || "UNKNOWN" }; }
 export function validatePurchase({ listing, buyer, quantity = listing?.amount, now = Math.floor(Date.now() / 1000) }) { if (!listing || listing.status !== LISTING_STATUS.ACTIVE) return "This listing is no longer active."; if (listing.expiresAt && now > listing.expiresAt) return "This listing has expired."; if (!isValidAddress(buyer)) return "Connect a valid buyer wallet."; if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return "Purchase quantity must be a positive integer."; if (BigInt(quantity) > BigInt(listing.amount)) return "The requested quantity is not available."; if (!/^[0-9]+$/.test(String(listing.price)) || BigInt(listing.price) <= 0n) return "The listing has an invalid price."; return null; }

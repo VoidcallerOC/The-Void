@@ -25,6 +25,13 @@ describe("marketplace listing validation", () => {
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", currency: "USDC" })).toMatch(/native/i);
     expect(validateListingDraft({ seller, contract, tokenId: 1, amount: 1, price: "1", expiresAt: 10, now: 11 })).toMatch(/future/i);
   });
+  it("rejects values outside the contract’s uint256 bounds", () => {
+    const max = ((1n << 256n) - 1n).toString();
+    const overflow = (1n << 256n).toString();
+    expect(validateListingDraft({ seller, contract, tokenId: overflow, amount: "1", price: "1" })).toMatch(/uint256/i);
+    expect(validateListingDraft({ seller, contract, tokenId: max, amount: overflow, price: "1" })).toMatch(/quantity/i);
+    expect(validateListingDraft({ seller, contract, tokenId: max, amount: "1", price: overflow })).toMatch(/uint256/i);
+  });
 });
 
 describe("purchase validation and payment", () => {

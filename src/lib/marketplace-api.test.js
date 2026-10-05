@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyAuthoritativePurchaseTransaction,
+  classifyAuthoritativeListingTransaction,
+  classifyAuthoritativeCancellationTransaction,
   createAuthoritativePurchaseIntent,
   fetchAuthoritativeListing,
   fetchAuthoritativeMarketplaceTransaction,
@@ -54,6 +56,12 @@ describe("authoritative marketplace API client", () => {
     await expect(fetchIndexedListings({ chainId: 43113, fetchImpl: emptyFetch })).resolves.toEqual([]);
   });
 
+  it("supports owner-scoped listing reads for the seller management flow", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response({ data: [listingRow] }));
+    await fetchIndexedListings({ chainId: 43113, marketplaceAddress: marketplace, tokenContractAddress: marketplace, tokenId: "2", sellerWallet: wallet, fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toContain(`sellerWallet=${wallet}`);
+  });
+
   it("creates pending purchase intents and records only submitted transaction references", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response({ data: { state: "PENDING" } }));
     await createAuthoritativePurchaseIntent({ listing, wallet, quantity: 2, marketplaceAddress: marketplace, authHeaders: { authorization: "Bearer token" }, fetchImpl });
@@ -78,6 +86,26 @@ describe("authoritative marketplace API client", () => {
     expect(classifyAuthoritativePurchaseTransaction(transactionRow({ status: "REVERTED", purchases: [] }), expectedPurchase)).toMatchObject({ state: PURCHASE_STATE.REVERTED });
     expect(classifyAuthoritativePurchaseTransaction(transactionRow({ status: "REORGED", purchases: [] }), expectedPurchase)).toMatchObject({ state: PURCHASE_STATE.RECONCILIATION_REQUIRED });
     expect(classifyAuthoritativePurchaseTransaction(transactionRow({ status: "EXPIRED", purchases: [] }), expectedPurchase)).toMatchObject({ state: PURCHASE_STATE.EXPIRED });
+  });
+
+  it("confirms a listing only when the submitted transaction and indexed release identity match", () => {
+    const expectedListing = { chainId: 43113, transactionHash, seller: wallet, marketplaceAddress: marketplace, listingId: "7", contract: marketplace, tokenId: "2", amount: "4", price: "25" };
+    const transaction = transactionRow({ transaction_type: "LISTING_CREATE", status: "CONFIRMED", from_wallet: wallet, to_address: marketplace });
+    const indexed = { ...listingRow, listingId: "7", seller: wallet, chain: 43113, marketplace, tokenContract: marketplace, contract: marketplace, tokenId: "2", amount: "3", initialAmount: "4", price: "25", status: "ACTIVE", authority: "INDEXED" };
+
+    expect(classifyAuthoritativeListingTransaction({ ...transaction, status: "SUBMITTED" }, indexed, expectedListing)).toBeNull();
+    expect(classifyAuthoritativeListingTransaction(transaction, indexed, expectedListing)).toMatchObject({ state: "LISTED", listing: indexed });
+    expect(classifyAuthoritativeListingTransaction(transaction, { ...indexed, tokenContract: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, expectedListing)).toMatchObject({ state: "RECONCILIATION_REQUIRED" });
+  });
+
+  it("confirms cancellation only for the exact seller, original listing and indexed CANCELLED state", () => {
+    const expectedCancel = { chainId: 43113, transactionHash, seller: wallet, marketplaceAddress: marketplace, listingId: "7", contract: marketplace, tokenId: "2", amount: "3", initialAmount: "4", exactRemainingAmount: true, price: "25" };
+    const transaction = transactionRow({ transaction_type: "LISTING_CANCEL", status: "FINALIZED", from_wallet: wallet, to_address: marketplace });
+    const cancelled = { ...listingRow, listingId: "7", seller: wallet, chain: 43113, marketplace, tokenContract: marketplace, contract: marketplace, tokenId: "2", amount: "3", initialAmount: "4", price: "25", status: "CANCELLED", authority: "INDEXED" };
+
+    expect(classifyAuthoritativeCancellationTransaction(transaction, cancelled, expectedCancel)).toMatchObject({ state: "CANCELLED", listing: cancelled });
+    expect(classifyAuthoritativeCancellationTransaction(transaction, { ...cancelled, seller: "0x2222222222222222222222222222222222222222" }, expectedCancel)).toMatchObject({ state: "RECONCILIATION_REQUIRED" });
+    expect(classifyAuthoritativeCancellationTransaction({ ...transaction, status: "REVERTED" }, null, expectedCancel)).toMatchObject({ state: "REVERTED" });
   });
 
   it("surfaces backend rejection rather than inferring a browser-local state", async () => {
