@@ -9,6 +9,7 @@ import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 import { ArtistProfileEditPage } from "./components/ArtistProfileEditPage.jsx";
 import { ContractRolesPage } from "./components/ContractRolesPage.jsx";
 import { MarketplacePage } from "./components/MarketplacePage.jsx";
+import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
 
@@ -77,6 +78,8 @@ export default function App() {
           <Route index element={<HomePage />} />
           <Route path="discover" element={<DiscoverPage />} />
           <Route path="marketplace" element={<MarketplacePage />} />
+          <Route path="claim" element={<ClaimPage />} />
+          <Route path="claim/:edition" element={<ClaimPage />} />
           <Route path="artists" element={<ArtistsPage />} />
           <Route path="artist/:artist" element={<ArtistRoutePage />} />
           <Route path="release/:release" element={<ReleaseRoutePage />} />

@@ -22,6 +22,7 @@ import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
 import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
+import { releaseBindingFor } from "../lib/claim-state.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
 function PlatformHeader({ eyebrow, title, children }) {
@@ -285,6 +286,11 @@ export function EditionPage() {
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
             <div style={{ marginTop: 18 }}>
               <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
+            </div>
+          )}
+          {releaseBindingFor(edition).valid && (
+            <div style={{ marginTop: 18 }}>
+              <Link to={`/claim/${edition.id}`} style={ghostBtn}>Open claim page</Link>
             </div>
           )}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
