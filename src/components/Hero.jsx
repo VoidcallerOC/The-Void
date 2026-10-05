@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { FUJI_VOLUME_IDENTITY, VC_DATA } from "../data.js";
-import { Eyebrow, Btn, Tag } from "./Atoms.jsx";
+import { Eyebrow, Btn } from "./Atoms.jsx";
 import { WordmarkGlitch } from "./Overlays.jsx";
 import { useAudio } from "../lib/audio.js";
 import { fetchSelfTitledEpVolume } from "../lib/marketplace-api.js";
@@ -94,10 +94,6 @@ export function Hero() {
         }}
       />
       <div style={{ position: "relative", zIndex: 2, maxWidth: 1100, display: "flex", flexDirection: "column", gap: 28 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Tag kind="crimson" pulse>LIVE · ON AVALANCHE</Tag>
-          <Eyebrow>CHAPTER I · SELF-TITLED EP</Eyebrow>
-        </div>
         <WordmarkGlitch />
         <div style={{ marginTop: -8 }}>
           <span style={{
