@@ -202,7 +202,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     listenersRef.current = { provider, onAccountsChanged, onChainChanged };
   }, [clearAuthentication, unwireProvider]);
 
-  const connect = useCallback(async (provider) => {
+  const connect = useCallback(async (provider, { authenticate: shouldAuthenticate = true } = {}) => {
     const p = provider || providerRef.current || window.ethereum;
     if (!p) return { error: "No wallet detected. Install MetaMask or Core." };
     try {
@@ -213,6 +213,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       const selectedChainId = parseInt(cid, 16);
       setChainId(selectedChainId);
       wireProvider(p);
+      if (!shouldAuthenticate) return { ok: true, account: accts[0], chainId: selectedChainId };
       return authenticate({ targetProvider: p, wallet: accts[0], selectedChainId });
     } catch (error) {
       const message = error?.code === 4001 ? "Wallet connection was rejected." : (error?.message || "Wallet connection failed.");

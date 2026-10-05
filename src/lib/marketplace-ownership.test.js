@@ -72,6 +72,15 @@ describe("Marketplace Fuji ownership configuration", () => {
     expect(owned.fuji.has(tokenId)).toBe(true);
   });
 
+  it("can distinguish failed RPC reads from verified empty balances when strict mode is enabled", async () => {
+    const chains = { cchain: { rpc: "https://rpc.invalid", contract: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tokenIds: [0] } };
+    const options = { chains, tokenIds: [0], rpc: async () => { throw new Error("RPC unavailable"); } };
+
+    await expect(checkCollectionOwnership(seller, options)).resolves.toMatchObject({ cchain: expect.any(Set) });
+    await expect(checkCollectionOwnership(seller, { ...options, throwOnError: true }))
+      .rejects.toMatchObject({ code: "OWNERSHIP_READ_FAILED" });
+  });
+
   it("keeps an unowned Fuji edition absent from both ownership sets and ownership records", async () => {
     const { config } = ownershipConfig();
     const rpc = async () => zeroWord;

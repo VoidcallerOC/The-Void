@@ -4,7 +4,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import { shortAddr } from "../lib/web3.js";
 
 // Brand-styled connect button + wallet picker dropdown for the Nav.
-export function WalletButton({ compact }) {
+export function WalletButton({ compact, readOnly = false }) {
   const w = useWallet();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -16,20 +16,20 @@ export function WalletButton({ compact }) {
   }, []);
 
   const onClick = async () => {
-    if (w.connected && w.authenticated) { w.disconnect(); return; }
+    if (w.connected && (w.authenticated || readOnly)) { w.disconnect(); return; }
     if (w.connected) { await w.authenticate(); return; }
-    if (w.wallets.length === 1) { await w.connect(w.wallets[0].provider); return; }
-    if (w.wallets.length === 0) { await w.connect(); return; } // legacy window.ethereum
+    if (w.wallets.length === 1) { await w.connect(w.wallets[0].provider, { authenticate: !readOnly }); return; }
+    if (w.wallets.length === 0) { await w.connect(undefined, { authenticate: !readOnly }); return; } // legacy window.ethereum
     setOpen((v) => !v);
   };
 
-  const label = w.authenticating ? "AUTHENTICATING" : w.connected ? (w.authenticated ? shortAddr(w.account) : "AUTH REQUIRED") : "CONNECT";
+  const label = w.authenticating ? "AUTHENTICATING" : w.connected ? (w.authenticated || readOnly ? shortAddr(w.account) : "AUTH REQUIRED") : "CONNECT";
 
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={onClick}
-        title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : "Connect wallet"}
+        title={w.authenticated || readOnly ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : "Connect wallet"}
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 500,
@@ -82,7 +82,7 @@ export function WalletButton({ compact }) {
           {w.wallets.map((wallet) => (
             <button
               key={wallet.rdns || wallet.name}
-              onClick={() => { w.connect(wallet.provider); setOpen(false); }}
+              onClick={() => { w.connect(wallet.provider, { authenticate: !readOnly }); setOpen(false); }}
               style={{
                 display: "flex", alignItems: "center", gap: 12, width: "100%",
                 background: "transparent", border: "none", cursor: "pointer",

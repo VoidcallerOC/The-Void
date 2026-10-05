@@ -8,6 +8,7 @@ import { useReviewerNotifications } from "../lib/reviewer-notifications-context.
 const LINKS = [
   ["DISCOVER", "/discover"],
   ["MARKETPLACE", "/marketplace"],
+  ["CLAIM", "/claim"],
   ["ARTISTS", "/artists"],
   ["VERIFY", "/verify"],
   ["COLLECTION", "/collection"],
