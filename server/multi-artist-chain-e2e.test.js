@@ -92,6 +92,7 @@ describe.skipIf(!ready)("second artist on a real chain, indexer and database", (
   // Studio draft → verified metadata → registrar → artist createEdition → Studio confirm.
   async function publish({ wallet, artistId, releaseTitle, editionTitle, supply = "10" }) {
     const release = await studio.createRelease({ request: asWallet(wallet), artistId, input: { title: releaseTitle } });
+    await pool.query("UPDATE releases SET release_metadata='{}'::jsonb WHERE id=$1", [release.id]);
     const edition = await studio.createEdition({ request: asWallet(wallet), releaseId: release.id, input: { trackTitle: editionTitle, quantity: supply } });
     const metadata = await studio.publishMetadata({ request: asWallet(wallet), releaseId: release.id, input: { releaseType: "EP" } });
     const payload = await registrarOnboard({ artistId, wallet, releaseSlug: metadata.releaseSlug, editionSlug: metadata.editionSlug });
