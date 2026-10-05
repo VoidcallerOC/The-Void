@@ -71,9 +71,9 @@ export function EditionCard({ item, owned = false }) {
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>
-      <div className="vc-sleeve">
-        <Link to={`/edition/${edition.id}`} className="vc-sleeve-art" aria-label={`View ${edition.title} edition`}>
-          <img src={image} alt={`${edition.title} artwork`} />
+      <div className="vc-sleeve" style={{ display: "flex", flexDirection: "column" }}>
+        <Link to={`/edition/${edition.id}`} className="vc-sleeve-art" aria-label={`View ${edition.title} edition`} style={{ display: "block" }}>
+          <img src={image} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", height: "auto", objectFit: "contain", objectPosition: "center", display: "block", background: "#000" }} />
         </Link>
         <div className="vc-sleeve-copy">
           <span className={`vc-object-mark ${object.tone}`}>{object.label}</span>
