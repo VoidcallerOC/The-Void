@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import deployment from "../../config/fuji-release.json" with { type: "json" };
+import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 
 export const FUJI_RELEASE_CONFIG = Object.freeze({ ...deployment, network: deployment.networkName });

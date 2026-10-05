@@ -1,0 +1,105 @@
+name: Deploy release-per-contract infrastructure to Fuji
+
+# This workflow is intentionally separate from the legacy V1/V2 and MusicMarketplace
+# workflows. The default path is non-broadcast dry-run only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      broadcast_deployment:
+        description: Set true only for an approved future Fuji broadcast.
+        required: true
+        type: boolean
+        default: false
+      confirm_fuji_deploy:
+        description: Type I_CONFIRM_FUJI_RELEASE_PER_CONTRACT_DEPLOY only for an approved broadcast.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: void-release-per-contract-fuji-deployment
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: fuji
+  AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+  DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+  RELEASE_PLATFORM_RECIPIENT: ${{ secrets.RELEASE_PLATFORM_RECIPIENT }}
+  RELEASE_PLATFORM_FEE_BPS: ${{ secrets.RELEASE_PLATFORM_FEE_BPS }}
+  RELEASE_SALE_OWNER: ${{ secrets.RELEASE_SALE_OWNER }}
+  RELEASE_MARKETPLACE_FEE_RECIPIENT: ${{ secrets.RELEASE_MARKETPLACE_FEE_RECIPIENT }}
+  CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_RELEASE_PER_CONTRACT_DEPLOY' && 'yes' || 'no' }}
+  BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
+
+jobs:
+  preflight:
+    name: Validate and prepare release-per-contract deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate deployer credential without broadcasting
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import { JsonRpcProvider, Wallet } from "ethers";
+
+          const provider = new JsonRpcProvider(
+            process.env.AVALANCHE_FUJI_RPC_URL,
+            43113,
+            { staticNetwork: true },
+          );
+          const wallet = new Wallet(process.env.DEPLOYER_PRIVATE_KEY);
+          const network = await provider.getNetwork();
+          if (network.chainId !== 43113n) {
+            throw new Error(`Unexpected chain ID: ${network.chainId}`);
+          }
+          const balance = await provider.getBalance(wallet.address);
+          console.log(`deployer_address=${wallet.address}`);
+          console.log(`fuji_chain_id=${network.chainId}`);
+          console.log(`fuji_balance_wei=${balance}`);
+          console.log("broadcasted=false");
+          JS
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build reviewed artifacts
+        run: forge build
+
+      - name: Run deployment workflow tests
+        run: npm test -- scripts/deploy-release-per-contract-fuji.test.mjs
+
+      - name: Run Fuji deployment preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
+            npm run deploy:release-per-contract:fuji
+          else
+            npm run deploy:release-per-contract:fuji -- --dry-run
+          fi
+
+      - name: Broadcast safety assertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
+            test "${CONFIRM_FUJI_DEPLOY}" = "I_CONFIRM_FUJI_RELEASE_PER_CONTRACT_DEPLOY"
+          else
+            echo "Dry-run mode: no transaction broadcast is permitted."
+          fi

@@ -79,7 +79,7 @@ contract VoidCollection1155 {
 
     /// @notice One-time setup of a clone. The artist owns the collection outright: it holds
     /// every role, and the platform keeps none. `issuer` (the primary-sale contract) may mint.
-    function initialize(address artist, address issuer, string calldata name_, string calldata symbol_, string calldata contractURI_) external {
+    function initialize(address artist, address issuer, string calldata name_, string calldata symbol_, string calldata contractURI_) public virtual {
         if (msg.sender != factory) revert NotFactory();
         if (_initialized) revert AlreadyInitializedCollection();
         if (artist == address(0)) revert InvalidAddress();
@@ -142,13 +142,13 @@ contract VoidCollection1155 {
 
     /// @dev Token IDs are uint256(keccak256("the-void:edition:v1", releaseId, editionId));
     ///      the zero value is rejected. IDs never depend on database ordering.
-    function tokenIdFor(bytes32 releaseId, bytes32 editionId) public pure returns (uint256) {
+    function tokenIdFor(bytes32 releaseId, bytes32 editionId) public pure virtual returns (uint256) {
         uint256 tokenId = uint256(keccak256(abi.encode("the-void:edition:v1", releaseId, editionId)));
         return tokenId == 0 ? 1 : tokenId;
     }
 
     function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string calldata metadataUri)
-        external onlyRole(ARTIST_ROLE) whenNotPaused returns (uint256 tokenId)
+        public virtual onlyRole(ARTIST_ROLE) whenNotPaused returns (uint256 tokenId)
     {
         return _createEdition(releaseId, editionId, maxSupply, metadataUri, msg.sender, 0);
     }
@@ -156,7 +156,7 @@ contract VoidCollection1155 {
     /// @notice Same edition identity as the four-argument form, plus the payout that
     /// receives ERC-2981 royalties and primary-sale proceeds. Royalty is capped at 10%.
     function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string calldata metadataUri, address payout, uint96 royaltyBps)
-        external onlyRole(ARTIST_ROLE) whenNotPaused returns (uint256 tokenId)
+        public virtual onlyRole(ARTIST_ROLE) whenNotPaused returns (uint256 tokenId)
     {
         return _createEdition(releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps);
     }
