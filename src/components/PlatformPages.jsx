@@ -299,13 +299,7 @@ export function EditionPage() {
         </div>
       </div>
       {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
-      {releaseMarketplaceAsset && <ListingPanel edition={edition} />}
-      {secondary !== MARKETPLACE_STATE.LIVE && !releaseMarketplaceAsset && (
-        <p className="vc-card-meta" style={{ marginTop: 28 }}>Secondary market · not yet live. No listings are shown or invented.</p>
-      )}
-      {secondary === MARKETPLACE_STATE.LIVE && !releaseMarketplaceAsset && (
-        <p className="vc-card-meta" style={{ marginTop: 28 }}>Secondary market · ReleaseMarketplaceV3 accepts only editions registered by the per-release factory. This edition is not offered through that market.</p>
-      )}
+      <ListingPanel edition={edition} />
       {experiences.length > 0 && (
         <>
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>What this unlocks</h2>
