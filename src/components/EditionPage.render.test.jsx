@@ -21,7 +21,7 @@ vi.mock("../lib/marketplace.js", async (importOriginal) => {
     ...actual,
     MARKETPLACE_CONFIG: Object.freeze({
       ...actual.MARKETPLACE_CONFIG,
-      address: "0x982b28352fd612fe934c5e1ad8fea399689190d2",
+      address: "0x228734C7a6325f7B6F570EBCAc80239495fdedf0",
       chainId: 43113,
       enabled: true,
     }),
@@ -51,7 +51,7 @@ const productionApi = {
   editions: [
     { id: "edition-b87f40b1-9419-4e90-8e2f-5b8986df043c", release_id: "release-b4bb9c4f-b683-4145-9a9c-9fe32ad609f7", title: "Marketplace Fuji E2E Test", supply: "1", status: "PUBLISHED", chain_id: "43113", contract_address: contractAddress, token_id: "69621777096996404494569967715110965261109496187347335164928263396549073080909", application_metadata: { includes: ["Test only"] } },
     { id: "edition-8ed9867c-e102-49c5-97a0-54ccf15605d2", release_id: "release-7f12ecfb-99eb-4b05-9b07-f862480829c5", title: "wer", supply: "1", status: "PUBLISHED", chain_id: "43113", contract_address: contractAddress, token_id: "86336109522257422783953313092869910591261689395232051112421244253165221467155" },
-    { id: editionId, release_id: releaseId, title: "VOIDCALLER", description: null, supply: "25", status: "PUBLISHED", application_metadata: { artwork: "/assets/voidcaller_art_4.png", includes: ["Full self-titled EP", "Collector Reliquary access", "Token-gated music experiences"], priceWei: "10000000000000000" }, chain_id: "43113", contract_address: contractAddress, token_id: tokenId },
+    { id: editionId, release_id: releaseId, title: "VOIDCALLER", description: null, supply: "25", status: "PUBLISHED", application_metadata: { artwork: "/assets/voidcaller_art_4.png", includes: ["Full self-titled EP", "Collector Reliquary access", "Token-gated music experiences"], priceWei: "10000000000000000" }, chain_id: "43113", contract_address: contractAddress, primary_sale_address: "0x8b743f91940a267899986d2e99b4375e1d87c321", token_id: tokenId },
   ],
   experiences: [],
 };
@@ -131,15 +131,13 @@ describe("production EditionPage route render", () => {
     expect(catalogState.current.artists.some((item) => /^(wer|sdfg|qwe|asdf)$/i.test(item.name))).toBe(false);
 
     const markup = renderEdition();
-    const buttonStart = markup.indexOf("<button");
-    const buttonSuffix = ">LIST EDITION</button>";
-    const buttonEnd = markup.indexOf(buttonSuffix, buttonStart);
-    const button = buttonStart >= 0 && buttonEnd >= 0 ? markup.slice(buttonStart, buttonEnd + buttonSuffix.length) : null;
     expect(markup).toContain("VOIDCALLER");
     expect(markup).not.toContain("Marketplace Fuji E2E Test");
     expect(markup).not.toContain("PINATA CERTIFICATION");
-    expect(button).toBeTruthy();
-    expect(button).not.toContain("disabled");
+    expect(markup).toContain('id="secondary-listing"');
+    expect(markup).toContain("Verifying the factory release, wallet balance, marketplace and royalty on chain");
+    expect(markup).not.toContain("LIST EDITION");
+    expect(markup).not.toContain("REVIEW LISTING");
   });
 
   it("keeps an experience route in loading state until the published catalog settles", () => {
