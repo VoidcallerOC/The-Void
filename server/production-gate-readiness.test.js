@@ -57,6 +57,12 @@ describe.skipIf(!testDatabaseUrl)("publication gate readiness on the production 
     });
   }
 
+  async function legacyRelease(service, wallet, artistId, title) {
+    const release = await service.createRelease({ request: asWallet(wallet), artistId, input: { title } });
+    await pool.query("UPDATE releases SET release_metadata='{}'::jsonb WHERE id=$1", [release.id]);
+    return { ...release, release_metadata: {} };
+  }
+
   // What the certified contract would hold after `creator` calls createEdition.
   function mineEdition({ creator, releaseSlug, editionSlug, metadataUri }) {
     const releaseId = ethers.encodeBytes32String(releaseSlug);
@@ -112,7 +118,7 @@ describe.skipIf(!testDatabaseUrl)("publication gate readiness on the production 
   it("lets the canonical owner create, publish and confirm a VOIDCALLER release", async () => {
     const service = studio();
     await expect(assertArtistMayPublish(pool, { artistId: "voidcaller", wallet: CANONICAL_OWNER })).resolves.toMatchObject({ artistId: "voidcaller" });
-    const release = await service.createRelease({ request: asWallet(CANONICAL_OWNER), artistId: "voidcaller", input: { title: "Next Record" } });
+    const release = await legacyRelease(service, CANONICAL_OWNER, "voidcaller", "Next Record");
     expect(release).toMatchObject({ artist_id: "voidcaller", slug: "next-record", status: "DRAFT" });
     await expect(service.updateRelease({ request: asWallet(CANONICAL_OWNER), releaseId: release.id, input: { description: "Configured." } })).resolves.toMatchObject({ description: "Configured." });
     const edition = await service.createEdition({ request: asWallet(CANONICAL_OWNER), releaseId: release.id, input: { trackTitle: "Next Record", quantity: "25" } });
@@ -129,7 +135,7 @@ describe.skipIf(!testDatabaseUrl)("publication gate readiness on the production 
     const e2e = asWallet(FUJI_E2E_WALLET);
     await expect(assertArtistMayPublish(pool, { artistId: "voidcaller", wallet: FUJI_E2E_WALLET })).rejects.toMatchObject({ code: "ARTIST_WALLET_NOT_AUTHORIZED" });
     await expect(service.createRelease({ request: e2e, artistId: "voidcaller", input: { title: "Hijack" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
-    const release = await service.createRelease({ request: asWallet(CANONICAL_OWNER), artistId: "voidcaller", input: { title: "Owner Draft" } });
+    const release = await legacyRelease(service, CANONICAL_OWNER, "voidcaller", "Owner Draft");
     await expect(service.updateRelease({ request: e2e, releaseId: release.id, input: { title: "x" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
     await expect(service.createEdition({ request: e2e, releaseId: release.id, input: { trackTitle: "x" } })).rejects.toMatchObject({ code: "ARTIST_ACCESS_DENIED" });
     await service.createEdition({ request: asWallet(CANONICAL_OWNER), releaseId: release.id, input: { trackTitle: "Owner Draft", quantity: "1" } });
@@ -140,7 +146,7 @@ describe.skipIf(!testDatabaseUrl)("publication gate readiness on the production 
     // Even the canonical owner cannot confirm an edition the Fuji E2E wallet created on-chain.
     await expect(service.confirmPublication({ request: asWallet(CANONICAL_OWNER), releaseId: release.id, input: { transactionHash: hash } })).rejects.toMatchObject({ code: "EDITION_CREATED_BY_ANOTHER_ARTIST" });
     // Its own unverified alias cannot publish new content either.
-    const aliasDraft = await service.createRelease({ request: e2e, artistId: ALIAS_ID, input: { title: "Alias Draft" } });
+    const aliasDraft = await legacyRelease(service, FUJI_E2E_WALLET, ALIAS_ID, "Alias Draft");
     await service.createEdition({ request: e2e, releaseId: aliasDraft.id, input: { trackTitle: "Alias Draft", quantity: "1" } });
     await expect(service.publishMetadata({ request: e2e, releaseId: aliasDraft.id, input: {} })).rejects.toMatchObject({ code: "ARTIST_NOT_VERIFIED" });
   });

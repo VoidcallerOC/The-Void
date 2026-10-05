@@ -70,10 +70,16 @@ describe.skipIf(!testDatabaseUrl)("multi-artist authorization (database)", () =>
     return id;
   }
 
+  async function legacyRelease({ wallet, artistId, title }) {
+    const release = await studio.createRelease({ request: asWallet(wallet), artistId, input: { title } });
+    await pool.query("UPDATE releases SET release_metadata='{}'::jsonb WHERE id=$1", [release.id]);
+    return { ...release, release_metadata: {} };
+  }
+
   async function onboard({ name, wallet, releaseTitle, editionTitle, verified = true }) {
     const artist = await studio.createArtist({ request: asWallet(wallet), input: { name } });
     if (verified) await verify(artist.id, wallet);
-    const release = await studio.createRelease({ request: asWallet(wallet), artistId: artist.id, input: { title: releaseTitle } });
+    const release = await legacyRelease({ wallet, artistId: artist.id, title: releaseTitle });
     const edition = await studio.createEdition({ request: asWallet(wallet), releaseId: release.id, input: { trackTitle: editionTitle, quantity: "10" } });
     return { artist, release, edition };
   }
@@ -148,7 +154,7 @@ describe.skipIf(!testDatabaseUrl)("multi-artist authorization (database)", () =>
   it("keeps VOIDCALLER one artist with its certified token, coexisting with other artists", async () => {
     // Contract-owner verification for VOIDCALLER (migration 018 claim shape).
     await pool.query("INSERT INTO artist_contract_verifications (id, artist_slug, wallet_address, contract_address, chain_id, signature, message) VALUES ('vc-claim','voidcaller',$1,'0xd1b4367dd9f235f9ee61878019d66e31511e98ee',43114,'0xsig','claim')", [VOIDCALLER_WALLET]);
-    const release = await studio.createRelease({ request: asWallet(VOIDCALLER_WALLET), artistId: "voidcaller", input: { title: "VOIDCALLER" } });
+    const release = await legacyRelease({ wallet: VOIDCALLER_WALLET, artistId: "voidcaller", title: "VOIDCALLER" });
     expect(release.slug).toBe("voidcaller");
     const edition = await studio.createEdition({ request: asWallet(VOIDCALLER_WALLET), releaseId: release.id, input: { trackTitle: "VOIDCALLER", quantity: "25" } });
     const token = await tokenRow(edition.id);

@@ -44,36 +44,56 @@ function experienceAction(item) {
   return <Link to={`/edition/${item.edition.id}`} style={ghostBtn}>View edition</Link>;
 }
 
+function objectClass(edition, chain) {
+  const id = String(chain?.id || edition.chainId || "");
+  if (id === "43114") return { label: "The relic", tone: "is-relic", note: "Avalanche C-Chain pressing" };
+  if (id === "43113") return { label: "Rehearsal", tone: "is-rehearsal", note: "Fuji test pressing · not the relic" };
+  return { label: "Pressing", tone: "", note: chain?.name || edition.chain || "Avalanche" };
+}
+
+function pressingsRemain(edition) {
+  if (edition.supply === undefined || edition.supply === null || edition.supply === "") return true;
+  const supply = Number(edition.supply);
+  return !Number.isFinite(supply) || supply > 0;
+}
+
 export function EditionCard({ item, owned = false }) {
   const { edition, artist, release, primary, chain } = item;
   const image = artworkFor(edition, release);
   const chainName = chain?.name || edition.chain || "Avalanche";
   const chainId = chain?.id || edition.chainId;
   const price = editionPriceLabel(edition);
-  const action = owned ? experienceAction(item) : primary.availability === "available"
+  const object = objectClass(edition, chain);
+  const collectable = primary.availability === "available" && pressingsRemain(edition);
+  const action = owned ? experienceAction(item) : collectable
     ? <Link to={primary.href} style={primaryBtn}>Collect</Link>
     : <Link to={`/edition/${edition.id}`} style={ghostBtn}>View edition</Link>;
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>
-      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${edition.title} edition`}>
-        <img src={image} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
-      </Link>
-      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-        <p className="vc-card-kicker">{artist?.name || "The Void"}</p>
-        <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
-        <h3 className="vc-card-title">{edition.title}</h3>
-        {edition.description && <p className="vc-card-body">{edition.description}</p>}
-        <p className="vc-card-meta">
-          {chainName} · Chain {chainId} · {editionTypeLabel(edition)} · {edition.supply || "Open supply"}
-        </p>
-        <p className="vc-card-meta">
-          {primary.availability === "available" ? "Available to collect" : primary.availability === "minted" ? "Primary mint complete" : "View edition details"}
-          {price ? ` · ${price}` : ""}
-        </p>
-        <Includes items={edition.includes} />
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
-          {action}
+      <div className="vc-sleeve">
+        <Link to={`/edition/${edition.id}`} className="vc-sleeve-art" aria-label={`View ${edition.title} edition`}>
+          <img src={image} alt={`${edition.title} artwork`} />
+        </Link>
+        <div className="vc-sleeve-copy">
+          <span className={`vc-object-mark ${object.tone}`}>{object.label}</span>
+          <p className="vc-card-kicker">{artist?.name || "The Void"}</p>
+          <h3 className="vc-card-title">{edition.title}</h3>
+          <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
+          <p className="vc-card-meta">{object.note} · {editionTypeLabel(edition)} · {pressingsRemain(edition) ? (edition.supply || "Open supply") : "No pressings remain"}</p>
+          <p className="vc-card-meta">
+            {collectable ? "Available to collect" : primary.availability === "minted" ? "Primary mint complete" : pressingsRemain(edition) ? "View edition details" : "Not available to collect"}
+            {price ? ` · ${price}` : ""}
+          </p>
+          <Includes items={edition.includes} />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
+            {action}
+          </div>
+          <details className="vc-colophon">
+            <summary>Provenance</summary>
+            <p>{chainName} · Chain {chainId}</p>
+            {edition.contractAddress && <p>{edition.contractAddress}</p>}
+          </details>
         </div>
       </div>
     </article>
@@ -97,10 +117,12 @@ export function SecondaryListingCard({ item, listings = [], owned = false }) {
         <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-        <p className="vc-card-kicker">{artist?.name || "The Void"} · Index-confirmed secondary</p>
-        <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
+        <span className={`vc-object-mark ${objectClass(edition, chain).tone}`}>{objectClass(edition, chain).label}</span>
+        <p className="vc-card-kicker">{artist?.name || "The Void"} · Secondary pressing</p>
         <h3 className="vc-card-title">{edition.title}</h3>
-        <p className="vc-card-meta">{chainName} · Chain {chainId} · {active.length} active indexed offer{active.length === 1 ? "" : "s"}</p>
+        <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
+        <p className="vc-card-meta">{active.length} active indexed offer{active.length === 1 ? "" : "s"}</p>
+        <details className="vc-colophon"><summary>Provenance</summary><p>{chainName} · Chain {chainId}</p></details>
         <Includes items={edition.includes} />
         <div aria-label="Active indexed offers" style={{ display: "grid", gap: 10 }}>
           {active.map((listing) => (

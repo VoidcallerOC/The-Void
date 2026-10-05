@@ -658,3 +658,119 @@ body { padding-bottom: 72px; }
   .vc-claim-info-row { grid-template-columns:1fr; gap:6px; }
   .vc-claim-action > * { flex:1 1 100%; min-width:0; }
 }
+
+/* Reliquary presentation — record first, colophon last */
+.vc-nav-secondary { opacity: 0.62; }
+.vc-nav-secondary.vc-navlink { font-size: 10px; letter-spacing: 0.14em; }
+.vc-nav-wallet { opacity: 0.85; }
+.vc-object-mark {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vc-bone);
+  border: 1px solid var(--vc-ash);
+  padding: 4px 8px;
+  width: fit-content;
+}
+.vc-object-mark.is-relic { border-color: var(--vc-crimson); color: var(--vc-crimson); }
+.vc-object-mark.is-rehearsal { color: var(--vc-bone-dim); }
+.vc-sleeve {
+  display: grid;
+  grid-template-columns: minmax(180px, 46%) minmax(0, 1fr);
+  min-height: 280px;
+}
+.vc-sleeve-art {
+  display: block;
+  min-height: 280px;
+  background: #000;
+  border-right: 1px solid var(--vc-ash);
+}
+.vc-sleeve-art img {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  object-fit: cover;
+  display: block;
+}
+.vc-sleeve-copy {
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vc-colophon {
+  border-top: 1px solid var(--vc-ash);
+  margin-top: 8px;
+  color: var(--vc-bone-dim);
+}
+.vc-colophon summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 10px 0;
+  list-style: none;
+}
+.vc-colophon summary::-webkit-details-marker { display: none; }
+.vc-colophon p, .vc-colophon code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  margin: 0 0 8px;
+}
+.vc-market-volume {
+  opacity: 0.7;
+  font-size: 12px;
+}
+.vc-market-volume strong { font-size: 13px; color: var(--vc-bone-dim); }
+.vc-edition-plate {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.15fr) minmax(280px, 0.85fr);
+  gap: 28px;
+  align-items: start;
+}
+.vc-edition-plate img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid var(--vc-ash);
+  display: block;
+}
+.vc-player-needle { box-shadow: none !important; }
+.vc-studio-action, .vc-studio-action.is-primary { box-shadow: none; }
+.vc-studio-action:hover, .vc-studio-action:focus-visible { box-shadow: none; transform: none; }
+footer, .vc-footer { margin-bottom: 8px; }
+@media (max-width: 768px) {
+  body { padding-bottom: 168px; }
+  .vc-sleeve { grid-template-columns: 1fr; }
+  .vc-sleeve-art, .vc-sleeve-art img { min-height: 240px; border-right: 0; border-bottom: 1px solid var(--vc-ash); }
+  .vc-edition-plate { grid-template-columns: 1fr; }
+  .vc-sticky-player { padding-bottom: 16px !important; }
+}
+
+.vc-market-mast { border-bottom: 1px solid var(--vc-ash); }
+.vc-market-mast .vc-market-hero-copy { padding: 112px clamp(16px, 4vw, 56px) 28px; }
+.vc-market-mast .vc-market-hero-title { font-size: clamp(64px, 8vw, 96px); }
+.vc-section-header h2 { font-size: clamp(22px, 3vw, 34px) !important; }
+.vc-nav-rule { width: 1px; height: 18px; background: var(--vc-ash); }
+.vc-reliquary-empty {
+  min-height: 420px;
+  border: 1px solid var(--vc-ash);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 36px;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.15), rgba(0,0,0,0.82)),
+    url("/assets/voidcaller_art_4.png") center 30% / cover no-repeat;
+}
+.vc-reliquary-empty h2 {
+  font-family: var(--font-display);
+  font-size: clamp(48px, 8vw, 88px);
+  line-height: 0.9;
+  text-transform: uppercase;
+  margin: 8px 0 12px;
+}
