@@ -17,11 +17,15 @@ describe("public catalog reads", () => {
       status: "PUBLISHED",
       chain_id: 43113,
       contract_address: "0x82b26da27136935454bdf1e40801190b521b82e5",
+      release_contract_address: "0x82b26da27136935454bdf1e40801190b521b82e5",
+      factory_address: "0x8291A4F1936C1c5C6D8917b0966c80757cd5c265",
       primary_sale_address: "0x1111111111111111111111111111111111111111",
       token_id: "69621777096996404494569967715110965261109496187347335164928263396549073080909",
     });
     await expect(catalog.instance.getEdition({ id: "edition-fuji" })).resolves.toMatchObject({
       contract_address: "0x82b26da27136935454bdf1e40801190b521b82e5",
+      release_contract_address: "0x82b26da27136935454bdf1e40801190b521b82e5",
+      factory_address: "0x8291A4F1936C1c5C6D8917b0966c80757cd5c265",
       chain_id: 43113,
       primary_sale_address: "0x1111111111111111111111111111111111111111",
       token_id: "69621777096996404494569967715110965261109496187347335164928263396549073080909",
@@ -30,6 +34,7 @@ describe("public catalog reads", () => {
     expect(sql).toContain("t.token_id::text AS token_id");
     expect(sql).toContain("lower(address)=$3 AND chain_id=$4");
     expect(sql).toContain("sale.address AS primary_sale_address");
+    expect(sql).toContain("factory.address AS factory_address");
   });
 
   it("does not return media_config, requirement internals, or storage keys", async () => {

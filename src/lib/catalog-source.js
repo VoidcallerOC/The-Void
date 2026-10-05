@@ -154,6 +154,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       publishedAt: row.published_at || row.publishedAt || null,
       updatedAt: row.updated_at || row.updatedAt || null,
       artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
+      publicationArchitecture: meta.publicationArchitecture || row.publication_architecture || "",
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
     });
@@ -178,6 +179,9 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       contractAddress,
       chainId,
       primarySaleAddress: row.primary_sale_address || fuji.primarySaleAddress || "",
+      releaseContractAddress: row.release_contract_address || fuji.releaseContractAddress || contractAddress,
+      factoryAddress: row.factory_address || fuji.factoryAddress || "",
+      publicationArchitecture: meta.publicationArchitecture || row.publication_architecture || "",
       chain: chainId === FUJI_RELEASE_CONFIG.chainId ? FUJI_RELEASE_CONFIG.networkName : "AVALANCHE",
       supply: row.supply != null ? String(row.supply) : null,
       status: legacy ? "minted" : String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),

@@ -626,3 +626,35 @@ body { padding-bottom: 72px; }
   inset: 0;
   pointer-events: none;
 }
+
+/* ============================================================
+   CLAIM — release identity surface
+   ============================================================ */
+.vc-claim-header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:42px; border-bottom:1px solid var(--vc-ash); padding-bottom:22px; }
+.vc-claim-layout { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(320px,1.1fr); gap:clamp(28px,6vw,88px); align-items:start; }
+.vc-claim-artwork { margin:0; position:sticky; top:104px; }
+.vc-claim-artwork img { display:block; width:100%; aspect-ratio:1; object-fit:cover; border:1px solid var(--vc-ash); filter:saturate(.86) contrast(1.05); }
+.vc-claim-artwork figcaption { display:flex; justify-content:space-between; gap:16px; padding-top:12px; font-family:var(--font-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--vc-bone-dim); }
+.vc-claim-copy { min-width:0; }
+.vc-claim-artist, .vc-claim-edition { font-family:var(--font-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--vc-bone-dim); margin:18px 0 8px; }
+.vc-claim-title { font-family:var(--font-display); font-size:clamp(48px,8vw,100px); line-height:.9; text-transform:uppercase; margin:0; overflow-wrap:anywhere; }
+.vc-claim-edition { margin-top:16px; color:var(--vc-crimson); }
+.vc-claim-status { margin-top:34px; border-top:1px solid var(--vc-ash); border-bottom:1px solid var(--vc-ash); padding:22px 0; }
+.vc-claim-status-head { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.vc-claim-status-message { color:var(--vc-bone-dim); line-height:1.65; max-width:620px; margin:14px 0 18px; }
+.vc-claim-wallet, .vc-claim-warning { margin:14px 0 0; }
+.vc-claim-warning { color:var(--vc-crimson); font-family:var(--font-mono); font-size:11px; line-height:1.6; }
+.vc-claim-mono { font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--vc-bone-dim); }
+.vc-claim-action { display:flex; gap:10px; flex-wrap:wrap; margin-top:22px; }
+.vc-claim-supporting { display:grid; gap:0; margin-top:48px; }
+.vc-claim-info-row { display:grid; grid-template-columns:minmax(130px,.45fr) minmax(0,1fr); gap:18px; padding:14px 0; border-top:1px solid var(--vc-ash); }
+.vc-claim-value { color:var(--vc-bone-dim); line-height:1.5; overflow-wrap:anywhere; }
+@media (max-width:768px) {
+  .vc-claim-header { align-items:flex-start; flex-direction:column; margin-bottom:30px; }
+  .vc-claim-layout { grid-template-columns:1fr; gap:34px; }
+  .vc-claim-artwork { position:static; }
+  .vc-claim-artwork img { max-height:72vw; }
+  .vc-claim-title { font-size:clamp(54px,18vw,88px); }
+  .vc-claim-info-row { grid-template-columns:1fr; gap:6px; }
+  .vc-claim-action > * { flex:1 1 100%; min-width:0; }
+}
