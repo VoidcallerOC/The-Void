@@ -112,7 +112,7 @@ function cancellationReceipt(id = "7") {
   };
 }
 
-function setup({ walletOverrides = {} } = {}) {
+function setup({ walletOverrides = {}, listingEdition = edition } = {}) {
   const wallet = {
     account: mocks.seller,
     authenticated: true,
@@ -124,7 +124,7 @@ function setup({ walletOverrides = {} } = {}) {
     authenticate: vi.fn().mockResolvedValue({ ok: true }),
     ...walletOverrides,
   };
-  const view = render(<MemoryRouter><WalletCtx.Provider value={wallet}><ListingPanel edition={edition} /></WalletCtx.Provider></MemoryRouter>);
+  const view = render(<MemoryRouter><WalletCtx.Provider value={wallet}><ListingPanel edition={listingEdition} /></WalletCtx.Provider></MemoryRouter>);
   return { ...view, wallet };
 }
 
@@ -171,6 +171,16 @@ async function reviewListing() {
 }
 
 describe("release-per-contract secondary listing flow", () => {
+  it("shows a disabled List for sale control and unsupported explanation for non-Fuji editions", async () => {
+    setup({ listingEdition: { ...edition, chainId: 43114 } });
+    await act(async () => { await flushPromises(); });
+
+    expect(screen.getByRole("button", { name: "LIST FOR SALE" }).disabled).toBe(true);
+    expect(screen.getByText(/Only a Fuji \(43113\) release-per-contract edition/)).toBeTruthy();
+    expect(mocks.readContext).not.toHaveBeenCalled();
+    expect(mocks.submitListing).not.toHaveBeenCalled();
+  });
+
   it("requires the on-chain review, verifies the exact ListingCreated event, and shows listed only after the index confirms it", async () => {
     setup();
     await makeReady();

@@ -140,6 +140,18 @@ describe("production EditionPage route render", () => {
     expect(markup).not.toContain("REVIEW LISTING");
   });
 
+  it("keeps an unavailable secondary listing control visible for unsupported editions", () => {
+    catalogState.current = {
+      ...catalogState.current,
+      editions: catalogState.current.editions.map((item) => item.id === editionId ? { ...item, chainId: 43114 } : item),
+    };
+
+    const markup = renderEdition();
+    expect(markup).toContain('id="secondary-listing"');
+    expect(markup).toContain("LIST FOR SALE");
+    expect(markup).toContain("This edition is unsupported; no transaction can be submitted.");
+  });
+
   it("keeps an experience route in loading state until the published catalog settles", () => {
     catalogState.current = { ...catalogState.current, experiences: [], publishedLoading: true };
     expect(renderExperience()).toContain("Loading experience");

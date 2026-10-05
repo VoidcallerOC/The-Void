@@ -64,4 +64,23 @@ describe("CollectPanel owner resale action", () => {
     expect(screen.getByRole("link", { name: "List for sale" }).getAttribute("href")).toBe("/edition/factory-release-owned-edition#secondary-listing");
     expect(screen.getByText("You own this edition. You can list it for resale.")).toBeTruthy();
   });
+
+  it("keeps a visible owner action for an edition that the Fuji marketplace cannot accept", async () => {
+    mocks.balance.mockResolvedValue(1n);
+    mocks.primarySale.mockResolvedValue(null);
+    const unsupportedEdition = { ...edition, chainId: 43114 };
+
+    render(
+      <MemoryRouter>
+        <WalletCtx.Provider value={wallet}>
+          <CollectPanel edition={unsupportedEdition} release={release} variant="hero" />
+        </WalletCtx.Provider>
+      </MemoryRouter>,
+    );
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(screen.getByText("Owned")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "List for sale" }).getAttribute("href")).toBe("/edition/factory-release-owned-edition#secondary-listing");
+    expect(screen.getByText("You own this edition. Secondary resale is unavailable for this release.")).toBeTruthy();
+  });
 });

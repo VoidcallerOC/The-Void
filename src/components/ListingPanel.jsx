@@ -65,7 +65,7 @@ function statusCopy(stage, message) {
     listed: "The authoritative marketplace index confirms this edition is listed.",
     "already-listed": "An active listing already exists for this exact contract and token. A second listing will not be created.",
     "not-owner": "This wallet no longer owns the selected edition on chain. Refresh the page after verifying your wallet.",
-    unsupported: "Only a release-per-contract edition registered by The-Void’s canonical factory can be listed here.",
+    unsupported: "Only a Fuji (43113) release-per-contract edition registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.",
     unavailable: "Marketplace or ownership verification is unavailable. No listing action was taken.",
     "wrong-network": "Switch to Avalanche Fuji (43113) before listing this release.",
     disconnected: "Connect a wallet to verify ownership and list this edition.",
@@ -464,6 +464,7 @@ export function ListingPanel({ edition }) {
       <h2 id="secondary-listing-title" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(28px, 4vw, 42px)", textTransform: "uppercase", lineHeight: 1, margin: "12px 0" }}>List for sale</h2>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65 }}>{ownerIntro} {ownershipDetail}</p>
       <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".08em", overflowWrap: "anywhere" }}>{identity}</p>
+      {(!candidate || !marketplaceConfigured) && <Btn kind="ash" disabled>LIST FOR SALE</Btn>}
       <details style={{ maxWidth: 760, margin: "12px 0", border: "1px solid var(--vc-ash)", padding: "10px 12px", background: "var(--vc-abyss)" }}>
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
         <div style={{ marginTop: 10, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.8, overflowWrap: "anywhere" }}>
