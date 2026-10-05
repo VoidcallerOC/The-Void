@@ -1,0 +1,35 @@
+{
+  "network": "fuji",
+  "chainId": 43113,
+  "architecture": "release-per-contract",
+  "factory": {
+    "name": "VoidReleaseFactoryV2",
+    "address": "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
+    "deploymentTransaction": "0x734bbd165e28c25762e444b693d2e621eb392ee8f613b9d23ae97c2914cb5b0d",
+    "deploymentBlock": 59082607,
+    "implementationAddress": "0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4",
+    "implementationVersion": 2,
+    "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "platformFeeBps": 250
+  },
+  "marketplace": {
+    "name": "ReleaseMarketplaceV3",
+    "address": "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
+    "deploymentTransaction": "0x3d08466ab91b4f31fdb69aa42b3107d821c7cef5d53effad3e56f2affd8c3861",
+    "deploymentBlock": 59082610,
+    "chainId": 43113,
+    "factoryAddress": "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
+    "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "feeBps": 250
+  },
+  "verification": {
+    "workflowRunId": 37384000260,
+    "sourceCommit": "9ec82e226505c7a4ea5878ed1bab33aaa53177dd",
+    "factoryBytecodeVerified": true,
+    "marketplaceBytecodeVerified": true,
+    "factoryMarketplaceLinked": true,
+    "factoryReleaseCountAtVerification": 0,
+    "releaseCreatedLogsInDeploymentReceipts": 0,
+    "verifiedAt": "2026-10-05T22:42:26Z"
+  }
+}
