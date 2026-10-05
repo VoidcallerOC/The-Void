@@ -98,7 +98,7 @@ contract VoidCollection1155 {
 
     /// @notice Hands the collection to a new owner wallet: the new owner gets every role and
     /// the previous owner loses them. Other role holders (such as the sale issuer) are kept.
-    function transferOwnership(address newOwner) external {
+    function transferOwnership(address newOwner) external virtual {
         if (msg.sender != owner) revert NotOwner();
         if (newOwner == address(0)) revert InvalidAddress();
         address previous = owner;

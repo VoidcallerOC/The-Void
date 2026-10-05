@@ -163,6 +163,17 @@ export async function simulateConfigureSale(provider, { from, data, value = 0 } 
   }
 }
 
+export async function simulateReleaseSaleConfigure(provider, { from, to, data, chainId }) {
+  await assertReleaseProvider(provider, chainId);
+  if (!ethers.isAddress(from) || !ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("The artist wallet and release-specific sale address are required.");
+  try {
+    return await provider.request({ method: "eth_call", params: [{ from: ethers.getAddress(from), to: ethers.getAddress(to), data, gas: SIMULATION_GAS }, "latest"] });
+  } catch (error) {
+    if (error?.code === "FUJI_RPC_TIMEOUT" || error?.code === "FUJI_RPC_UNAVAILABLE") throw error;
+    throw Object.assign(new Error(`Release primary-sale configuration simulation reverted: ${error?.shortMessage || error?.message || "execution reverted"}`), { code: "CONFIGURE_SALE_SIMULATION_REVERTED", cause: error });
+  }
+}
+
 export function explainConfigureSaleError(error) {
   if (error?.code === "FUJI_RPC_TIMEOUT") return { code: error.code, message: error.message };
   if (error?.code === "FUJI_RPC_UNAVAILABLE") return { code: error.code, message: error.message };

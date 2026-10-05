@@ -273,6 +273,8 @@ describe("Artist Studio publication pipeline", () => {
 
 describe("provenance anchor inside publication", () => {
   const manifest = canonicalProvenanceManifest({ releaseId: "release-1", editionId: "edition-1", creator: { artistId: "artist-1", wallet: owner }, metadataDigest: "a".repeat(64), createdAt: "2026-09-25T20:00:00.000Z", artwork: "b".repeat(64) });
+  const releaseKey = `0x${"99".repeat(32)}`;
+  const boundReleaseAddress = "0x4444444444444444444444444444444444444444";
   const config = { enabled: true, chainId: 43113, network: "fuji", releaseContract: fujiRelease.contractAddress.toLowerCase(), contractAddress: anchorAddress, rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc", eventName: "ProvenanceAnchored" };
 
   function anchorService(reader, proof) {
@@ -284,14 +286,14 @@ describe("provenance anchor inside publication", () => {
       recordAnchorFailure: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "FAILED", verification_status: "UNVERIFIED" }),
       recordVerifiedAnchor: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "ANCHORED", verification_status: "VERIFIED" }),
     };
-    const db = { query: vi.fn().mockResolvedValue({ rows: [{ release_id: "release-1", release_slug: "the-record", release_status: "PUBLISHED", artist_id: "artist-1", edition_id: "edition-1", title: "Chapter I", token_id: null, metadata: { provenance: manifest.record }, metadata_version: manifest.metadataDigest }] }) };
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ release_id: "release-1", release_slug: "the-record", release_status: "PUBLISHED", artist_id: "artist-1", edition_id: "edition-1", title: "Chapter I", token_id: null, metadata: { provenance: manifest.record }, metadata_version: manifest.metadataDigest, bound_chain_id: 43113, release_key: releaseKey, release_contract_address: boundReleaseAddress, provenance_anchor_address: anchorAddress }] }) };
     return { service: new ProvenanceAnchorService({ db, records, authenticator: async () => ({ wallet: owner }), config, reader }), records };
   }
 
   it("reports provenance failure and verification failure without a verified publication", async () => {
     const reverted = anchorService({ getNetwork: async () => ({ chainId: 43113 }), getTransaction: async () => ({ to: anchorAddress, from: owner, data: "0x" }), getTransactionReceipt: async () => ({ status: 0, logs: [] }), getBlock: async () => ({ timestamp: 1 }), isAnchored: async () => false }, { id: "proof-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" });
     const { encodeAnchorCall } = await import("./provenance-anchor.js");
-    const call = encodeAnchorCall({ releaseSlug: "the-record", editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
+    const call = encodeAnchorCall({ releaseKey, editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
     reverted.service.reader.getTransaction = async () => ({ to: anchorAddress, from: owner, data: call.data });
     await expect(reverted.service.confirm({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false, verificationStatus: "UNVERIFIED" });
     expect(reverted.records.recordVerifiedAnchor).not.toHaveBeenCalled();
@@ -304,8 +306,8 @@ describe("provenance anchor inside publication", () => {
 
   it("marks the release fully published only after an independent anchor verification and can retry", async () => {
     const { encodeAnchorCall, ANCHOR_ABI } = await import("./provenance-anchor.js");
-    const call = encodeAnchorCall({ releaseSlug: "the-record", editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
-    const encoded = new ethers.Interface(ANCHOR_ABI).encodeEventLog("ProvenanceAnchored", [call.provenanceRoot, call.releaseId, call.editionId, call.tokenId, owner, fujiRelease.contractAddress]);
+    const call = encodeAnchorCall({ releaseKey, editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
+    const encoded = new ethers.Interface(ANCHOR_ABI).encodeEventLog("ProvenanceAnchored", [call.provenanceRoot, call.releaseId, call.editionId, call.tokenId, owner, boundReleaseAddress]);
     const reader = { getNetwork: async () => ({ chainId: 43113 }), getTransaction: async () => ({ to: anchorAddress, from: owner, data: call.data }), getTransactionReceipt: async () => ({ status: 1, blockNumber: 90, logs: [{ address: anchorAddress, topics: encoded.topics, data: encoded.data }] }), getBlock: async () => ({ timestamp: 1_758_835_200 }), isAnchored: async () => true };
     const failed = anchorService(reader, { id: "proof-1", anchor_status: "FAILED", verification_status: "UNVERIFIED", attempt_count: 1 });
     const verified = await failed.service.confirm({ request, releaseId: "release-1", input: { transactionHash: tx } });

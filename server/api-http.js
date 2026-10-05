@@ -218,6 +218,13 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.updateRelease({ request: apiRequest, releaseId: base[2], input: body });
         }
+        else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "provisioning" && base.length === 5) {
+          if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+          if (base[4] === "prepare") data = await studioService.prepareReleaseProvisioning({ request: apiRequest, releaseId: base[2] });
+          else if (base[4] === "submit") data = await studioService.recordReleaseProvisioningSubmission({ request: apiRequest, releaseId: base[2], input: body });
+          else if (base[4] === "status") data = await studioService.releaseProvisioningStatus({ request: apiRequest, releaseId: base[2] });
+          else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
+        }
         else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "contract" && base.length === 4) {
           if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
           data = await studioService.bindReleaseContract({ request: apiRequest, releaseId: base[2], input: body });

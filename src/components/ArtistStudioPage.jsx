@@ -7,8 +7,8 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, encodeCreateReleaseEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, sendReleaseTransaction, simulateCreateFujiEdition, simulateReleaseCall, verifyFujiEditionCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
-import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, fujiPrimarySaleAddress, weiToAvax, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
+import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
@@ -103,7 +103,7 @@ function initialState() {
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "0.01",
-    royaltyBps: "500",
+    royaltyBps: "250",
     saleSupply: "",
     perWalletLimit: "1",
     saleStart: "",
@@ -129,6 +129,9 @@ export function ArtistStudioPage() {
   const [selectedReleaseId, setSelectedReleaseId] = useState("");
   const [artistId, setArtistId] = useState("");
   const [releaseId, setReleaseId] = useState("");
+  const [provisioning, setProvisioning] = useState(null);
+  const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
+  const [activeReleaseAsset, setActiveReleaseAsset] = useState(null);
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
   const [configuredSale, setConfiguredSale] = useState(null);
@@ -166,6 +169,8 @@ export function ArtistStudioPage() {
     setReleaseId(resumed.releaseId);
     setEditionId(resumed.editionId || "");
     setPublishedTokenId(resumed.tokenId);
+    const boundEdition = (catalog?.editions || []).find((item) => item.id === resumed.editionId);
+    setActiveReleaseAsset(boundEdition?.contractAddress && boundEdition?.primarySaleAddress ? { chainId: Number(boundEdition.chainId), releaseContractAddress: boundEdition.contractAddress, primarySaleAddress: boundEdition.primarySaleAddress, tokenId: resumed.tokenId } : null);
     setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined).map(([key, value]) => [key, key === "priceWei" ? weiToAvax(value) : value])) }));
     setConfiguredSale(null);
     setWorkflow("catalog");
@@ -190,13 +195,39 @@ export function ArtistStudioPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!canUseStudio || step !== "sale" || !publishedTokenId || !fujiPrimarySaleAddress()) return undefined;
-    const publicProvider = createFujiPublicProvider();
-    readPrimarySale(publicProvider, publishedTokenId, wallet.account)
+    const release = (ownedStudioCatalog?.releases || []).find((item) => item.id === requestedReleaseId);
+    if (!canUseStudio || !requestedReleaseId || !release || release.status === "published") return undefined;
+    setReleaseId(requestedReleaseId);
+    setSelectedReleaseId(requestedReleaseId);
+    setArtistId(release.artistId || "");
+    setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseDescription: release.description || "", releaseArtwork: release.artwork || "" }));
+    studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers })
+      .then(async (prepared) => {
+        if (cancelled) return;
+        setProvisioning(prepared);
+        const status = await studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers });
+        if (cancelled) return;
+        setProvisioningState(status.state || prepared.state || "PENDING");
+        if (status.state === "CONFIRMED") {
+          setActiveReleaseAsset({ chainId: Number(status.chainId || prepared.chainId), releaseContractAddress: status.releaseContractAddress, primarySaleAddress: status.primarySaleAddress, provenanceAnchorAddress: status.provenanceAnchorAddress });
+          setStep("track");
+        } else if (status.transactionHash) {
+          setNotice(`Recovered provisioning ${status.state}: ${status.transactionHash}. Reconciliation will use the stored transaction and matching Factory event.`);
+        }
+      })
+      .catch((error) => { if (!cancelled && error?.code !== "RELEASE_FACTORY_V2_NOT_CONFIGURED") setNotice(error.message); });
+    return () => { cancelled = true; };
+  }, [canUseStudio, headers, ownedStudioCatalog, requestedReleaseId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canUseStudio || step !== "sale" || !publishedTokenId || !activeReleaseAsset?.primarySaleAddress) return undefined;
+    const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+    readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account)
       .then((sale) => { if (!cancelled) setConfiguredSale(sale); })
       .catch(() => { if (!cancelled) setConfiguredSale(null); });
     return () => { cancelled = true; };
-  }, [canUseStudio, publishedTokenId, step, wallet, wallet.account]);
+  }, [activeReleaseAsset, canUseStudio, publishedTokenId, step, wallet, wallet.account]);
 
 
 
@@ -234,13 +265,69 @@ export function ArtistStudioPage() {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
       setSelectedReleaseId(ids.releaseId);
-      setNotice(`Release created: ${form.releaseTitle}. Continue to Tracks when you are ready.`);
-      setStep("track");
+      const prepared = await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
+      setProvisioning(prepared);
+      setProvisioningState(prepared.state || "PENDING");
+      setNotice("Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.");
     } catch (error) {
-      setNotice(error.message);
+      setNotice(`Release draft saved. ${error.message}`);
     } finally {
       setBusy("");
     }
+  };
+
+  const refreshProvisioningStatus = async (targetReleaseId = releaseId) => {
+    if (!targetReleaseId) throw new Error("Create or select a release draft first.");
+    const status = await studioFetch(`/studio/releases/${encodeURIComponent(targetReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers });
+    setProvisioningState(status.state || "NOT_STARTED");
+    if (status.state === "CONFIRMED") {
+      setActiveReleaseAsset({ chainId: Number(status.chainId || FUJI_RELEASE_FACTORY_V2_CONFIG.chainId), releaseContractAddress: status.releaseContractAddress, primarySaleAddress: status.primarySaleAddress, provenanceAnchorAddress: status.provenanceAnchorAddress });
+      setStep("track");
+      setNotice("Release infrastructure confirmed and bound. Configure editions and metadata next.");
+    } else if (status.transactionHash) {
+      setNotice(`Provisioning ${status.state}: ${status.transactionHash}. Reconciliation will bind only the matching Factory event; do not retry deployment.`);
+    }
+    return status;
+  };
+
+  const createReleaseOnChain = async () => {
+    setBusy("provision"); setNotice(""); setTxEvidence(null);
+    try {
+      if (!canUseStudio || !wallet.account) throw new Error("Connect and authenticate the canonical artist OWNER wallet first.");
+      if (!releaseId) throw new Error("Save the release draft before provisioning it.");
+      let expected = provisioning;
+      if (!expected) {
+        expected = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
+        setProvisioning(expected);
+        setProvisioningState(expected.state || "PENDING");
+        setNotice("Exact parameters prepared. Review them above, then select Create release on-chain to authorize the transaction.");
+        return;
+      }
+      if (String(expected.artistWallet).toLowerCase() !== String(wallet.account).toLowerCase()) throw new Error("The connected wallet is not the canonical artist OWNER authorized for this release.");
+      const walletProvider = wallet.getProvider?.();
+      if (!walletProvider?.request) throw new Error("The artist wallet provider is unavailable.");
+      const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+      const submitted = await submitArtistReleaseCreation({ provider: walletProvider, from: wallet.account, payload: expected });
+      // Save the hash immediately after wallet submission, before waiting for a receipt.
+      await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/submit`, { method: "POST", payload: { transactionHash: submitted.hash }, headers });
+      setProvisioningState("SUBMITTED");
+      setTxEvidence({ status: "submitted", transactionHash: submitted.hash, explorerUrl: fujiExplorerUrl("tx", submitted.hash), contractAddress: submitted.factoryAddress, chainId: submitted.chainId });
+      setNotice(`Transaction submitted by ${wallet.account}. Your artist wallet pays the gas. Waiting for the Fuji receipt…`);
+      const verified = await verifyArtistReleaseCreation(publicProvider, { transactionHash: submitted.hash, expected });
+      setActiveReleaseAsset({ chainId: verified.chainId, releaseContractAddress: verified.releaseContractAddress, primarySaleAddress: verified.primarySaleAddress, provenanceAnchorAddress: verified.provenanceAnchorAddress });
+      setProvisioningState("RECONCILING");
+      setNotice("Receipt and exact clone initialization verified. Waiting for the release-aware indexer to bind the confirmed Factory event.");
+      let result = null;
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        result = await refreshProvisioningStatus(releaseId);
+        if (result.state === "CONFIRMED") break;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+      if (result?.state !== "CONFIRMED") setNotice(`Receipt verified (${submitted.hash}), but indexing/reconciliation is still pending. Reload or select “Reconcile release” later; the stored request prevents a duplicate deployment.`);
+    } catch (error) {
+      setNotice(error.message);
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally { setBusy(""); }
   };
 
   const saveDraft = async (knownIds = null, { manageBusy = true, quantity = undefined } = {}) => {
@@ -335,30 +422,23 @@ export function ArtistStudioPage() {
         payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
         headers,
       });
+      if (metadata.releaseContractAddress && metadata.primarySaleAddress) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: metadata.tokenId });
       const provider = wallet.getProvider?.();
-      const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.chainId === 43113);
-      if (FUJI_RELEASE_FACTORY_CONFIG.factoryAddress && !releaseScoped) throw new Error("This Studio release is not bound to a mined VoidReleaseFactory deployment. No legacy shared Fuji contract fallback is allowed.");
-      if (!releaseScoped && !(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This wallet does not have ARTIST_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
-      const encoded = releaseScoped
-        ? encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
-        : (fujiReleaseIsV2()
-          ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
-          : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri }));
+      const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.primarySaleAddress && metadata.provenanceAnchorAddress && Number(metadata.chainId) === Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId));
+      if (!releaseScoped) throw new Error("This Studio release is not bound to its verified V2 release, dedicated sale, and provenance anchor. Legacy V2/shared-contract fallback is disabled.");
+      const encoded = encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 });
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
-      if (releaseScoped) await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
-      else await simulateCreateFujiEdition(provider, { from: wallet.account, data: encoded.data });
-      const transaction = releaseScoped
-        ? await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data })
-        : await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
-      if (releaseScoped) await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
-      else await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
+      await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
+      const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data });
+      await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);
       if (!result.fullyPublished) return;
       setPublishedTokenId(encoded.tokenId.toString());
+      if (releaseScoped) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: encoded.tokenId.toString() });
       setStep("sale");
     } catch (error) {
       setNotice(error.message);
@@ -372,18 +452,18 @@ export function ArtistStudioPage() {
     setBusy("sale"); setTxEvidence(null);
     setNotice("");
     try {
-      const sale = fujiPrimarySaleAddress();
-      if (!sale) throw new Error("VoidPrimarySale is not deployed on Fuji yet. The collectible stays ERC-1155, but fans cannot pay until the sale contract is configured.");
+      const sale = activeReleaseAsset?.primarySaleAddress;
+      if (!sale || !activeReleaseAsset?.releaseContractAddress || !activeReleaseAsset?.chainId) throw new Error("This release has no verified dedicated primary sale bound to its V2 Factory deployment. Shared legacy sales are disabled.");
       if (!publishedTokenId) throw new Error("Publish the release before setting up the sale.");
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       if (wallet.chainId !== FUJI_RELEASE_CONFIG.chainId) throw Object.assign(new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}) before configuring the sale.`), { code: "CHAIN_MISMATCH" });
       // All reads and the exact preflight use the public Fuji RPC. The wallet
       // provider is intentionally acquired only after preflight succeeds, for
       // the user-confirmed transaction submission below.
-      const publicProvider = createFujiPublicProvider();
-      const edition = await readFujiEdition(publicProvider, publishedTokenId);
+      const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+      const edition = await readReleaseEdition(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId });
       if (!edition?.exists) throw new Error("The published edition could not be found on Fuji. Refresh the edition before configuring its sale.");
-      const existingSale = await readPrimarySale(publicProvider, publishedTokenId, wallet.account);
+      const existingSale = await readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account);
       if (existingSale?.configured) {
         setConfiguredSale(existingSale);
         setNotice("This release already has a primary sale configured. No transaction was submitted.");
@@ -407,17 +487,17 @@ export function ArtistStudioPage() {
         paused: form.salePaused,
         openEdition,
       });
-      await simulateConfigureSale(publicProvider, { from: wallet.account, data });
+      await simulateReleaseSaleConfigure(publicProvider, { from: wallet.account, to: sale, data, chainId: activeReleaseAsset.chainId });
       const walletProvider = wallet.getProvider?.();
       if (!walletProvider?.request) throw Object.assign(new Error("The wallet provider is unavailable. Reconnect your wallet before configuring the sale."), { code: "WALLET_PROVIDER_UNAVAILABLE" });
       let transaction;
       try {
-        transaction = await sendFujiTransaction({ provider: walletProvider, receiptProvider: publicProvider, from: wallet.account, data, to: sale, assumeFujiChain: true });
+        transaction = await sendReleaseTransaction({ provider: walletProvider, receiptProvider: publicProvider, from: wallet.account, data, to: sale });
       } catch (error) {
         throw Object.assign(new Error(explainConfigureSaleError({ ...error, code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? error.code : "TRANSACTION_SUBMISSION_FAILED" }).message), { code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? "TRANSACTION_REJECTED" : "TRANSACTION_SUBMISSION_FAILED", cause: error, transactionHash: error?.transactionHash });
       }
       setNotice(`Sale configured at ${form.priceWei} AVAX. Transaction confirmed: ${transaction.hash}`);
-      setConfiguredSale(await readPrimarySale(publicProvider, publishedTokenId, wallet.account));
+      setConfiguredSale(await readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account));
     } catch (error) {
       setNotice(explainConfigureSaleError(error).message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
@@ -688,11 +768,24 @@ export function ArtistStudioPage() {
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
+          {releaseId && <div style={{ ...card, marginTop: 18 }}>
+            <Eyebrow red>Artist-paid release deployment · Fuji</Eyebrow>
+            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Only the canonical artist OWNER can provision this release. The Factory call is sent by your connected wallet; the artist wallet pays gas. The platform has no release-creation signer.</p>
+            {provisioning ? <dl style={{ display: "grid", gridTemplateColumns: "minmax(110px, 150px) 1fr", gap: "8px 12px", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+              <dt>Factory</dt><dd>{provisioning.factoryAddress}</dd><dt>Chain</dt><dd>{provisioning.chainId}</dd><dt>Release key</dt><dd>{provisioning.releaseKey}</dd><dt>Artist / gas payer</dt><dd>{provisioning.artistWallet}</dd><dt>Name</dt><dd>{provisioning.name}</dd><dt>Symbol</dt><dd>{provisioning.symbol}</dd><dt>Contract URI</dt><dd>{provisioning.contractURI || "(empty string)"}</dd><dt>Parameters digest</dt><dd>{provisioning.authorizationDigest}</dd>
+            </dl> : <p style={{ color: "var(--vc-bone-dim)" }}>Provisioning has not been prepared. Existing V1 Factory is deliberately not used.</p>}
+            <p role="status">Provisioning state: {provisioningState}</p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh exact parameters" : "Prepare provisioning"}</button>
+              {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain · artist pays gas"}</button>}
+              {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Reconcile release</button> : null}
+            </div>
+          </div>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Creating…" : "Create release"}
             </button>
-            {releaseId && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
+            {releaseId && provisioningState === "CONFIRMED" && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
           </div>
         </section>
       )}
@@ -852,10 +945,10 @@ export function ArtistStudioPage() {
         <section style={card}>
           <Eyebrow red>Set up sale</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Set up sale</h2>
-          {!fujiPrimarySaleAddress() ? (
+          {!activeReleaseAsset?.primarySaleAddress ? (
             <>
               <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-                VoidPrimarySale is not on this Fuji config yet. The collectible remains an ERC-1155. Fans pay native AVAX to the sale contract, which mints the edition. Until that contract is deployed, this step cannot open a public sale and Collect will not send an issuer mint.
+                This release has no confirmed, dedicated primary sale bound to its V2 Factory deployment. The Studio will not use a shared legacy sale or mint fallback. Reconcile the release deployment before configuring a sale.
               </p>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
                 <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>

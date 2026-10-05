@@ -117,6 +117,39 @@ export class PersistenceRepository {
     return rows[0] || null;
   }
 
+  async createReleaseProvisioningRequest({ releaseId, chainId: rawChainId, releaseKey, artistWallet, factoryAddress, authorizationDigest, expectedParameters }) {
+    const values = [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), requiredText(releaseKey, "provisioning.releaseKey").toLowerCase(), walletAddress(artistWallet, "provisioning.artistWallet"), walletAddress(factoryAddress, "provisioning.factoryAddress"), requiredText(authorizationDigest, "provisioning.authorizationDigest").toLowerCase(), normalizeJson(expectedParameters)];
+    try {
+      const { rows } = await this.db.query(`INSERT INTO release_provisioning_requests (release_id,chain_id,release_key,artist_wallet,factory_address,authorization_digest,expected_parameters) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (release_id,chain_id) DO UPDATE SET updated_at=now() WHERE release_provisioning_requests.release_key=EXCLUDED.release_key AND lower(release_provisioning_requests.artist_wallet)=lower(EXCLUDED.artist_wallet) AND lower(release_provisioning_requests.factory_address)=lower(EXCLUDED.factory_address) AND release_provisioning_requests.authorization_digest=EXCLUDED.authorization_digest RETURNING *`, values);
+      if (!rows[0]) throw new PersistenceConflictError("A provisioning request already exists with different release parameters or artist authority.");
+      return rows[0];
+    } catch (error) { throw normalizeDbError(error, "This release key or transaction is already assigned to another provisioning request."); }
+  }
+
+  async getReleaseProvisioningRequest({ releaseId, chainId: rawChainId }) {
+    const { rows } = await this.db.query("SELECT * FROM release_provisioning_requests WHERE release_id=$1 AND chain_id=$2 LIMIT 1", [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId)]);
+    return rows[0] || null;
+  }
+
+  async updateReleaseProvisioningRequest({ releaseId, chainId: rawChainId, transactionHash, state = "SUBMITTED" }) {
+    const selectedState = enumValue(state, "provisioning.state", ["PENDING", "SUBMITTED", "CONFIRMED", "FAILED", "RECONCILING"]);
+    const tx = transactionHash == null ? null : requiredText(transactionHash, "provisioning.transactionHash", { max: 66 }).toLowerCase();
+    if (tx !== null && !/^0x[0-9a-f]{64}$/.test(tx)) throw new PersistenceValidationError("provisioning.transactionHash must be a 32-byte transaction hash.", "provisioning.transactionHash");
+    const { rows } = await this.db.query("UPDATE release_provisioning_requests SET transaction_hash=COALESCE($3,transaction_hash), state=$4, updated_at=now() WHERE release_id=$1 AND chain_id=$2 AND (transaction_hash IS NULL OR $3 IS NULL OR transaction_hash=$3) RETURNING *", [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), tx, selectedState]);
+    if (!rows[0]) throw new PersistenceConflictError("The provisioning transaction hash conflicts with an existing request.");
+    return rows[0];
+  }
+
+  async confirmReleaseProvisioningRequest({ releaseId, chainId: rawChainId, transactionHash, releaseContractAddress, primarySaleAddress, provenanceAnchorAddress, deploymentBlockNumber, creationLogIndex }) {
+    const addresses = [releaseContractAddress, primarySaleAddress, provenanceAnchorAddress].map((value, index) => walletAddress(value, ["releaseContractAddress", "primarySaleAddress", "provenanceAnchorAddress"][index]));
+    const tx = requiredText(transactionHash, "provisioning.transactionHash", { max: 66 }).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(tx)) throw new PersistenceValidationError("provisioning.transactionHash must be a 32-byte transaction hash.", "provisioning.transactionHash");
+    const values = [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), tx, ...addresses, deploymentBlockNumber === null ? null : nonNegativeBigInt(deploymentBlockNumber, "provisioning.deploymentBlockNumber"), creationLogIndex === null ? null : Number(creationLogIndex)];
+    const { rows } = await this.db.query("UPDATE release_provisioning_requests SET transaction_hash=$3,state='CONFIRMED',release_contract_address=$4,primary_sale_address=$5,provenance_anchor_address=$6,deployment_block_number=$7,creation_log_index=$8,confirmed_at=COALESCE(confirmed_at,now()),updated_at=now() WHERE release_id=$1 AND chain_id=$2 AND transaction_hash=$3 RETURNING *", values);
+    if (!rows[0]) throw new PersistenceConflictError("The confirmed deployment does not match this release provisioning request.");
+    return rows[0];
+  }
+
   async saveEdition({ id, releaseId, contractId = null, title, tier = null, description = null, supply = null, status = "DRAFT", metadata = {} }) {
     const values = [requiredText(id, "edition.id"), requiredText(releaseId, "edition.releaseId"), contractId, requiredText(title, "edition.title"), optionalText(tier, "edition.tier"), optionalText(description, "edition.description", { max: 20000 }), supply === null ? null : nonNegativeBigInt(supply, "edition.supply"), enumValue(status, "edition.status", APPLICATION_STATUSES), normalizeJson(metadata)];
     const { rows } = await this.db.query(`INSERT INTO editions (id, release_id, contract_id, title, tier, description, supply, status, application_metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET release_id=EXCLUDED.release_id, contract_id=EXCLUDED.contract_id, title=EXCLUDED.title, tier=EXCLUDED.tier, description=EXCLUDED.description, supply=EXCLUDED.supply, status=EXCLUDED.status, application_metadata=EXCLUDED.application_metadata, updated_at=now() RETURNING *`, values);

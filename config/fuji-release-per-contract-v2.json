@@ -1,0 +1,19 @@
+{
+  "network": "fuji",
+  "networkName": "Avalanche Fuji",
+  "chainId": 43113,
+  "chainHexId": "0xa869",
+  "factoryAddress": "",
+  "implementationAddress": "",
+  "marketplaceAddress": "",
+  "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+  "marketplaceFeeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+  "primaryFeeBps": 250,
+  "marketplaceFeeBps": 250,
+  "rpcUrl": "https://api.avax-test.network/ext/bc/C/rpc",
+  "explorer": "https://testnet.snowtrace.io",
+  "source": "VoidReleaseFactoryV2",
+  "releaseVersion": 2,
+  "provisioningEnabled": false,
+  "deploymentAuthorized": false
+}

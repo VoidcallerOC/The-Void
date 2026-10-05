@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { RELEASE_DEPLOYMENT as deployment } from "../config/release-network.js";
+import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2 } from "../config/release-network.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
@@ -117,6 +117,35 @@ function releaseKey(value, field = "releaseKey") {
   const key = requiredText(value, field, { max: 66 }).toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(key) || /^0x0{64}$/.test(key)) throw new ApiError(400, "INVALID_RELEASE_KEY", `${field} must be a non-zero bytes32 value.`);
   return key;
+}
+
+const PROVISIONING_CHAIN_ID = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
+const RELEASE_FACTORY_V2_ABI = Object.freeze([
+  "function createRelease(bytes32 applicationReleaseId,bytes32 releaseKey,string name,string symbol,string contractURI) returns (address releaseContract,address primarySale,address provenanceAnchor)",
+  "event ReleaseCreated(address indexed releaseContract,bytes32 indexed releaseKey,address indexed artist,address primarySale,address provenanceAnchor,address implementation,uint256 index,uint16 version)",
+]);
+
+export function deriveStudioApplicationReleaseId(releaseId) {
+  return ethers.keccak256(ethers.toUtf8Bytes(requiredText(releaseId, "releaseId", { max: 128 })));
+}
+
+export function deriveStudioReleaseKey({ releaseId, applicationReleaseId = deriveStudioApplicationReleaseId(releaseId), artistWallet, factoryAddress = FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress, chainId: selectedChainId = PROVISIONING_CHAIN_ID }) {
+  const artist = walletAddress(artistWallet, "artistWallet");
+  const factory = walletAddress(factoryAddress, "factoryAddress");
+  const appId = releaseKey(applicationReleaseId, "applicationReleaseId");
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ["string", "uint256", "address", "bytes32", "address"],
+    ["the-void:studio-release:v2", BigInt(chainId(selectedChainId)), factory, appId, artist],
+  ));
+}
+
+function provisioningFactoryConfig() {
+  const config = FUJI_RELEASE_PER_CONTRACT_V2;
+  const address = String(config.factoryAddress || "").trim();
+  if (config.provisioningEnabled !== true || config.deploymentAuthorized !== true || !ethers.isAddress(address) || ethers.getAddress(address) === ethers.ZeroAddress) {
+    throw new ApiError(503, "RELEASE_FACTORY_V2_NOT_CONFIGURED", "Artist release creation is unavailable until the separately authorized Factory V2 deployment is configured. The existing Factory is not used as a fallback.");
+  }
+  return { ...config, factoryAddress: ethers.getAddress(address) };
 }
 
 function requiresFactoryRelease(release) {
@@ -247,25 +276,110 @@ export class ArtistStudioService {
    */
   async bindReleaseContract({ request, releaseId, input = {} }) {
     const identity = await this.identity(request);
-    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
-    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot bind a contract for this release.");
+    if (!release) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may bind a release contract.");
     if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_CONTRACT_LOCKED", "A published release cannot be rebound to a different contract.");
     const selectedChainId = chainId(input.chainId, "chainId");
     const selectedReleaseAddress = contractAddress(input.releaseContractAddress, "releaseContractAddress");
     const selectedReleaseKey = releaseKey(input.releaseKey);
-    const indexed = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND release_contract_address=$2 AND release_key=$3 AND lower(artist_wallet)=lower($4) LIMIT 1", [selectedChainId, selectedReleaseAddress, selectedReleaseKey, identity.wallet]);
+    const factoryConfig = provisioningFactoryConfig();
+    if (selectedChainId !== Number(factoryConfig.chainId) || String(release.release_metadata?.releaseKey || "").toLowerCase() !== selectedReleaseKey) throw new ApiError(409, "RELEASE_PROVISIONING_MISMATCH", "The release key or chain does not match this application's prepared provisioning request.");
+    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: selectedChainId });
+    if (!provisioning || String(provisioning.release_key).toLowerCase() !== selectedReleaseKey || String(provisioning.artist_wallet).toLowerCase() !== identity.wallet.toLowerCase()) throw new ApiError(409, "PROVISIONING_REQUEST_REQUIRED", "This release must have a durable artist provisioning request before it can be bound.");
+    const indexed = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_contract_address)=lower($3) AND lower(release_key)=lower($4) AND lower(artist_wallet)=lower($5) LIMIT 1", [selectedChainId, factoryConfig.factoryAddress, selectedReleaseAddress, selectedReleaseKey, identity.wallet]);
     const deployment = indexed.rows[0];
     if (!deployment) throw new ApiError(409, "RELEASE_DEPLOYMENT_NOT_INDEXED", "This release contract is not a confirmed factory deployment for the authenticated artist.");
+    if (Number(deployment.implementation_version) !== 2 || (provisioning.transaction_hash && String(provisioning.transaction_hash).toLowerCase() !== String(deployment.transaction_hash).toLowerCase())) throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed V2 event does not match this release's stored transaction.");
     const saved = await this.repository.inTransaction(async (repository) => {
       const releaseContract = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.release_contract_address, contractType: "ERC1155", name: "VoidRelease1155V4", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { source: "RELEASE_FACTORY", factory: deployment.factory_address, releaseKey: deployment.release_key, implementation: deployment.implementation_address, implementationVersion: deployment.implementation_version } });
-      const factory = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.factory_address, contractType: "OTHER", name: "VoidReleaseFactory", deploymentTxHash: null, deploymentBlockNumber: null, metadata: { role: "RELEASE_FACTORY" } });
+      const factory = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.factory_address, contractType: "OTHER", name: "VoidReleaseFactoryV2", deploymentTxHash: null, deploymentBlockNumber: null, metadata: { role: "RELEASE_FACTORY", version: 2 } });
       const primarySale = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.primary_sale_address, contractType: "OTHER", name: "VoidPrimarySale", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PRIMARY_SALE", releaseContract: deployment.release_contract_address } });
       const anchor = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.provenance_anchor_address, contractType: "OTHER", name: "VoidProvenanceAnchor", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PROVENANCE_ANCHOR", releaseContract: deployment.release_contract_address } });
       return repository.saveReleaseContract({ releaseId: release.id, chainId: selectedChainId, releaseContractId: releaseContract.id, factoryContractId: factory.id, primarySaleContractId: primarySale.id, provenanceAnchorContractId: anchor.id, releaseKey: deployment.release_key, artistWallet: deployment.artist_wallet, implementationAddress: deployment.implementation_address, implementationVersion: deployment.implementation_version, deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, creationLogIndex: input.creationLogIndex ?? null, status: "DEPLOYED", metadata: { factoryIndex: deployment.factory_index } });
     });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CONTRACT_BOUND", subjectType: "release", subjectId: release.id, payload: { chainId: selectedChainId, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, releaseKey: deployment.release_key } });
     return { ...saved, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, provenanceAnchorAddress: deployment.provenance_anchor_address };
+  }
+
+  async prepareReleaseProvisioning({ request, releaseId }) {
+    const identity = await this.identity(request);
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may provision a blockchain release. Verified managers cannot create releases on-chain.");
+    if (release.status !== "DRAFT") throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "Only a draft release can be provisioned.");
+    const factory = provisioningFactoryConfig();
+    const applicationReleaseId = deriveStudioApplicationReleaseId(release.id);
+    if (String(release.release_metadata?.applicationReleaseId || "").toLowerCase() !== applicationReleaseId) throw new ApiError(409, "APPLICATION_RELEASE_ID_MISMATCH", "The stored application release digest does not match this release.");
+    const expectedKey = deriveStudioReleaseKey({ releaseId: release.id, applicationReleaseId, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, chainId: factory.chainId });
+    const persistedKey = String(release.release_metadata?.releaseKey || "").toLowerCase();
+    const existingRequest = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: factory.chainId });
+    if (existingRequest && persistedKey !== expectedKey) throw new ApiError(409, "RELEASE_KEY_MISMATCH", "The persisted release key no longer matches its durable provisioning request.");
+    if (!existingRequest && persistedKey !== expectedKey) {
+      const updated = await this.db.query("UPDATE releases SET release_metadata=jsonb_set(COALESCE(release_metadata,'{}'::jsonb),'{releaseKey}',to_jsonb($2::text),true), updated_at=now() WHERE id=$1 AND status='DRAFT' RETURNING id", [release.id, expectedKey]);
+      if (!updated.rows[0]) throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "The expected V2 release key could not be persisted before authorization.");
+    }
+    const name = requiredText(release.title, "release.title", { max: 256 });
+    const symbol = generatedSlug(release.title, "release title").replace(/-/g, "").slice(0, 11).toUpperCase();
+    const contractURI = optionalText(release.release_metadata?.contractURI, "release.contractURI", { max: 2048 }) || "";
+    const expectedParameters = { chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress.toLowerCase(), applicationReleaseId, applicationReleaseRecordId: release.id, releaseKey: expectedKey, artistWallet: identity.wallet.toLowerCase(), name, symbol, contractURI };
+    const authorizationDigest = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(expectedParameters)));
+    const provisioning = await this.repository.createReleaseProvisioningRequest({ releaseId: release.id, chainId: factory.chainId, releaseKey: expectedKey, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, authorizationDigest, expectedParameters });
+    return { requestId: provisioning.request_id, state: provisioning.state, releaseId: release.id, applicationReleaseId, releaseKey: expectedKey, chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress, artistWallet: identity.wallet, name, symbol, contractURI, authorizationDigest, authorization: "DIRECT_ARTIST_TRANSACTION", gasPayer: identity.wallet };
+  }
+
+  async recordReleaseProvisioningSubmission({ request, releaseId, input = {} }) {
+    const identity = await this.identity(request);
+    const factory = provisioningFactoryConfig();
+    const id = requiredText(releaseId, "releaseId");
+    const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
+    if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may submit this release deployment.");
+    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId });
+    if (!provisioning || String(provisioning.artist_wallet).toLowerCase() !== identity.wallet.toLowerCase() || String(provisioning.factory_address).toLowerCase() !== factory.factoryAddress.toLowerCase()) throw new ApiError(409, "PROVISIONING_REQUEST_REQUIRED", "Prepare this exact release deployment in Studio before submitting its transaction.");
+    const transactionHash = requiredText(input.transactionHash, "transactionHash", { max: 66 }).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The release creation transaction hash is invalid.");
+    const provider = this.publicationChain || new ethers.JsonRpcProvider(factory.rpcUrl, Number(factory.chainId), { staticNetwork: true });
+    let tx = null;
+    try { tx = await provider.getTransaction(transactionHash); } catch { /* RPC/indexer propagation can lag wallet submission. */ }
+    if (tx) {
+      const expected = provisioning.expected_parameters;
+      const iface = new ethers.Interface(RELEASE_FACTORY_V2_ABI);
+      const expectedData = iface.encodeFunctionData("createRelease", [expected.applicationReleaseId, expected.releaseKey, expected.name, expected.symbol, expected.contractURI]);
+      if (Number(tx.chainId) !== Number(factory.chainId) || String(tx.from).toLowerCase() !== identity.wallet.toLowerCase() || String(tx.to).toLowerCase() !== factory.factoryAddress.toLowerCase() || String(tx.data).toLowerCase() !== expectedData.toLowerCase()) {
+        throw new ApiError(409, "PROVISIONING_TRANSACTION_MISMATCH", "The submitted transaction does not match this artist, Factory, chain, release key, and exact initialization parameters.");
+      }
+    }
+    const updated = await this.repository.updateReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId, transactionHash, state: tx ? "SUBMITTED" : "RECONCILING" });
+    await this.audit({ identity, request, eventType: "STUDIO_RELEASE_PROVISIONING_SUBMITTED", subjectType: "release", subjectId: id, payload: { chainId: Number(factory.chainId), releaseKey: provisioning.release_key, transactionHash } });
+    return { requestId: updated.request_id, state: updated.state, transactionHash, chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress };
+  }
+
+  async releaseProvisioningStatus({ request, releaseId }) {
+    const identity = await this.identity(request);
+    const factory = provisioningFactoryConfig();
+    const id = requiredText(releaseId, "releaseId");
+    const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
+    if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may view this provisioning request.");
+    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId });
+    if (!provisioning) return { state: "NOT_STARTED", releaseId: id };
+    const { rows: indexed } = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_key)=lower($3) AND lower(artist_wallet)=lower($4) LIMIT 1", [factory.chainId, factory.factoryAddress, provisioning.release_key, identity.wallet]);
+    const deployment = indexed[0];
+    if (!deployment) return { requestId: provisioning.request_id, state: provisioning.state, releaseId: id, releaseKey: provisioning.release_key, transactionHash: provisioning.transaction_hash || null };
+    if (Number(deployment.implementation_version) !== 2 || (provisioning.transaction_hash && String(deployment.transaction_hash).toLowerCase() !== String(provisioning.transaction_hash).toLowerCase())) {
+      throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed Factory event does not match the expected V2 provisioning request.");
+    }
+    const provider = this.publicationChain || new ethers.JsonRpcProvider(factory.rpcUrl, Number(factory.chainId), { staticNetwork: true });
+    const clone = new ethers.Contract(deployment.release_contract_address, ["function owner() view returns(address)", "function releaseKey() view returns(bytes32)", "function name() view returns(string)", "function symbol() view returns(string)", "function contractURI() view returns(string)"], provider);
+    const [owner, key, name, symbol, contractURI] = await Promise.all([clone.owner(), clone.releaseKey(), clone.name(), clone.symbol(), clone.contractURI()]);
+    const expected = provisioning.expected_parameters;
+    if (String(owner).toLowerCase() !== identity.wallet.toLowerCase() || String(key).toLowerCase() !== String(expected.releaseKey).toLowerCase() || name !== expected.name || symbol !== expected.symbol || contractURI !== expected.contractURI) {
+      throw new ApiError(409, "RELEASE_INITIALIZATION_MISMATCH", "The deployed clone's owner, key, name, symbol, or contract URI does not match the authorized application release.");
+    }
+    const txHash = String(deployment.transaction_hash).toLowerCase();
+    if (!provisioning.transaction_hash) await this.repository.updateReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId, transactionHash: txHash, state: "RECONCILING" });
+    const binding = await this.bindReleaseContract({ request, releaseId: id, input: { chainId: Number(factory.chainId), releaseContractAddress: deployment.release_contract_address, releaseKey: provisioning.release_key } });
+    const confirmed = await this.repository.confirmReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId, transactionHash: txHash, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, provenanceAnchorAddress: deployment.provenance_anchor_address, deploymentBlockNumber: deployment.deployment_block_number, creationLogIndex: null });
+    return { requestId: confirmed.request_id, state: "CONFIRMED", transactionHash: txHash, ...binding };
   }
 
   async bindProtectedAssets(artistId, protectedMedia) {
@@ -504,9 +618,10 @@ export class ArtistStudioService {
     // Release slugs become the on-chain releaseId (bytes32), which is shared by every
     // artist on the canonical contract, so they are allocated platform-wide.
     const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
-    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), publicationArchitecture: "release-per-contract", ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) }, "release.metadata") });
+    const metadata = { ...(input.metadata || {}), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) };
+    const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject(metadata, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
-    return release;
+    return { ...release, releaseKey: metadata.releaseKey, chainId: PROVISIONING_CHAIN_ID };
   }
 
   async updateRelease({ request, releaseId, input }) {
