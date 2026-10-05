@@ -125,26 +125,41 @@ export function MarketplacePage() {
 
   return (
     <section>
-      <header className="vc-market-hero-bleed">
+      <header className={heroImage ? "vc-market-hero-bleed" : "vc-market-mast"}>
         {heroImage && <div className="vc-market-hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden />}
-        <div className="vc-market-hero-shade" aria-hidden />
+        {heroImage && <div className="vc-market-hero-shade" aria-hidden />}
         <div className="vc-market-hero-copy">
-          <Eyebrow red>† {copy.eyebrow}</Eyebrow>
-          <h1 className="vc-market-hero-title">{copy.title}</h1>
-          <p className="vc-market-hero-lede">{copy.body}</p>
+          <Eyebrow red>† The catalog</Eyebrow>
+          <h1 className="vc-market-hero-title">Releases</h1>
+          <p className="vc-market-hero-lede">Collect the pressing. Hear what it unlocks. Provenance stays on the colophon.</p>
           {volume && <div className="vc-market-volume" aria-label="Overall volume">
             <Eyebrow>Overall volume</Eyebrow>
             <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
           </div>}
           <QuietStatus primary="Published catalog" secondary={marketplaceSecondaryAvailability(secondary)} />
+          <details className="vc-colophon"><summary>Index note</summary><p>{copy.body}</p></details>
           <MarketplaceHeroEditor current={presentation?.heroArtwork || ""} onSaved={setPresentation} />
         </div>
       </header>
 
       <div style={contentShell}>
+        <section aria-label="The shelf">
+          <SectionHead eyebrow="The shelf" title="Pressings">
+            Every public pressing. Relic and rehearsal are marked. Collect only appears when a pressing can actually be taken.
+          </SectionHead>
+          {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).length > 0 ? (
+            <div className="vc-market-grid">
+              {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).map((item) => (
+                <EditionCard key={`shelf-${item.edition.id}`} item={item} owned={editionOwnedByWallet(item, wallet)} />
+              ))}
+            </div>
+          ) : (
+            <EmptyRail title="The shelf is empty">No held or completed pressings sit outside the collectable list.</EmptyRail>
+          )}
+        </section>
         <section aria-labelledby="official-editions-heading">
-          <SectionHead id="official-editions-heading" eyebrow="Primary · artist-published" title="Official editions available to collect">
-            Canonical editions only. Each edition appears once; editions with an active indexed offer are grouped below, where their primary collect action remains available.
+          <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
+            Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out or zero-supply object is not offered as collectable.
           </SectionHead>
           {officialEditions.length > 0 ? (
             <div className="vc-market-grid">
@@ -162,8 +177,8 @@ export function MarketplacePage() {
         </section>
 
         <section aria-labelledby="secondary-listings-heading">
-          <SectionHead id="secondary-listings-heading" eyebrow="Secondary · authoritative index" title="Secondary collector listings">
-            Offers appear here only when the authoritative marketplace index confirms an active listing.
+          <SectionHead id="secondary-listings-heading" eyebrow="II · Secondhand" title="Secondary collector listings">
+            A secondhand pressing appears only when a real listing is confirmed. Empty means no pressing is offered — not a hidden catalog.
           </SectionHead>
           {secondary === MARKETPLACE_STATE.UNAVAILABLE ? (
             <EmptyRail title="Listings unavailable">The authoritative listing index could not be reached. No offers are shown.</EmptyRail>
@@ -178,7 +193,7 @@ export function MarketplacePage() {
               ))}
             </div>
           ) : (
-            <EmptyRail title="No active listings">The authoritative index currently confirms no active secondary offers.</EmptyRail>
+            <EmptyRail title="No active listings">No pressings available. The index confirms no secondhand offer. Nothing is invented in its place.</EmptyRail>
           )}
           {indexError && <p role="alert" style={{ color: "var(--vc-crimson)", marginTop: 14 }}>{indexError}</p>}
         </section>

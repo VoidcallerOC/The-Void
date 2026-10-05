@@ -60,7 +60,7 @@ export function Nav() {
         alignItems: "center",
         justifyContent: "space-between",
         background: solid ? "rgba(0,0,0,0.92)" : "rgba(0,0,0,0.6)",
-        backdropFilter: "blur(14px)",
+        backdropFilter: "none",
         borderBottom: "1px solid var(--vc-ash)",
         transition: "background 220ms cubic-bezier(0.6,0,0.2,1)",
       }}
@@ -71,8 +71,15 @@ export function Nav() {
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
-          {links.map(([label, path]) => (
+          {links.filter(([, path]) => !["/verify", "/studio"].includes(path)).map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
+              {label}
+              {badge(path)}
+            </NavLink>
+          ))}
+          <span className="vc-nav-rule" aria-hidden="true" />
+          {links.filter(([, path]) => ["/verify", "/studio"].includes(path)).map(([label, path]) => (
+            <NavLink key={label} to={path} end={path === "/"} className="vc-navlink vc-nav-secondary">
               {label}
               {badge(path)}
             </NavLink>
@@ -81,7 +88,7 @@ export function Nav() {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span className="vc-nav-cta" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span className="vc-nav-cta vc-nav-wallet" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <WalletButton />
         </span>
         <button
@@ -113,7 +120,7 @@ export function Nav() {
             left: 0,
             right: 0,
             background: "rgba(0,0,0,0.96)",
-            backdropFilter: "blur(14px)",
+            backdropFilter: "none",
             borderBottom: "1px solid var(--vc-ash)",
             padding: "12px clamp(16px, 4vw, 32px) 28px",
             display: "flex",
