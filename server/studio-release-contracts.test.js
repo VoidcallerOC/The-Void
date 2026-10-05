@@ -28,9 +28,9 @@ function harness() {
 }
 
 describe("Studio release contract binding", () => {
-  it("refuses to bind V1 or arbitrary contracts while the separately authorized V2 Factory is unconfigured", async () => {
+  it("refuses to bind arbitrary contracts without a durable V2 provisioning request", async () => {
     const { instance, repo } = harness();
-    await expect(instance.bindReleaseContract({ request: { headers: {} }, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } })).rejects.toMatchObject({ code: "RELEASE_FACTORY_V2_NOT_CONFIGURED" });
+    await expect(instance.bindReleaseContract({ request: { headers: {} }, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } })).rejects.toMatchObject({ code: "PROVISIONING_REQUEST_REQUIRED" });
     expect(repo.inTransaction).not.toHaveBeenCalled();
     expect(repo.saveReleaseContract).not.toHaveBeenCalled();
   });

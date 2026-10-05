@@ -3,9 +3,9 @@
   "networkName": "Avalanche Fuji",
   "chainId": 43113,
   "chainHexId": "0xa869",
-  "factoryAddress": "",
-  "implementationAddress": "",
-  "marketplaceAddress": "",
+  "factoryAddress": "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
+  "implementationAddress": "0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4",
+  "marketplaceAddress": "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
   "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   "marketplaceFeeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   "primaryFeeBps": 250,
@@ -14,6 +14,6 @@
   "explorer": "https://testnet.snowtrace.io",
   "source": "VoidReleaseFactoryV2",
   "releaseVersion": 2,
-  "provisioningEnabled": false,
-  "deploymentAuthorized": false
+  "provisioningEnabled": true,
+  "deploymentAuthorized": true
 }
