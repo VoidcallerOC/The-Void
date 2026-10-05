@@ -1,10 +1,14 @@
 import fuji from "./fuji-release.json" with { type: "json" };
+import fujiPerContract from "./fuji-release-per-contract.json" with { type: "json" };
 import mainnet from "./mainnet-release.json" with { type: "json" };
 
 // One deployment per environment. Fuji is the default; mainnet is an explicit
 // opt-in (VITE_RELEASE_NETWORK in the web build, RELEASE_NETWORK on the server)
 // and refuses to load until config/mainnet-release.json holds deployed addresses.
 export const RELEASE_DEPLOYMENTS = Object.freeze({ fuji, mainnet });
+// Individual release addresses are discovered from this factory at runtime;
+// this manifest contains only public infrastructure addresses.
+export const FUJI_RELEASE_PER_CONTRACT = Object.freeze(fujiPerContract);
 
 function requestedNetwork() {
   const web = typeof import.meta !== "undefined" ? import.meta.env?.VITE_RELEASE_NETWORK : undefined;
