@@ -146,3 +146,21 @@ describe("collection registry", () => {
   });
 });
 
+describe("release registry", () => {
+  const factory = "0xfac0000000000000000000000000000000000001";
+  const release = "0xC011000000000000000000000000000000000003";
+  const artist = "0xa11ce00000000000000000000000000000000004";
+  const sale = "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+  const anchor = "0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b";
+  const implementation = "0x7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c";
+  const key = `0x${"ab".repeat(32)}`;
+  const tx = `0x${"cd".repeat(32)}`;
+
+  it("binds numeric chain ID and text chain key separately", async () => {
+    const { pool, client } = poolWith([{}, { rows: [{ id: "contract" }] }, { rows: [{ id: "release" }] }, {}]);
+    await expect(new IndexerStore(pool).registerRelease({ chainId: 43113, factoryAddress: factory, releaseContractAddress: release, releaseKey: key, artistWallet: artist, primarySaleAddress: sale, provenanceAnchorAddress: anchor, implementationAddress: implementation, releaseIndex: "0", implementationVersion: 2, blockNumber: 59083459, transactionHash: tx })).resolves.toEqual({ id: "release" });
+    const [sql, params] = client.query.mock.calls.find(([statement]) => String(statement).includes("INSERT INTO contracts"));
+    expect(sql).toContain("VALUES ($1, $2::text, $3");
+    expect(params.slice(0, 3)).toEqual([43113, "43113", release.toLowerCase()]);
+  });
+});
