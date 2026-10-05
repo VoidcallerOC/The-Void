@@ -19,6 +19,7 @@
     "start:indexer": "node server/indexer-worker.js",
     "deploy:release": "node scripts/deploy-release.mjs",
     "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs",
+    "deploy:release-per-contract:fuji": "node scripts/deploy-release-per-contract-fuji.mjs",
     "deploy:release-v2-mainnet": "node scripts/deploy-release-v2-mainnet.mjs",
     "deploy:role-granter": "node scripts/deploy-role-granter-fuji.mjs",
     "deploy:marketplace": "node scripts/deploy-marketplace.mjs"
