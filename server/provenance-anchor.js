@@ -3,7 +3,7 @@ import process from "node:process";
 import { ApiError } from "./api-errors.js";
 import { requireWalletAuth } from "./api-runtime.js";
 import { ConfigurationError } from "./config.js";
-import { releaseDeploymentFor } from "../config/release-network.js";
+import { releaseDeploymentFor, FUJI_RELEASE_PER_CONTRACT_V2 } from "../config/release-network.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { publicationView } from "./studio-publication.js";
@@ -42,8 +42,17 @@ export function tokenIdFor(releaseSlug, editionTitleSlug) {
   return { releaseId, editionId, tokenId: tokenId === 0n ? 1n : tokenId };
 }
 
-export function encodeAnchorCall({ releaseSlug, editionTitleSlug, provenanceRoot }) {
-  const ids = tokenIdFor(releaseSlug, editionTitleSlug);
+export function tokenIdForRelease(releaseKey, editionTitleSlug) {
+  const releaseId = String(releaseKey || "").trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(releaseId) || /^0x0{64}$/.test(releaseId)) throw new ApiError(400, "ANCHOR_IDENTITY_INVALID", "The bound release key must be a non-zero bytes32 value.");
+  const editionId = bytes32Slug(editionTitleSlug, "edition.slug");
+  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", editionId]));
+  const tokenId = BigInt(digest);
+  return { releaseId, editionId, tokenId: tokenId === 0n ? 1n : tokenId };
+}
+
+export function encodeAnchorCall({ releaseKey = null, releaseSlug, editionTitleSlug, provenanceRoot }) {
+  const ids = releaseKey ? tokenIdForRelease(releaseKey, editionTitleSlug) : tokenIdFor(releaseSlug, editionTitleSlug);
   const root = provenanceRootBytes(provenanceRoot);
   return { ...ids, provenanceRoot: root, data: iface.encodeFunctionData("anchor", [ids.releaseId, ids.editionId, root]) };
 }
@@ -62,18 +71,16 @@ export function loadProvenanceAnchorConfig(env = process.env) {
   if (configuredChainId !== chainId) throw new ConfigurationError("PROVENANCE_ANCHOR_CHAIN_ID must match RELEASE_NETWORK.");
   const network = String(env.PROVENANCE_ANCHOR_NETWORK || deployment.network || selectedNetwork).trim().toLowerCase();
   if (network !== selectedNetwork) throw new ConfigurationError("PROVENANCE_ANCHOR_NETWORK must match RELEASE_NETWORK.");
+  // The anchor contract is release-specific. This value is retained only as an
+  // explicit legacy override; V2 calls resolve the address from the verified binding.
   const releaseContract = String(env.PROVENANCE_RELEASE_CONTRACT || deployment.contractAddress || "").trim().toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(releaseContract)) throw new ConfigurationError("The release contract for this network is not configured.");
   const configured = deployment.provenance || {};
   const address = String(env.PROVENANCE_ANCHOR_ADDRESS || configured.anchorAddress || "").trim().toLowerCase();
-  const rpcUrl = String(env.PROVENANCE_ANCHOR_RPC_URL || configured.rpcUrl || "").trim();
-  if (!address && !rpcUrl) {
-    return Object.freeze({ enabled: false, chainId, network, releaseContract, eventName: EVENT_NAME });
-  }
-  if (!address || !rpcUrl || !/^0x[0-9a-f]{40}$/.test(address)) {
-    throw new ConfigurationError("PROVENANCE_ANCHOR_ADDRESS and PROVENANCE_ANCHOR_RPC_URL must be set together.");
-  }
-  if (address === releaseContract) {
+  const v2Rpc = FUJI_RELEASE_PER_CONTRACT_V2.provisioningEnabled === true && FUJI_RELEASE_PER_CONTRACT_V2.deploymentAuthorized === true ? FUJI_RELEASE_PER_CONTRACT_V2.rpcUrl : "";
+  const rpcUrl = String(env.PROVENANCE_ANCHOR_RPC_URL || configured.rpcUrl || v2Rpc || "").trim();
+  if (!rpcUrl) return Object.freeze({ enabled: false, chainId, network, releaseContract, eventName: EVENT_NAME });
+  if (address && !/^0x[0-9a-f]{40}$/.test(address)) throw new ConfigurationError("PROVENANCE_ANCHOR_ADDRESS must be a valid address when used as a legacy override.");
+  if (address && releaseContract && address === releaseContract) {
     throw new ConfigurationError("The provenance anchor contract must not be the release contract.");
   }
   let parsed;
@@ -87,7 +94,7 @@ export function loadProvenanceAnchorConfig(env = process.env) {
     chainId,
     network,
     releaseContract,
-    contractAddress: address,
+    contractAddress: address || null,
     rpcUrl: parsed.toString(),
     eventName: EVENT_NAME,
   });
@@ -198,10 +205,10 @@ export class ProvenanceAnchorService {
     this.reader = reader;
   }
 
-  chainReader() {
+  chainReader(targetConfig = this.config) {
     if (this.reader) return this.reader;
-    if (!this.config?.enabled) throw new ApiError(503, "PROVENANCE_ANCHOR_NOT_CONFIGURED", "Provenance anchoring is not configured for this deployment.");
-    const provider = new ethers.JsonRpcProvider(this.config.rpcUrl, this.config.chainId);
+    if (!targetConfig?.enabled || !targetConfig.contractAddress) throw new ApiError(503, "PROVENANCE_ANCHOR_NOT_CONFIGURED", "Provenance anchoring is not configured for this release.");
+    const provider = new ethers.JsonRpcProvider(targetConfig.rpcUrl, targetConfig.chainId);
     const view = new ethers.Interface(ANCHOR_ABI);
     return {
       getNetwork: () => provider.getNetwork(),
@@ -210,7 +217,7 @@ export class ProvenanceAnchorService {
       getBlock: (number) => provider.getBlock(number),
       isAnchored: async ({ releaseId, editionId, provenanceRoot }) => {
         const data = view.encodeFunctionData("isAnchored", [releaseId, editionId, provenanceRoot]);
-        const result = await provider.call({ to: this.config.contractAddress, data });
+        const result = await provider.call({ to: targetConfig.contractAddress, data });
         return Boolean(view.decodeFunctionResult("isAnchored", result)[0]);
       },
     };
@@ -219,15 +226,19 @@ export class ProvenanceAnchorService {
   async editionContext(releaseId, wallet) {
     const { rows } = await this.db.query(
       `SELECT r.id AS release_id, r.slug AS release_slug, r.status AS release_status, r.artist_id, e.id AS edition_id, e.title,
-              t.token_id, t.metadata, t.metadata_version
+              t.token_id, t.metadata, t.metadata_version, rc.chain_id AS bound_chain_id, rc.release_key,
+              release_contract.address AS release_contract_address, anchor_contract.address AS provenance_anchor_address
        FROM releases r
-       JOIN artist_owners ao ON ao.artist_id = r.artist_id AND ao.owner_wallet = $2
+       JOIN artist_owners ao ON ao.artist_id = r.artist_id AND lower(ao.owner_wallet) = lower($2) AND ao.role='OWNER'
        JOIN editions e ON e.release_id = r.id
        LEFT JOIN tokens t ON t.edition_id = e.id
+       LEFT JOIN release_contracts rc ON rc.release_id=r.id AND rc.chain_id=$3
+       LEFT JOIN contracts release_contract ON release_contract.id=rc.release_contract_id
+       LEFT JOIN contracts anchor_contract ON anchor_contract.id=rc.provenance_anchor_contract_id
        WHERE r.id = $1
        ORDER BY e.created_at DESC
        LIMIT 1`,
-      [releaseId, wallet],
+      [releaseId, wallet, this.config.chainId],
     );
     const row = rows[0];
     if (!row) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot anchor this release.");
@@ -236,11 +247,19 @@ export class ProvenanceAnchorService {
     if (!provenance?.root) throw new ApiError(409, "PROVENANCE_ROOT_REQUIRED", "Publish the canonical provenance manifest before anchoring it.");
     const rebuilt = rebuiltRoot(provenance, row.release_id, row.edition_id);
     const slug = editionSlug(row.title);
-    const ids = tokenIdFor(row.release_slug, slug);
+    const ids = tokenIdForRelease(row.release_key, slug);
     if (row.token_id != null && BigInt(row.token_id) !== ids.tokenId) {
       throw new ApiError(409, "ANCHOR_EDITION_IDENTITY", "The edition token id does not match the certified release identity.");
     }
-    return { ...row, editionSlug: slug, ...ids, root: rebuilt.root, metadataDigest: rebuilt.metadataDigest, provenance };
+    if (!row.release_contract_address || !row.provenance_anchor_address || Number(row.bound_chain_id) !== Number(this.config.chainId)) throw new ApiError(409, "RELEASE_ANCHOR_BINDING_REQUIRED", "This release has no verified release-specific provenance anchor binding.");
+    if (String(row.provenance_anchor_address).toLowerCase() === String(row.release_contract_address).toLowerCase()) throw new ApiError(409, "RELEASE_ANCHOR_BINDING_INVALID", "The provenance anchor must be a distinct contract bound to this release.");
+    return { ...row, editionSlug: slug, releaseKey: String(row.release_key).toLowerCase(), ...ids, root: rebuilt.root, metadataDigest: rebuilt.metadataDigest, provenance };
+  }
+
+  anchorConfigForContext(context) {
+    if (!this.config?.enabled || !/^0x[0-9a-f]{40}$/i.test(String(context.provenance_anchor_address || "")) || !/^0x[0-9a-f]{40}$/i.test(String(context.release_contract_address || ""))) throw new ApiError(503, "PROVENANCE_ANCHOR_NOT_CONFIGURED", "This release's dedicated provenance anchor is not configured.");
+    if (String(context.provenance_anchor_address).toLowerCase() === String(context.release_contract_address).toLowerCase()) throw new ApiError(409, "RELEASE_ANCHOR_BINDING_INVALID", "The provenance anchor must differ from the release contract.");
+    return { ...this.config, enabled: true, contractAddress: ethers.getAddress(context.provenance_anchor_address).toLowerCase(), releaseContract: ethers.getAddress(context.release_contract_address).toLowerCase() };
   }
 
   async ensureProof(context, wallet) {
@@ -265,20 +284,21 @@ export class ProvenanceAnchorService {
     if (!this.config?.enabled) throw new ApiError(503, "PROVENANCE_ANCHOR_NOT_CONFIGURED", "Provenance anchoring is not configured for this deployment.");
     const identity = await requireWalletAuth(this.authenticator, request);
     const context = await this.editionContext(String(releaseId || "").trim(), identity.wallet);
+    const anchorConfig = this.anchorConfigForContext(context);
     const proof = await this.ensureProof(context, identity.wallet);
     if (proof.verification_status === "VERIFIED") {
-      return { proofId: proof.id, provenanceRoot: context.root, chainId: this.config.chainId, network: this.config.network, anchorStatus: proof.anchor_status, verificationStatus: "VERIFIED", alreadyAnchored: true, data: null, ...publicationFields(context, proof) };
+      return { proofId: proof.id, provenanceRoot: context.root, chainId: anchorConfig.chainId, network: anchorConfig.network, contractAddress: anchorConfig.contractAddress, anchorStatus: proof.anchor_status, verificationStatus: "VERIFIED", alreadyAnchored: true, data: null, ...publicationFields(context, proof) };
     }
-    const call = encodeAnchorCall({ releaseSlug: context.release_slug, editionTitleSlug: context.editionSlug, provenanceRoot: context.root });
+    const call = encodeAnchorCall({ releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root });
     return {
       proofId: proof.id,
       releaseId: context.release_id,
       editionId: context.edition_id,
       provenanceRoot: context.root,
-      chainId: this.config.chainId,
-      network: this.config.network,
-      contractAddress: this.config.contractAddress,
-      releaseContract: this.config.releaseContract,
+      chainId: anchorConfig.chainId,
+      network: anchorConfig.network,
+      contractAddress: anchorConfig.contractAddress,
+      releaseContract: anchorConfig.releaseContract,
       eventName: EVENT_NAME,
       tokenId: call.tokenId.toString(),
       data: call.data,
@@ -291,7 +311,7 @@ export class ProvenanceAnchorService {
   }
 
   expected(context, wallet, transactionHash) {
-    return { transactionHash, wallet, releaseSlug: context.release_slug, editionTitleSlug: context.editionSlug, provenanceRoot: context.root };
+    return { transactionHash, wallet, releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root };
   }
 
   async openForAttempt(proof, wallet) {
@@ -308,9 +328,10 @@ export class ProvenanceAnchorService {
     const hash = String(input.transactionHash || "").trim().toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(hash)) throw new ApiError(400, "TRANSACTION_INVALID", "The anchor transaction hash is invalid.");
     const context = await this.editionContext(String(releaseId || "").trim(), identity.wallet);
+    const anchorConfig = this.anchorConfigForContext(context);
     const proof = await this.openForAttempt(await this.ensureProof(context, identity.wallet), identity.wallet);
     if (proof.verification_status === "VERIFIED") throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance root is already verified.");
-    const observed = await inspectAnchorTransaction({ reader: this.chainReader(), config: this.config, expected: this.expected(context, identity.wallet, hash) });
+    const observed = await inspectAnchorTransaction({ reader: this.chainReader(anchorConfig), config: anchorConfig, expected: this.expected(context, identity.wallet, hash) });
     if (observed.outcome === "failed") {
       const failed = await this.records.recordAnchorFailure({ id: proof.id, creatorWallet: identity.wallet, failureCode: "ANCHOR_TRANSACTION_REVERTED", failureDetail: "The anchor transaction reverted." });
       return { proofId: failed.id, provenanceRoot: context.root, anchorStatus: "FAILED", verificationStatus: "UNVERIFIED", transactionHash: hash, provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false };
@@ -318,10 +339,10 @@ export class ProvenanceAnchorService {
     const submitted = await this.records.recordSubmittedAnchor({
       id: proof.id,
       creatorWallet: identity.wallet,
-      chainKey: this.config.network,
-      chainId: this.config.chainId,
+      chainKey: anchorConfig.network,
+      chainId: anchorConfig.chainId,
       transactionHash: hash,
-      anchorContract: this.config.contractAddress,
+      anchorContract: anchorConfig.contractAddress,
       anchorEvent: EVENT_NAME,
     });
     return { proofId: submitted.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: observed.outcome === "pending", ...publicationFields(context, { anchor_status: "SUBMITTED", verification_status: "UNVERIFIED" }) };
@@ -333,6 +354,7 @@ export class ProvenanceAnchorService {
     const hash = String(input.transactionHash || "").trim().toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(hash)) throw new ApiError(400, "TRANSACTION_INVALID", "The anchor transaction hash is invalid.");
     const context = await this.editionContext(String(releaseId || "").trim(), identity.wallet);
+    const anchorConfig = this.anchorConfigForContext(context);
     const existing = await this.ensureProof(context, identity.wallet);
     if (existing.verification_status === "VERIFIED") {
       if (String(existing.transaction_hash || "").toLowerCase() === hash) {
@@ -343,7 +365,7 @@ export class ProvenanceAnchorService {
     const proof = await this.openForAttempt(existing, identity.wallet);
     let observed;
     try {
-      observed = await inspectAnchorTransaction({ reader: this.chainReader(), config: this.config, expected: this.expected(context, identity.wallet, hash) });
+      observed = await inspectAnchorTransaction({ reader: this.chainReader(anchorConfig), config: anchorConfig, expected: this.expected(context, identity.wallet, hash) });
     } catch (error) {
       if (VERIFICATION_FAILURES.has(error?.code)) {
         await this.records.recordAnchorFailure({ id: proof.id, creatorWallet: identity.wallet, failureCode: error.code, failureDetail: "The anchor transaction was not verified." }).catch(() => {});
@@ -352,7 +374,7 @@ export class ProvenanceAnchorService {
     }
     if (observed.outcome === "pending") {
       const pending = await this.records.recordSubmittedAnchor({
-        id: proof.id, creatorWallet: identity.wallet, chainKey: this.config.network, chainId: this.config.chainId, transactionHash: hash, anchorContract: this.config.contractAddress, anchorEvent: EVENT_NAME,
+        id: proof.id, creatorWallet: identity.wallet, chainKey: anchorConfig.network, chainId: anchorConfig.chainId, transactionHash: hash, anchorContract: anchorConfig.contractAddress, anchorEvent: EVENT_NAME,
       });
       return { proofId: pending.id, provenanceRoot: context.root, anchorStatus: "SUBMITTED", verificationStatus: "UNVERIFIED", transactionHash: hash, pending: true, ...publicationFields(context, { anchor_status: "SUBMITTED", verification_status: "UNVERIFIED" }) };
     }
@@ -363,8 +385,8 @@ export class ProvenanceAnchorService {
     const verified = await this.records.recordVerifiedAnchor({
       id: proof.id,
       creatorWallet: identity.wallet,
-      chainKey: this.config.network,
-      chainId: this.config.chainId,
+      chainKey: anchorConfig.network,
+      chainId: anchorConfig.chainId,
       transactionHash: hash,
       blockNumber: observed.blockNumber,
       blockTimestamp: observed.blockTimestamp,
@@ -374,12 +396,12 @@ export class ProvenanceAnchorService {
     return {
       proofId: verified.id,
       provenanceRoot: context.root,
-      chainId: this.config.chainId,
-      network: this.config.network,
+      chainId: anchorConfig.chainId,
+      network: anchorConfig.network,
       transactionHash: hash,
       blockNumber: observed.blockNumber,
       blockTimestamp: observed.blockTimestamp,
-      contractAddress: this.config.contractAddress,
+      contractAddress: anchorConfig.contractAddress,
       eventName: EVENT_NAME,
       anchorStatus: "ANCHORED",
       verificationStatus: "VERIFIED",

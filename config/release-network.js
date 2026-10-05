@@ -1,5 +1,6 @@
 import fuji from "./fuji-release.json" with { type: "json" };
 import fujiPerContract from "./fuji-release-per-contract.json" with { type: "json" };
+import fujiPerContractV2 from "./fuji-release-per-contract-v2.json" with { type: "json" };
 import mainnet from "./mainnet-release.json" with { type: "json" };
 
 // One deployment per environment. Fuji is the default; mainnet is an explicit
@@ -9,6 +10,9 @@ export const RELEASE_DEPLOYMENTS = Object.freeze({ fuji, mainnet });
 // Individual release addresses are discovered from this factory at runtime;
 // this manifest contains only public infrastructure addresses.
 export const FUJI_RELEASE_PER_CONTRACT = Object.freeze(fujiPerContract);
+// V2 is separate from the existing immutable V1 deployment. Provisioning remains
+// disabled until a future, separately authorized deployment is configured.
+export const FUJI_RELEASE_PER_CONTRACT_V2 = Object.freeze(fujiPerContractV2);
 
 function requestedNetwork() {
   const web = typeof import.meta !== "undefined" ? import.meta.env?.VITE_RELEASE_NETWORK : undefined;

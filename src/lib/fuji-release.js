@@ -1,10 +1,11 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
-import { FUJI_RELEASE_PER_CONTRACT } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT, FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 
 export const FUJI_RELEASE_CONFIG = Object.freeze({ ...deployment, network: deployment.networkName });
 export const FUJI_RELEASE_FACTORY_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT, network: FUJI_RELEASE_PER_CONTRACT.networkName });
+export const FUJI_RELEASE_FACTORY_V2_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT_V2, network: FUJI_RELEASE_PER_CONTRACT_V2.networkName });
 export const FUJI_RELEASE_ABI = Object.freeze(deployment.abi);
 
 export const FUJI_ROLES = Object.freeze({
@@ -50,6 +51,18 @@ const editionIface = new ethers.Interface([
 const mintIface = new ethers.Interface([
   "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)",
 ]);
+const releaseFactoryV2Iface = new ethers.Interface([
+  "function createRelease(bytes32 applicationReleaseId,bytes32 releaseKey,string name,string symbol,string contractURI) returns (address releaseContract,address primarySale,address provenanceAnchor)",
+  "function releaseContractOf(bytes32 releaseKey) view returns(address)",
+  "event ReleaseCreated(address indexed releaseContract,bytes32 indexed releaseKey,address indexed artist,address primarySale,address provenanceAnchor,address implementation,uint256 index,uint16 version)",
+]);
+const releaseCloneInitIface = new ethers.Interface([
+  "function owner() view returns(address)",
+  "function releaseKey() view returns(bytes32)",
+  "function name() view returns(string)",
+  "function symbol() view returns(string)",
+  "function contractURI() view returns(string)",
+]);
 const bytes32 = (value, name) => {
   const text = String(value || "").trim();
   if (!text || text.length > 31) throw new Error(`${name} must be non-empty and at most 31 bytes.`);
@@ -58,6 +71,70 @@ const bytes32 = (value, name) => {
 
 export function fujiIds(releaseId, editionId) {
   return { releaseId: bytes32(releaseId, "releaseId"), editionId: bytes32(editionId, "editionId") };
+}
+
+function assertReleaseFactoryV2Configured() {
+  const config = FUJI_RELEASE_FACTORY_V2_CONFIG;
+  if (config.provisioningEnabled !== true || config.deploymentAuthorized !== true || !ethers.isAddress(config.factoryAddress || "") || ethers.getAddress(config.factoryAddress) === ethers.ZeroAddress) {
+    throw new Error("Artist-paid release creation is not enabled: the separately authorized Factory V2 deployment has not been configured. The old Factory will not be used.");
+  }
+  return { ...config, factoryAddress: ethers.getAddress(config.factoryAddress) };
+}
+
+export function encodeArtistReleaseCreation({ applicationReleaseId, releaseKey, name, symbol, contractURI = "" }) {
+  if (!/^0x[0-9a-f]{64}$/i.test(String(applicationReleaseId || "")) || /^0x0{64}$/i.test(String(applicationReleaseId))) throw new Error("A non-zero application release digest is required.");
+  if (!/^0x[0-9a-f]{64}$/i.test(String(releaseKey || "")) || /^0x0{64}$/i.test(String(releaseKey))) throw new Error("A non-zero deterministic release key is required.");
+  const releaseName = String(name || "").trim();
+  const releaseSymbol = String(symbol || "").trim();
+  if (!releaseName || !releaseSymbol) throw new Error("The exact release name and symbol are required.");
+  const normalizedURI = String(contractURI || "");
+  return { data: releaseFactoryV2Iface.encodeFunctionData("createRelease", [applicationReleaseId, releaseKey, releaseName, releaseSymbol, normalizedURI]), applicationReleaseId: String(applicationReleaseId).toLowerCase(), releaseKey: String(releaseKey).toLowerCase(), name: releaseName, symbol: releaseSymbol, contractURI: normalizedURI };
+}
+
+/** Broadcasts from the artist's connected wallet. No backend or platform signer is involved. */
+export async function submitArtistReleaseCreation({ provider, from, payload }) {
+  const config = assertReleaseFactoryV2Configured();
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(from) || ethers.getAddress(from) === ethers.ZeroAddress) throw new Error("Connect the canonical artist OWNER wallet before creating this release.");
+  const encoded = encodeArtistReleaseCreation(payload);
+  const transaction = { from: ethers.getAddress(from), to: config.factoryAddress, data: encoded.data };
+  // Simulate the exact call before opening the wallet confirmation.
+  await provider.request({ method: "eth_call", params: [transaction, "latest"] });
+  const hash = await requestWithTimeout(provider, { method: "eth_sendTransaction", params: [transaction] });
+  if (!/^0x[0-9a-f]{64}$/i.test(String(hash || ""))) throw new Error("The wallet returned an invalid release creation transaction hash.");
+  return { hash, factoryAddress: config.factoryAddress, chainId: Number(config.chainId), releaseKey: encoded.releaseKey, gasPayer: ethers.getAddress(from) };
+}
+
+async function readReleaseCloneValue(provider, address, fragment) {
+  const data = releaseCloneInitIface.encodeFunctionData(fragment);
+  const result = await provider.request({ method: "eth_call", params: [{ to: address, data }, "latest"] });
+  return releaseCloneInitIface.decodeFunctionResult(fragment, result)[0];
+}
+
+/** Waits for a mined receipt and verifies the emitting V2 Factory, event, registry and clone initialization. */
+export async function verifyArtistReleaseCreation(provider, { transactionHash, expected }) {
+  const config = assertReleaseFactoryV2Configured();
+  await assertFujiProvider(provider);
+  if (Number(expected.chainId) !== Number(config.chainId) || String(expected.factoryAddress).toLowerCase() !== config.factoryAddress.toLowerCase()) throw new Error("The prepared release authorization targets a different chain or Factory.");
+  const expectedKey = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "uint256", "address", "bytes32", "address"], ["the-void:studio-release:v2", BigInt(config.chainId), config.factoryAddress, expected.applicationReleaseId, expected.artistWallet]));
+  if (expectedKey.toLowerCase() !== String(expected.releaseKey).toLowerCase()) throw new Error("The prepared release key does not commit to the application ID, artist, chain, and Factory.");
+  const receipt = await waitForReceipt(provider, transactionHash);
+  if (!receipt || receipt.status !== "0x1") throw Object.assign(new Error("The artist-paid release creation transaction did not receive a successful Fuji receipt."), { transactionHash });
+  const event = (receipt.logs || []).filter((log) => String(log.address || "").toLowerCase() === config.factoryAddress.toLowerCase()).map((log) => {
+    try { return releaseFactoryV2Iface.parseLog(log); } catch { return null; }
+  }).find((parsed) => parsed?.name === "ReleaseCreated" && String(parsed.args.releaseKey).toLowerCase() === String(expected.releaseKey).toLowerCase());
+  if (!event || String(event.args.artist).toLowerCase() !== String(expected.artistWallet).toLowerCase() || BigInt(event.args.version) !== 2n) throw new Error("The confirmed transaction did not emit the exact V2 ReleaseCreated event for this artist and release key.");
+  const releaseContractAddress = ethers.getAddress(event.args.releaseContract);
+  const primarySaleAddress = ethers.getAddress(event.args.primarySale);
+  const provenanceAnchorAddress = ethers.getAddress(event.args.provenanceAnchor);
+  const registered = await provider.request({ method: "eth_call", params: [{ to: config.factoryAddress, data: releaseFactoryV2Iface.encodeFunctionData("releaseContractOf", [expected.releaseKey]) }, "latest"] });
+  const registeredAddress = releaseFactoryV2Iface.decodeFunctionResult("releaseContractOf", registered)[0];
+  if (String(registeredAddress).toLowerCase() !== releaseContractAddress.toLowerCase()) throw new Error("Factory registry does not point to the ReleaseCreated contract.");
+  const [owner, key, name, symbol, contractURI] = await Promise.all(["owner", "releaseKey", "name", "symbol", "contractURI"].map((field) => readReleaseCloneValue(provider, releaseContractAddress, field)));
+  if (String(owner).toLowerCase() !== String(expected.artistWallet).toLowerCase() || String(key).toLowerCase() !== String(expected.releaseKey).toLowerCase() || name !== expected.name || symbol !== expected.symbol || contractURI !== String(expected.contractURI || "")) {
+    throw new Error("The deployed clone's owner, key, name, symbol, or contract URI differs from the exact parameters shown in Studio.");
+  }
+  return { receipt, releaseContractAddress, primarySaleAddress, provenanceAnchorAddress, releaseKey: expected.releaseKey, artistWallet: expected.artistWallet, factoryAddress: config.factoryAddress, chainId: Number(config.chainId), implementationAddress: ethers.getAddress(event.args.implementation), version: Number(event.args.version) };
 }
 
 export function fujiTokenId(releaseId, editionId) {
@@ -484,6 +561,24 @@ export async function readFujiEdition(provider, tokenId) {
         const parsed = editionIface.parseError(revertData);
         if (parsed?.name === "EditionNotFound") return null;
       } catch { /* Preserve the provider error for unknown failures. */ }
+    }
+    throw error;
+  }
+}
+
+export async function readReleaseEdition(provider, { releaseContractAddress, tokenId, chainId = FUJI_RELEASE_FACTORY_V2_CONFIG.chainId }) {
+  if (Number(chainId) !== Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId)) throw new Error("The bound release is on a different chain.");
+  await assertFujiProvider(provider);
+  if (!ethers.isAddress(releaseContractAddress) || ethers.getAddress(releaseContractAddress) === ethers.ZeroAddress) throw new Error("The bound release contract address is invalid.");
+  const data = editionIface.encodeFunctionData("edition", [BigInt(tokenId)]);
+  const result = await provider.request({ method: "eth_call", params: [{ to: ethers.getAddress(releaseContractAddress), data }, "latest"] });
+  try {
+    const [edition] = editionIface.decodeFunctionResult("edition", result);
+    return { releaseId: edition.releaseId, editionId: edition.editionId, artist: edition.artist, maxSupply: edition.maxSupply, mintedSupply: edition.mintedSupply, metadataUri: edition.metadataUri, exists: Boolean(edition.exists) };
+  } catch (error) {
+    const revertData = error?.data || error?.originalError?.data || error?.cause?.data;
+    if (revertData) {
+      try { if (editionIface.parseError(revertData)?.name === "EditionNotFound") return null; } catch { /* Preserve the provider error. */ }
     }
     throw error;
   }

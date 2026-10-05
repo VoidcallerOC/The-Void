@@ -8,6 +8,8 @@ import { ANCHOR_ABI, encodeAnchorCall, inspectAnchorTransaction, loadProvenanceA
 
 const owner = "0x1111111111111111111111111111111111111111";
 const anchorAddress = "0x3333333333333333333333333333333333333333";
+const boundReleaseAddress = "0x4444444444444444444444444444444444444444";
+const releaseKey = `0x${"99".repeat(32)}`;
 const tx = `0x${"ab".repeat(32)}`;
 const iface = new ethers.Interface(ANCHOR_ABI);
 const config = Object.freeze({
@@ -28,7 +30,7 @@ const manifest = canonicalProvenanceManifest({
   createdAt: "2026-09-25T20:00:00.000Z",
   artwork: "b".repeat(64),
 });
-const call = encodeAnchorCall({ releaseSlug: "the-record", editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
+const call = encodeAnchorCall({ releaseKey, editionTitleSlug: "chapter-i", provenanceRoot: manifest.root });
 
 function editionRow() {
   return {
@@ -40,6 +42,10 @@ function editionRow() {
     token_id: call.tokenId.toString(),
     metadata: { provenance: manifest.record },
     metadata_version: manifest.metadataDigest,
+    bound_chain_id: 43113,
+    release_key: releaseKey,
+    release_contract_address: boundReleaseAddress,
+    provenance_anchor_address: anchorAddress,
   };
 }
 
@@ -48,7 +54,7 @@ function proof(overrides = {}) {
 }
 
 function logFor(address = anchorAddress) {
-  const encoded = iface.encodeEventLog("ProvenanceAnchored", [call.provenanceRoot, call.releaseId, call.editionId, call.tokenId, owner, fujiRelease.contractAddress]);
+  const encoded = iface.encodeEventLog("ProvenanceAnchored", [call.provenanceRoot, call.releaseId, call.editionId, call.tokenId, owner, boundReleaseAddress]);
   return { address, topics: encoded.topics, data: encoded.data };
 }
 
@@ -166,7 +172,7 @@ describe("provenance anchor verification", () => {
   });
 
   it("does not verify a transaction that was only found by the low-level inspector as pending", async () => {
-    await expect(inspectAnchorTransaction({ reader: readerFor({ receipt: null }), config, expected: { transactionHash: tx, wallet: owner, releaseSlug: "the-record", editionTitleSlug: "chapter-i", provenanceRoot: manifest.root } })).resolves.toMatchObject({ outcome: "pending" });
+    await expect(inspectAnchorTransaction({ reader: readerFor({ receipt: null }), config, expected: { transactionHash: tx, wallet: owner, releaseKey, editionTitleSlug: "chapter-i", provenanceRoot: manifest.root } })).resolves.toMatchObject({ outcome: "pending" });
   });
 });
 

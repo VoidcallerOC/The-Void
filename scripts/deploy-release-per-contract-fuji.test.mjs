@@ -6,10 +6,9 @@ const BASE = {
   DEPLOY_NETWORK: "fuji",
   AVALANCHE_FUJI_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc",
   DEPLOYER_PRIVATE_KEY: KEY,
-  RELEASE_PLATFORM_RECIPIENT: "0x0000000000000000000000000000000000000011",
+  RELEASE_PLATFORM_RECIPIENT: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   RELEASE_PLATFORM_FEE_BPS: "250",
-  RELEASE_SALE_OWNER: "0x0000000000000000000000000000000000000022",
-  RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x0000000000000000000000000000000000000033",
+  RELEASE_MARKETPLACE_FEE_RECIPIENT: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   BROADCAST_DEPLOYMENT: "no",
 };
 
@@ -20,7 +19,7 @@ describe("release-per-contract Fuji deployment preflight", () => {
     expect(validateDeploymentEnv(BASE)).toMatchObject({ network: "fuji", platformFeeBps: 250, broadcast: false });
     expect(buildDryRunPlan(validateDeploymentEnv(BASE))).toMatchObject({
       chainId: 43113,
-      factory: { artifact: "out/VoidReleaseFactory.sol/VoidReleaseFactory.json" },
+      factory: { artifact: "out/VoidReleaseFactoryV2.sol/VoidReleaseFactoryV2.json" },
       marketplace: { artifact: "out/ReleaseMarketplaceV3.sol/ReleaseMarketplaceV3.json" },
     });
   });
@@ -39,9 +38,13 @@ describe("release-per-contract Fuji deployment preflight", () => {
   });
 
   it("rejects missing addresses, invalid fee BPS, and invalid deployer configuration", () => {
-    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_SALE_OWNER: "" })).toThrow(/RELEASE_SALE_OWNER/);
-    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_FEE_BPS: "10001" })).toThrow(/FEE_BPS/);
+    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_FEE_BPS: "10001" })).toThrow(/exactly 250/);
     expect(() => validateDeploymentEnv({ ...BASE, DEPLOYER_PRIVATE_KEY: "not-a-key" })).toThrow(/DEPLOYER_PRIVATE_KEY/);
+  });
+
+  it("rejects a changed permanent Fuji treasury", () => {
+    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: "0x0000000000000000000000000000000000000011" })).toThrow(/existing permanent treasury/);
+    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x0000000000000000000000000000000000000033" })).toThrow(/existing permanent treasury/);
   });
 
   it("rejects a provider reporting any chain other than Fuji", async () => {

@@ -3,11 +3,12 @@ import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { ContractFactory, JsonRpcProvider, Wallet, getAddress, isAddress } from "ethers";
+import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 
 export const FUJI_CHAIN_ID = 43113;
 export const DEPLOYMENT_RECORD_PATH = "deployments/release-per-contract-fuji.json";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FACTORY_ARTIFACT_PATH = "out/VoidReleaseFactory.sol/VoidReleaseFactory.json";
+const FACTORY_ARTIFACT_PATH = "out/VoidReleaseFactoryV2.sol/VoidReleaseFactoryV2.json";
 const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV3.sol/ReleaseMarketplaceV3.json";
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
@@ -28,10 +29,10 @@ function address(value, name) {
 }
 
 function feeBps(value) {
-  const text = required(value, "RELEASE_PLATFORM_FEE_BPS");
+  const text = required(value ?? fujiV2.marketplaceFeeBps, "RELEASE_PLATFORM_FEE_BPS");
   if (!/^\d+$/.test(text)) throw new DeploymentError("RELEASE_PLATFORM_FEE_BPS must be an integer from 0 to 10000.");
   const parsed = Number(text);
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 10_000) throw new DeploymentError("RELEASE_PLATFORM_FEE_BPS must be an integer from 0 to 10000.");
+  if (parsed !== 250) throw new DeploymentError("RELEASE_PLATFORM_FEE_BPS must be exactly 250 (2.5%) for the locked release economics.");
   return parsed;
 }
 
@@ -47,14 +48,14 @@ export function validateDeploymentEnv(env = process.env) {
   const rpcUrl = required(env.AVALANCHE_FUJI_RPC_URL, "AVALANCHE_FUJI_RPC_URL");
   if (!/^https?:\/\//i.test(rpcUrl) || /@/.test(rpcUrl)) throw new DeploymentError("AVALANCHE_FUJI_RPC_URL must be an HTTP(S) URL without embedded credentials.");
   const deployerPrivateKey = privateKey(env.DEPLOYER_PRIVATE_KEY);
-  const platformRecipient = address(env.RELEASE_PLATFORM_RECIPIENT, "RELEASE_PLATFORM_RECIPIENT");
-  const marketplaceFeeRecipient = address(env.RELEASE_MARKETPLACE_FEE_RECIPIENT, "RELEASE_MARKETPLACE_FEE_RECIPIENT");
-  const saleOwner = address(env.RELEASE_SALE_OWNER, "RELEASE_SALE_OWNER");
+  const platformRecipient = address(env.RELEASE_PLATFORM_RECIPIENT || fujiV2.platformRecipient, "RELEASE_PLATFORM_RECIPIENT");
+  const marketplaceFeeRecipient = address(env.RELEASE_MARKETPLACE_FEE_RECIPIENT || fujiV2.marketplaceFeeRecipient, "RELEASE_MARKETPLACE_FEE_RECIPIENT");
+  if (platformRecipient !== getAddress(fujiV2.platformRecipient) || marketplaceFeeRecipient !== getAddress(fujiV2.marketplaceFeeRecipient)) throw new DeploymentError("Fuji fees must continue going to the read-verified existing permanent treasury address.");
   const platformFeeBps = feeBps(env.RELEASE_PLATFORM_FEE_BPS);
   const confirmFuji = String(env.CONFIRM_FUJI_DEPLOY || "").trim();
   const broadcast = String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes";
   if (broadcast && confirmFuji !== "yes") throw new DeploymentError("Broadcast requires CONFIRM_FUJI_DEPLOY=yes.");
-  return Object.freeze({ network, rpcUrl, deployerPrivateKey, platformRecipient, marketplaceFeeRecipient, saleOwner, platformFeeBps, confirmFuji, broadcast });
+  return Object.freeze({ network, rpcUrl, deployerPrivateKey, platformRecipient, marketplaceFeeRecipient, platformFeeBps, confirmFuji, broadcast });
 }
 
 export function buildDryRunPlan(config) {
@@ -65,10 +66,8 @@ export function buildDryRunPlan(config) {
       artifact: FACTORY_ARTIFACT_PATH,
       constructor: {
         platformRecipient: config.platformRecipient,
-        platformFeeBps: config.platformFeeBps,
-        saleOwner: config.saleOwner,
       },
-      note: "VoidReleaseFactory internally deploys VoidRelease1155V4; no separate V4 deployment is planned.",
+      note: "VoidReleaseFactoryV2 internally deploys VoidRelease1155V4; artists call it directly and pay gas. Primary sale commission is locked to 250 bps in bytecode. No separate V4 deployment is planned.",
     },
     marketplace: {
       artifact: MARKETPLACE_ARTIFACT_PATH,
@@ -81,7 +80,7 @@ export function buildDryRunPlan(config) {
     postDeployment: {
       record: DEPLOYMENT_RECORD_PATH,
       indexer: "Configure RELEASE_FACTORY and MARKETPLACE entries only with actual mined addresses and deployment blocks.",
-      database: "Apply migrations 001-034 to the disposable/staging database before E2E; this workflow does not provision or modify a database.",
+      database: "Apply migrations 001-035 to the disposable/staging database before E2E; this workflow does not provision or modify a database.",
     },
   });
 }
@@ -101,7 +100,7 @@ async function broadcastDeployment(config, provider) {
   const wallet = new Wallet(config.deployerPrivateKey, provider);
   const factoryArtifact = await loadArtifact(FACTORY_ARTIFACT_PATH);
   const marketplaceArtifact = await loadArtifact(MARKETPLACE_ARTIFACT_PATH);
-  const factory = await new ContractFactory(factoryArtifact.abi, factoryArtifact.bytecode.object, wallet).deploy(config.platformRecipient, config.platformFeeBps, config.saleOwner);
+  const factory = await new ContractFactory(factoryArtifact.abi, factoryArtifact.bytecode.object, wallet).deploy(config.platformRecipient);
   const factoryReceipt = await factory.deploymentTransaction().wait();
   const factoryAddress = getAddress(await factory.getAddress());
   const implementationAddress = getAddress(await factory.implementation());
@@ -119,10 +118,9 @@ async function broadcastDeployment(config, provider) {
       deploymentTransaction: factoryReceipt.hash,
       deploymentBlock: factoryReceipt.blockNumber,
       implementationAddress,
-      implementationVersion: 1,
+      implementationVersion: 2,
       platformRecipient: config.platformRecipient,
       platformFeeBps: config.platformFeeBps,
-      saleOwner: config.saleOwner,
     },
     marketplace: {
       address: marketplaceAddress,

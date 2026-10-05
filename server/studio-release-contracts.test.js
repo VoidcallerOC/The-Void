@@ -1,49 +1,47 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArtistStudioService } from "./studio-service.js";
+import { ArtistStudioService, deriveStudioReleaseKey } from "./studio-service.js";
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const RELEASE = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const FACTORY = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const SALE = "0xcccccccccccccccccccccccccccccccccccccccc";
-const ANCHOR = "0xdddddddddddddddddddddddddddddddddddddddd";
-const IMPLEMENTATION = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 const KEY = `0x${"ab".repeat(32)}`;
 
 function repository() {
   const repo = {
     saveContract: vi.fn(async (input) => ({ id: `${input.name}-id`, ...input })),
     saveReleaseContract: vi.fn(async (input) => ({ id: "binding-id", ...input })),
+    getReleaseProvisioningRequest: vi.fn(async () => null),
     appendAuditEvent: vi.fn(async () => ({})),
   };
   repo.inTransaction = vi.fn(async (callback) => callback(repo));
   return repo;
 }
-function harness({ indexed = true } = {}) {
-  const release = { id: "release-1", artist_id: "artist-1", slug: "one", status: "DRAFT" };
-  const deployment = { chain_id: 43113, factory_address: FACTORY, release_contract_address: RELEASE, release_key: KEY, artist_wallet: OWNER, primary_sale_address: SALE, provenance_anchor_address: ANCHOR, implementation_address: IMPLEMENTATION, implementation_version: 1, factory_index: "2", deployment_block_number: 123, transaction_hash: `0x${"12".repeat(32)}` };
+function harness() {
+  const release = { id: "release-1", artist_id: "artist-1", slug: "one", status: "DRAFT", release_metadata: { releaseKey: KEY } };
   const db = { query: vi.fn(async (sql) => {
     if (String(sql).includes("FROM releases r JOIN artist_owners")) return { rows: [release] };
-    if (String(sql).includes("FROM factory_releases")) return { rows: indexed ? [deployment] : [] };
+    if (String(sql).includes("FROM factory_releases")) return { rows: [{ chain_id: 43113, factory_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", release_contract_address: RELEASE, release_key: KEY, artist_wallet: OWNER }] };
     return { rows: [] };
   }) };
   const repo = repository();
   const instance = new ArtistStudioService({ db, repository: repo, authenticator: vi.fn().mockResolvedValue({ wallet: OWNER }), logger: { error: vi.fn() } });
-  return { instance, repo, db, deployment };
+  return { instance, repo, db };
 }
 
 describe("Studio release contract binding", () => {
-  it("persists the exact factory-indexed contract, sale and provenance tuple", async () => {
+  it("refuses to bind V1 or arbitrary contracts while the separately authorized V2 Factory is unconfigured", async () => {
     const { instance, repo } = harness();
-    const result = await instance.bindReleaseContract({ request: { requestId: "request-1", headers: {} }, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } });
-    expect(result).toMatchObject({ releaseContractAddress: RELEASE, primarySaleAddress: SALE, provenanceAnchorAddress: ANCHOR, chainId: 43113, status: "DEPLOYED" });
-    expect(repo.saveContract).toHaveBeenCalledTimes(4);
-    expect(repo.saveReleaseContract).toHaveBeenCalledWith(expect.objectContaining({ releaseId: "release-1", releaseKey: KEY, releaseContractId: "VoidRelease1155V4-id", primarySaleContractId: "VoidPrimarySale-id", provenanceAnchorContractId: "VoidProvenanceAnchor-id", implementationAddress: IMPLEMENTATION, implementationVersion: 1, status: "DEPLOYED" }));
-    expect(repo.appendAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_RELEASE_CONTRACT_BOUND", actorWallet: OWNER }));
+    await expect(instance.bindReleaseContract({ request: { headers: {} }, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } })).rejects.toMatchObject({ code: "RELEASE_FACTORY_V2_NOT_CONFIGURED" });
+    expect(repo.inTransaction).not.toHaveBeenCalled();
+    expect(repo.saveReleaseContract).not.toHaveBeenCalled();
   });
 
-  it("refuses browser-supplied contracts that were not discovered from the release factory", async () => {
-    const { instance, repo } = harness({ indexed: false });
-    await expect(instance.bindReleaseContract({ request: { headers: {} }, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } })).rejects.toMatchObject({ code: "RELEASE_DEPLOYMENT_NOT_INDEXED" });
-    expect(repo.inTransaction).not.toHaveBeenCalled();
+  it("derives a deterministic release key scoped to chain, canonical artist, and application release id", () => {
+    const factoryAddress = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const first = deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: OWNER, factoryAddress });
+    expect(first).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: OWNER, factoryAddress })).toBe(first);
+    expect(deriveStudioReleaseKey({ releaseId: "release-2", artistWallet: OWNER, factoryAddress })).not.toBe(first);
+    expect(deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: "0x2222222222222222222222222222222222222222", factoryAddress })).not.toBe(first);
+    expect(deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: OWNER, factoryAddress, chainId: 43114 })).not.toBe(first);
   });
 });

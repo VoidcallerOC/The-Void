@@ -13,6 +13,7 @@ contract VoidRelease1155V4 is VoidCollection1155 {
     error ReleaseKeyRequired();
     error ReleaseKeyMismatch(bytes32 expected, bytes32 actual);
     error DirectInitializationDisabled();
+    error OwnershipTransferUnsupported();
 
     event ReleaseInitialized(bytes32 indexed releaseKey, address indexed artist, address indexed issuer);
 
@@ -39,6 +40,12 @@ contract VoidRelease1155V4 is VoidCollection1155 {
         // releases deliberately separate artist edition management from sale mint authority.
         _revokeRole(ISSUER_ROLE, artist);
         emit ReleaseInitialized(releaseKey_, artist, issuer);
+    }
+
+    /// @notice V4 editions retain their original artist identity permanently.
+    /// @dev Ownership transfer would strand those editions' sale configuration, so fail closed.
+    function transferOwnership(address) external pure override {
+        revert OwnershipTransferUnsupported();
     }
 
     /// @notice Token IDs are edition-scoped inside a clone. Equal edition IDs intentionally
