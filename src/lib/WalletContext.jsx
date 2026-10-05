@@ -3,6 +3,7 @@ import { CHAINS, checkOwnership, checkCollectionOwnership, checkOwnershipRecords
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 import { authenticateWallet, authorizationHeaders } from "./wallet-auth.js";
+import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
 const LEGACY_RDNS = {
@@ -19,7 +20,7 @@ const LEGACY_NAMES = {
   isCore: "Core",
   isAvalanche: "Core",
 };
-const AUTH_CHAIN_ID = 43113;
+const AUTH_CHAIN_ID = RELEASE_DEPLOYMENT.chainId;
 
 function emptyOwnership(chains = CHAINS) {
   return Object.fromEntries(Object.keys(chains || CHAINS).map((key) => [key, new Set()]));
@@ -142,7 +143,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       return { error, code: "AUTH_WALLET_REQUIRED" };
     }
     if (selectedChainId !== AUTH_CHAIN_ID) {
-      const error = "Switch your wallet to Avalanche Fuji (43113) before signing in.";
+      const error = `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) before signing in.`;
       setAuthenticationError(error);
       return { error, code: "AUTH_CHAIN_UNSUPPORTED" };
     }

@@ -17,18 +17,21 @@ import { primaryCollectForEdition } from "../lib/marketplace-surface.js";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import {
   collectEdition,
+  collectReleaseEdition,
   ensureFujiNetwork,
   explainCollectError,
   formatAvax,
   fujiPrimarySaleAddress,
   readPrimarySale,
+  readReleasePrimarySale,
   saleIsSoldOut,
   walletLimitReached,
 } from "../lib/primary-sale.js";
+import { readReleaseBalance, readReleasePaused } from "../lib/release-asset.js";
 import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
 
-function saleFacts(sale) {
-  if (!fujiPrimarySaleAddress()) return "Primary sale is not configured on Fuji yet. This ERC-1155 cannot be bought until VoidPrimarySale is deployed.";
+function saleFacts(sale, saleAddress) {
+  if (!saleAddress) return "Primary sale is not configured for this release yet.";
   if (!sale?.configured) return "This release does not have a primary sale yet.";
   const facts = [
     `Price ${formatAvax(sale.priceWei)}`,
@@ -54,7 +57,15 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const primary = primaryCollectForEdition(edition);
   const certified = isCertifiedFujiEdition(edition);
   const tokenId = edition?.tokenIds?.[0];
-  const saleAddress = fujiPrimarySaleAddress();
+  const releaseAsset = useMemo(() => {
+    const editionTokenId = edition?.tokenIds?.[0];
+    return edition?.primarySaleAddress && edition?.contractAddress && editionTokenId !== undefined && editionTokenId !== null
+      ? { chainId: edition.chainId, releaseContractAddress: edition.contractAddress, primarySaleAddress: edition.primarySaleAddress, tokenId: editionTokenId }
+      : null;
+  }, [edition]);
+  const releaseScoped = Boolean(releaseAsset) && !certified;
+  const collectorEnabled = certified || releaseScoped;
+  const saleAddress = releaseScoped ? releaseAsset.primarySaleAddress : fujiPrimarySaleAddress();
   const [balance, setBalance] = useState(null);
   const [sale, setSale] = useState(null);
   const [busy, setBusy] = useState("");
@@ -65,8 +76,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
 
   const library = useMemo(() => (catalog ? getCollectorLibrary(catalog, wallet.ownershipRecords || []) : null), [catalog, wallet.ownershipRecords]);
   const catalogOwned = Boolean(library?.editions?.some((item) => item.edition.id === edition.id));
-  const fujiOwned = balance !== null && balance > 0n;
-  const owned = certified ? fujiOwned : catalogOwned || primary.availability === "minted" && catalogOwned;
+  const onChainOwned = balance !== null && balance > 0n;
+  const owned = collectorEnabled ? onChainOwned : catalogOwned || primary.availability === "minted" && catalogOwned;
   const blocked = Boolean(sale?.configured && (saleIsSoldOut(sale) || sale.paused || walletLimitReached(sale)));
 
   const storedEvidence = useMemo(() => loadPrimaryPurchaseEvidence({ editionId: edition?.id, tokenId, purchaser: wallet.account }), [edition?.id, tokenId, wallet.account]);
@@ -78,22 +89,32 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
 
   useEffect(() => {
     let live = true;
-    if (!certified || !wallet.connected || !wallet.account || tokenId === undefined) return undefined;
+    if (!collectorEnabled || !wallet.connected || !wallet.account || tokenId === undefined) return undefined;
     const provider = wallet.getProvider();
-    const reads = [readFujiEdition(provider, tokenId), readFujiBalance(provider, wallet.account, tokenId)];
-    if (saleAddress) reads.push(readPrimarySale(provider, tokenId, wallet.account));
+    const reads = certified
+      ? [readFujiEdition(provider, tokenId), readFujiBalance(provider, wallet.account, tokenId), ...(saleAddress ? [readPrimarySale(provider, tokenId, wallet.account)] : [])]
+      : [readReleaseBalance(provider, releaseAsset, wallet.account), readReleasePrimarySale(provider, releaseAsset, wallet.account)];
     Promise.all(reads)
-      .then(([onChainEdition, value, onChainSale]) => {
+      .then((results) => {
         if (!live) return;
-        setNotCreated(!onChainEdition?.exists);
-        setBalance(value);
-        setSale(onChainSale || null);
+        if (certified) {
+          const [onChainEdition, value, onChainSale] = results;
+          setNotCreated(!onChainEdition?.exists);
+          setBalance(value);
+          setSale(onChainSale || null);
+        } else {
+          const [value, onChainSale] = results;
+          setNotCreated(false);
+          setBalance(value);
+          setSale(onChainSale || null);
+        }
       })
       .catch((error) => {
-        console.error("Fuji release preflight failed", error);
+        console.error("Release collect preflight failed", error);
         if (!live) return;
-        setNotCreated(isFujiEditionNotFoundError(error));
-        if (!isFujiEditionNotFoundError(error)) {
+        const missing = certified && isFujiEditionNotFoundError(error);
+        setNotCreated(missing);
+        if (!missing) {
           const explained = explainCollectError(error);
           setNotice(explained.message);
           setNoticeState(explained.state);
@@ -102,7 +123,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
         setSale(null);
       });
     return () => { live = false; };
-  }, [certified, wallet, wallet.connected, wallet.account, tokenId, saleAddress]);
+  }, [certified, collectorEnabled, releaseAsset, wallet, wallet.connected, wallet.account, tokenId, saleAddress]);
 
   const collect = async () => {
     setBusy("collect");
@@ -112,32 +133,41 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     try {
       if (!wallet.account) throw new Error("Connect a wallet before collecting.");
       if (!wallet.authenticated) await wallet.authenticate();
-      if (!certified) throw new Error("Primary collect for this edition is not on the certified Fuji contract.");
-      if (!saleAddress) throw Object.assign(new Error("Primary sale is not configured on Fuji yet."), { state: "unconfigured" });
+      if (!collectorEnabled) throw new Error("Primary collect is not configured for this edition.");
+      if (!saleAddress) throw Object.assign(new Error("Primary sale is not configured for this release yet."), { state: "unconfigured" });
       const provider = wallet.getProvider();
-      await ensureFujiNetwork(provider);
-      const paused = await readFujiPaused(provider);
-      if (paused) throw Object.assign(new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused."), { state: "paused" });
-      let onChainEdition;
-      try {
-        onChainEdition = await readFujiEdition(provider, tokenId);
-      } catch (error) {
-        if (!isFujiEditionNotFoundError(error)) throw error;
-        console.error("Fuji edition preflight: expected missing edition", error);
-        setNotCreated(true);
-        return;
+      let onChainSale;
+      if (certified) {
+        await ensureFujiNetwork(provider);
+        const paused = await readFujiPaused(provider);
+        if (paused) throw Object.assign(new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused."), { state: "paused" });
+        let onChainEdition;
+        try {
+          onChainEdition = await readFujiEdition(provider, tokenId);
+        } catch (error) {
+          if (!isFujiEditionNotFoundError(error)) throw error;
+          console.error("Fuji edition preflight: expected missing edition", error);
+          setNotCreated(true);
+          return;
+        }
+        if (!onChainEdition?.exists) {
+          setNotCreated(true);
+          return;
+        }
+        onChainSale = await readPrimarySale(provider, tokenId, wallet.account);
+      } else {
+        const paused = await readReleasePaused(provider, releaseAsset);
+        if (paused) throw Object.assign(new Error("This release is paused. Collect is unavailable until it is unpaused."), { state: "paused" });
+        onChainSale = await readReleasePrimarySale(provider, releaseAsset, wallet.account);
       }
-      if (!onChainEdition?.exists) {
-        setNotCreated(true);
-        return;
-      }
-      const onChainSale = await readPrimarySale(provider, tokenId, wallet.account);
       setSale(onChainSale);
       if (!onChainSale?.configured) throw Object.assign(new Error("This release does not have a primary sale yet."), { state: "unconfigured" });
       if (saleIsSoldOut(onChainSale)) throw Object.assign(new Error("This release is sold out."), { state: "sold-out" });
       if (onChainSale.paused) throw Object.assign(new Error("This sale is paused."), { state: "paused" });
       if (walletLimitReached(onChainSale)) throw Object.assign(new Error("This wallet has reached the collector limit for this release."), { state: "wallet-limit" });
-      const result = await collectEdition({ provider, from: wallet.account, tokenId, qty: 1, priceWei: onChainSale.priceWei });
+      const result = certified
+        ? await collectEdition({ provider, from: wallet.account, tokenId, qty: 1, priceWei: onChainSale.priceWei })
+        : await collectReleaseEdition({ provider, from: wallet.account, releaseAsset, qty: 1, priceWei: onChainSale.priceWei });
       setSessionEvidence(savePrimaryPurchaseEvidence({
         transactionHash: result.hash,
         tokenId,
@@ -146,9 +176,13 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
         priceWei: onChainSale.priceWei,
         purchaser: wallet.account,
       }));
-      const nextBalance = await readFujiBalance(provider, wallet.account, tokenId);
+      const nextBalance = certified
+        ? await readFujiBalance(provider, wallet.account, tokenId)
+        : await readReleaseBalance(provider, releaseAsset, wallet.account);
       setBalance(nextBalance);
-      const refreshed = await readPrimarySale(provider, tokenId, wallet.account);
+      const refreshed = certified
+        ? await readPrimarySale(provider, tokenId, wallet.account)
+        : await readReleasePrimarySale(provider, releaseAsset, wallet.account);
       setSale(refreshed);
       if (nextBalance <= 0n) throw new Error("The transaction confirmed, but ownership was not found on chain.");
       setNotice("Collect confirmed. This edition is now in your collection.");
@@ -175,8 +209,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const experienceHref = linkedExperience ? `/experience/${linkedExperience.id}` : "/reliquary";
   const experienceLabel = linkedExperience ? "Open experience" : "Open reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);
-  const primaryOpensExperience = !owned && !notCreated && !certified && primary.availability === "minted";
-  const primaryCollectReady = certified && primary.availability === "available" && tokenId !== undefined && tokenId !== null;
+  const primaryOpensExperience = !owned && !notCreated && !collectorEnabled && primary.availability === "minted";
+  const primaryCollectReady = collectorEnabled && primary.availability === "available" && tokenId !== undefined && tokenId !== null;
   const action = owned ? (
     <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
   ) : notCreated ? (
@@ -185,7 +219,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected || blocked || !saleAddress} onClick={collect}>
       {collectLabel(sale, busy === "collect")}
     </button>
-  ) : certified ? (
+  ) : collectorEnabled ? (
     <span style={ghostBtn}>Not yet available</span>
   ) : primary.availability === "minted" ? (
     <Link to={experienceHref} style={primaryBtn}>{experienceLabel}</Link>
@@ -204,8 +238,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       {wallet.connected && !wallet.authenticated && (
         <p style={{ color: "var(--vc-bone-dim)" }}>Authenticate the connected wallet before collecting.</p>
       )}
-      {certified && (
-        <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>{saleFacts(sale)}</p>
+      {collectorEnabled && (
+        <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>{saleFacts(sale, saleAddress)}</p>
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}

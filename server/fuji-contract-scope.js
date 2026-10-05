@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import deployment from "../config/fuji-release.json" with { type: "json" };
+import { RELEASE_DEPLOYMENT as deployment } from "../config/release-network.js";
 
 export const CANONICAL_FUJI_CHAIN_ID = Number(deployment.chainId);
 export const CANONICAL_FUJI_RELEASE = String(deployment.contractAddress).toLowerCase();

@@ -84,9 +84,9 @@ function service({ reader, records, row = editionRow() } = {}) {
 describe("provenance anchor configuration", () => {
   it("keeps Fuji and C-Chain configuration separate and rejects embedded secrets", () => {
     expect(loadProvenanceAnchorConfig({}).enabled).toBe(false);
-    expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "avalanche" })).toThrow(/Fuji/);
-    expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "fuji" })).toThrow(/avalanche/);
-    expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "avalanche", PROVENANCE_RELEASE_CONTRACT: fujiRelease.contractAddress })).toThrow(/Fuji release/);
+    expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "avalanche" })).toThrow(/RELEASE_NETWORK/);
+    expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "fuji" })).toThrow(/RELEASE_NETWORK/);
+    expect(() => loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toThrow(/incomplete|not deployed/i);
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_ADDRESS: anchorAddress, PROVENANCE_ANCHOR_RPC_URL: "https://user:secret@rpc.example/v1" })).toThrow(/credentials/);
     expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_ADDRESS: anchorAddress, PROVENANCE_ANCHOR_RPC_URL: "http://127.0.0.1:8545" })).toThrow(/HTTPS/);
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_ADDRESS: fujiRelease.contractAddress, PROVENANCE_ANCHOR_RPC_URL: "https://rpc.example" })).toThrow(/release contract/);

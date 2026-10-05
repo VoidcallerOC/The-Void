@@ -14,6 +14,7 @@ import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import { ipfsToHttp } from "./web3.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
 import { isLegacyMainnetEdition } from "./legacy-genesis.js";
+import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -176,6 +177,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       tokenIds: legacyTokenIds.length ? legacyTokenIds : tokenId !== undefined && tokenId !== null && tokenId !== "" ? [String(tokenId)] : [],
       contractAddress,
       chainId,
+      primarySaleAddress: row.primary_sale_address || fuji.primarySaleAddress || "",
       chain: chainId === FUJI_RELEASE_CONFIG.chainId ? FUJI_RELEASE_CONFIG.networkName : "AVALANCHE",
       supply: row.supply != null ? String(row.supply) : null,
       status: legacy ? "minted" : String(row.status || "available").toLowerCase() === "published" ? "available" : String(row.status || "available").toLowerCase(),
@@ -251,6 +253,31 @@ export function withoutShadowedLegacyAlbum(published, base = baseCatalogs()) {
   });
 }
 
+// Each deployment runs one release network (Fuji or C-Chain). Published
+// editions minted on the other network are hidden, with the experiences and
+// releases that only they carry. The legacy C-Chain collection always stays.
+export function onActiveReleaseNetwork(published, activeChainId = RELEASE_DEPLOYMENT.chainId) {
+  if (!published) return published;
+  const editions = asArray(published.editions);
+  const offNetwork = new Set(editions
+    .filter((edition) => Number(edition.chainId) && Number(edition.chainId) !== Number(activeChainId) && !isLegacyMainnetEdition(edition))
+    .map((edition) => edition.id));
+  if (!offNetwork.size) return published;
+  const hiddenReleaseIds = new Set(
+    editions
+      .filter((edition) => offNetwork.has(edition.id))
+      .map((edition) => edition.releaseId)
+      .filter((releaseId) => editions.every((edition) => edition.releaseId !== releaseId || offNetwork.has(edition.id))),
+  );
+  return createCatalog({
+    ...published,
+    releases: asArray(published.releases).filter((release) => !hiddenReleaseIds.has(release.id)),
+    editions: editions.filter((edition) => !offNetwork.has(edition.id)),
+    tokens: asArray(published.tokens).filter((token) => !offNetwork.has(token.editionId)),
+    experiences: asArray(published.experiences).filter((experience) => !offNetwork.has(experience.editionId)),
+  });
+}
+
 function apiBase() {
   const configured = typeof import.meta !== "undefined" ? import.meta.env?.VITE_API_ORIGIN : "";
   return configured ? String(configured).replace(/\/$/, "") : "";
@@ -270,12 +297,12 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
     fetchJson("/api/editions", { fetchImpl, signal }).catch(() => []),
     fetchJson("/api/experiences", { fetchImpl, signal }).catch(() => []),
   ]);
-  return collapsePublicCatalog(mapPublishedCatalog({
+  return collapsePublicCatalog(onActiveReleaseNetwork(mapPublishedCatalog({
     artists: asArray(artists),
     releases: asArray(releases),
     editions: asArray(editions),
     experiences: asArray(experiences),
-  }));
+  })));
 }
 
 export function useMarketplaceCatalogs() {
@@ -303,7 +330,7 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   return useMemo(() => ({
-    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(published)])),
+    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))])),
     publishedLoading,
   }), [overlay, published, publishedLoading]);
 }
