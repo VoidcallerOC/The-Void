@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_CONFIG, FUJI_ROLES, encodeCreateFujiEdition, encodeCreateReleaseEdition, fujiExplorerUrl, readFujiEdition, readFujiRole, sendFujiTransaction, sendReleaseTransaction, simulateCreateFujiEdition, simulateReleaseCall, verifyFujiEditionCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, fujiPrimarySaleAddress, weiToAvax, fujiReleaseIsV2, readPrimarySale, simulateConfigureSale, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -336,16 +336,24 @@ export function ArtistStudioPage() {
         headers,
       });
       const provider = wallet.getProvider?.();
-      if (!(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This wallet does not have ARTIST_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
-      const encoded = fujiReleaseIsV2()
-        ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
-        : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri });
+      const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.chainId === 43113);
+      if (FUJI_RELEASE_FACTORY_CONFIG.factoryAddress && !releaseScoped) throw new Error("This Studio release is not bound to a mined VoidReleaseFactory deployment. No legacy shared Fuji contract fallback is allowed.");
+      if (!releaseScoped && !(await readFujiRole(provider, FUJI_ROLES.ARTIST_ROLE, wallet.account))) throw new Error("This wallet does not have ARTIST_ROLE on the Fuji contract yet. The contract admin grants it at /admin/roles.");
+      const encoded = releaseScoped
+        ? encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
+        : (fujiReleaseIsV2()
+          ? encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 })
+          : encodeCreateFujiEdition({ releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri }));
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
-      await simulateCreateFujiEdition(provider, { from: wallet.account, data: encoded.data });
-      const transaction = await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
-      await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
+      if (releaseScoped) await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
+      else await simulateCreateFujiEdition(provider, { from: wallet.account, data: encoded.data });
+      const transaction = releaseScoped
+        ? await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data })
+        : await sendFujiTransaction({ provider, from: wallet.account, data: encoded.data });
+      if (releaseScoped) await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
+      else await verifyFujiEditionCreation(provider, { transactionHash: transaction.hash, releaseId: metadata.releaseSlug, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);
