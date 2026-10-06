@@ -35,6 +35,14 @@ describe("Studio release contract binding", () => {
     expect(repo.saveReleaseContract).not.toHaveBeenCalled();
   });
 
+  it("loads the release, dedicated sale, and provenance-anchor addresses from a verified binding", async () => {
+    const { instance, db } = harness();
+    db.query.mockResolvedValueOnce({ rows: [{ release_contract_id: "release-contract-id", release_contract_address: RELEASE, factory_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", primary_sale_address: "0xcccccccccccccccccccccccccccccccccccccc", provenance_anchor_address: "0xdddddddddddddddddddddddddddddddddddddd", release_key: KEY, chain_id: 43113, implementation_version: 2, status: "DEPLOYED" }] });
+    await expect(instance.releaseContractBinding("release-1")).resolves.toMatchObject({ release_contract_address: RELEASE, factory_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", primary_sale_address: "0xcccccccccccccccccccccccccccccccccccccc", provenance_anchor_address: "0xdddddddddddddddddddddddddddddddddddddd" });
+    expect(db.query.mock.calls[0][0]).toContain("sale_contract.address AS primary_sale_address");
+    expect(db.query.mock.calls[0][0]).toContain("anchor_contract.address AS provenance_anchor_address");
+  });
+
   it("derives a deterministic release key scoped to chain, canonical artist, and application release id", () => {
     const factoryAddress = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const first = deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: OWNER, factoryAddress });
