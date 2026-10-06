@@ -196,6 +196,10 @@ const v2CreateIface = new ethers.Interface([
 const v4CreateIface = new ethers.Interface([
   "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
 ]);
+const v4AlbumIface = new ethers.Interface(["function createAlbum(bytes32 releaseId)"]);
+const v4AlbumTrackIface = new ethers.Interface([
+  "function createAlbumTrack(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps, bool single, uint64 mintEnd) returns (uint256 tokenId)",
+]);
 
 // Every custom error the deployed VoidRelease1155V2 can revert createEdition with,
 // so a revert (from a pre-broadcast eth_call simulation or a failed receipt) can be
@@ -343,6 +347,24 @@ export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, m
 
 // Dry-run a release-contract call from this wallet so a revert surfaces its
 // decoded reason before anything is broadcast.
+/** Explicitly opts a Factory V2 V4 clone into Album Contract semantics. */
+export function encodeCreateReleaseAlbum({ releaseKey }) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album activation.");
+  return { data: v4AlbumIface.encodeFunctionData("createAlbum", [releaseKey]) };
+}
+
+export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0 }) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album tracks.");
+  if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
+  if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
+  const bps = BigInt(royaltyBps ?? 0);
+  if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const edition = bytes32(editionId, "editionId");
+  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
+  const tokenId = BigInt(digest);
+  return { tokenId: tokenId === 0n ? 1n : tokenId, data: v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps, Boolean(single), BigInt(mintEnd || 0)]) };
+}
+
 export async function simulateFujiCall(provider, { from, to, data }) {
   await assertFujiProvider(provider);
   const target = assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress);

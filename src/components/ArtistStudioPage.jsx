@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -94,12 +94,15 @@ function initialState() {
   return {
     artistName: "",
     releaseTitle: "",
+    releaseType: "EP",
     releaseDescription: "",
     releaseArtwork: "",
     trackTitle: "",
     trackDescription: "",
     trackArtwork: "",
     trackPreview: "",
+    albumSingle: false,
+    mintEnd: "",
     includes: "Full self-titled EP\nCollector Reliquary access\nToken-gated music experiences",
     quantity: "25",
     priceWei: "0.01",
@@ -131,6 +134,7 @@ export function ArtistStudioPage() {
   const [releaseId, setReleaseId] = useState("");
   const [provisioning, setProvisioning] = useState(null);
   const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
+  const [albumActivated, setAlbumActivated] = useState(false);
   const [activeReleaseAsset, setActiveReleaseAsset] = useState(null);
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
@@ -200,7 +204,7 @@ export function ArtistStudioPage() {
     setReleaseId(requestedReleaseId);
     setSelectedReleaseId(requestedReleaseId);
     setArtistId(release.artistId || "");
-    setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseDescription: release.description || "", releaseArtwork: release.artwork || "" }));
+    setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseType: release.releaseType || prior.releaseType, releaseDescription: release.description || "", releaseArtwork: release.artwork || "" }));
     studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers })
       .then(async (prepared) => {
         if (cancelled) return;
@@ -251,7 +255,7 @@ export function ArtistStudioPage() {
     let nextReleaseId = releaseId;
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
-      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, description: form.releaseDescription, artwork: form.releaseArtwork },
+      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork },
       headers,
     });
     nextReleaseId = release.id;
@@ -324,6 +328,24 @@ export function ArtistStudioPage() {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
       if (result?.state !== "CONFIRMED") setNotice(`Receipt verified (${submitted.hash}), but indexing/reconciliation is still pending. Reload or select “Reconcile release” later; the stored request prevents a duplicate deployment.`);
+    } catch (error) {
+      setNotice(error.message);
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally { setBusy(""); }
+  };
+
+  const activateAlbumOnChain = async () => {
+    setBusy("album"); setNotice(""); setTxEvidence(null);
+    try {
+      if (form.releaseType !== "ALBUM") throw new Error("Choose Album Contract as the release type first.");
+      if (!activeReleaseAsset?.releaseContractAddress || !provisioning?.releaseKey) throw new Error("Confirm the Factory V2 release before activating its Album Contract.");
+      const provider = wallet.getProvider?.();
+      const encoded = encodeCreateReleaseAlbum({ releaseKey: provisioning.releaseKey });
+      await simulateReleaseCall(provider, { from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data, chainId: activeReleaseAsset.chainId });
+      const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data });
+      setAlbumActivated(true);
+      setTxEvidence({ status: "submitted", transactionHash: transaction.hash, explorerUrl: fujiExplorerUrl("tx", transaction.hash), contractAddress: activeReleaseAsset.releaseContractAddress, chainId: activeReleaseAsset.chainId });
+      setNotice(`Album Contract activated. Add up to 13 tracks and designate up to 4 as singles.`);
     } catch (error) {
       setNotice(error.message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
@@ -408,7 +430,7 @@ export function ArtistStudioPage() {
       if (!form.trackPreview) throw new Error("Upload the public preview clip on the Tracks step before publishing. A token's metadata cannot be changed after it is published.");
       if (!editionId || (gatedEditionId !== editionId && !editionHasGatedTrack(ownedStudioCatalog, editionId))) throw new Error("Save the catalog structure with the private full track before publishing, so holders can unlock it.");
       const checked = validateReleasePublish({
-        release: { title: form.releaseTitle, type: "ep" },
+        release: { title: form.releaseTitle, type: form.releaseType.toLowerCase() },
         tracks: [{ title: form.trackTitle || form.releaseTitle }],
         supply: form.quantity,
         metadata: { artwork: form.trackArtwork || form.releaseArtwork, includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean) },
@@ -419,14 +441,18 @@ export function ArtistStudioPage() {
       const saved = await saveDraft(ids, { manageBusy: false, quantity: checked.supply });
       const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
         method: "POST",
-        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: "EP" },
+        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: form.releaseType },
         headers,
       });
       if (metadata.releaseContractAddress && metadata.primarySaleAddress) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: metadata.tokenId });
       const provider = wallet.getProvider?.();
       const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.primarySaleAddress && metadata.provenanceAnchorAddress && Number(metadata.chainId) === Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId));
       if (!releaseScoped) throw new Error("This Studio release is not bound to its verified V2 release, dedicated sale, and provenance anchor. Legacy V2/shared-contract fallback is disabled.");
-      const encoded = encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 });
+      if (form.releaseType === "ALBUM" && !albumActivated) throw new Error("Activate the Album Contract before creating album tracks.");
+      const mintEnd = form.mintEnd ? Math.floor(new Date(form.mintEnd).getTime() / 1000) : 0;
+      const encoded = form.releaseType === "ALBUM"
+        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, single: form.albumSingle, mintEnd })
+        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 });
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
@@ -766,6 +792,12 @@ export function ArtistStudioPage() {
             canUseStudio && ownedStudioCatalog && <TextField title="Your artist name (creates your artist profile — add bio and links on your profile page)" value={form.artistName} onChange={(value) => set("artistName", value)} required />
           )}
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
+          <label style={label}>Release type
+            <select value={form.releaseType} onChange={(event) => set("releaseType", event.target.value)} style={field}>
+              <option value="EP">EP / standalone release</option>
+              <option value="ALBUM">Album Contract · up to 13 tracks / 4 singles</option>
+            </select>
+          </label>
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
           {releaseId && <div style={{ ...card, marginTop: 18 }}>
@@ -778,6 +810,7 @@ export function ArtistStudioPage() {
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh exact parameters" : "Prepare provisioning"}</button>
               {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain · artist pays gas"}</button>}
+              {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Reconcile release</button> : null}
             </div>
           </div>}
@@ -796,6 +829,13 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Track details</h2>
           <p style={{ color: "var(--vc-bone-dim)" }}>Release: {form.releaseTitle || "Select a release first"}. {editionId ? "Editing this track." : releaseId ? "Saving adds a new track on this release. It does not change the songs already on it." : ""}</p>
           <TextField title="Track title" value={form.trackTitle} onChange={(value) => set("trackTitle", value)} placeholder="Defaults to the release title" />
+          {form.releaseType === "ALBUM" && <div style={{ marginTop: 16, border: "1px solid var(--vc-ash)", padding: 14 }}>
+            <label style={{ ...label, marginTop: 0, display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={form.albumSingle} onChange={(event) => set("albumSingle", event.target.checked)} /> Designate this track as a Single</label>
+            <label style={label}>Track mint end (optional)
+              <input type="datetime-local" value={form.mintEnd} onChange={(event) => set("mintEnd", event.target.value)} style={field} />
+            </label>
+            <p style={{ color: "var(--vc-bone-dim)", fontSize: 12, lineHeight: 1.5 }}>A single may close minting before the album. Album Contract defaults: 13 tracks and 4 singles.</p>
+          </div>}
           <TextField title="Track description" value={form.trackDescription} onChange={(value) => set("trackDescription", value)} multiline />
           <p style={{ margin: "8px 0 0", color: "var(--vc-bone-dim)" }}>Optional. If left blank, this track will use the release description.</p>
           <ArtworkField title="Track artwork (optional)" helper="Leave this empty and the track uses the release artwork; only upload here if this track needs a different image." value={form.trackArtwork} onChange={(value) => set("trackArtwork", value)} onUpload={(file) => uploadArtwork("trackArtwork", file)} uploading={busy === "artwork:trackArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:trackArtwork"]} signedIn={canUseStudio} />
