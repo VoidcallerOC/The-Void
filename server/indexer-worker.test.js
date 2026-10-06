@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadIndexerConfig } from "./config.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
-import { IndexerLeaseError, ProductionIndexerWorker } from "./indexer-worker.js";
+import { createProductionIndexerWorker, IndexerLeaseError, ProductionIndexerWorker } from "./indexer-worker.js";
 
 const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const wallet = "0x1111111111111111111111111111111111111111";
@@ -102,6 +102,19 @@ describe("production indexer worker", () => {
 });
 
 describe("indexer worker configuration", () => {
+  it("copies frozen production contract configuration before discovering contracts", () => {
+    const configured = Object.freeze([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 100 }]);
+    const { worker } = createProductionIndexerWorker({
+      serverConfig: {},
+      indexerConfig: { chainId: 43113, contracts: configured, confirmations: 12, chunkSize: 500, rpcRetries: 0, retryBaseDelayMs: 1 },
+      pool: {},
+      rpc: {},
+      store: {},
+      logger,
+    });
+    expect(Object.isExtensible(worker.indexer.configs)).toBe(true);
+    expect(worker.indexer.configs).toEqual(configured);
+  });
   it("requires explicit RPC and contract configuration and restricts production to Fuji", () => {
     expect(() => loadIndexerConfig({}, { requireConfiguration: true })).toThrow(/INDEXER_RPC_URL/);
     expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43114", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43114, address: contract, contractType: "ERC1155", startBlock: 1 }]) })).toThrow(/Fuji/);

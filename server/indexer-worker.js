@@ -148,7 +148,7 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
   const resolvedPool = pool || createDatabasePool(serverConfig);
   const resolvedStore = store || createIndexerStore(resolvedPool);
   const resolvedRpc = rpc || createJsonRpcClient({ url: indexerConfig.rpcUrl, timeoutMs: indexerConfig.rpcTimeoutMs });
-  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: indexerConfig.contracts, confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions: { retries: indexerConfig.rpcRetries, baseDelayMs: indexerConfig.retryBaseDelayMs }, logger });
+  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions: { retries: indexerConfig.rpcRetries, baseDelayMs: indexerConfig.retryBaseDelayMs }, logger });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, logger });
   indexer.onProgress = () => worker.heartbeat();
   return { worker, pool: resolvedPool };
