@@ -135,7 +135,8 @@ export class PersistenceRepository {
     const selectedState = enumValue(state, "provisioning.state", ["PENDING", "SUBMITTED", "CONFIRMED", "FAILED", "RECONCILING"]);
     const tx = transactionHash == null ? null : requiredText(transactionHash, "provisioning.transactionHash", { max: 66 }).toLowerCase();
     if (tx !== null && !/^0x[0-9a-f]{64}$/.test(tx)) throw new PersistenceValidationError("provisioning.transactionHash must be a 32-byte transaction hash.", "provisioning.transactionHash");
-    const { rows } = await this.db.query("UPDATE release_provisioning_requests SET transaction_hash=COALESCE($3,transaction_hash), state=$4, updated_at=now() WHERE release_id=$1 AND chain_id=$2 AND (transaction_hash IS NULL OR $3 IS NULL OR transaction_hash=$3) RETURNING *", [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), tx, selectedState]);
+    // PostgreSQL cannot infer the type of a null parameter used only in an IS NULL branch.
+    const { rows } = await this.db.query("UPDATE release_provisioning_requests SET transaction_hash=COALESCE($3::text,transaction_hash), state=$4, updated_at=now() WHERE release_id=$1 AND chain_id=$2 AND (transaction_hash IS NULL OR $3::text IS NULL OR transaction_hash=$3::text) RETURNING *", [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), tx, selectedState]);
     if (!rows[0]) throw new PersistenceConflictError("The provisioning transaction hash conflicts with an existing request.");
     return rows[0];
   }

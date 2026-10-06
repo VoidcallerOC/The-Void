@@ -52,6 +52,13 @@ describe("repository contracts", () => {
     await expect(repository.saveArtist({ id: "artist-001", slug: "voidcaller", displayName: "Voidcaller" })).rejects.toBeInstanceOf(PersistenceConflictError);
   });
 
+  it("casts a null provisioning transaction parameter for existing-event reconciliation", async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ state: "RECONCILING" }] }) };
+    const repository = createPersistenceRepository(db);
+    await repository.updateReleaseProvisioningRequest({ releaseId: "release-001", chainId: 43113, transactionHash: null, state: "RECONCILING" });
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining("$3::text"), ["release-001", 43113, null, "RECONCILING"]);
+  });
+
   it("persists only hashed auth secrets and atomically scopes nonce consumption", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [{ nonce_hash: "hashed-nonce" }] }) };
     const repository = createPersistenceRepository(db);
