@@ -9,6 +9,7 @@ import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chro
 import { FUJI_RELEASE_FACTORY_CONFIG } from "../lib/fuji-release.js";
 import { releaseBindingFor } from "../lib/claim-state.js";
 import { checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
+import { FUJI_REHEARSAL_CLAIM_TARGET } from "../lib/fuji-rehearsal-claim.js";
 
 const CLAIM_PHASES = Object.freeze({
   DISCONNECTED: "disconnected",
@@ -73,6 +74,52 @@ function classifyError(error) {
   if (error?.code === "INVALID_RELEASE_BINDING" || error?.code === "CLAIM_BINDING_MISMATCH") return CLAIM_PHASES.INVALID_BINDING;
   if (error?.code === "CLAIM_UNAVAILABLE" || error?.code === "CLAIM_AUTHORIZATION_UNAVAILABLE") return CLAIM_PHASES.CLAIM_UNAVAILABLE;
   return CLAIM_PHASES.ERROR;
+}
+
+function FujiRehearsalClaimSurface() {
+  const target = FUJI_REHEARSAL_CLAIM_TARGET;
+  return (
+    <section className="vc-claim-page" style={shell}>
+      <header className="vc-claim-header">
+        <div>
+          <Eyebrow red>† Claim · Fuji rehearsal</Eyebrow>
+          <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Fuji Rehearsal Release A</h1>
+        </div>
+        <StateMark state={CLAIM_PHASES.CLAIM_UNAVAILABLE} />
+      </header>
+      <div className="vc-claim-layout">
+        <figure className="vc-claim-artwork">
+          <img src="/assets/voidcaller_art_4.png" alt="Fuji Rehearsal Release A artwork" />
+          <figcaption><span>Voidcaller</span><span>Fuji test pressing</span></figcaption>
+        </figure>
+        <div className="vc-claim-copy">
+          <Eyebrow red>Collector-facing release identity</Eyebrow>
+          <p className="vc-claim-artist">Voidcaller</p>
+          <h2 className="vc-claim-title">Fuji Rehearsal Release A</h2>
+          <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>A Fuji-only public claim rehearsal. This surface verifies the existing Release A binding before collector claims are enabled.</p>
+          <div className="vc-claim-status" aria-live="polite">
+            <div className="vc-claim-status-head">
+              <Eyebrow red>Claim status</Eyebrow>
+              <StateMark state={CLAIM_PHASES.CLAIM_UNAVAILABLE} />
+            </div>
+            <p className="vc-claim-status-message">Claim execution is intentionally closed for this rehearsal. No claim authorization, wallet signature, or transaction is requested.</p>
+          </div>
+          <div className="vc-claim-action">
+            <button type="button" style={{ ...primaryBtn, opacity: 0.45, cursor: "not-allowed" }} disabled aria-disabled="true">CLAIM UNAVAILABLE</button>
+            <Link to="/marketplace" style={ghostBtn}>View marketplace</Link>
+          </div>
+          <div className="vc-claim-supporting">
+            <Eyebrow red>Verified Fuji target</Eyebrow>
+            <InfoRow label="Release" mono>{target.releaseContract}</InfoRow>
+            <InfoRow label="Primary sale" mono>{target.primarySale}</InfoRow>
+            <InfoRow label="Provenance anchor" mono>{target.provenanceAnchor}</InfoRow>
+            <InfoRow label="Network">{target.network} · {target.chainId}</InfoRow>
+            <InfoRow label="Collector receives">Full self-titled EP · Collector Reliquary access · Token-gated music experiences</InfoRow>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export function ClaimPage() {
@@ -225,6 +272,8 @@ export function ClaimPage() {
           : phase === CLAIM_PHASES.ALREADY_CLAIMED
             ? "ALREADY CLAIMED"
             : "CLAIM UNAVAILABLE";
+
+  if (!editionId) return <FujiRehearsalClaimSurface />;
 
   if (!edition) {
     return (
