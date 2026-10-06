@@ -261,7 +261,7 @@ export class ArtistStudioService {
   // A verified binding is the source of truth for all new release-contract flows.
   // Legacy releases have no row and continue to use the certified shared contract.
   async releaseContractBinding(releaseId) {
-    const { rows } = await this.db.query("SELECT rc.*, c.address AS release_contract_address FROM release_contracts rc JOIN contracts c ON c.id=rc.release_contract_id WHERE rc.release_id=$1 AND rc.status IN ('DEPLOYED','VERIFIED') ORDER BY rc.implementation_version DESC, rc.created_at DESC LIMIT 1", [releaseId]);
+    const { rows } = await this.db.query("SELECT rc.*, release_contract.address AS release_contract_address, factory_contract.address AS factory_address, sale_contract.address AS primary_sale_address, anchor_contract.address AS provenance_anchor_address FROM release_contracts rc JOIN contracts release_contract ON release_contract.id=rc.release_contract_id LEFT JOIN contracts factory_contract ON factory_contract.id=rc.factory_contract_id LEFT JOIN contracts sale_contract ON sale_contract.id=rc.primary_sale_contract_id LEFT JOIN contracts anchor_contract ON anchor_contract.id=rc.provenance_anchor_contract_id WHERE rc.release_id=$1 AND rc.status IN ('DEPLOYED','VERIFIED') ORDER BY rc.implementation_version DESC, rc.created_at DESC LIMIT 1", [releaseId]);
     const binding = rows[0];
     // Treat any incomplete row as absent. This protects legacy records and makes
     // the release-contract path opt-in only after the full factory tuple exists.
