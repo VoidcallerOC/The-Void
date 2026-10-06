@@ -50,6 +50,12 @@ function reviewerLinks(html) {
 }
 
 describe("site header · reviewer notifications", () => {
+  it("shows the public claim link without requiring a wallet", () => {
+    const html = renderNav({ account: null, store: storeFor({ reviewer: false, count: 0 }) });
+    expect(html).toContain('href="/claim"');
+    expect(html).toContain(">CLAIM</a>");
+  });
+
   it("hides the reviewer link, badge and count for a normal wallet", async () => {
     const store = storeFor({ reviewer: false, count: 0 });
     await store.sync(session(NORMAL));
