@@ -36,6 +36,7 @@ contract VoidCollection1155 {
     mapping(uint256 => Edition) private _editions;
     mapping(uint256 => address) private _payout;
     mapping(uint256 => uint96) private _royaltyBps;
+    mapping(uint256 => uint64) private _mintEnds;
     mapping(uint256 => mapping(address => uint256)) private _balances;
     mapping(address => mapping(address => bool)) private _operatorApprovals;
     bool public paused;
@@ -53,6 +54,7 @@ contract VoidCollection1155 {
     error ZeroQuantity();
     error ContractPaused();
     error UnsafeRecipient();
+    error MintingEnded(uint256 tokenId, uint64 mintEnd);
     error RoyaltyTooHigh(uint96 bps, uint96 cap);
     error AlreadyInitializedCollection();
     error NotFactory();
@@ -176,6 +178,12 @@ contract VoidCollection1155 {
         return _editions[tokenId].maxSupply;
     }
 
+    /// @notice Returns the optional token-level minting deadline. Zero means no deadline.
+    function mintEndOf(uint256 tokenId) external view returns (uint64) {
+        if (!_editions[tokenId].exists) revert EditionNotFound(tokenId);
+        return _mintEnds[tokenId];
+    }
+
     function royaltyBpsOf(uint256 tokenId) external view returns (uint96) {
         if (!_editions[tokenId].exists) revert EditionNotFound(tokenId);
         return _royaltyBps[tokenId];
@@ -257,7 +265,7 @@ contract VoidCollection1155 {
         internal returns (uint256 tokenId)
     {
         if (releaseId == bytes32(0) || editionId == bytes32(0)) revert InvalidIdentifier();
-        if (maxSupply == 0) revert InvalidSupply();
+        // maxSupply 0 is an open edition; positive values retain the finite cap.
         if (payout == address(0)) revert InvalidAddress();
         if (royaltyBps > MAX_ROYALTY_BPS) revert RoyaltyTooHigh(royaltyBps, MAX_ROYALTY_BPS);
         tokenId = tokenIdFor(releaseId, editionId);
@@ -282,9 +290,19 @@ contract VoidCollection1155 {
         Edition storage item = _editions[tokenId];
         if (!item.exists) revert EditionNotFound(tokenId);
         if (amount == 0) revert ZeroQuantity();
-        uint256 available = item.maxSupply - item.mintedSupply;
-        if (amount > available) revert ExceedsSupply(tokenId, available, amount);
+        uint64 mintEnd = _mintEnds[tokenId];
+        if (mintEnd != 0 && block.timestamp > mintEnd) revert MintingEnded(tokenId, mintEnd);
+        // Open editions retain actual mintedSupply accounting but skip the finite cap check.
+        if (item.maxSupply != 0) {
+            uint256 available = item.maxSupply - item.mintedSupply;
+            if (amount > available) revert ExceedsSupply(tokenId, available, amount);
+        }
         item.mintedSupply += amount;
+    }
+
+    function _setMintEnd(uint256 tokenId, uint64 mintEnd) internal {
+        if (!_editions[tokenId].exists) revert EditionNotFound(tokenId);
+        _mintEnds[tokenId] = mintEnd;
     }
     function _checkOnERC1155Received(address operator, address from, address to, uint256 id, uint256 amount, bytes calldata data) private {
         if (to.code.length != 0) {

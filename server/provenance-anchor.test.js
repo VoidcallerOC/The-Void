@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 import { describe, expect, it, vi } from "vitest";
 import { createApiHandler } from "./api-http.js";
 import fujiRelease from "../config/fuji-release.json" with { type: "json" };
+import fujiPerContractV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ANCHOR_ABI, encodeAnchorCall, inspectAnchorTransaction, loadProvenanceAnchorConfig, ProvenanceAnchorService } from "./provenance-anchor.js";
 
@@ -89,7 +90,8 @@ function service({ reader, records, row = editionRow() } = {}) {
 
 describe("provenance anchor configuration", () => {
   it("keeps Fuji and C-Chain configuration separate and rejects embedded secrets", () => {
-    expect(loadProvenanceAnchorConfig({}).enabled).toBe(false);
+    const defaultConfig = loadProvenanceAnchorConfig({});
+    expect(defaultConfig).toMatchObject({ enabled: true, chainId: 43113, network: "fuji", contractAddress: null, rpcUrl: fujiPerContractV2.rpcUrl });
     expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "avalanche" })).toThrow(/RELEASE_NETWORK/);
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "fuji" })).toThrow(/RELEASE_NETWORK/);
     expect(() => loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toThrow(/incomplete|not deployed/i);
