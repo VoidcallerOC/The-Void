@@ -43,6 +43,11 @@ const PRODUCT_TYPES = Object.freeze({
   DIGITAL_DOWNLOAD: "DOWNLOAD", ALTERNATE_ARTWORK: "ARTWORK", COLLECTOR_ARCHIVE: "DOWNLOAD",
   MEMBERSHIP: "TICKET", VIP_BACKSTAGE: "VIP_ACCESS", PHYSICAL_DIGITAL: "PHYSICAL_REDEMPTION",
 });
+function releaseType(value) {
+  const type = String(value ?? "EP").trim().toUpperCase();
+  if (!["EP", "ALBUM"].includes(type)) throw new ApiError(400, "INVALID_RELEASE_TYPE", "Release type must be EP or ALBUM.");
+  return type;
+}
 
 function normalizedSlug(value, field) {
   const slug = requiredText(value, field, { max: 96 }).toLowerCase();
@@ -618,7 +623,7 @@ export class ArtistStudioService {
     // Release slugs become the on-chain releaseId (bytes32), which is shared by every
     // artist on the canonical contract, so they are allocated platform-wide.
     const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
-    const metadata = { ...(input.metadata || {}), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) };
+    const metadata = { ...(input.metadata || {}), releaseType: releaseType(input.releaseType), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) };
     const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject(metadata, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return { ...release, releaseKey: metadata.releaseKey, chainId: PROVISIONING_CHAIN_ID };
@@ -637,7 +642,8 @@ export class ArtistStudioService {
     if (status === "ARCHIVED" && await this.collectorsCanStillBuy(release)) {
       throw new ApiError(409, "MINTABLE_RELEASE_LOCKED", "A published release collectors can still buy stays on the site.");
     }
-    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata: input.metadata === undefined ? release.release_metadata : jsonObject(input.metadata, "release.metadata"), publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
+    const metadata = input.metadata === undefined ? { ...(release.release_metadata || {}), ...(input.releaseType === undefined ? {} : { releaseType: releaseType(input.releaseType) }) } : jsonObject(input.metadata, "release.metadata");
+    const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata, publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
     return saved;
