@@ -129,8 +129,12 @@ contract GenesisHolderClaim {
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         uint256 releaseMaxSupply = IGenesisClaimRelease(releaseContract_).maxSupplyOf(tokenId_);
-        if (allocation_ > releaseMaxSupply || publicAllocation_ > releaseMaxSupply - allocation_) {
-            revert InvalidConfiguration();
+        // An unlimited release has no total-cap arithmetic; claim allocation remains finite
+        // and is enforced independently by claimedSupply and AllocationExhausted.
+        if (releaseMaxSupply != 0) {
+            if (allocation_ > releaseMaxSupply || publicAllocation_ > releaseMaxSupply - allocation_) {
+                revert InvalidConfiguration();
+            }
         }
         releaseContract = releaseContract_;
         primarySale = primarySale_;
