@@ -89,7 +89,8 @@ contract ReentrantBuyer {
             armed = false;
             reentryAttempts++;
             (bool ok,) = address(market).call{value: reentryValue}(
-                abi.encodeWithSignature("buy(uint256,uint256)", listingId, quantity)
+                abi.encodeWithSignature("buy(uint256
+,uint256)", listingId, quantity)
             );
             require(!ok, "reentrant buy succeeded");
         }
@@ -178,6 +179,7 @@ contract MusicMarketplaceSettlementTest {
 
         require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
         require(ARTIST.balance =
+
 = artistBefore, "no royalty without ERC-2981");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
         require(SELLER.balance - sellerBefore == sellerCut, "seller proceeds");
@@ -263,7 +265,8 @@ contract MusicMarketplaceSettlementTest {
 
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        vm.expectRevert(MusicMarketplace.ListingNotActive.selector);
+   
+     vm.expectRevert(MusicMarketplace.ListingNotActive.selector);
         marketplace.buy{value: PRICE}(listingId, 1);
     }
 
