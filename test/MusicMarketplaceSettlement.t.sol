@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: MITpragma solidity ^0.8.24;
 
 import {MusicMarketplace as MM} from "../contracts/MusicMarketplace.sol";
 
@@ -136,14 +135,6 @@ contract MusicMarketplaceSettlementTest {
     uint256 internal constant PRICE = 1 ether;
     uint256 internal constant FEE_BPS = 250;
     uint256 internal constant ROYALTY_BPS = 500;
-    bytes32 internal constant LISTING_SOLD_TOPIC = keccak256(
-        string.concat(
-            "ListingSold(uint256,address,",
-            "address,address,uint256,uint256,",
-            "uint256,uint256,uint256)"
-        )
-    );
-
     MM internal marketplace;
     MockRoyalty1155 internal canonical;
 
@@ -170,7 +161,8 @@ contract MusicMarketplaceSettlementTest {
         vm.prank(BUYER);
         marketplace.buy{value: PRICE}(listingId, 1);
 
-        uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
+    
+    uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
         uint256 expectedRoyalty = (PRICE * ROYALTY_BPS) / 10_000;
         uint256 expectedSeller = PRICE - expectedFee - expectedRoyalty;
         require(FEE.balance - feeBefore == expectedFee, "fee amount");
@@ -354,7 +346,8 @@ contract MusicMarketplaceSettlementTest {
 
     // 12: stale approval reverts
     function testStaleApprovalReverts() public {
-        uint256 listingId = _list(5, PRICE, 0);
+        uint256
+ listingId = _list(5, PRICE, 0);
         canonical.setApproval(SELLER, address(marketplace), false);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
@@ -396,7 +389,8 @@ contract MusicMarketplaceSettlementTest {
         require(victim.balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
-        require(canonical.balanceOf(SELLER, 1) == 5, "nft unchanged");
+        require(canonical.balanceOf(SELLER, 1) == 5, 
+"nft unchanged");
         MM.Status st = marketplace.listingStatus(listingId);
         require(st == MM.Status.ACTIVE, "still active");
     }
@@ -451,6 +445,13 @@ contract MusicMarketplaceSettlementTest {
 
     // 17: settlement event matches the actual economics
     function testSettlementEventMatches() public {
+        bytes32 topic = keccak256(
+            string.concat(
+                "ListingSold(uint256,address,",
+                "address,address,uint256,uint256,",
+                "uint256,uint256,uint256)"
+            )
+        );
         uint256 listingId = _list(2, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.recordLogs();
@@ -461,7 +462,7 @@ contract MusicMarketplaceSettlementTest {
         bool found;
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter != address(marketplace)) continue;
-            if (logs[i].topics[0] != LISTING_SOLD_TOPIC) continue;
+            if (logs[i].topics[0] != topic) continue;
             found = true;
             require(logs[i].topics.length == 5, "indexed topics");
             require(uint256(logs[i].topics[1]) == listingId, "listingId topic");
