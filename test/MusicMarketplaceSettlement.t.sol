@@ -42,8 +42,7 @@ contract MockRoyalty1155 {
 
     function royaltyInfo(uint256, uint256 salePrice) external view returns (address, uint256) {
         require(erc2981, "ERC2981 unsupported");
-        
-return (royaltyReceiver, (salePrice * royaltyBps) / BPS_DENOMINATOR);
+        return (royaltyReceiver, (salePrice * royaltyBps) / BPS_DENOMINATOR);
     }
 
     function safeTransferFrom(address from, address to, uint256 id, uint256 value, bytes calldata) external {
@@ -91,8 +90,7 @@ contract ReentrantBuyer {
             (bool ok,) = address(market).call{value: reentryValue}(
                 abi.encodeWithSignature("buy(uint256,uint256)", listingId, quantity)
             );
-            require(!ok, "reentrant buy 
-succeeded");
+            require(!ok, "reentrant buy succeeded");
         }
         return this.onERC1155Received.selector;
     }
@@ -139,8 +137,7 @@ contract MusicMarketplaceSettlementTest {
     }
 
     // 1, 2, 3, 4, 17: full secondary sale splits the payment exactly
-    function testFullSecondarySalePaysRoyaltyFeeAnd
-SellerExactly() public {
+    function testFullSaleSplitsPayment() public {
         uint256 listingId = _list(2, PRICE, 0);
         uint256 feeBefore = FEE.balance;
         uint256 artistBefore = ARTIST.balance;
@@ -150,9 +147,9 @@ SellerExactly() public {
         vm.prank(BUYER);
         marketplace.buy{value: PRICE}(listingId, 1);
 
-        uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;        // 0.025 ether
-        uint256 expectedRoyalty = (PRICE * ROYALTY_BPS) / 10_000; // 0.05 ether
-        uint256 expectedSeller = PRICE - expectedFee - expectedRoyalty; // 0.925 ether
+        uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
+        uint256 expectedRoyalty = (PRICE * ROYALTY_BPS) / 10_000;
+        uint256 expectedSeller = PRICE - expectedFee - expectedRoyalty;
         require(FEE.balance - feeBefore == expectedFee, "fee amount");
         require(ARTIST.balance - artistBefore == expectedRoyalty, "royalty amount");
         require(SELLER.balance - sellerBefore == expectedSeller, "seller proceeds");
@@ -163,7 +160,7 @@ SellerExactly() public {
     }
 
     // 2: no ERC-2981 on the token => royalty is zero, platform fee still applies
-    function testNonErc2981TokenSettlesFeeOnly() public {
+    function testNoErc2981MeansNoRoyalty() public {
         MockRoyalty1155 plain = new MockRoyalty1155(ARTIST, ROYALTY_BPS, false);
         MusicMarketplace plainMarket = new MusicMarketplace(FEE, FEE_BPS, address(plain));
         plain.setBalance(SELLER, 1, 5);
@@ -178,14 +175,13 @@ SellerExactly() public {
         vm.prank(BUYER);
         plainMarket.buy{value: PRICE}(listingId, 1);
 
-        require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee 
-amount");
+        require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
         require(ARTIST.balance == artistBefore, "no royalty without ERC-2981");
         require(SELLER.balance - sellerBefore == PRICE - (PRICE * FEE_BPS) / 10_000, "seller proceeds");
     }
 
     // 6, 7: partial purchase charges proportional amounts and keeps the listing active
-    function testPartialPurchaseChargesProportionalAmounts() public {
+    function testPartialPurchaseProportional() public {
         uint256 unitPrice = 0.01 ether;
         uint256 listingId = _list(3, unitPrice, 0);
         uint256 feeBefore = FEE.balance;
@@ -199,13 +195,13 @@ amount");
 
         require(FEE.balance - feeBefore == (salePrice * FEE_BPS) / 10_000, "fee proportional");
         require(ARTIST.balance - artistBefore == (salePrice * ROYALTY_BPS) / 10_000, "royalty proportional");
-        require(SELLER.balance - sellerBefore == salePrice - (salePrice * FEE_BPS) / 10_000 - (salePrice * ROYALTY_BPS) / 10_000, "seller proportional");
+        uint256 sellerCut = salePrice - (salePrice * FEE_BPS) / 10_000 - (salePrice * ROYALTY_BPS) / 10_000;
+        require(SELLER.balance - sellerBefore == sellerCut, "seller proportional");
         require(canonical.balanceOf(BUYER, 1) == 2, "partial nft transfer");
         MusicMarketplace.Listing memory snapshot = marketplace.getListing(listingId);
         require(snapshot.amount == 1, "remaining amount");
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "active after partial");
 
-        // second purchase completes the listing
         vm.deal(BUYER, unitPrice);
         vm.prank(BUYER);
         marketplace.buy{value: unitPrice}(listingId, 1);
@@ -214,9 +210,8 @@ amount");
     }
 
     // 5: accounting conservation, including floor rounding credited to the seller
-    function testAccountingConservationWithRounding() public {
-        uint256 unitPrice = 1_000_003; 
-// deliberately indivisible by BPS
+    function testConservationWithRounding() public {
+        uint256 unitPrice = 1_000_003; // deliberately indivisible by BPS
         uint256 quantity = 7;
         uint256 listingId = _list(10, unitPrice, 0);
         uint256 salePrice = unitPrice * quantity;
@@ -238,7 +233,7 @@ amount");
     }
 
     // 7: terminal listing cannot be purchased again
-    function testFullPurchaseMakesListingTerminal() public {
+    function testFullPurchaseIsTerminal() public {
         uint256 listingId = _list(1, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
@@ -254,7 +249,7 @@ amount");
     }
 
     // 8: cancellation
-    function testSellerCancellationBlocksPurchase() public {
+    function testSellerCancellationBlocks() public {
         uint256 listingId = _list(2, PRICE, 0);
         vm.prank(address(0xBAD));
         try marketplace.cancelListing(listingId) {
@@ -262,8 +257,7 @@ amount");
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.NotSeller.selector, "wrong error");
         }
-      
-  vm.prank(SELLER);
+        vm.prank(SELLER);
         marketplace.cancelListing(listingId);
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.CANCELLED), "cancelled");
         vm.deal(BUYER, PRICE);
@@ -295,7 +289,6 @@ amount");
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.ListingNotActive.selector, "wrong error");
         }
-        // listing in the past cannot even be created
         vm.prank(SELLER);
         try marketplace.createListing(address(canonical), SELLER, 1, 1, PRICE, uint64(block.timestamp - 1)) {
             revert("past expiry accepted");
@@ -305,8 +298,7 @@ amount");
     }
 
     // 10: exact payment validation, no partial refunds, no state change
-    function testIncorrectPaymentRevertsWithoutSideEffe
-cts() public {
+    function testWrongPaymentRevertsCleanly() public {
         uint256 listingId = _list(2, PRICE, 0);
         uint256 sellerBefore = SELLER.balance;
         vm.deal(BUYER, PRICE + 1 wei);
@@ -331,7 +323,7 @@ cts() public {
     }
 
     // 11: seller spent the tokens after listing
-    function testInsufficientSellerBalanceReverts() public {
+    function testInsufficientSellerBalance() public {
         uint256 listingId = _list(5, PRICE, 0);
         canonical.transferAway(SELLER, address(0xDEAD), 1, 5);
         vm.deal(BUYER, PRICE);
@@ -350,15 +342,14 @@ cts() public {
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
         try marketplace.buy{value: PRICE}(listingId, 1) {
-           
- revert("purchase without approval");
+            revert("purchase without approval");
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.InsufficientApproval.selector, "wrong error");
         }
     }
 
     // 13: reentrancy with a funded, value-carrying reentry attempt
-    function testReentrancyGuardBlocksDoubleSettlement() public {
+    function testReentrancyIsBlocked() public {
         uint256 listingId = _list(2, PRICE, 0);
         ReentrantBuyer attacker = new ReentrantBuyer(marketplace);
         vm.deal(address(attacker), PRICE * 2);
@@ -371,12 +362,13 @@ cts() public {
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "single decrement");
         require(FEE.balance == (PRICE * FEE_BPS) / 10_000, "single fee");
         require(ARTIST.balance == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
-        require(SELLER.balance == PRICE - (PRICE * FEE_BPS) / 10_000 - (PRICE * ROYALTY_BPS) / 10_000, "single seller payment");
+        uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000 - (PRICE * ROYALTY_BPS) / 10_000;
+        require(SELLER.balance == sellerCut, "single seller payment");
         require(address(attacker).balance == PRICE, "attacker spent exactly once");
     }
 
     // 14: malicious ERC-1155 receiver makes the whole settlement revert atomically
-    function testMaliciousReceiverBlocksSettlement() public {
+    function testMaliciousReceiverReverts() public {
         uint256 listingId = _list(2, PRICE, 0);
         MaliciousReceiver victim = new MaliciousReceiver();
         vm.deal(address(victim), PRICE);
@@ -388,15 +380,13 @@ cts() public {
         }
         require(address(victim).balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
-        require(FEE.balance == 0 && ARTIS
-T.balance == 0, "nothing leaked");
+        require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
         require(canonical.balanceOf(SELLER, 1) == 5, "nft unchanged");
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "still active");
     }
 
     // 15, 16: royalty above the post-fee remainder is rejected; fee bounds enforced
-    function testRoyaltyAndFeeBoundsAreEnforced() public {
-        // royalty 9800 bps of 1 ether = 0.98 > 0.975 remaining after 250 bps fee
+    function testRoyaltyAndFeeBounds() public {
         MockRoyalty1155 greedy = new MockRoyalty1155(ARTIST, 9_800, true);
         MusicMarketplace greedyMarket = new MusicMarketplace(FEE, FEE_BPS, address(greedy));
         greedy.setBalance(SELLER, 1, 5);
@@ -411,7 +401,6 @@ T.balance == 0, "nothing leaked");
             require(bytes4(reason) == MusicMarketplace.RoyaltyTooHigh.selector, "wrong error");
         }
 
-        // constructor fee bounds
         try new MusicMarketplace(FEE, 10_001, address(canonical)) {
             revert("fee above bound accepted");
         } catch (bytes memory reason) {
@@ -420,26 +409,23 @@ T.balance == 0, "nothing leaked");
         new MusicMarketplace(FEE, 10_000, address(canonical));
         MusicMarketplace zeroFee = new MusicMarketplace(FEE, 0, address(canonical));
 
-        // zero-fee marketplace still pays royalty and seller correctly
         uint256 artistBefore = ARTIST.balance;
         uint256 sellerBefore = SELLER.balance;
         vm.prank(SELLER);
         uint256 zeroFeeListing = zeroFee.createListing(address(canonical), SELLER, 1, 1, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        zeroFee.buy{value: PRICE}(zeroFeeLis
-ting, 1);
+        zeroFee.buy{value: PRICE}(zeroFeeListing, 1);
         require(FEE.balance == 0, "no fee");
         require(ARTIST.balance - artistBefore == (PRICE * ROYALTY_BPS) / 10_000, "royalty without fee");
         require(SELLER.balance - sellerBefore == PRICE - (PRICE * ROYALTY_BPS) / 10_000, "seller without fee");
     }
 
     // 15: economics configuration is immutable and cannot be changed by anyone
-    function testUnauthorizedConfigurationIsImpossible() public {
+    function testConfigIsImmutable() public {
         require(marketplace.feeRecipient() == FEE, "fee recipient immutable");
         require(marketplace.platformFeeBps() == FEE_BPS, "fee bps immutable");
         require(marketplace.canonicalToken() == address(canonical), "canonical token immutable");
-        // a seller cannot list on behalf of another wallet
         vm.prank(SELLER);
         try marketplace.createListing(address(canonical), BUYER, 1, 1, PRICE, 0) {
             revert("listing for another seller accepted");
@@ -449,7 +435,7 @@ ting, 1);
     }
 
     // 17: the settlement event matches the actual economics word for word
-    function testSettlementEventMatchesEconomics() public {
+    function testSettlementEventMatches() public {
         uint256 listingId = _list(2, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.recordLogs();
@@ -465,8 +451,7 @@ ting, 1);
             require(uint256(logs[i].topics[1]) == listingId, "listingId topic");
             require(address(uint160(uint256(logs[i].topics[2]))) == BUYER, "buyer topic");
             require(address(uint160(uint256(logs[i].topics[3]))) == SELLER, "seller topic");
-            (address tokenC
-ontract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
+            (address tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
                 abi.decode(logs[i].data, (address, uint256, uint256, uint256, uint256, uint256));
             require(tokenContract == address(canonical), "token contract data");
             require(tokenId == 1, "token id data");
