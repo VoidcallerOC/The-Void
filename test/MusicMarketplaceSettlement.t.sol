@@ -78,7 +78,10 @@ contract MockRoyalty1155 {
     }
 }
 
-/// @dev Buyer that reenters buy while a settlement is in flight.
+/// @dev Self-funded buyer that reenters buy while settlement is in flight.
+///      Funded with PRICE * 2 so the first buy and a value-carrying reentry
+///      are both payable from the attacker; the reentrancy guard must reject
+///      the second call and refund that payment.
 contract ReentrantBuyer {
     MM public market;
     uint256 public listingId;
@@ -105,11 +108,7 @@ contract ReentrantBuyer {
             armed = false;
             reentryAttempts++;
             (bool ok,) = address(market).call{value: reentryValue}(
-                abi.encodeWithSignature(
-                    string.concat("buy(uint256", ",uint256)"),
-                    listingId,
-                    quantity
-                )
+                abi.encodeWithSignature("buy(uint256,uint256)", listingId, quantity)
             );
             require(!ok, "reentrant buy won");
         }
@@ -369,25 +368,36 @@ contract MusicMarketplaceSettlementTest {
         marketplace.buy{value: PRICE}(listingId, 1);
     }
 
-    // 13: funded reentrancy attempt on buy is rejected once
+    // 13: self-funded reentrancy attempt on buy is rejected once; refunded reentry
+    //     payment leaves attacker with PRICE after spending exactly one sale.
     function testReentrancyIsBlocked() public {
         uint256 listingId = _list(2, PRICE, 0);
         ReentrantBuyer attacker = new ReentrantBuyer(marketplace);
         vm.deal(address(attacker), PRICE * 2);
         attacker.arm(listingId, 1, PRICE);
 
+        uint256 feeBefore = FEE.balance;
+        uint256 artistBefore = ARTIST.balance;
+        uint256 sellerBefore = SELLER.balance;
+
         attacker.buy(listingId, 1);
 
+        // Reentry was attempted and rejected; only one settlement occurred.
         require(attacker.reentryAttempts() == 1, "reentry tried once");
         require(canonical.balanceOf(address(attacker), 1) == 1, "one transfer");
+        require(canonical.balanceOf(SELLER, 1) == 4, "seller nft decremented once");
+        // Attacker funded with PRICE*2: first buy spent PRICE; reverted reentry refunded.
         require(address(attacker).balance == PRICE, "spent exactly once");
-        require(FEE.balance == (PRICE * FEE_BPS) / 10_000, "single fee");
-        require(ARTIST.balance == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
+        require(address(marketplace).balance == 0, "no marketplace residue");
+        require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "single fee");
+        require(ARTIST.balance - artistBefore == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
         sellerCut = sellerCut - (PRICE * ROYALTY_BPS) / 10_000;
-        require(SELLER.balance == sellerCut, "single seller pay");
+        require(SELLER.balance - sellerBefore == sellerCut, "single seller pay");
+        MM.Listing memory snapshot = marketplace.getListing(listingId);
+        require(snapshot.amount == 1, "single quantity decrement");
         MM.Status st = marketplace.listingStatus(listingId);
-        require(st == MM.Status.ACTIVE, "single decrement");
+        require(st == MM.Status.ACTIVE, "listing still active");
     }
 
     // 14: malicious receiver hook reverts the whole settlement
