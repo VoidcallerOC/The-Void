@@ -89,8 +89,7 @@ contract ReentrantBuyer {
             armed = false;
             reentryAttempts++;
             (bool ok,) = address(market).call{value: reentryValue}(
-                abi.encodeWithSignature("buy(uint256
-,uint256)", listingId, quantity)
+                abi.encodeWithSignature("buy(uint256,uint256)", listingId, quantity)
             );
             require(!ok, "reentrant buy succeeded");
         }
