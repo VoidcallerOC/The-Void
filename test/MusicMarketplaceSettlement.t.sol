@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MITpragma solidity ^0.8.24;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
 
 import {MusicMarketplace as MM} from "../contracts/MusicMarketplace.sol";
 
@@ -95,8 +96,8 @@ contract ReentrantBuyer {
         armed = true;
     }
 
-    function buy(uint256 id, uint256 q) external payable {
-        market.buy{value: msg.value}(id, q);
+    function buy(uint256 id, uint256 q) external {
+        market.buy{value: reentryValue}(id, q);
     }
 
     function onERC1155Received(address, address, uint256, uint256, bytes calldata) external returns (bytes4) {
@@ -149,6 +150,7 @@ contract MusicMarketplaceSettlementTest {
     uint256 internal constant PRICE = 1 ether;
     uint256 internal constant FEE_BPS = 250;
     uint256 internal constant ROYALTY_BPS = 500;
+
     MM internal marketplace;
     MockRoyalty1155 internal canonical;
 
@@ -175,12 +177,10 @@ contract MusicMarketplaceSettlementTest {
         vm.prank(BUYER);
         marketplace.buy{value: PRICE}(listingId, 1);
 
-    
-    uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
+        uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
         uint256 expectedRoyalty = (PRICE * ROYALTY_BPS) / 10_000;
         uint256 expectedSeller = PRICE - expectedFee - expectedRoyalty;
-        require(FEE.balance - feeBefore ==
- expectedFee, "fee amount");
+        require(FEE.balance - feeBefore == expectedFee, "fee amount");
         require(ARTIST.balance - artistBefore == expectedRoyalty, "royalty amount");
         require(SELLER.balance - sellerBefore == expectedSeller, "seller proceeds");
         require(BUYER.balance == 0, "buyer overpaid residue");
@@ -222,8 +222,7 @@ contract MusicMarketplaceSettlementTest {
         uint256 salePrice = unitPrice * 2;
         vm.deal(BUYER, salePrice);
 
-        vm.
-prank(BUYER);
+        vm.prank(BUYER);
         marketplace.buy{value: salePrice}(listingId, 2);
 
         require(FEE.balance - feeBefore == (salePrice * FEE_BPS) / 10_000, "fee prop");
@@ -362,8 +361,7 @@ prank(BUYER);
 
     // 12: stale approval reverts
     function testStaleApprovalReverts() public {
-        uint256
- listingId = _list(5, PRICE, 0);
+        uint256 listingId = _list(5, PRICE, 0);
         canonical.setApproval(SELLER, address(marketplace), false);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
@@ -378,11 +376,11 @@ prank(BUYER);
         vm.deal(address(attacker), PRICE * 2);
         attacker.arm(listingId, 1, PRICE);
 
-        attacker.buy{value: PRICE}(listingId, 1);
+        attacker.buy(listingId, 1);
 
         require(attacker.reentryAttempts() == 1, "reentry tried once");
         require(canonical.balanceOf(address(attacker), 1) == 1, "one transfer");
-        require(attacker.balance == PRICE * 2, "spent exactly once");
+        require(attacker.balance == PRICE, "spent exactly once");
         require(FEE.balance == (PRICE * FEE_BPS) / 10_000, "single fee");
         require(ARTIST.balance == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
@@ -405,8 +403,7 @@ prank(BUYER);
         require(victim.balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
-        require(canonical.balanceOf(SELLER, 1) == 5, 
-"nft unchanged");
+        require(canonical.balanceOf(SELLER, 1) == 5, "nft unchanged");
         MM.Status st = marketplace.listingStatus(listingId);
         require(st == MM.Status.ACTIVE, "still active");
     }
@@ -481,16 +478,15 @@ prank(BUYER);
             if (logs[i].emitter != address(marketplace)) continue;
             if (logs[i].topics[0] != topic) continue;
             found = true;
-            require(logs[i].topics.length == 5, "indexed topics");
+            require(logs[i].topics.length == 4, "indexed topics");
             require(uint256(logs[i].topics[1]) == listingId, "listingId topic");
             address buyerTopic = address(uint160(uint256(logs[i].topics[2])));
             require(buyerTopic == BUYER, "buyer topic");
             address sellerTopic = address(uint160(uint256(logs[i].topics[3])));
             require(sellerTopic == SELLER, "seller topic");
-            address tokenTopic = address(uint160(uint256(logs[i].topics[4])));
-            require(tokenTopic == address(canonical), "token topic");
-            (uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
-                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+            (address tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
+                abi.decode(logs[i].data, (address, uint256, uint256, uint256, uint256, uint256));
+            require(tokenContract == address(canonical), "token data");
             require(tokenId == 1, "token id data");
             require(amount == 1, "amount data");
             require(price == PRICE, "price data");
