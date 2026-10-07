@@ -88,7 +88,7 @@ Ownership checks use indexed ERC-1155 balances and fail closed when the required
 
 ## Protected Media
 
-Public preview audio is served from `public/assets/audio-preview/`. Full-duration masters are kept outside the public frontend asset path and are accessed only through the protected-media system.
+Public preview audio is served from `public/assets/audio-preview/` as short `*-preview.*` clips only. Full-duration masters must never live under `public/` or in Git — production uses Pinata private storage; local/dev may use the ignored `private-media/` mount. Access is only through the protected-media system.
 
 The production architecture uses Pinata for private media retrieval and Pinata for JSON/IPFS metadata when the corresponding production configuration is present. The protected-media flow is:
 

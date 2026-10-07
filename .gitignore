@@ -31,7 +31,22 @@ out/
 broadcast/
 
 # Protected masters are deployment assets, never static web or repository content.
+# Production: Pinata private IPFS (MEDIA_STORAGE_DRIVER=pinata). Local/dev: this mount.
 private-media/
+# Never reintroduce a public master directory. Previews live only under audio-preview/.
+public/assets/audio/
+
+# Public audio-preview may contain short *-preview.* clips and preview manifests only.
+# Full-duration or non-preview-named audio under this tree is a boundary violation.
+public/assets/audio-preview/*
+!public/assets/audio-preview/*-preview.mp3
+!public/assets/audio-preview/*-preview.wav
+!public/assets/audio-preview/*-preview.flac
+!public/assets/audio-preview/*-preview.m4a
+!public/assets/audio-preview/*-preview.ogg
+!public/assets/audio-preview/_previews.json
+!public/assets/audio-preview/_previews-ep1.json
+!public/assets/audio-preview/.gitkeep
 
 # Admin-uploaded marketplace header files. The API serves them; do not commit the bytes.
 public/assets/marketplace-heroes/*
