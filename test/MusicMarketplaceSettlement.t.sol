@@ -10,6 +10,8 @@ interface Vm {
     function warp(uint256) external;
     function recordLogs() external;
     function getRecordedLogs() external returns (Log[] memory);
+    function expectRevert() external;
+    function expectRevert(bytes4) external;
 }
 
 /// @dev ERC-1155 mock with optional ERC-2981 royaltyInfo and receiver-hook transfers,
@@ -51,7 +53,7 @@ contract MockRoyalty1155 {
         balances[to][id] += value;
         if (callReceiverHook && to.code.length > 0) {
             (bool ok, bytes memory ret) = to.call(
-                abi.encodeWithSignature("onERC1155Received(address,address,uint256,uint256,bytes)", from, address(0), id, value, "")
+                abi.encodeWithSignature("onERC1155Received(address,address,uint256,uint256,bytes)", from, address(0), id, value, bytes(""))
             );
             require(ok && ret.length >= 4 && bytes4(ret) == bytes4(0xf23a6e61), "receiver rejected");
         }
@@ -177,7 +179,8 @@ contract MusicMarketplaceSettlementTest {
 
         require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
         require(ARTIST.balance == artistBefore, "no royalty without ERC-2981");
-        require(SELLER.balance - sellerBefore == PRICE - (PRICE * FEE_BPS) / 10_000, "seller proceeds");
+        uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
+        require(SELLER.balance - sellerBefore == sellerCut, "seller proceeds");
     }
 
     // 6, 7: partial purchase charges proportional amounts and keeps the listing active
@@ -239,34 +242,28 @@ contract MusicMarketplaceSettlementTest {
         vm.prank(BUYER);
         marketplace.buy{value: PRICE}(listingId, 1);
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.SOLD), "sold");
+
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("terminal listing bought");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.ListingNotActive.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.ListingNotActive.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
     }
 
     // 8: cancellation
     function testSellerCancellationBlocks() public {
         uint256 listingId = _list(2, PRICE, 0);
         vm.prank(address(0xBAD));
-        try marketplace.cancelListing(listingId) {
-            revert("non-seller cancelled");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.NotSeller.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.NotSeller.selector);
+        marketplace.cancelListing(listingId);
+
         vm.prank(SELLER);
         marketplace.cancelListing(listingId);
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.CANCELLED), "cancelled");
+
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("cancelled listing bought");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.ListingNotActive.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.ListingNotActive.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
     }
 
     // 9: expiration
@@ -276,25 +273,20 @@ contract MusicMarketplaceSettlementTest {
         vm.warp(block.timestamp + 101);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("expired listing bought");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.Expired.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.Expired.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
+
         marketplace.expireListing(listingId);
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.EXPIRED), "expired");
+
+        vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("expired-marked listing bought");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.ListingNotActive.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.ListingNotActive.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
+
         vm.prank(SELLER);
-        try marketplace.createListing(address(canonical), SELLER, 1, 1, PRICE, uint64(block.timestamp - 1)) {
-            revert("past expiry accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.InvalidExpiry.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.InvalidExpiry.selector);
+        marketplace.createListing(address(canonical), SELLER, 1, 1, PRICE, uint64(block.timestamp - 1));
     }
 
     // 10: exact payment validation, no partial refunds, no state change
@@ -304,17 +296,13 @@ contract MusicMarketplaceSettlementTest {
         vm.deal(BUYER, PRICE + 1 wei);
 
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE - 1 wei}(listingId, 1) {
-            revert("underpayment accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.IncorrectPayment.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.IncorrectPayment.selector);
+        marketplace.buy{value: PRICE - 1 wei}(listingId, 1);
+
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE + 1 wei}(listingId, 1) {
-            revert("overpayment accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.IncorrectPayment.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.IncorrectPayment.selector);
+        marketplace.buy{value: PRICE + 1 wei}(listingId, 1);
+
         require(BUYER.balance == PRICE + 1 wei, "buyer balance restored");
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "no fee or royalty leaked");
@@ -328,11 +316,8 @@ contract MusicMarketplaceSettlementTest {
         canonical.transferAway(SELLER, address(0xDEAD), 1, 5);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("purchase without balance");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.InsufficientBalance.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.InsufficientBalance.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
     }
 
     // 12: stale approval
@@ -341,11 +326,8 @@ contract MusicMarketplaceSettlementTest {
         canonical.setApproval(SELLER, address(marketplace), false);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("purchase without approval");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.InsufficientApproval.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.InsufficientApproval.selector);
+        marketplace.buy{value: PRICE}(listingId, 1);
     }
 
     // 13: reentrancy with a funded, value-carrying reentry attempt
@@ -373,11 +355,10 @@ contract MusicMarketplaceSettlementTest {
         MaliciousReceiver victim = new MaliciousReceiver();
         vm.deal(address(victim), PRICE);
         uint256 sellerBefore = SELLER.balance;
-        try victim.buy(marketplace, listingId, PRICE) {
-            revert("malicious receiver settled");
-        } catch {
-            // expected: receiver revert bubbles up through safeTransferFrom
-        }
+
+        vm.expectRevert();
+        victim.buy(marketplace, listingId, PRICE);
+
         require(address(victim).balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
@@ -395,20 +376,16 @@ contract MusicMarketplaceSettlementTest {
         uint256 listingId = greedyMarket.createListing(address(greedy), SELLER, 1, 2, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        try greedyMarket.buy{value: PRICE}(listingId, 1) {
-            revert("excessive royalty accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.RoyaltyTooHigh.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.RoyaltyTooHigh.selector);
+        greedyMarket.buy{value: PRICE}(listingId, 1);
 
-        try new MusicMarketplace(FEE, 10_001, address(canonical)) {
-            revert("fee above bound accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.FeeTooHigh.selector, "wrong error");
-        }
-        new MusicMarketplace(FEE, 10_000, address(canonical));
+        vm.expectRevert(MusicMarketplace.FeeTooHigh.selector);
+        new MusicMarketplace(FEE, 10_001, address(canonical));
+
+        MusicMarketplace maxFee = new MusicMarketplace(FEE, 10_000, address(canonical));
+        require(maxFee.platformFeeBps() == 10_000, "boundary fee allowed");
+
         MusicMarketplace zeroFee = new MusicMarketplace(FEE, 0, address(canonical));
-
         uint256 artistBefore = ARTIST.balance;
         uint256 sellerBefore = SELLER.balance;
         vm.prank(SELLER);
@@ -418,7 +395,8 @@ contract MusicMarketplaceSettlementTest {
         zeroFee.buy{value: PRICE}(zeroFeeListing, 1);
         require(FEE.balance == 0, "no fee");
         require(ARTIST.balance - artistBefore == (PRICE * ROYALTY_BPS) / 10_000, "royalty without fee");
-        require(SELLER.balance - sellerBefore == PRICE - (PRICE * ROYALTY_BPS) / 10_000, "seller without fee");
+        uint256 sellerCut = PRICE - (PRICE * ROYALTY_BPS) / 10_000;
+        require(SELLER.balance - sellerBefore == sellerCut, "seller without fee");
     }
 
     // 15: economics configuration is immutable and cannot be changed by anyone
@@ -426,12 +404,10 @@ contract MusicMarketplaceSettlementTest {
         require(marketplace.feeRecipient() == FEE, "fee recipient immutable");
         require(marketplace.platformFeeBps() == FEE_BPS, "fee bps immutable");
         require(marketplace.canonicalToken() == address(canonical), "canonical token immutable");
+
         vm.prank(SELLER);
-        try marketplace.createListing(address(canonical), BUYER, 1, 1, PRICE, 0) {
-            revert("listing for another seller accepted");
-        } catch (bytes memory reason) {
-            require(bytes4(reason) == MusicMarketplace.InvalidAddress.selector, "wrong error");
-        }
+        vm.expectRevert(MusicMarketplace.InvalidAddress.selector);
+        marketplace.createListing(address(canonical), BUYER, 1, 1, PRICE, 0);
     }
 
     // 17: the settlement event matches the actual economics word for word
