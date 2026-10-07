@@ -103,8 +103,8 @@ succeeded");
 /// @dev Buyer whose ERC-1155 receiver hook always reverts; the whole settlement must revert.
 contract MaliciousReceiver {
     receive() external payable {}
-    function buy(MusicMarketplace market, uint256 listingId) external payable {
-        market.buy{value: msg.value}(listingId, 1);
+    function buy(MusicMarketplace market, uint256 listingId, uint256 price) external {
+        market.buy{value: price}(listingId, 1);
     }
     function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure {
         revert("no tokens for you");
@@ -201,8 +201,8 @@ amount");
         require(ARTIST.balance - artistBefore == (salePrice * ROYALTY_BPS) / 10_000, "royalty proportional");
         require(SELLER.balance - sellerBefore == salePrice - (salePrice * FEE_BPS) / 10_000 - (salePrice * ROYALTY_BPS) / 10_000, "seller proportional");
         require(canonical.balanceOf(BUYER, 1) == 2, "partial nft transfer");
-        (,,,, uint256 remaining,,, ) = marketplace.getListing(listingId);
-        require(remaining == 1, "remaining amount");
+        MusicMarketplace.Listing memory snapshot = marketplace.getListing(listingId);
+        require(snapshot.amount == 1, "remaining amount");
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "active after partial");
 
         // second purchase completes the listing
@@ -381,7 +381,7 @@ cts() public {
         MaliciousReceiver victim = new MaliciousReceiver();
         vm.deal(address(victim), PRICE);
         uint256 sellerBefore = SELLER.balance;
-        try victim.buy{value: PRICE}(marketplace, listingId) {
+        try victim.buy(marketplace, listingId, PRICE) {
             revert("malicious receiver settled");
         } catch {
             // expected: receiver revert bubbles up through safeTransferFrom
@@ -417,7 +417,7 @@ T.balance == 0, "nothing leaked");
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.FeeTooHigh.selector, "wrong error");
         }
-        MusicMarketplace(FEE, 10_000, address(canonical));
+        new MusicMarketplace(FEE, 10_000, address(canonical));
         MusicMarketplace zeroFee = new MusicMarketplace(FEE, 0, address(canonical));
 
         // zero-fee marketplace still pays royalty and seller correctly
