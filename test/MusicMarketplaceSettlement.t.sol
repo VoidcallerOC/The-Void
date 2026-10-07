@@ -42,7 +42,8 @@ contract MockRoyalty1155 {
 
     function royaltyInfo(uint256, uint256 salePrice) external view returns (address, uint256) {
         require(erc2981, "ERC2981 unsupported");
-        return (royaltyReceiver, (salePrice * royaltyBps) / BPS_DENOMINATOR);
+        
+return (royaltyReceiver, (salePrice * royaltyBps) / BPS_DENOMINATOR);
     }
 
     function safeTransferFrom(address from, address to, uint256 id, uint256 value, bytes calldata) external {
@@ -90,7 +91,8 @@ contract ReentrantBuyer {
             (bool ok,) = address(market).call{value: reentryValue}(
                 abi.encodeWithSignature("buy(uint256,uint256)", listingId, quantity)
             );
-            require(!ok, "reentrant buy succeeded");
+            require(!ok, "reentrant buy 
+succeeded");
         }
         return this.onERC1155Received.selector;
     }
@@ -101,6 +103,9 @@ contract ReentrantBuyer {
 /// @dev Buyer whose ERC-1155 receiver hook always reverts; the whole settlement must revert.
 contract MaliciousReceiver {
     receive() external payable {}
+    function buy(MusicMarketplace market, uint256 listingId) external payable {
+        market.buy{value: msg.value}(listingId, 1);
+    }
     function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure {
         revert("no tokens for you");
     }
@@ -133,14 +138,9 @@ contract MusicMarketplaceSettlementTest {
         listingId = marketplace.createListing(address(canonical), SELLER, 1, amount, price, expiresAt);
     }
 
-    function _expectRevert(bytes4 selector, string memory what) internal {
-        // helper documented for readability; callers use inline try/catch
-        what;
-        selector;
-    }
-
     // 1, 2, 3, 4, 17: full secondary sale splits the payment exactly
-    function testFullSecondarySalePaysRoyaltyFeeAndSellerExactly() public {
+    function testFullSecondarySalePaysRoyaltyFeeAnd
+SellerExactly() public {
         uint256 listingId = _list(2, PRICE, 0);
         uint256 feeBefore = FEE.balance;
         uint256 artistBefore = ARTIST.balance;
@@ -178,7 +178,8 @@ contract MusicMarketplaceSettlementTest {
         vm.prank(BUYER);
         plainMarket.buy{value: PRICE}(listingId, 1);
 
-        require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
+        require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee 
+amount");
         require(ARTIST.balance == artistBefore, "no royalty without ERC-2981");
         require(SELLER.balance - sellerBefore == PRICE - (PRICE * FEE_BPS) / 10_000, "seller proceeds");
     }
@@ -214,7 +215,8 @@ contract MusicMarketplaceSettlementTest {
 
     // 5: accounting conservation, including floor rounding credited to the seller
     function testAccountingConservationWithRounding() public {
-        uint256 unitPrice = 1_000_003; // deliberately indivisible by BPS
+        uint256 unitPrice = 1_000_003; 
+// deliberately indivisible by BPS
         uint256 quantity = 7;
         uint256 listingId = _list(10, unitPrice, 0);
         uint256 salePrice = unitPrice * quantity;
@@ -260,7 +262,8 @@ contract MusicMarketplaceSettlementTest {
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.NotSeller.selector, "wrong error");
         }
-        vm.prank(SELLER);
+      
+  vm.prank(SELLER);
         marketplace.cancelListing(listingId);
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.CANCELLED), "cancelled");
         vm.deal(BUYER, PRICE);
@@ -302,7 +305,8 @@ contract MusicMarketplaceSettlementTest {
     }
 
     // 10: exact payment validation, no partial refunds, no state change
-    function testIncorrectPaymentRevertsWithoutSideEffects() public {
+    function testIncorrectPaymentRevertsWithoutSideEffe
+cts() public {
         uint256 listingId = _list(2, PRICE, 0);
         uint256 sellerBefore = SELLER.balance;
         vm.deal(BUYER, PRICE + 1 wei);
@@ -346,7 +350,8 @@ contract MusicMarketplaceSettlementTest {
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
         try marketplace.buy{value: PRICE}(listingId, 1) {
-            revert("purchase without approval");
+           
+ revert("purchase without approval");
         } catch (bytes memory reason) {
             require(bytes4(reason) == MusicMarketplace.InsufficientApproval.selector, "wrong error");
         }
@@ -376,14 +381,15 @@ contract MusicMarketplaceSettlementTest {
         MaliciousReceiver victim = new MaliciousReceiver();
         vm.deal(address(victim), PRICE);
         uint256 sellerBefore = SELLER.balance;
-        try victim.buy(address(marketplace), listingId, PRICE) {
+        try victim.buy{value: PRICE}(marketplace, listingId) {
             revert("malicious receiver settled");
         } catch {
             // expected: receiver revert bubbles up through safeTransferFrom
         }
         require(address(victim).balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
-        require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
+        require(FEE.balance == 0 && ARTIS
+T.balance == 0, "nothing leaked");
         require(canonical.balanceOf(SELLER, 1) == 5, "nft unchanged");
         require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "still active");
     }
@@ -421,7 +427,8 @@ contract MusicMarketplaceSettlementTest {
         uint256 zeroFeeListing = zeroFee.createListing(address(canonical), SELLER, 1, 1, PRICE, 0);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);
-        zeroFee.buy{value: PRICE}(zeroFeeListing, 1);
+        zeroFee.buy{value: PRICE}(zeroFeeLis
+ting, 1);
         require(FEE.balance == 0, "no fee");
         require(ARTIST.balance - artistBefore == (PRICE * ROYALTY_BPS) / 10_000, "royalty without fee");
         require(SELLER.balance - sellerBefore == PRICE - (PRICE * ROYALTY_BPS) / 10_000, "seller without fee");
@@ -458,7 +465,8 @@ contract MusicMarketplaceSettlementTest {
             require(uint256(logs[i].topics[1]) == listingId, "listingId topic");
             require(address(uint160(uint256(logs[i].topics[2]))) == BUYER, "buyer topic");
             require(address(uint160(uint256(logs[i].topics[3]))) == SELLER, "seller topic");
-            (address tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
+            (address tokenC
+ontract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty) =
                 abi.decode(logs[i].data, (address, uint256, uint256, uint256, uint256, uint256));
             require(tokenContract == address(canonical), "token contract data");
             require(tokenId == 1, "token id data");
