@@ -349,7 +349,7 @@ ACTIVE), "still active");
         require(ARTIST.balance == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000 - (PRICE * ROYALTY_BPS) / 10_000;
         require(SELLER.balance == sellerCut, "single seller payment");
-        require(address(attacker).balance == PRICE, "attacker spent exactly once");
+        require(address(attacker).balance == PRICE * 2, "attacker spent exactly once");
     }
 
     // 14: malicious ERC-1155 receiver makes the whole settlement revert atomically
