@@ -460,11 +460,11 @@ contract MusicMarketplaceSettlementTest {
     // 17: settlement event matches the actual economics
     function testSettlementEventMatches() public {
         bytes32 topic = keccak256(
-            string.concat(
+            bytes(string.concat(
                 "ListingSold(uint256,address,",
                 "address,address,uint256,uint256,",
                 "uint256,uint256,uint256)"
-            )
+            ))
         );
         uint256 listingId = _list(2, PRICE, 0);
         vm.deal(BUYER, PRICE);
