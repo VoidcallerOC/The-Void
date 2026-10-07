@@ -400,7 +400,7 @@ contract MusicMarketplaceSettlementTest {
         vm.expectRevert();
         victim.buy(marketplace, listingId, PRICE);
 
-        require(victim.balance == PRICE, "buyer funds intact");
+        require(address(victim).balance == PRICE, "buyer funds intact");
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "nothing leaked");
         require(canonical.balanceOf(SELLER, 1) == 5, "nft unchanged");
