@@ -68,7 +68,7 @@ contract MockRoyalty1155 {
                 )
             );
             require(ok, "receiver rejected");
-            require(ret.length == 4, "bad hook return");
+            require(ret.length == 32, "bad hook return");
             bytes32 head;
             assembly {
                 head := mload(add(ret, 32))
