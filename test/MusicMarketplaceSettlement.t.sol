@@ -66,8 +66,13 @@ contract MockRoyalty1155 {
                     bytes4(0xf23a6e61), from, address(0), id, value, bytes("")
                 )
             );
-            require(ok && ret.length >= 4, "receiver rejected");
-            require(bytes4(ret) == bytes4(0xf23a6e61), "bad magic");
+            require(ok, "receiver rejected");
+            require(ret.length == 4, "bad hook return");
+            bytes32 head;
+            assembly {
+                head := mload(add(ret, 32))
+            }
+            require(bytes4(head) == bytes4(0xf23a6e61), "bad magic");
         }
     }
 }
@@ -126,6 +131,15 @@ contract MaliciousReceiver {
     }
 }
 
+/// @dev Deploys the marketplace on behalf of callers so that a
+///      constructor revert bubbles up through an external call.
+contract DeployHelper {
+    function deploy(uint256 bps, address token) external {
+        MM m = new MM(msg.sender, bps, token);
+        require(address(m) != address(0), "deploy failed");
+    }
+}
+
 contract MusicMarketplaceSettlementTest {
     VmMkt internal constant vm = VmMkt(address(uint160(uint256(keccak256("hevm cheat code")))));
     address internal constant SELLER = address(0xA11CE);
@@ -165,7 +179,8 @@ contract MusicMarketplaceSettlementTest {
     uint256 expectedFee = (PRICE * FEE_BPS) / 10_000;
         uint256 expectedRoyalty = (PRICE * ROYALTY_BPS) / 10_000;
         uint256 expectedSeller = PRICE - expectedFee - expectedRoyalty;
-        require(FEE.balance - feeBefore == expectedFee, "fee amount");
+        require(FEE.balance - feeBefore ==
+ expectedFee, "fee amount");
         require(ARTIST.balance - artistBefore == expectedRoyalty, "royalty amount");
         require(SELLER.balance - sellerBefore == expectedSeller, "seller proceeds");
         require(BUYER.balance == 0, "buyer overpaid residue");
@@ -207,7 +222,8 @@ contract MusicMarketplaceSettlementTest {
         uint256 salePrice = unitPrice * 2;
         vm.deal(BUYER, salePrice);
 
-        vm.prank(BUYER);
+        vm.
+prank(BUYER);
         marketplace.buy{value: salePrice}(listingId, 2);
 
         require(FEE.balance - feeBefore == (salePrice * FEE_BPS) / 10_000, "fee prop");
@@ -408,8 +424,9 @@ contract MusicMarketplaceSettlementTest {
         vm.expectRevert(MM.RoyaltyTooHigh.selector);
         greedyMarket.buy{value: PRICE}(listingId, 1);
 
+        DeployHelper helper = new DeployHelper();
         vm.expectRevert(MM.FeeTooHigh.selector);
-        MM badFeeMarket = new MM(FEE, 10_001, address(canonical));
+        helper.deploy(10_001, address(canonical));
 
         MM maxFee = new MM(FEE, 10_000, address(canonical));
         require(maxFee.platformFeeBps() == 10_000, "boundary fee ok");
