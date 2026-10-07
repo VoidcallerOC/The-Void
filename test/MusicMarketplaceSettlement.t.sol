@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: MITpragma solidity ^0.8.24;
 
 import {MusicMarketplace} from "../contracts/MusicMarketplace.sol";
 
@@ -178,7 +177,8 @@ contract MusicMarketplaceSettlementTest {
         plainMarket.buy{value: PRICE}(listingId, 1);
 
         require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
-        require(ARTIST.balance == artistBefore, "no royalty without ERC-2981");
+        require(ARTIST.balance =
+= artistBefore, "no royalty without ERC-2981");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
         require(SELLER.balance - sellerBefore == sellerCut, "seller proceeds");
     }
@@ -214,6 +214,7 @@ contract MusicMarketplaceSettlementTest {
 
     // 5: accounting conservation, including floor rounding credited to the seller
     function testConservationWithRounding() public {
+        canonical.setBalance(SELLER, 1, 10);
         uint256 unitPrice = 1_000_003; // deliberately indivisible by BPS
         uint256 quantity = 7;
         uint256 listingId = _list(10, unitPrice, 0);
@@ -307,7 +308,8 @@ contract MusicMarketplaceSettlementTest {
         require(SELLER.balance == sellerBefore, "seller unpaid");
         require(FEE.balance == 0 && ARTIST.balance == 0, "no fee or royalty leaked");
         require(canonical.balanceOf(BUYER, 1) == 0, "no nft moved");
-        require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.ACTIVE), "still active");
+        require(uint256(marketplace.listingStatus(listingId)) == uint256(MusicMarketplace.Status.
+ACTIVE), "still active");
     }
 
     // 11: seller spent the tokens after listing
@@ -386,6 +388,7 @@ contract MusicMarketplaceSettlementTest {
         require(maxFee.platformFeeBps() == 10_000, "boundary fee allowed");
 
         MusicMarketplace zeroFee = new MusicMarketplace(FEE, 0, address(canonical));
+        canonical.setApproval(SELLER, address(zeroFee), true);
         uint256 artistBefore = ARTIST.balance;
         uint256 sellerBefore = SELLER.balance;
         vm.prank(SELLER);
