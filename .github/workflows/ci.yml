@@ -56,6 +56,9 @@ jobs:
       - name: Install ffprobe
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      - name: Reject public master audio paths
+        run: bash scripts/check-public-media-boundary.sh .
+
       - name: Reject public audio longer than 35 seconds
         run: |
           set -euo pipefail

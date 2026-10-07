@@ -1,5 +1,14 @@
 # Private media storage
 
-This directory is a server-only storage mount. Protected full-resolution audio, video, stems, demos, live recordings, and downloads must be uploaded here (or to a provider-backed adapter) during deployment. The contents are intentionally ignored by Git and are never copied into the Vite `public/` tree.
+This directory is a server-only storage mount for **local/dev filesystem** protected media. Full-resolution masters, video, stems, demos, live recordings, and downloads must never be copied into the Vite `public/` tree and must never be committed to Git.
 
-Expected protected audio keys use the form `audio/<filename>`, matching the server media catalog. Configure `PRIVATE_MEDIA_ROOT` to the mounted directory in production. Public previews remain under `public/assets/audio-preview/`.
+## Storage boundary
+
+| Environment | Where full masters live | Public tree |
+| --- | --- | --- |
+| Production | Pinata private IPFS (`MEDIA_STORAGE_DRIVER=pinata`) | `public/assets/audio-preview/*-preview.*` only |
+| Local/dev | This ignored mount (`MEDIA_STORAGE_DRIVER=filesystem`, `MEDIA_PRIVATE_ROOT` / `PRIVATE_MEDIA_ROOT`) | Same preview-only rule |
+
+`public/assets/audio/` is forbidden. CI rejects that directory and any non-`*-preview` audio under `public/assets/audio-preview/`.
+
+Expected protected audio keys use the form `audio/<filename>`, matching the server media catalog. Populate production masters through the controlled Pinata private-upload path (Studio / server adapters), not by committing bytes.
