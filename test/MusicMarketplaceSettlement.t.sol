@@ -177,9 +177,7 @@ contract MusicMarketplaceSettlementTest {
         plainMarket.buy{value: PRICE}(listingId, 1);
 
         require(FEE.balance - feeBefore == (PRICE * FEE_BPS) / 10_000, "fee amount");
-        require(ARTIST.balance =
-
-= artistBefore, "no royalty without ERC-2981");
+        require(ARTIST.balance == artistBefore, "no royalty without ERC-2981");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
         require(SELLER.balance - sellerBefore == sellerCut, "seller proceeds");
     }
