@@ -380,7 +380,7 @@ contract MusicMarketplaceSettlementTest {
 
         require(attacker.reentryAttempts() == 1, "reentry tried once");
         require(canonical.balanceOf(address(attacker), 1) == 1, "one transfer");
-        require(attacker.balance == PRICE, "spent exactly once");
+        require(address(attacker).balance == PRICE, "spent exactly once");
         require(FEE.balance == (PRICE * FEE_BPS) / 10_000, "single fee");
         require(ARTIST.balance == (PRICE * ROYALTY_BPS) / 10_000, "single royalty");
         uint256 sellerCut = PRICE - (PRICE * FEE_BPS) / 10_000;
