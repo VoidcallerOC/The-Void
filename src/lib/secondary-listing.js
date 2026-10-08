@@ -1,5 +1,5 @@
 import { Interface, getAddress, isAddress } from "ethers";
-import { FUJI_RELEASE_PER_CONTRACT } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -34,7 +34,7 @@ async function read(provider, address, contractInterface, method, args = []) {
 
 export function isReleasePerContractCandidate(edition) {
   const tokenId = edition?.tokenIds?.[0];
-  return Number(edition?.chainId) === Number(FUJI_RELEASE_PER_CONTRACT.chainId)
+  return Number(edition?.chainId) === Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId)
     && !isCertifiedFujiEdition(edition)
     && validContractAddress(edition?.contractAddress)
     && validContractAddress(edition?.primarySaleAddress)
@@ -51,9 +51,10 @@ export async function readReleaseListingContext({
   tokenId,
   seller,
 }) {
-  const expectedChainId = Number(FUJI_RELEASE_PER_CONTRACT.chainId);
-  const factoryAddress = getAddress(FUJI_RELEASE_PER_CONTRACT.factoryAddress);
-  const canonicalMarketplace = getAddress(FUJI_RELEASE_PER_CONTRACT.marketplaceAddress);
+  const expectedChainId = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
+  const factoryAddress = getAddress(FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress);
+  const canonicalMarketplace = getAddress(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceAddress);
+  const expectedFeeBps = BigInt(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceFeeBps);
 
   if (!provider?.request) fail("Connect a browser wallet to verify this release on chain.", "WALLET_REQUIRED");
   if (!validContractAddress(marketplaceAddress) || getAddress(marketplaceAddress) !== canonicalMarketplace) {
@@ -89,8 +90,8 @@ export async function readReleaseListingContext({
   } catch {
     fail("The configured marketplace could not be verified on chain. Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
   }
-  if (getAddress(registry) !== factoryAddress || deployedChainId !== BigInt(expectedChainId) || feeBps > 10_000n) {
-    fail("The marketplace deployment does not match the verified Fuji release factory or chain.", "MARKETPLACE_UNAVAILABLE");
+  if (getAddress(registry) !== factoryAddress || deployedChainId !== BigInt(expectedChainId) || feeBps !== expectedFeeBps) {
+    fail("The marketplace deployment does not match the verified Fuji release factory, chain, or 250 bps fee.", "MARKETPLACE_UNAVAILABLE");
   }
 
   let isRelease;

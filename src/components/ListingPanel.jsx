@@ -22,7 +22,7 @@ import {
   recordAuthoritativeTransactionSubmission,
 } from "../lib/marketplace-api.js";
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
-import { FUJI_RELEASE_PER_CONTRACT } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
 import { switchChain } from "../lib/web3.js";
 
@@ -78,8 +78,8 @@ function statusCopy(stage, message) {
 export function ListingPanel({ edition }) {
   const wallet = useWallet();
   const infrastructure = resolveInfrastructureStatus();
-  const canonicalMarketplace = FUJI_RELEASE_PER_CONTRACT.marketplaceAddress;
-  const canonicalChainId = Number(FUJI_RELEASE_PER_CONTRACT.chainId);
+  const canonicalMarketplace = FUJI_RELEASE_PER_CONTRACT_V2.marketplaceAddress;
+  const canonicalChainId = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
   const candidate = isReleasePerContractCandidate(edition);
   const marketplaceConfigured = infrastructure === MARKETPLACE_STATE.LIVE
     && Number(MARKETPLACE_CONFIG.chainId) === canonicalChainId
@@ -469,7 +469,7 @@ export function ListingPanel({ edition }) {
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
         <div style={{ marginTop: 10, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.8, overflowWrap: "anywhere" }}>
           <div>NETWORK · AVALANCHE FUJI · CHAIN {canonicalChainId}</div>
-          <div>RELEASE FACTORY · {FUJI_RELEASE_PER_CONTRACT.factoryAddress}</div>
+          <div>RELEASE FACTORY · {FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress}</div>
           <div>MARKETPLACE · {canonicalMarketplace}</div>
           <div>RELEASE CONTRACT · {contract || "UNAVAILABLE"}</div>
           <div>CONTRACT · checks clone registration, balance, approval, price, expiry and settlement rules.</div>
