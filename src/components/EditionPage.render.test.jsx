@@ -21,7 +21,7 @@ vi.mock("../lib/marketplace.js", async (importOriginal) => {
     ...actual,
     MARKETPLACE_CONFIG: Object.freeze({
       ...actual.MARKETPLACE_CONFIG,
-      address: "0x228734C7a6325f7B6F570EBCAc80239495fdedf0",
+      address: "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
       chainId: 43113,
       enabled: true,
     }),

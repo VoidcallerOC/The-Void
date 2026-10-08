@@ -5,10 +5,10 @@ import { Interface } from "ethers";
 import { MemoryRouter } from "react-router-dom";
 import { ListingPanel } from "./ListingPanel.jsx";
 import { WalletCtx } from "../lib/wallet-context.js";
-import { FUJI_RELEASE_PER_CONTRACT } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
 
 const mocks = vi.hoisted(() => ({
-  market: "0x228734C7a6325f7B6F570EBCAc80239495fdedf0",
+  market: "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
   seller: "0xabd3746e8b852f55be52fc44fab6cab908b1c174",
   contract: "0x82b26da27136935454bdf1e40801190b521b82e5",
   sale: "0x8b743f91940a267899986d2e99b4375e1d87c321",
@@ -136,7 +136,7 @@ beforeEach(() => {
     approved: true,
     marketplaceFeeBps: "250",
     royaltyBps: "250",
-    factoryAddress: FUJI_RELEASE_PER_CONTRACT.factoryAddress,
+    factoryAddress: FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress,
     marketplaceAddress: mocks.market,
     releaseContractAddress: mocks.contract,
     tokenId,
