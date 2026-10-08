@@ -132,9 +132,14 @@ describe("Genesis holder claim authorization", () => {
       GENESIS_CLAIM_TOKEN_ID: "0",
       GENESIS_CLAIM_ALLOCATION: "25",
       GENESIS_PUBLIC_MINT_ALLOCATION: "75",
+      GENESIS_CLAIM_SIGNER_PRIVATE_KEY: `0x${"11".repeat(32)}`,
     };
     expect(() => loadGenesisClaimConfig({ ...complete, GENESIS_CLAIM_RELEASE_CONTRACT: LEGACY_FUJI_SINGLETON })).toThrow(/legacy Fuji V2 singleton/);
     expect(() => loadGenesisClaimConfig({ ...complete, GENESIS_CLAIM_TOKEN_ID: "not-a-number" })).toThrow(/non-negative integer/);
-    expect(() => loadGenesisClaimConfig(complete)).toThrow(/GENESIS_CLAIM_SIGNER_PRIVATE_KEY/);
+    expect(loadGenesisClaimConfig(complete).publicAllocation).toBe(75n);
+    expect(loadGenesisClaimConfig({ ...complete, GENESIS_PUBLIC_MINT_ALLOCATION: "0" }).publicAllocation).toBe(0n);
+    expect(() => loadGenesisClaimConfig({ ...complete, GENESIS_PUBLIC_MINT_ALLOCATION: "-1" })).toThrow(/non-negative integer/);
+    expect(() => loadGenesisClaimConfig({ ...complete, GENESIS_PUBLIC_MINT_ALLOCATION: "1.5" })).toThrow(/non-negative integer/);
+    expect(() => loadGenesisClaimConfig({ ...complete, GENESIS_PUBLIC_MINT_ALLOCATION: "" })).toThrow(/non-negative integer/);
   });
 });

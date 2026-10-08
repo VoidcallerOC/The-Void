@@ -69,6 +69,16 @@ function positiveBigInt(value, name) {
   }
 }
 
+function nonNegativeBigInt(value, name) {
+  try {
+    const text = String(value ?? "").trim();
+    if (!/^(0|[1-9]\d*)$/.test(text)) throw new Error();
+    return BigInt(text);
+  } catch {
+    throw new GenesisClaimConfigurationError(`${name} must be a non-negative integer.`);
+  }
+}
+
 function httpUrl(value, name) {
   try {
     const url = new URL(String(value || "").trim());
@@ -95,7 +105,7 @@ export function loadGenesisClaimConfig(env = process.env) {
   if (!/^(0|[1-9]\d*)$/.test(tokenIdValue)) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_TOKEN_ID must be a non-negative integer.");
   const tokenId = BigInt(tokenIdValue);
   const allocation = positiveBigInt(env.GENESIS_CLAIM_ALLOCATION, "GENESIS_CLAIM_ALLOCATION");
-  const publicAllocation = positiveBigInt(env.GENESIS_PUBLIC_MINT_ALLOCATION, "GENESIS_PUBLIC_MINT_ALLOCATION");
+  const publicAllocation = nonNegativeBigInt(env.GENESIS_PUBLIC_MINT_ALLOCATION, "GENESIS_PUBLIC_MINT_ALLOCATION");
   const privateKey = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY || "").trim();
   if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY must be a server-side 32-byte hex secret.");
   return Object.freeze({
