@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getAddress, id } from "ethers";
-import { OLD_AUTHORITY, OWNABLES, RELEASES, ROLES, buildRotationPlan, ownableIface, releaseIface, validateNewAuthority } from "./authority-rotation-plan.mjs";
+import { LOCKED_OWNABLES, OLD_AUTHORITY, OWNABLES, RELEASES, ROLES, buildRotationPlan, ownableIface, releaseIface, validateNewAuthority } from "./authority-rotation-plan.mjs";
 
 // Deterministic test-only address; NOT a proposed replacement authority.
 const NEW = getAddress("0x00000000000000000000000000000000000000a1");
@@ -43,14 +43,14 @@ describe("authority rotation plan", () => {
     }
   });
 
-  it("orders each release grant -> ISSUER revoke (proof) -> ADMIN revoke -> ARTIST revoke", () => {
+  it("orders each release grant -> ADMIN revoke (proof, closes the race) -> ISSUER revoke -> ARTIST revoke", () => {
     const steps = buildRotationPlan({ newAuthority: NEW, scope: "ALL" });
     for (const release of RELEASES) {
       const own = steps.filter((s) => s.to === release.address);
       expect(own.map((s) => [s.signer === NEW ? "new" : "old", s.function.split("(")[0], s.args.role])).toEqual([
         ["old", "grantRole", "DEFAULT_ADMIN_ROLE"],
-        ["new", "revokeRole", "ISSUER_ROLE"],
         ["new", "revokeRole", "DEFAULT_ADMIN_ROLE"],
+        ["new", "revokeRole", "ISSUER_ROLE"],
         ["new", "revokeRole", "ARTIST_ROLE"],
       ]);
     }
@@ -64,8 +64,23 @@ describe("authority rotation plan", () => {
     expect(steps.find((s) => s.function.startsWith("transferOwnership")).to).toBe(OWNABLES[0].address);
   });
 
+  it("never revokes or renounces the new authority (last-admin lockout guard)", () => {
+    for (const step of buildRotationPlan({ newAuthority: NEW, scope: "ALL" })) {
+      expect(step.function.startsWith("renounceRole")).toBe(false);
+      if (step.function.startsWith("revokeRole")) expect(step.args.account).toBe(OLD_AUTHORITY);
+    }
+  });
+
+  it("never emits a transfer to a sale whose bytecode cannot transfer ownership", () => {
+    const steps = buildRotationPlan({ newAuthority: NEW, scope: "ALL" });
+    const locked = new Set(LOCKED_OWNABLES.map((c) => c.address));
+    expect(steps.filter((s) => locked.has(s.to))).toEqual([]);
+    expect(() => validateNewAuthority(LOCKED_OWNABLES[0].address)).toThrow(/contracts being rotated/);
+    expect(steps).toHaveLength(RELEASES.length * 4 + OWNABLES.length);
+  });
+
   it("scopes the package to P0 when requested", () => {
     const targets = new Set(buildRotationPlan({ newAuthority: NEW, scope: "P0" }).map((s) => s.to));
-    expect([...targets]).toEqual(["0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6", "0x51cCD2d5Cd71368917f1EFe3fa43Fab8068E1aBA"]);
+    expect([...targets]).toEqual(["0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6"]);
   });
 });

@@ -26,6 +26,7 @@ const saleIface = new Interface([
   "function balances(address) view returns (uint256)",
   "function platformFeeBps() view returns (uint256)",
   "function releases() view returns (address)",
+  "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
 ]);
 const editionIface = new Interface([
   "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)",
@@ -104,7 +105,15 @@ async function main() {
       const v = await read("sales", [tokenId]);
       const payout = editionIface.decodeFunctionResult("payoutOf", await provider.call({ to: release, data: editionIface.encodeFunctionData("payoutOf", [tokenId]) }))[0];
       const open = v.configured && !v.paused && (v.startTime === 0n || BigInt(now) >= v.startTime) && (v.endTime === 0n || BigInt(now) <= v.endTime) && (v.maxSupply === 0n || v.sold < v.maxSupply);
-      s.editions.push({ tokenId, payout, configured: v.configured, paused: v.paused, priceWei: v.priceWei.toString(), sold: v.sold.toString(), maxSupply: v.maxSupply.toString(), startTime: v.startTime.toString(), endTime: v.endTime.toString(), purchasableNow: open });
+      const e = { tokenId, payout, configured: v.configured, paused: v.paused, priceWei: v.priceWei.toString(), sold: v.sold.toString(), maxSupply: v.maxSupply.toString(), perWalletLimit: v.perWalletLimit.toString(), startTime: v.startTime.toString(), endTime: v.endTime.toString(), purchasableNow: open };
+      if (open) {
+        // Optional pre-rotation close: same parameters, paused = true. Only the edition
+        // artist (the old key) can do this, and only while it still holds ARTIST_ROLE.
+        e.closeCalldata = saleIface.encodeFunctionData("configureSale", [tokenId, v.priceWei, v.maxSupply, v.perWalletLimit, v.startTime, v.endTime, true]);
+        e.closeFromOld = await simulate(old, sale, e.closeCalldata);
+        e.closeFromUnprivileged = await simulate(UNPRIVILEGED, sale, e.closeCalldata);
+      }
+      s.editions.push(e);
     }
     s.withdrawFromOld = await simulate(old, sale, "0x3ccfd60b");
     out.sales.push(s);
