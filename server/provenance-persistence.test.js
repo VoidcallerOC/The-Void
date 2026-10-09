@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadServerConfig } from "./config.js";
 import { migrate } from "./migrate.js";
+import { CANONICAL_FUJI_RELEASE } from "./fuji-contract-scope.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "";
@@ -180,5 +181,40 @@ describe.skipIf(!testDatabaseUrl)("provenance persistence", () => {
     }
 
     expect((await pool.query("SELECT id FROM provenance_proofs WHERE id = 'proof-1'")).rowCount).toBe(1);
+  });
+
+  it("verifies EditionCreated only from the release contract bound to the proof's own release, on that binding's chain", async () => {
+    const { pool, records } = await database();
+    const ownContract = "0x4444444444444444444444444444444444444444";
+    const otherReleaseContract = "0x5555555555555555555555555555555555555555";
+    const failedContract = "0x6666666666666666666666666666666666666666";
+    const contracts = {};
+    for (const [address, chainId] of [[ownContract, 43113], [otherReleaseContract, 43113], [failedContract, 43114]]) {
+      contracts[address] = (await pool.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name) VALUES ($1, $2, $3, 'ERC1155', 'VoidRelease1155V4') RETURNING id", [chainId, String(chainId), address])).rows[0].id;
+    }
+    for (const [releaseId, address, chainId, key, status] of [["release-1", ownContract, 43113, "a", "DEPLOYED"], ["release-2", otherReleaseContract, 43113, "b", "DEPLOYED"], ["release-1", failedContract, 43114, "c", "FAILED"]]) {
+      await pool.query(
+        "INSERT INTO release_contracts (release_id, chain_id, release_contract_id, release_key, artist_wallet, implementation_address, implementation_version, status) VALUES ($1, $2, $3, $4, $5, $6, 2, $7)",
+        [releaseId, chainId, contracts[address], `0x${key.repeat(64)}`, owner, "0x7777777777777777777777777777777777777777", status],
+      );
+    }
+    await records.createProof({ id: "proof-bound", releaseId: "release-1", editionId: "edition-1", creatorWallet: owner, metadataSha256: metadata, manifestSha256: manifest, schemaVersion: 1, proofTimestamp: "2026-09-25T20:00:00.000Z" });
+    const anchor = (overrides) => ({ id: "proof-bound", creatorWallet: owner, chainKey: "43113", chainId: 43113, transactionHash: tx, blockNumber: 90, blockTimestamp: "2026-09-25T22:00:01.000Z", anchorContract: ownContract, anchorEvent: "EditionCreated", mechanism: "edition-metadata-cid", metadataCid: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", verifiedAt: "2026-09-25T22:00:00.000Z", ...overrides });
+    const refusal = async (promise) => promise.then(() => { throw new Error("expected the anchor to be rejected"); }, (error) => error);
+    const NOT_BOUND = "EditionCreated must come from the canonical Fuji release contract or this release's bound release contract.";
+
+    expect(await refusal(records.recordVerifiedAnchor(anchor({ anchorContract: otherReleaseContract })))).toMatchObject({ code: "PROVENANCE_RECORD_INVALID", message: NOT_BOUND });
+    expect(await refusal(records.recordVerifiedAnchor(anchor({ anchorContract: failedContract, chainId: 43114, chainKey: "43114" })))).toMatchObject({ code: "PROVENANCE_RECORD_INVALID", message: NOT_BOUND });
+    expect(await refusal(records.recordVerifiedAnchor(anchor({ chainId: 43114 })))).toMatchObject({ code: "PROVENANCE_RECORD_INVALID", message: "EditionCreated must be anchored on chain 43113." });
+    expect(await refusal(records.recordVerifiedAnchor(anchor({ chainKey: "fuji" })))).toMatchObject({ code: "PROVENANCE_RECORD_INVALID", message: "EditionCreated must be anchored on the 43113 network." });
+    expect((await pool.query("SELECT anchor_status, verification_status FROM provenance_proofs WHERE id = 'proof-bound'")).rows[0]).toEqual({ anchor_status: "PENDING", verification_status: "UNVERIFIED" });
+
+    const verified = await records.recordVerifiedAnchor(anchor({ anchorContract: `0x${ownContract.slice(2).toUpperCase()}` }));
+    expect(verified).toMatchObject({ anchor_status: "ANCHORED", verification_status: "VERIFIED", anchor_contract: ownContract, anchor_event: "EditionCreated", chain_key: "43113" });
+    expect(String(verified.chain_id)).toBe("43113");
+
+    await records.createProof({ id: "proof-canonical", releaseId: "release-2", editionId: "edition-2", creatorWallet: owner, metadataSha256: metadata, manifestSha256: manifest, schemaVersion: 1, proofTimestamp: "2026-09-25T20:00:00.000Z" });
+    const canonical = await records.recordVerifiedAnchor(anchor({ id: "proof-canonical", transactionHash: `0x${"cd".repeat(32)}`, chainKey: "fuji", anchorContract: CANONICAL_FUJI_RELEASE }));
+    expect(canonical).toMatchObject({ anchor_status: "ANCHORED", verification_status: "VERIFIED", anchor_contract: CANONICAL_FUJI_RELEASE, chain_key: "fuji" });
   });
 });

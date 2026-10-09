@@ -6,6 +6,7 @@ import { ApiError } from "./api-errors.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceAnchorService } from "./provenance-anchor.js";
+import { ProvenanceRecords } from "./provenance-records.js";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 import { ArtistStudioService } from "./studio-service.js";
 import { assertProvenanceConsistency, provenancePublicationStatus, publicationView } from "./studio-publication.js";
@@ -283,6 +284,79 @@ describe("Artist Studio publication pipeline", () => {
     await expect(rejected.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
     expect(records.recordAnchorFailure).toHaveBeenCalledWith(expect.objectContaining({ id: "proof-1", failureCode: "PROVENANCE_RECORD_INVALID" }));
     expect(records.recordAnchorFailure.mock.calls[0][0].failureDetail).not.toMatch(/ipfs:\/\//);
+  });
+});
+
+describe("release-contract publication through the real provenance record layer", () => {
+  const releaseContract = "0x4444444444444444444444444444444444444444";
+  const releaseKey = `0x${"5a".repeat(32)}`;
+  const metadataUri = "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+  const editionId = ethers.encodeBytes32String("chapter-i");
+  const tokenId = BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", editionId])));
+
+  function publication({ recordBinding }) {
+    const generated = canonicalMetadata({ release: releaseRow(), edition: { title: "Chapter I", description: null, supply: "10" }, artist: { name: "Voidcaller" }, releaseType: "EP" });
+    const provenance = canonicalProvenanceManifest({ releaseId: "release-1", editionId: "edition-1", creator: { artistId: "artist-1", wallet: owner }, metadataDigest: generated.digest, createdAt: "2026-09-25T20:00:00.000Z", artwork: "11".repeat(32) });
+    const document = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
+    const release = { ...releaseRow(), release_metadata: { publicationArchitecture: "release-per-contract" } };
+    const edition = { ...editionRow(document), contract_id: "contract-release", metadata_uri: metadataUri, token_id: tokenId.toString() };
+    const studioBinding = { release_contract_id: "contract-release", release_contract_address: releaseContract, chain_id: "43113", release_key: releaseKey };
+    const proof = { id: "proof-1", release_id: "release-1", edition_id: "edition-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" };
+    const event = new ethers.Interface(["event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
+    const encoded = event.encodeEventLog("EditionCreated", [tokenId, releaseKey, editionId, owner, 10n, metadataUri]);
+    const chain = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 1, blockNumber: 90, logs: [{ address: releaseContract, topics: encoded.topics, data: encoded.data }] }),
+      edition: vi.fn().mockResolvedValue([releaseKey, editionId, owner, 10n, 0n, metadataUri, true]),
+      getBlock: vi.fn().mockResolvedValue({ timestamp: 1_758_835_200 }),
+    };
+    const db = { query: vi.fn(async (sql, params) => {
+      const text = String(sql);
+      if (text.includes("FROM experiences")) return { rows: [] };
+      if (text.includes("JOIN tokens t")) return { rows: [edition] };
+      if (text.includes("AS release_contract_address")) return { rows: [studioBinding] };
+      if (text.includes("FROM release_contracts rc")) return { rows: recordBinding };
+      if (text.includes("anchor_status = 'FAILED'")) return { rows: [{ ...proof, anchor_status: "FAILED", failure_code: params[1] }] };
+      if (text.includes("UPDATE provenance_proofs")) return { rows: [{ ...proof, anchor_status: "ANCHORED", verification_status: "VERIFIED", chain_key: params[2], chain_id: params[3], anchor_contract: params[7], anchor_event: params[8] }] };
+      if (text.includes("FROM provenance_proofs p")) return { rows: [proof] };
+      if (text.includes("FROM editions e")) return { rows: [{ release_id: "release-1", edition_id: "edition-1", artist_id: "artist-1" }] };
+      return { rows: [release] };
+    }) };
+    const scoped = verifiedArtistDb(db);
+    const instance = new ArtistStudioService({
+      db: scoped,
+      repository: repository(),
+      metadataStorage: { write: vi.fn() },
+      provenanceRecords: new ProvenanceRecords({ db: scoped }),
+      publicationChain: chain,
+      metadataFetcher: async () => Buffer.from(JSON.stringify(document)),
+      authenticator: vi.fn().mockResolvedValue({ wallet: owner }),
+      logger: { error: vi.fn(), info: vi.fn() },
+    });
+    const calls = (pattern) => db.query.mock.calls.filter(([sql]) => pattern.test(String(sql)));
+    return { instance, calls };
+  }
+
+  it("fully publishes a bound release contract's EditionCreated on its own chain", async () => {
+    const { instance, calls } = publication({ recordBinding: [{ address: releaseContract, chain_id: "43113", chain_key: "43113" }] });
+    await expect(instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_VERIFIED", fullyPublished: true, releaseContractAddress: releaseContract, chainId: 43113 });
+    expect(calls(/FROM release_contracts rc\s+JOIN contracts c/)[0][1]).toEqual(["release-1", releaseContract]);
+    const [, params] = calls(/anchor_status = 'ANCHORED'/)[0];
+    expect(params.slice(2, 4)).toEqual(["43113", 43113]);
+    expect(params.slice(7)).toEqual([releaseContract, "EditionCreated"]);
+    expect(calls(/anchor_status = 'FAILED'/)).toHaveLength(0);
+  });
+
+  it("does not fully publish when the record layer finds no binding for that contract", async () => {
+    const { instance, calls } = publication({ recordBinding: [] });
+    await expect(instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ status: "PUBLISHED", provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
+    expect(calls(/anchor_status = 'ANCHORED'/)).toHaveLength(0);
+    expect(calls(/anchor_status = 'FAILED'/)[0][1][1]).toBe("PROVENANCE_RECORD_INVALID");
+  });
+
+  it("does not fully publish when the bound release contract's chain differs from the publication chain", async () => {
+    const { instance, calls } = publication({ recordBinding: [{ address: releaseContract, chain_id: "43114", chain_key: "43114" }] });
+    await expect(instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ provenanceStatus: "PROVENANCE_FAILED", fullyPublished: false });
+    expect(calls(/anchor_status = 'ANCHORED'/)).toHaveLength(0);
   });
 });
 
