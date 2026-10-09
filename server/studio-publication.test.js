@@ -105,6 +105,21 @@ describe("Artist Studio publication pipeline", () => {
     expect(harness.repo.saveRelease).not.toHaveBeenCalled();
   });
 
+  it("publishes the stored, validated release type rather than the request's releaseType", async () => {
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue(null), createProof: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
+    const metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata" }) };
+    const harness = studio({ records, metadataStorage });
+    harness.db.query
+      .mockResolvedValueOnce({ rows: [{ ...releaseRow(), release_metadata: { releaseType: "ALBUM" } }] })
+      .mockResolvedValueOnce({ rows: [{ ...editionRow(), metadata_uri: null, metadata: null, metadata_version: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await harness.instance.publishMetadata({ request, releaseId: "release-1", input: { releaseType: "<script>MIXTAPE" } });
+    expect(metadataStorage.write).toHaveBeenCalledOnce();
+    expect(JSON.stringify(metadataStorage.write.mock.calls[0][0].metadata)).toContain('"ALBUM"');
+    expect(JSON.stringify(metadataStorage.write.mock.calls[0][0].metadata)).not.toContain("MIXTAPE");
+  });
+
   it("does not record provenance when metadata publication fails", async () => {
     const records = { findOwnedByRoot: vi.fn(), createProof: vi.fn() };
     const harness = studio({ records, metadataStorage: { write: vi.fn().mockRejectedValue(new Error("pinata down")) } });

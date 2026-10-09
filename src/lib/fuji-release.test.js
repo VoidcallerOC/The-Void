@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ethers } from "ethers";
-import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiE2EMintPlan, assertFujiTransactionTarget, assertProvenanceAnchorTarget, createFujiE2EMintPlan, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiE2ECreateEdition, encodeFujiE2EMint, encodeFujiMint, explainFujiEditionError, fujiIds, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiE2EMintPreflight, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint } from "./fuji-release.js";
+import { FUJI_E2E_MINT, FUJI_RELEASE_CONFIG, FUJI_RELEASE_ABI, FUJI_ROLES, assertFujiAddress, assertFujiE2EMintPlan, assertFujiTransactionTarget, assertProvenanceAnchorTarget, createFujiE2EMintPlan, decodeFujiRevert, encodeCreateFujiEdition, encodeFujiE2ECreateEdition, encodeFujiE2EMint, encodeFujiMint, explainFujiEditionError, fujiIds, fujiSlug, fujiTokenId, isCertifiedFujiEdition, isFujiEditionNotFoundError, readFujiE2EMintPreflight, readReleaseAlbumState, readFujiEdition, sendFujiTransaction, simulateCreateFujiEdition, verifyFujiE2EMint } from "./fuji-release.js";
 
 describe("certified Fuji VoidRelease1155 integration", () => {
   it("uses a valid certified Fuji release configuration", () => {
@@ -370,5 +370,32 @@ describe("sendFujiTransaction failure preserves evidence", () => {
         explorerUrl: expect.stringContaining(failingHash),
         blockNumber: null,
       });
+  });
+});
+
+describe("readReleaseAlbumState", () => {
+  const clone = "0x1aaf66f0aba020321e63d684186886a3178a9bfc";
+  const album = new ethers.Interface(["function albumCreated() view returns (bool)", "function albumClosed() view returns (bool)", "function albumTrackCount() view returns (uint256)", "function albumSingleCount() view returns (uint256)"]);
+  const selectorOf = (name) => album.getFunction(name).selector;
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+
+  it("reports a pre-album clone as unsupported when the album getter reverts", async () => {
+    const provider = { request: async () => { throw Object.assign(new Error("execution reverted"), { rpcCode: -32000 }); } };
+    await expect(readReleaseAlbumState(provider, clone)).resolves.toMatchObject({ supported: false, created: false });
+  });
+  it("reports empty return data as unsupported", async () => {
+    await expect(readReleaseAlbumState({ request: async () => "0x" }, clone)).resolves.toMatchObject({ supported: false });
+  });
+  it("reads album activation, closure and counts from an album-capable clone", async () => {
+    const values = { albumCreated: coder.encode(["bool"], [true]), albumClosed: coder.encode(["bool"], [false]), albumTrackCount: coder.encode(["uint256"], [3]), albumSingleCount: coder.encode(["uint256"], [1]) };
+    const provider = { request: async ({ params }) => values[Object.keys(values).find((name) => params[0].data === selectorOf(name))] };
+    await expect(readReleaseAlbumState(provider, clone)).resolves.toEqual({ supported: true, created: true, closed: false, trackCount: 3n, singleCount: 1n });
+  });
+  it("propagates transport failures instead of treating them as unsupported", async () => {
+    const provider = { request: async () => { throw new Error("Fuji RPC unavailable"); } };
+    await expect(readReleaseAlbumState(provider, clone)).rejects.toThrow(/unavailable/);
+  });
+  it("rejects a zero or malformed release contract address", async () => {
+    await expect(readReleaseAlbumState({ request: async () => "0x" }, ethers.ZeroAddress)).rejects.toThrow(/invalid/);
   });
 });

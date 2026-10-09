@@ -37,7 +37,8 @@ vi.mock("../lib/marketplace-api.js", async (importOriginal) => {
 });
 
 const buyer = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
-const indexedMarketplace = "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b";
+const indexedMarketplace = mocks.address;
+const foreignMarketplace = "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b";
 const tokenContract = "0x82b26da27136935454bdf1e40801190b521b82e5";
 const transactionHash = `0x${"a".repeat(64)}`;
 const edition = { id: "edition-1", title: "Test edition", chainId: 43113, contractAddress: tokenContract, tokenIds: ["42"] };
@@ -211,5 +212,15 @@ describe("PurchasePanel authoritative settlement polling", () => {
     expect(requestSignal.aborted).toBe(true);
     await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
     expect(mocks.fetchAuthoritativeTransaction).toHaveBeenCalledTimes(2);
+  });
+  it("blocks a purchase when the indexed listing names a non-canonical marketplace", async () => {
+    mocks.fetchIndexedListings.mockReset().mockResolvedValue([{ ...activeListing, marketplace: foreignMarketplace }]);
+    setup();
+    await act(async () => { await flushPromises(); });
+    await clickCollect();
+
+    expect(mocks.createIntent).not.toHaveBeenCalled();
+    expect(mocks.submitPurchase).not.toHaveBeenCalled();
+    expect(screen.getByText(/does not belong to the verified marketplace/)).not.toBeNull();
   });
 });

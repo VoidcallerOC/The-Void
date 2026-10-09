@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Btn } from "./Atoms.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import { LISTING_STATUS, MARKETPLACE_CONFIG, PURCHASE_STATE, requiredPayment, submitPurchase } from "../lib/marketplace.js";
+import { LISTING_STATUS, MARKETPLACE_CONFIG, PURCHASE_STATE, assertCanonicalMarketplaceTarget, requiredPayment, submitPurchase } from "../lib/marketplace.js";
 import {
   classifyAuthoritativePurchaseTransaction,
   createAuthoritativePurchaseIntent,
@@ -73,7 +73,14 @@ export function PurchasePanel({ edition }) {
     if (!wallet.authenticated) { setMessage("Authenticate your wallet before submitting a purchase."); return; }
     if (!listing || listing.status !== LISTING_STATUS.ACTIVE) { setMessage("No active indexed listing is available for this edition."); return; }
     const selectedListing = { ...listing };
-    const marketplaceTarget = selectedListing.marketplace || MARKETPLACE_CONFIG.address;
+    let marketplaceTarget;
+    try {
+      marketplaceTarget = assertCanonicalMarketplaceTarget({ marketplace: selectedListing.marketplace || MARKETPLACE_CONFIG.address, chainId: chain?.id, config: MARKETPLACE_CONFIG });
+    } catch (error) {
+      setState(PURCHASE_STATE.FAILED);
+      setMessage(error.message);
+      return;
+    }
     const selectedQuantity = Number(quantity);
     const payment = requiredPayment(selectedListing, selectedQuantity);
     let submitted = null;
@@ -89,6 +96,7 @@ export function PurchasePanel({ edition }) {
         quantity: selectedQuantity,
         chain,
         chainId: wallet.chainId,
+        canonical: MARKETPLACE_CONFIG,
         onState: (nextState) => {
           // A wallet receipt is only observed locally. Only the authoritative
           // marketplace transaction endpoint may move PENDING to CONFIRMED.

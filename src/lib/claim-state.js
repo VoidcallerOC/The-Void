@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { FUJI_RELEASE_FACTORY_CONFIG } from "./fuji-release.js";
+import { FUJI_RELEASE_FACTORY_V2_CONFIG } from "./fuji-release.js";
 
 export const CLAIM_STATES = Object.freeze({
   WALLET_DISCONNECTED: "wallet-disconnected",
@@ -34,9 +34,9 @@ export function releaseBindingFor(edition) {
   const isLegacySingleton = releaseContractAddress.toLowerCase() === LEGACY_FUJI_SINGLETON;
   const factoryAddress = String(edition?.factoryAddress || "").trim();
   const factoryMatches = factoryAddress.length > 0
-    && factoryAddress.toLowerCase() === String(FUJI_RELEASE_FACTORY_CONFIG.factoryAddress || "").toLowerCase();
+    && factoryAddress.toLowerCase() === String(FUJI_RELEASE_FACTORY_V2_CONFIG.factoryAddress || "").toLowerCase();
   const valid = architecture === "release-per-contract"
-    && chainId === FUJI_RELEASE_FACTORY_CONFIG.chainId
+    && chainId === FUJI_RELEASE_FACTORY_V2_CONFIG.chainId
     && addressLooksValid
     && saleLooksValid
     && tokenLooksValid
@@ -59,7 +59,7 @@ export function claimState({ edition, walletConnected = false, chainId = null, b
   if (error) return { state: CLAIM_STATES.ERROR, binding, message: error };
   if (!binding.valid) return { state: CLAIM_STATES.INVALID_RELEASE_BINDING, binding, message: binding.reason };
   if (!walletConnected) return { state: CLAIM_STATES.WALLET_DISCONNECTED, binding, message: "Connect a wallet to check this release." };
-  if (Number(chainId) !== binding.chainId) return { state: CLAIM_STATES.WRONG_NETWORK, binding, message: `Switch your wallet to ${FUJI_RELEASE_FACTORY_CONFIG.networkName} (chain ${binding.chainId}).` };
+  if (Number(chainId) !== binding.chainId) return { state: CLAIM_STATES.WRONG_NETWORK, binding, message: `Switch your wallet to ${FUJI_RELEASE_FACTORY_V2_CONFIG.networkName} (chain ${binding.chainId}).` };
   if (balance !== null && balance !== undefined && BigInt(balance) > 0n) return { state: CLAIM_STATES.ALREADY_CLAIMED, binding, message: "This wallet already holds this release token." };
   if (!executorAvailable) return { state: CLAIM_STATES.RELEASE_UNAVAILABLE, binding, message: "Claim is not wired for this release yet. No transaction was submitted." };
   return { state: CLAIM_STATES.CLAIM_AVAILABLE, binding, message: "This release is ready to claim." };
