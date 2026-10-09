@@ -6,8 +6,8 @@
 
 | Run | Scripts | Fuji tip block |
 |---|---|---|
-| [37907784942](https://github.com/VoidcallerOC/The-Void/actions/runs/37907784942) | `fuji-release-capability-probe.mjs`, `fuji-marketplace-reconciliation-probe.mjs`, bundle scan | 59224940–59225 k |
-| __DEPLOYER_RUN__ | `fuji-deployer-audit.mjs` | __DEPLOYER_TIP__ |
+| [37907784942](https://github.com/VoidcallerOC/The-Void/actions/runs/37907784942) | `fuji-release-capability-probe.mjs`, `fuji-marketplace-reconciliation-probe.mjs`, bundle scan | 59224940 |
+| [37908523801](https://github.com/VoidcallerOC/The-Void/actions/runs/37908523801) | All three scripts with exact-build fingerprints and role readout (final) | 59225306–59225311 |
 
 ---
 
@@ -79,16 +79,16 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 |---|---|---|---|---|---|---|
 | `0x42B740aA92A6F48380F6D97AD91e332a7921a744` | `0x3d08466ab91b4f31fdb69aa42b3107d821c7cef5d53effad3e56f2affd8c3861`, 59082610, 2026-10-05 22:41:29 | 5,891 B, `0xedce…199a` | **ReleaseMarketplaceV3 @44cc90de** (partial match, optimizer 200) | registry FactoryV2 `0xa5Cb…3505`; fee 250 to `0xb65C…1ce4`; chain 43113 | 0 | manifest, config, Vercel, indexer |
 | `0x228734C7a6325f7B6F570EBCAc80239495fdedf0` | `0xf8d2834916406024326f771db35c3db14f9c846435310a41df6f7751978cce32`, 59050637, 2026-10-05 00:34:54 | 5,891 B, `0x1476…49a2` | ReleaseMarketplaceV3 @44cc90de | registry **V1 factory `0x8291…c265`** (releaseCount 0); fee 250 to `0xb65C…` | 0 | `config/fuji-release-per-contract.json` (bundled; not a target) |
-| `0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b` | `0xc5c56d7b3f7ca4e2cdb8d73427f929ac29639b4724a4479a343161376ee2493f`, 58933908, 2026-10-01 13:49:45 | 9,834 B, `0x4530…5431` | MusicMarketplace (unmatched; optimizer-off size) | token `0x82b26…`; fee 250 to `0x284C…180a`; chain 43113 | 1 SOLD, 1 ACTIVE (expired) | git `7b1bee8` (removed `4bbce80`); Vercel `VITE_FUJI_LISTING_MARKETPLACE_ADDRESS` (inert); DB `contracts` |
-| `0x982b28352fd612fe934c5e1ad8fea399689190d2` | `0xe6cbb916c86e04061886dbd82c63a2a2532248375661efb65913015666cd57d0`, 58850317, 2026-09-29 10:19:37 | 8,827 B, `0x87d0…7b6c` | MusicMarketplace, older (2-arg constructor; no `deploymentChainId` or `canonicalToken`; size matches `9e5411f0` optimizer-off) | fee 250 to `0x284C…180a` | 1 SOLD, 1 ACTIVE (expired) | git `606b3aa`; DB `contracts`; 2026-10-04 indexer |
-| `0xd13f6184f4e3166901c7ed322e8c2c6be5915f92` | `0x06efd5a56057da3b846c21c21cf5eba89258721df113b636161addb26837488a`, 59023173, 2026-10-04 03:58:01 | 9,834 B, `0x4530…5431` (**identical to `0xa03b`**) | MusicMarketplace (unmatched) | token `0x82b26…`; fee 250 to `0x284C…180a`; chain 43113 | 0 | **nothing** (absent from git, config, bundle and DB listings) |
-| `0xced494f8c5e51053fe631d68c5165856633e7a29` | `0xee1eda13d2ce8e51f095d0b43a37c6f736729d48289c1024ff0eca3428752548`, 59036649, 2026-10-04 13:50:58 | 9,834 B, `0x4530…5431` (identical) | MusicMarketplace (unmatched) | same as `0xd13f` | 0 | nothing |
-| `0x1bc4cc82e658856d9bd53793612d97b0b23a6e04` | `0x8317e65b923d690576706fbf0a725a4e7e3d6b0a4d97e919e3e376542644a6b1`, 59089446, 2026-10-06 03:13:59 | 9,834 B, `0x8993…6476` | MusicMarketplace (unmatched) | token `0x82b26…`; fee 250 to **`0xb65C…1ce4`**; chain 43113 | 0 | nothing |
+| `0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b` | `0xc5c56d7b3f7ca4e2cdb8d73427f929ac29639b4724a4479a343161376ee2493f`, 58933908, 2026-10-01 13:49:45 | 9,834 B, `0x4530…5431` | **MusicMarketplace @0dfb240e** (exact; solc 0.8.30, optimizer off) | token `0x82b26…`; fee 250 to `0x284C…180a`; chain 43113 | 1 SOLD, 1 ACTIVE (expired) | git `7b1bee8` (removed `4bbce80`); Vercel `VITE_FUJI_LISTING_MARKETPLACE_ADDRESS` (inert); DB `contracts` |
+| `0x982b28352fd612fe934c5e1ad8fea399689190d2` | `0xe6cbb916c86e04061886dbd82c63a2a2532248375661efb65913015666cd57d0`, 58850317, 2026-09-29 10:19:37 | 8,827 B, `0x87d0…7b6c` | **MusicMarketplace @9e5411f0** (exact; 2-arg constructor; no `deploymentChainId` or `canonicalToken`) | fee 250 to `0x284C…180a` | 1 SOLD, 1 ACTIVE (expired) | git `606b3aa`; DB `contracts`; 2026-10-04 indexer |
+| `0xd13f6184f4e3166901c7ed322e8c2c6be5915f92` | `0x06efd5a56057da3b846c21c21cf5eba89258721df113b636161addb26837488a`, 59023173, 2026-10-04 03:58:01 | 9,834 B, `0x4530…5431` (**identical to `0xa03b`**) | **MusicMarketplace @0dfb240e** (exact) | token `0x82b26…`; fee 250 to `0x284C…180a`; chain 43113 | 0 | **nothing** (absent from git, config, bundle and DB listings) |
+| `0xced494f8c5e51053fe631d68c5165856633e7a29` | `0xee1eda13d2ce8e51f095d0b43a37c6f736729d48289c1024ff0eca3428752548`, 59036649, 2026-10-04 13:50:58 | 9,834 B, `0x4530…5431` (identical) | **MusicMarketplace @0dfb240e** (exact) | same as `0xd13f` | 0 | nothing |
+| `0x1bc4cc82e658856d9bd53793612d97b0b23a6e04` | `0x8317e65b923d690576706fbf0a725a4e7e3d6b0a4d97e919e3e376542644a6b1`, 59089446, 2026-10-06 03:13:59 | 9,834 B, `0x8993…6476` | **MusicMarketplace @0dfb240e** (exact) | token `0x82b26…`; fee 250 to **`0xb65C…1ce4`**; chain 43113 | 0 | nothing |
 
 **Notes:**
 - All seven contracts have 0 native balance.
 - None has an owner, admin, pause or withdraw function, by source of every version (`grep owner|admin|pause|withdraw`). No party can disable, upgrade or reconfigure them.
-- Constructor args for the MusicMarketplace rows were not decoded (`constructorArgs: null`), because decoding is only attempted after a fingerprint match. The immutable getters above report the same values directly from contract state (tier 2).
+- Constructor args are decoded from each creation transaction (tier 1) and agree with the immutable getters (tier 2); see §11.
 
 **Bytecode identity (COMPLETE).**
 - **Inputs.** All three reported runs built from byte-identical inputs: `contracts/MusicMarketplace.sol` blob `ba389bcf`, `scripts/deploy-marketplace.mjs` blob `58670388`, `foundry.toml` blob `33a4cfa6`. The image does not contain `foundry.toml`. Each run logged SHA-256(creation bytecode) `0x6e707e33…85c785`.
@@ -177,7 +177,7 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 |---|---|---|
 | Service | Render cron `crn-dat953e0tbcc73acrepg` ("The-Void"), docker command `npm run deploy:marketplace`, schedule `0 0 1 1 *`, auto-deploy off | Render API |
 | Trigger | **All 14 runs since 2026-09-28 were manual**; the schedule never fired. 11 runs between 09-28 and 10-01 are marked `unsuccessful`, 2 are `successful` (10-04), and 1 is `canceled` (10-06, by `voidcalleroc@gmail.com`). | Render events |
-| Broadcasts | **At least 5:** `0x982b`, `0xa03b`, `0xd13f`, `0xced4` and `0x1bc4`. The deployer enumeration (§11) lists every contract the key created. | Receipts |
+| Broadcasts | **Exactly 5 MusicMarketplaces:** `0x982b`, `0xa03b`, `0xd13f`, `0xced4` and `0x1bc4`. The other 9 failed runs created no contract (complete deployer enumeration, §11). | Receipts; §11 |
 | Source commit per reported run | `81756115` (10-04 03:58), `3a960ba2` (10-04 13:51), `0705495f` (10-06 03:14). These are pre-rewrite SHAs, still fetchable. Contract, script and `foundry.toml` blobs are identical to current `main`. | Render deploy windows, `git rev-parse <sha>:path` |
 | Network and implementation selection | `DEPLOY_NETWORK` (default `fuji`). The contract is hard-coded to `contracts/MusicMarketplace.sol:MusicMarketplace`. The token is pinned to `0x82b26…` on Fuji. | `scripts/deploy-marketplace.mjs:10-60,78-90` |
 | Can it deploy an outdated implementation? | **Yes, by design.** It always deploys the legacy MusicMarketplace, never V3, and compiles without repository settings. | Same |
@@ -202,7 +202,7 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 | Mainnet marketplace, factory or manifest | NOT STARTED (`config/mainnet-release.json`: `deployed: false`, no marketplace) |
 | Album/single implementation | BLOCKED on the redeploy decisions (D1–D5 in `ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md`) |
 | Legacy deploy path can create an unregistered mainnet marketplace | OPEN (safeguards 1–3) |
-| Deployer key hygiene | OPEN (safeguard 5) |
+| Deployer key hygiene | **OPEN, P0.** The key that administers the live shared release and sale sat in the Render env (§11). |
 | Reproducible bytecode | OPEN (safeguard 4) |
 | Fuji state preservation | Mainnet does not need any Fuji migration. Legacy Fuji contracts stay immutable and historical; the new manifest is per-chain. |
 
@@ -215,7 +215,7 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 | # | Decision | Recommendation |
 |---|---|---|
 | M1 | Retire `scripts/deploy-marketplace.mjs` and delete the suspended cron? | Yes. V3 is the only designed resale path. |
-| M2 | Rotate deployer `0xaBd3…c174`, which is shared by the cron, the GitHub workflow and E2E tests? | Yes, before any broadcast (supersedes D5). |
+| M2 | Rotate deployer `0xaBd3…c174` and move its live authority (admin of `0x7Bba`, owner of `0x51cC`) to a new key or a Safe? The key is shared by the cron, the GitHub workflow and E2E tests (§11). | **Yes, P0 before mainnet**; P1 for Fuji. The handoff needs wallet transactions, so it requires your authorization. Supersedes D5. |
 | M3 | Mark `0x982b…` and `0xa03b…` as LEGACY in the API (code change) while keeping their history? | Yes |
 | M4 | Ask seller `0x6a86…d2fb` to revoke approvals for the legacy marketplaces? | Optional; the listings are expired and Fuji-only. |
 | M5 | Delete the unused Vercel `VITE_FUJI_LISTING_*` variables? | Yes. It also removes `0xa03b` from the bundle. |
@@ -227,7 +227,47 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 
 ## 11. Deployer enumeration
 
-__DEPLOYER_SECTION__
+Read-only enumeration of every `CREATE` from deployer `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`. The script derives each address from (deployer, nonce) for nonces 0–58, keeps those with code, and dates them by binary search on `eth_getCode`. Run [37908523801](https://github.com/VoidcallerOC/The-Void/actions/runs/37908523801), tip block 59225311.
+
+**Totals:** 59 nonces used and **16 contracts created**, of which **exactly 5 are MusicMarketplaces** (nonces 32, 38, 52, 53, 58). No cron run created anything else. The same key created every Fuji platform contract, so it is the **platform deployer, the E2E test wallet and the Render-cron key at once**.
+
+| Nonce | Address | Created (UTC) | Block | Kind | Code (B) | Authority the deployer still holds |
+|---|---|---|---|---|---|---|
+| 0 | `0x262B774cf9a1949170B58E2d57F6189980FE757b` | 2026-09-17 02:03:34 | 58428586 | ERC-1155 release | 8896 | deployer holds `DEFAULT_ADMIN_ROLE` |
+| 10 | `0x7A78F13Bef1a984676787Df1878F0C378b9dFc6e` | 2026-09-26 16:32:41 | 58751656 | ERC-1155 release | 10331 | deployer holds `DEFAULT_ADMIN_ROLE` |
+| 11 | `0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363` | 2026-09-26 16:32:46 | 58751660 | Primary sale | 4196 | deployer is `owner()` |
+| 13 | `0x82b26Da27136935454Bdf1e40801190B521b82e5` | 2026-09-26 21:47:01 | 58761820 | ERC-1155 release | 10331 | deployer holds `DEFAULT_ADMIN_ROLE` |
+| 14 | `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` | 2026-09-26 21:47:06 | 58761822 | Primary sale | 4196 | deployer is `owner()` |
+| 32 | `0x982B28352FD612fe934C5E1AD8fea399689190D2` | 2026-09-29 10:19:37 | 58850317 | MusicMarketplace | 8827 | — |
+| 38 | `0xA03b4B6E384c1d2718b837cd78e6408754Aa0c0b` | 2026-10-01 13:49:45 | 58933908 | MusicMarketplace | 9834 | — |
+| 47 | `0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6` | 2026-10-03 22:17:22 | 59015108 | ERC-1155 release | 10310 | deployer holds `DEFAULT_ADMIN_ROLE` |
+| 48 | `0x51cCD2d5Cd71368917f1EFe3fa43Fab8068E1aBA` | 2026-10-03 22:17:28 | 59015114 | Primary sale | 4331 | deployer is `owner()` |
+| 52 | `0xd13F6184F4e3166901c7ED322e8C2C6be5915f92` | 2026-10-04 03:58:01 | 59023173 | MusicMarketplace | 9834 | — |
+| 53 | `0xced494F8C5e51053fe631d68c5165856633e7A29` | 2026-10-04 13:50:58 | 59036649 | MusicMarketplace | 9834 | — |
+| 54 | `0x8291A4F1936C1c5C6D8917b0966c80757cd5c265` | 2026-10-05 00:34:49 | 59050635 | Release factory | 10266 | deployer is `owner()` |
+| 55 | `0x228734C7a6325f7B6F570EBCAc80239495fdedf0` | 2026-10-05 00:34:54 | 59050637 | ReleaseMarketplaceV3 | 5891 | — |
+| 56 | `0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505` | 2026-10-05 22:41:25 | 59082607 | Release factory | 10031 | — |
+| 57 | `0x42B740aA92A6F48380F6D97AD91e332a7921a744` | 2026-10-05 22:41:29 | 59082610 | ReleaseMarketplaceV3 | 5891 | — |
+| 58 | `0x1bC4cC82e658856d9bd53793612D97B0B23a6e04` | 2026-10-06 03:13:59 | 59089446 | MusicMarketplace | 9834 | — |
+
+**Key-compromise blast radius (tier 2, read from contract state):**
+- The deployer holds `DEFAULT_ADMIN_ROLE` on the **live shared release `0x7Bba…95B6`**, where every published Fuji edition sits, and on releases `0x262B`, `0x7A78` and `0x82b26`.
+- It is `owner()` of the **live shared primary sale `0x51cC…1aBA`**, of sales `0x7D1a` and `0xcc26`, and of factory V1 `0x8291`.
+- FactoryV2, both V3 marketplaces and all MusicMarketplaces have no owner or admin.
+
+The private key was stored in the Render cron environment, as a GitHub secret (same `from` on workflow deployments) and in E2E tooling. **M2 (rotation plus admin handoff) is therefore P0 before mainnet.** It is also P1 for Fuji, because the shared release and sale are live.
+
+**Exact identities (final probe run).** Every MusicMarketplace now matches an exact-build fingerprint, and its constructor args decode to the same values as its immutables:
+
+| Address | Identity | Constructor args (tier 1, tx input) |
+|---|---|---|
+| `0xA03b4B6E384c1d2718b837cd78e6408754Aa0c0b` | MusicMarketplace @`0dfb240e`, solc 0.8.30, optimizer off | `(0x284C…180a, 250, 0x82b26…b82e5)` |
+| `0x982B28352FD612fe934C5E1AD8fea399689190D2` | MusicMarketplace @`9e5411f0`, solc 0.8.30, optimizer off | `(0x284C…180a, 250)` |
+| `0xd13F6184F4e3166901c7ED322e8C2C6be5915f92` | MusicMarketplace @`0dfb240e`, solc 0.8.30, optimizer off | `(0x284C…180a, 250, 0x82b26…)` |
+| `0xced494F8C5e51053fe631d68c5165856633e7A29` | MusicMarketplace @`0dfb240e`, solc 0.8.30, optimizer off | `(0x284C…180a, 250, 0x82b26…)` |
+| `0x1bC4cC82e658856d9bd53793612D97B0B23a6e04` | MusicMarketplace @`0dfb240e`, solc 0.8.30, optimizer off | `(0xb65C…1ce4, 250, 0x82b26…)` |
+| `0x42B740aA92A6F48380F6D97AD91e332a7921a744` | ReleaseMarketplaceV3 @`44cc90de`, solc 0.8.24, optimizer 200 | `(0xb65C…1ce4, 250, 0xa5Cb…3505)` |
+| `0x228734C7a6325f7B6F570EBCAc80239495fdedf0` | ReleaseMarketplaceV3 @`44cc90de`, solc 0.8.24, optimizer 200 | `(0xb65C…1ce4, 250, 0x8291…c265)` |
 
 ---
 
