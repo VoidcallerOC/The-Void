@@ -19,6 +19,7 @@ on:
       - scripts/safe-readiness-probe.mjs
       - scripts/legacy-sale-bytecode-check.mjs
       - scripts/authority-rotation-fork-rehearsal.mjs
+      - scripts/verify-safe-signatures.mjs
       - scripts/data/legacy-sale-fingerprints.json
       - config/fuji-release-per-contract-v2.json
       - deployments/**

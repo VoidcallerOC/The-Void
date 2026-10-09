@@ -127,6 +127,65 @@ function safeTx(to, data, nonce) {
   return { to, value: "0", data, operation: 0, safeTxGas: "0", baseGas: "0", gasPrice: "0", gasToken: ZeroAddress, refundReceiver: ZeroAddress, nonce: nonce === null ? null : String(nonce) };
 }
 
+// Canonical Safe v1.4.1 deployments (identical bytecode on Fuji and C-Chain, LIVE-READ).
+export const SAFE_PROXY_FACTORY_141 = "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67";
+export const SAFE_L2_141 = "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762";
+export const COMPATIBILITY_FALLBACK_HANDLER_141 = "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99";
+export const safeSetupIface = new Interface([
+  "function setup(address[] owners, uint256 threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)",
+  "function createProxyWithNonce(address singleton, bytes initializer, uint256 saltNonce) returns (address proxy)",
+  "function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)",
+]);
+
+/**
+ * Safe creation call (decision R1/R2 design: 3 independent owners, threshold 2, no
+ * modules, no guard, canonical fallback handler, SafeL2 singleton). Owners must be
+ * distinct and none may be the old key, 0x284C, a rotated contract or the backup.
+ * The resulting address is predicted read-only with eth_call (see the report).
+ */
+export function buildSafeCreation({ owners = [], threshold = 2, saltNonce = null, backup = null } = {}) {
+  const list = (owners || []).map((o, i) => validateAddress(o, `SAFE_OWNER_${i + 1}`)).filter(Boolean);
+  if (list.length !== 3 || saltNonce === null || saltNonce === "") return { status: "BLOCKED", blockedOn: [...(list.length !== 3 ? ["SAFE_OWNERS (3 addresses)"] : []), ...(saltNonce === null || saltNonce === "" ? ["SALT_NONCE"] : [])], calldata: null };
+  if (new Set(list).size !== 3) throw new Error("Safe owners must be three distinct addresses.");
+  const b = validateAddress(backup, "BACKUP_ADMIN");
+  if (b && list.includes(b)) throw new Error("BACKUP_ADMIN must not be a Safe owner.");
+  if (threshold !== 2) throw new Error("The approved design is a 2-of-3 Safe.");
+  const initializer = safeSetupIface.encodeFunctionData("setup", [list, threshold, ZeroAddress, "0x", COMPATIBILITY_FALLBACK_HANDLER_141, ZeroAddress, 0, ZeroAddress]);
+  return {
+    status: "READY_FOR_OWNER_REVIEW", chainId: CHAIN_ID, to: SAFE_PROXY_FACTORY_141, value: "0", singleton: SAFE_L2_141, owners: list, threshold, saltNonce: String(saltNonce),
+    initializer, calldata: safeSetupIface.encodeFunctionData("createProxyWithNonce", [SAFE_L2_141, initializer, BigInt(saltNonce)]),
+  };
+}
+
+/** Full EIP-712 payload for a SafeTx, in the shape wallets and `cast wallet sign --data` accept. */
+export function safeTypedData({ safe, tx, chainId = CHAIN_ID }) {
+  return {
+    types: { EIP712Domain: [{ name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }], ...SAFE_TX_TYPES },
+    primaryType: "SafeTx",
+    domain: { chainId, verifyingContract: safe },
+    message: tx,
+  };
+}
+
+/**
+ * S-0: a harmless Safe self-test. The Safe calls itself with value 0 and empty data
+ * (its receive() only emits SafeReceived). It proves on Fuji that the owners can sign
+ * and that a submitter can execute, consumes exactly one Safe nonce, and touches no
+ * release, sale or role.
+ */
+export function buildSafeSelfTest({ safe = null, safeNonce = null } = {}) {
+  const s = validateAddress(safe, "SAFE_AUTHORITY");
+  const nonce = safeNonce === null || safeNonce === undefined || safeNonce === "" ? null : Number(safeNonce);
+  const blockedOn = [...(!s ? ["SAFE_AUTHORITY"] : []), ...(nonce === null ? ["SAFE_NONCE"] : [])];
+  if (blockedOn.length) return { step: "S-0", status: "BLOCKED", blockedOn, safeTx: null, safeTxHash: null };
+  const tx = safeTx(s, "0x", nonce);
+  return {
+    step: "S-0", status: "READY_FOR_OWNER_REVIEW", chainId: CHAIN_ID, safe: s, safeTx: tx, safeTxHash: safeTxHash({ safe: s, tx }), typedData: safeTypedData({ safe: s, tx }),
+    expected: "Safe nonce increases by exactly 1; ExecutionSuccess(safeTxHash) emitted; no role, sale or balance changes.",
+    stopIf: "the signer's device shows a chain other than 43113, a hash different from safeTxHash, or a target other than the Safe itself",
+  };
+}
+
 /**
  * Ordered plan per release (invariants unit-tested):
  *   1. old key   grantRole(DEFAULT_ADMIN_ROLE, SAFE)
@@ -158,7 +217,7 @@ export function buildRotationPlan({ safe = null, backup = null, safeNonce = null
     const blockedOn = [...(!safe ? ["SAFE_AUTHORITY"] : []), ...(nonce === null ? ["SAFE_NONCE"] : [])];
     const tx = safeTx(fields.to, fields.calldata, nonce);
     const hash = safe && nonce !== null ? safeTxHash({ safe, tx }) : null;
-    add({ ...fields, signer: safe || "SAFE_AUTHORITY (unresolved)", signerKind: "Safe execTransaction (operation 0 = CALL)", safeTx: tx, safeTxHash: hash, ...(blockedOn.length ? { blockedOn } : {}) });
+    add({ ...fields, signer: safe || "SAFE_AUTHORITY (unresolved)", signerKind: "Safe execTransaction (operation 0 = CALL)", safeTx: tx, safeTxHash: hash, ...(hash ? { typedData: safeTypedData({ safe, tx }) } : {}), ...(blockedOn.length ? { blockedOn } : {}) });
   };
 
   for (const c of RELEASES.filter((r) => levels.includes(r.priority))) {
@@ -229,5 +288,7 @@ const invokedDirectly = process.argv[1] && import.meta.url === `file://${process
 if (invokedDirectly) {
   const scope = process.env.SCOPE || "P0";
   const steps = buildRotationPlan({ safe: process.env.SAFE_AUTHORITY, backup: process.env.BACKUP_ADMIN, safeNonce: process.env.SAFE_NONCE, scope });
-  console.log(JSON.stringify({ chainId: CHAIN_ID, oldAuthority: OLD_AUTHORITY, scope, unsigned: true, ...packageStatus(steps), preSteps: buildSaleCloseSteps(), steps, lockedOwnables: LOCKED_OWNABLES }, null, 2));
+  const safeCreation = buildSafeCreation({ owners: String(process.env.SAFE_OWNERS || "").split(",").map((x) => x.trim()).filter(Boolean), saltNonce: process.env.SALT_NONCE ?? null, backup: process.env.BACKUP_ADMIN });
+  const selfTest = buildSafeSelfTest({ safe: process.env.SAFE_AUTHORITY, safeNonce: process.env.SELF_TEST_NONCE ?? null });
+  console.log(JSON.stringify({ chainId: CHAIN_ID, oldAuthority: OLD_AUTHORITY, scope, unsigned: true, ...packageStatus(steps), safeCreation, selfTest, preSteps: buildSaleCloseSteps(), steps, lockedOwnables: LOCKED_OWNABLES }, null, 2));
 }

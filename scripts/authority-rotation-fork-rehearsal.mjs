@@ -13,7 +13,8 @@
 // step it reads the postconditions. The Safe and backup here are fork-only stand-ins
 // with the same structure as the owner's; their addresses are not proposals.
 import { AbiCoder, Interface, JsonRpcProvider, ZeroAddress, getAddress, keccak256, toBeHex } from "ethers";
-import { LEGACY_RELEASE_82B26, LEGACY_SALE_82B26, OLD_AUTHORITY, OPEN_OLD_KEY_SALES, ROLES, SAFE_TX_TYPES, buildRotationPlan, buildSaleCloseSteps, packageStatus, releaseIface, safeTxHash } from "./authority-rotation-plan.mjs";
+import { LEGACY_RELEASE_82B26, LEGACY_SALE_82B26, OLD_AUTHORITY, OPEN_OLD_KEY_SALES, ROLES, SAFE_TX_TYPES, buildRotationPlan, buildSafeCreation, buildSafeSelfTest, buildSaleCloseSteps, packageStatus, releaseIface, safeTxHash } from "./authority-rotation-plan.mjs";
+import { verifySafeSignatures } from "./verify-safe-signatures.mjs";
 
 const URL_ = process.env.ANVIL_URL || "http://127.0.0.1:8545";
 const SAFE_L2 = "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762";
@@ -143,16 +144,40 @@ async function main() {
 
   progress("test Safe creation");
   // --- Test Safe: 2-of-3 through the canonical factory and SafeL2 singleton.
-  const initializer = safeIface.encodeFunctionData("setup", [[o1, o2, o3], 2, ZeroAddress, "0x", FALLBACK, ZeroAddress, 0, ZeroAddress]);
-  const createData = factoryIface.encodeFunctionData("createProxyWithNonce", [SAFE_L2, initializer, BigInt(forkBlock)]);
+  // Creation calldata from the package generator; the address is predicted read-only with eth_call.
+  const creation = buildSafeCreation({ owners: [o1, o2, o3], saltNonce: forkBlock, backup });
+  const createData = creation.calldata;
+  if (getAddress(creation.to) !== getAddress(FACTORY) || getAddress(creation.singleton) !== getAddress(SAFE_L2)) throw new Error("creation target mismatch");
   const predicted = getAddress(factoryIface.decodeFunctionResult("createProxyWithNonce", await provider.call({ from: o1, to: FACTORY, data: createData }))[0]);
   const created = await send(o1, FACTORY, createData);
   const safe = predicted;
   const read = async (fn) => safeIface.decodeFunctionResult(fn, await provider.call({ to: safe, data: safeIface.encodeFunctionData(fn) }))[0];
   out.safe = { address: safe, creationStatus: created.status, creationGas: created.gasUsed, version: await read("VERSION"), owners: (await read("getOwners")).map(getAddress), threshold: Number(await read("getThreshold")), nonce: (await read("nonce")).toString() };
 
-  // --- P0 package exactly as generated for this Safe/backup.
-  const plan = buildRotationPlan({ safe, backup, safeNonce: Number(out.safe.nonce), scope: "P0" });
+  out.safe.predictedEqualsCreated = (await provider.getCode(predicted)) !== "0x";
+  out.safe.fallbackHandlerFromGenerator = FALLBACK;
+  const rolesOf = async () => Object.fromEntries(await Promise.all(Object.entries({ old, safe, backup }).map(async ([who, a]) => [who, Object.fromEntries(await Promise.all(Object.keys(ROLES).map(async (r) => [r, await hasRole(P0_RELEASE, r, a)])))])));
+
+  // --- S-0: harmless Safe self-test, signatures checked offline before submission.
+  progress("S-0 self-test");
+  {
+    const s0 = buildSafeSelfTest({ safe, safeNonce: Number(out.safe.nonce) });
+    const rolesBefore = JSON.stringify(await rolesOf());
+    const sigs = [];
+    for (const sgn of [o2, o1]) sigs.push(await provider.send("eth_signTypedData_v4", [sgn, JSON.stringify(s0.typedData)]));
+    const check = verifySafeSignatures({ safe, chainId: Number(chainId), owners: [o1, o2, o3], threshold: 2, tx: s0.safeTx, signatures: sigs });
+    const t = s0.safeTx;
+    const tx = await send(buyer, safe, safeIface.encodeFunctionData("execTransaction", [t.to, t.value, t.data, t.operation, t.safeTxGas, t.baseGas, t.gasPrice, t.gasToken, t.refundReceiver, check.signaturesForExecTransaction]));
+    out.selfTest = {
+      safeTxHash: s0.safeTxHash, offlineVerification: { ok: check.ok, signers: check.signers.map((x) => x.signer) },
+      txStatus: tx.status, gasUsed: tx.gasUsed, nonceAfter: (await read("nonce")).toString(),
+      rolesUnchanged: JSON.stringify(await rolesOf()) === rolesBefore,
+      logsEmitted: tx.logs.length,
+    };
+  }
+
+  // --- P0 package exactly as generated for this Safe/backup (nonce after S-0).
+  const plan = buildRotationPlan({ safe, backup, safeNonce: Number(await read("nonce")), scope: "P0" });
   out.p0PackageStatus = packageStatus(plan).status;
   const signers = [o1, o2].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
   const adminRemoval = plan.find((st) => st.safeTx && st.args.role === "DEFAULT_ADMIN_ROLE");
@@ -165,16 +190,40 @@ async function main() {
     await send(old, P0_RELEASE, releaseIface.encodeFunctionData("revokeRole", [ROLES.DEFAULT_ADMIN_ROLE, wrong]));
     out.failureCases.wrongAddressGrantRecovery = { grantedByMistake: granted, revokedByOldKey: !(await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", wrong)) };
     await revertTo(id2);
-    // Compromised-key race: between the grant and the Safe's removal, the old key can revoke the Safe.
+    // Compromised-key race and recovery: after steps 1-2 the old key revokes the Safe.
     const id3 = await snapshot();
     await send(old, P0_RELEASE, plan[0].calldata);
+    await send(old, P0_RELEASE, plan[1].calldata);
     await send(old, P0_RELEASE, releaseIface.encodeFunctionData("revokeRole", [ROLES.DEFAULT_ADMIN_ROLE, safe]));
     const t = adminRemoval.safeTx;
     const sigs = [];
     for (const sgn of signers) sigs.push([sgn, await signSafeTx(sgn, safe, t, Number(chainId))]);
-    const attempt = await call(buyer, safe, execData(t, joinSigs(sigs)));
-    out.failureCases.compromisedOldKeyRace = { oldKeyRevokedSafeAfterGrant: !(await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", safe)), safeRemovalOfOldAdminThenFails: !attempt.ok, revert: attempt.revertData, note: "the race is real: until the Safe's removal executes, the old key can undo the grant" };
+    const presigned = joinSigs(sigs);
+    const nonceBefore = (await read("nonce")).toString();
+    const attempt = await send(buyer, safe, execData(t, presigned));
+    const nonceAfterFailure = (await read("nonce")).toString();
+    // Recovery: the backup (still admin) re-grants the Safe and removes the old admin itself.
+    const regrant = await send(backup, P0_RELEASE, releaseIface.encodeFunctionData("grantRole", [ROLES.DEFAULT_ADMIN_ROLE, safe]));
+    const backupRemovesOld = await send(backup, P0_RELEASE, releaseIface.encodeFunctionData("revokeRole", [ROLES.DEFAULT_ADMIN_ROLE, old]));
+    // The same pre-signed Safe step still executes (nonce was not consumed); now a no-op revoke.
+    const retry = await send(buyer, safe, execData(t, presigned));
+    out.failureCases.compromisedOldKeyRace = {
+      oldKeyRevokedSafeAfterGrant: true,
+      safeRemovalAttemptStatus: attempt.status,
+      safeNonceUnchangedByFailedAttempt: nonceBefore === nonceAfterFailure,
+      recovery: { backupRegrantsSafe: regrant.status, backupRemovesOldAdmin: backupRemovesOld.status, presignedSafeStepRetried: retry.status, nonceAfterRetry: (await read("nonce")).toString() },
+      adminsAfterRecovery: { old: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", old), safe: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", safe), backup: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", backup) },
+      note: "the race is real; recovery works while the backup is still an admin",
+    };
     await revertTo(id3);
+    // Worst case: the old key revokes both new admins; only the old key (held by the owner and the attacker) remains.
+    const id4 = await snapshot();
+    await send(old, P0_RELEASE, plan[0].calldata);
+    await send(old, P0_RELEASE, plan[1].calldata);
+    await send(old, P0_RELEASE, releaseIface.encodeFunctionData("revokeRole", [ROLES.DEFAULT_ADMIN_ROLE, safe]));
+    await send(old, P0_RELEASE, releaseIface.encodeFunctionData("revokeRole", [ROLES.DEFAULT_ADMIN_ROLE, backup]));
+    out.failureCases.bothNewAdminsRevoked = { safeAdmin: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", safe), backupAdmin: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", backup), oldAdmin: await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", old), note: "no on-chain winner: only the old key can re-grant; contested control means abandoning 0x7Bba" };
+    await revertTo(id4);
   }
   progress("P0 package");
   for (const step of plan) {
@@ -187,6 +236,7 @@ async function main() {
       const typed = { domain: { chainId: Number(chainId), verifyingContract: safe }, types: { EIP712Domain: [{ name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }], ...SAFE_TX_TYPES }, primaryType: "SafeTx", message: t };
       const sigs = [];
       for (const s of signers) sigs.push(await provider.send("eth_signTypedData_v4", [s, JSON.stringify(typed)]));
+      entry.offlineSignatureCheck = verifySafeSignatures({ safe, chainId: Number(chainId), owners: [o1, o2, o3], threshold: 2, tx: t, signatures: sigs }).ok;
       const exec = (signatures) => safeIface.encodeFunctionData("execTransaction", [t.to, t.value, t.data, t.operation, t.safeTxGas, t.baseGas, t.gasPrice, t.gasToken, t.refundReceiver, signatures]);
       entry.oneSignatureRejected = !(await call(buyer, safe, exec(sigs[0]))).ok;
       if (step === adminRemoval) {
@@ -213,6 +263,8 @@ async function main() {
     oldCanMint: (await call(old, P0_RELEASE, releaseEvents.encodeFunctionData("mint", [old, 1n, 1n, "0x"]))).ok,
     safeCanAdminister: (await call(safe, P0_RELEASE, releaseIface.encodeFunctionData("grantRole", [ROLES.DEFAULT_ADMIN_ROLE, safe]))).ok,
     backupCanAdminister: (await call(backup, P0_RELEASE, releaseIface.encodeFunctionData("grantRole", [ROLES.DEFAULT_ADMIN_ROLE, backup]))).ok,
+    // P0 does not touch 0x82b26: the old key's close authority there survives P0 (re-close is a no-op).
+    closeStillAuthorizedAfterP0: (await call(old, LEGACY_SALE_82B26, buildSaleCloseSteps()[0].calldata)).ok,
     p1ArtistRevokeOn0x82b26AfterPreSteps: "not executed here (P1 is out of P0 scope)",
   };
   console.log(JSON.stringify(out, null, 2));
