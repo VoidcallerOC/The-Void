@@ -32,6 +32,7 @@ const safeIface = new Interface([
 const saleIface = new Interface([
   "function sales(uint256) view returns (uint256 priceWei, uint256 maxSupply, uint256 sold, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused, bool configured)",
   "function purchase(uint256 tokenId, uint256 qty) payable",
+  "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
   "event SaleConfigured(uint256 indexed tokenId, address indexed artist, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
 ]);
 const releaseEvents = new Interface([
