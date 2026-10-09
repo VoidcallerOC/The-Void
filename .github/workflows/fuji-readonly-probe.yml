@@ -20,6 +20,7 @@ on:
       - scripts/legacy-sale-bytecode-check.mjs
       - scripts/authority-rotation-fork-rehearsal.mjs
       - scripts/verify-safe-signatures.mjs
+      - scripts/safe-identity-probe.mjs
       - scripts/data/legacy-sale-fingerprints.json
       - config/fuji-release-per-contract-v2.json
       - deployments/**
@@ -55,6 +56,10 @@ jobs:
         run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
       - name: Safe readiness for the replacement admin (read-only RPC and public GET only)
         run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
+      - name: Identify the owner-supplied Safe on Fuji and C-Chain (read-only)
+        env:
+          SAFE_CANDIDATE: "0xecC40c3CE983A2F3bB4a241EBAd4e08C261aeA10"
+        run: node scripts/safe-identity-probe.mjs | tee safe-identity.json
       - name: Identify legacy sale bytecode (source commit and compiler) for the storage layout
         run: node scripts/legacy-sale-bytecode-check.mjs | tee legacy-sale-bytecode.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
@@ -84,6 +89,7 @@ jobs:
             authority-rotation-simulation.json
             safe-readiness.json
             legacy-sale-bytecode.json
+            safe-identity.json
 
   # Executes the rotation package on a LOCAL anvil fork of Fuji. Nothing is sent to
   # Fuji: the script refuses any endpoint that is not a local anvil node, the old key
