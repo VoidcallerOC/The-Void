@@ -59,7 +59,7 @@ All seven inventory runs return an identical `summary`. **The old key's Fuji non
 | `7d634a4` | success (113767503381) | success (113767503241) | **hung** (113767503011) | confirmation-based receipt wait stalled after `evm_revert`; fixed in `770b22c` |
 | `770b22c` | success (113771125677) | success (113771126532) | success (113771126783) | last commit that changes scripts or workflows |
 
-The commit that adds this document changes only Markdown. The `probe` and `fork-rehearsal` workflows filter on script and workflow paths, so they do not re-run for it. Their evidence is from `770b22c`, which has identical scripts. `build-and-test` status for the document head is reported separately.
+Commits after `770b22c` change only this document. All three checks still re-run on every push, because `pull_request` path filters evaluate the whole PR diff. The status for the latest head is on the PR checks page and in the final report; this document does not assert it.
 
 ## 3. Authority inventory (Fuji 43113)
 
