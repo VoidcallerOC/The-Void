@@ -26,6 +26,8 @@ const UNPRIVILEGED = "0x000000000000000000000000000000000000dEaD";
 const ARTIST_WALLET = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 const STANDIN_SAFE = "0x00000000000000000000000000000000000000A1";
 const STANDIN_BACKUP = "0x00000000000000000000000000000000000000b2";
+// Fresh buyer with no code (0xdEaD has code on Fuji and rejects ERC-1155 receipt).
+const SIM_BUYER = getAddress(`0x${id("the-void:rotation-sim-buyer").slice(-40)}`);
 const P0_RELEASE = RELEASES.find((r) => r.priority === "P0").address;
 // Storage layout (solc --storage-layout; validated against live state below):
 // VoidRelease1155/V2 `_roles` mapping at slot 0; legacy VoidPrimarySale `_status` 0,
@@ -161,6 +163,7 @@ async function main() {
     const release = getAddress((await read(saleIface, sale, "releases"))[0]);
     const now = (await provider.getBlock(tip)).timestamp;
     const s = {
+      simBuyer: SIM_BUYER, simBuyerHasCode: (await provider.getCode(SIM_BUYER)) !== "0x",
       sale, release, releaseMatchesPlan: release === getAddress(LEGACY_RELEASE_82B26), blockTimestamp: now,
       layout: { owner: getAddress(`0x${(await storageAt(sale, 2n)).slice(26)}`) === getAddress((await read(saleIface, sale, "owner"))[0]), platformFeeBps: BigInt(await storageAt(sale, 1n)) === (await read(saleIface, sale, "platformFeeBps"))[0] },
       oldHoldsArtistRole: (await read(releaseIface, release, "hasRole", [ROLES.ARTIST_ROLE, old]))[0],
@@ -191,8 +194,8 @@ async function main() {
         closeFrom0x284C: await simulate(ARTIST_WALLET, sale, liveCalldata),
         // Ordering requirement: with the old key's ARTIST_ROLE already revoked, the close must fail.
         closeAfterArtistRevoke: await simulate(old, sale, liveCalldata, { overrides: { [release]: { stateDiff: { [roleSlot(ROLES.ARTIST_ROLE, old)]: FALSE } } } }),
-        purchaseNow: await simulate(UNPRIVILEGED, sale, saleIface.encodeFunctionData("purchase", [tokenId, 1n]), { value: v.priceWei, overrides: { [UNPRIVILEGED]: { balance: toBeHex(10n ** 18n) } } }),
-        purchaseAfterClose: await simulate(UNPRIVILEGED, sale, saleIface.encodeFunctionData("purchase", [tokenId, 1n]), { value: v.priceWei, overrides: { [UNPRIVILEGED]: { balance: toBeHex(10n ** 18n) }, [sale]: { stateDiff: { [toBeHex(base + 4n, 32)]: packedAfterClose } } } }),
+        purchaseNow: await simulate(SIM_BUYER, sale, saleIface.encodeFunctionData("purchase", [tokenId, 1n]), { value: v.priceWei, overrides: { [SIM_BUYER]: { balance: toBeHex(10n ** 18n) } } }),
+        purchaseAfterClose: await simulate(SIM_BUYER, sale, saleIface.encodeFunctionData("purchase", [tokenId, 1n]), { value: v.priceWei, overrides: { [SIM_BUYER]: { balance: toBeHex(10n ** 18n) }, [sale]: { stateDiff: { [toBeHex(base + 4n, 32)]: packedAfterClose } } } }),
       };
       // Isolation: the close may touch only sales[tokenId] in the sale contract's storage.
       try {
@@ -204,7 +207,7 @@ async function main() {
       // The other open edition stays purchasable when only this one is closed.
       const other = openIds.find((x) => x !== tokenId);
       const otherSale = await read(saleIface, sale, "sales", [other]);
-      ed.otherEditionPurchasableAfterThisClose = await simulate(UNPRIVILEGED, sale, saleIface.encodeFunctionData("purchase", [other, 1n]), { value: otherSale.priceWei, overrides: { [UNPRIVILEGED]: { balance: toBeHex(10n ** 18n) }, [sale]: { stateDiff: { [toBeHex(base + 4n, 32)]: packedAfterClose } } } });
+      ed.otherEditionPurchasableAfterThisClose = await simulate(SIM_BUYER, sale, saleIface.encodeFunctionData("purchase", [other, 1n]), { value: otherSale.priceWei, overrides: { [SIM_BUYER]: { balance: toBeHex(10n ** 18n) }, [sale]: { stateDiff: { [toBeHex(base + 4n, 32)]: packedAfterClose } } } });
       s.editions.push(ed);
     }
     out.sales.push(s);

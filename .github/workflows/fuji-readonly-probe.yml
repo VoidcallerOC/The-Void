@@ -17,6 +17,9 @@ on:
       - scripts/authority-rotation-plan.mjs
       - scripts/authority-rotation-simulate.mjs
       - scripts/safe-readiness-probe.mjs
+      - scripts/legacy-sale-bytecode-check.mjs
+      - scripts/authority-rotation-fork-rehearsal.mjs
+      - scripts/data/legacy-sale-fingerprints.json
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -51,6 +54,8 @@ jobs:
         run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
       - name: Safe readiness for the replacement admin (read-only RPC and public GET only)
         run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
+      - name: Identify legacy sale bytecode (source commit and compiler) for the storage layout
+        run: node scripts/legacy-sale-bytecode-check.mjs | tee legacy-sale-bytecode.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
         shell: bash
         run: |
@@ -77,3 +82,36 @@ jobs:
             authority-inventory.json
             authority-rotation-simulation.json
             safe-readiness.json
+            legacy-sale-bytecode.json
+
+  # Executes the rotation package on a LOCAL anvil fork of Fuji. Nothing is sent to
+  # Fuji: the script refuses any endpoint that is not a local anvil node, the old key
+  # is impersonated, and test signers are anvil's unlocked dev accounts (no keys).
+  fork-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+      - name: Rehearse P-1, P-2 and P0 on a local fork (no broadcast to Fuji)
+        shell: bash
+        run: |
+          set -euo pipefail
+          anvil --fork-url https://api.avax-test.network/ext/bc/C/rpc --host 127.0.0.1 --port 8545 --silent &
+          for i in $(seq 1 60); do
+            if curl -sf -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' http://127.0.0.1:8545 >/dev/null; then break; fi
+            sleep 1
+          done
+          ANVIL_URL=http://127.0.0.1:8545 node scripts/authority-rotation-fork-rehearsal.mjs | tee authority-rotation-fork-rehearsal.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: authority-rotation-fork-rehearsal
+          path: authority-rotation-fork-rehearsal.json

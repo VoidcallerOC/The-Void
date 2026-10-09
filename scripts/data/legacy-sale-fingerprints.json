@@ -1,0 +1,526 @@
+[
+  {
+    "sourceCommit": "fd31295",
+    "compiler": "solc-0.8.24-opt200-cancun (repo foundry.toml)",
+    "runtimeBytes": 4196,
+    "immutableRanges": [
+      [
+        473,
+        32
+      ],
+      [
+        859,
+        32
+      ],
+      [
+        906,
+        32
+      ],
+      [
+        1192,
+        32
+      ],
+      [
+        1340,
+        32
+      ],
+      [
+        2965,
+        32
+      ],
+      [
+        3243,
+        32
+      ],
+      [
+        328,
+        32
+      ],
+      [
+        3080,
+        32
+      ],
+      [
+        524,
+        32
+      ],
+      [
+        3474,
+        32
+      ],
+      [
+        3534,
+        32
+      ]
+    ],
+    "normalizedRuntimeHash": "0xb0970aaec98be509c785ba1a6025fa184c4be7da02dbe3630e2eaba39d676341",
+    "hasTransferOwnership": false,
+    "storageLayout": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "_status"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "platformFeeBps"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "owner"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "sales"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "walletPurchased"
+      },
+      {
+        "slot": "5",
+        "offset": 0,
+        "label": "balances"
+      }
+    ],
+    "saleStruct": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "priceWei"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "maxSupply"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "sold"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "perWalletLimit"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "startTime"
+      },
+      {
+        "slot": "4",
+        "offset": 8,
+        "label": "endTime"
+      },
+      {
+        "slot": "4",
+        "offset": 16,
+        "label": "paused"
+      },
+      {
+        "slot": "4",
+        "offset": 17,
+        "label": "configured"
+      }
+    ]
+  },
+  {
+    "sourceCommit": "fd31295",
+    "compiler": "solc-0.8.30-noopt-prague (Render image, no foundry.toml)",
+    "runtimeBytes": 7284,
+    "immutableRanges": [
+      [
+        774,
+        32
+      ],
+      [
+        834,
+        32
+      ],
+      [
+        1134,
+        32
+      ],
+      [
+        1289,
+        32
+      ],
+      [
+        3911,
+        32
+      ],
+      [
+        4263,
+        32
+      ],
+      [
+        4541,
+        32
+      ],
+      [
+        2245,
+        32
+      ],
+      [
+        4069,
+        32
+      ],
+      [
+        4577,
+        32
+      ],
+      [
+        4880,
+        32
+      ],
+      [
+        4921,
+        32
+      ]
+    ],
+    "normalizedRuntimeHash": "0x114f0a0930ee6489432704d28c63b730841fec127e3cbf0a6a0bd80a03f88768",
+    "hasTransferOwnership": false,
+    "storageLayout": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "_status"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "platformFeeBps"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "owner"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "sales"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "walletPurchased"
+      },
+      {
+        "slot": "5",
+        "offset": 0,
+        "label": "balances"
+      }
+    ],
+    "saleStruct": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "priceWei"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "maxSupply"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "sold"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "perWalletLimit"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "startTime"
+      },
+      {
+        "slot": "4",
+        "offset": 8,
+        "label": "endTime"
+      },
+      {
+        "slot": "4",
+        "offset": 16,
+        "label": "paused"
+      },
+      {
+        "slot": "4",
+        "offset": 17,
+        "label": "configured"
+      }
+    ]
+  },
+  {
+    "sourceCommit": "66f4938",
+    "compiler": "solc-0.8.24-opt200-cancun (repo foundry.toml)",
+    "runtimeBytes": 4331,
+    "immutableRanges": [
+      [
+        473,
+        32
+      ],
+      [
+        857,
+        32
+      ],
+      [
+        904,
+        32
+      ],
+      [
+        1190,
+        32
+      ],
+      [
+        1338,
+        32
+      ],
+      [
+        3102,
+        32
+      ],
+      [
+        3380,
+        32
+      ],
+      [
+        328,
+        32
+      ],
+      [
+        3217,
+        32
+      ],
+      [
+        524,
+        32
+      ],
+      [
+        3610,
+        32
+      ],
+      [
+        3670,
+        32
+      ]
+    ],
+    "normalizedRuntimeHash": "0x27fe3e174a72bb37cbd0372e32cc8b237022a9180213c2fedb8ebc261de17077",
+    "hasTransferOwnership": false,
+    "storageLayout": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "_status"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "platformFeeBps"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "owner"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "sales"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "walletPurchased"
+      },
+      {
+        "slot": "5",
+        "offset": 0,
+        "label": "balances"
+      }
+    ],
+    "saleStruct": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "priceWei"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "maxSupply"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "sold"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "perWalletLimit"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "startTime"
+      },
+      {
+        "slot": "4",
+        "offset": 8,
+        "label": "endTime"
+      },
+      {
+        "slot": "4",
+        "offset": 16,
+        "label": "paused"
+      },
+      {
+        "slot": "4",
+        "offset": 17,
+        "label": "configured"
+      }
+    ]
+  },
+  {
+    "sourceCommit": "66f4938",
+    "compiler": "solc-0.8.30-noopt-prague (Render image, no foundry.toml)",
+    "runtimeBytes": 7492,
+    "immutableRanges": [
+      [
+        774,
+        32
+      ],
+      [
+        834,
+        32
+      ],
+      [
+        1134,
+        32
+      ],
+      [
+        1289,
+        32
+      ],
+      [
+        4120,
+        32
+      ],
+      [
+        4472,
+        32
+      ],
+      [
+        4749,
+        32
+      ],
+      [
+        2425,
+        32
+      ],
+      [
+        4278,
+        32
+      ],
+      [
+        4785,
+        32
+      ],
+      [
+        5088,
+        32
+      ],
+      [
+        5129,
+        32
+      ]
+    ],
+    "normalizedRuntimeHash": "0xa9a60df391fa6914a2759cb32f6588e7122a02bc6b5dbe8eb5711f83fc9ce91e",
+    "hasTransferOwnership": false,
+    "storageLayout": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "_status"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "platformFeeBps"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "owner"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "sales"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "walletPurchased"
+      },
+      {
+        "slot": "5",
+        "offset": 0,
+        "label": "balances"
+      }
+    ],
+    "saleStruct": [
+      {
+        "slot": "0",
+        "offset": 0,
+        "label": "priceWei"
+      },
+      {
+        "slot": "1",
+        "offset": 0,
+        "label": "maxSupply"
+      },
+      {
+        "slot": "2",
+        "offset": 0,
+        "label": "sold"
+      },
+      {
+        "slot": "3",
+        "offset": 0,
+        "label": "perWalletLimit"
+      },
+      {
+        "slot": "4",
+        "offset": 0,
+        "label": "startTime"
+      },
+      {
+        "slot": "4",
+        "offset": 8,
+        "label": "endTime"
+      },
+      {
+        "slot": "4",
+        "offset": 16,
+        "label": "paused"
+      },
+      {
+        "slot": "4",
+        "offset": 17,
+        "label": "configured"
+      }
+    ]
+  }
+]
