@@ -16,6 +16,7 @@ on:
       - scripts/authority-inventory.mjs
       - scripts/authority-rotation-plan.mjs
       - scripts/authority-rotation-simulate.mjs
+      - scripts/safe-readiness-probe.mjs
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -48,6 +49,8 @@ jobs:
         run: node scripts/authority-inventory.mjs | tee authority-inventory.json
       - name: Simulate the authority rotation against live state (eth_call only; nothing signed or broadcast)
         run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
+      - name: Safe readiness for the replacement admin (read-only RPC and public GET only)
+        run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
         shell: bash
         run: |
@@ -73,3 +76,4 @@ jobs:
             fuji-deployer-audit.json
             authority-inventory.json
             authority-rotation-simulation.json
+            safe-readiness.json
