@@ -153,6 +153,17 @@ for (const contract of FUJI_CONTRACTS) result.fuji.push(await inspect(fuji, cont
 for (const contract of MAINNET_CONTRACTS) {
   try { result.mainnet.push(await inspect(mainnet, contract, 0, false)); } catch (error) { result.mainnet.push({ address: contract.address, error: error.message }); }
 }
+// Canonical Safe v1.4.1 deployments (safe-global/safe-deployments; same address on
+// every chain they are deployed to). Code presence is evidence only that the contracts
+// exist on Fuji, not that a Safe UI or transaction service supports the chain.
+const SAFE_CANONICAL = {
+  SafeProxyFactory_v1_4_1: "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+  Safe_v1_4_1: "0x41675C099F32341bf84BFc5382aF534df5C7461a",
+  SafeL2_v1_4_1: "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+};
+result.safeInfrastructureOnFuji = {};
+for (const [name, address] of Object.entries(SAFE_CANONICAL)) result.safeInfrastructureOnFuji[name] = { address, codePresent: (await fuji.getCode(address)) !== "0x" };
+
 result.summary = {
   fujiAuthorityHeld: result.fuji.flatMap((c) => Object.entries(c.subject || {}).filter(([k, v]) => v === true && k !== "pendingWithdrawalWei").map(([k]) => `${c.address}:${k}`)),
   fujiEditionBindings: result.fuji.flatMap((c) => (c.editions || []).filter((e) => e.subjectIsArtist || e.subjectIsPayout).map((e) => `${c.address}:${e.tokenId}:${e.subjectIsArtist ? "artist" : ""}${e.subjectIsPayout ? "+payout" : ""}`)),
