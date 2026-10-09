@@ -14,6 +14,8 @@ on:
       - scripts/data/marketplace-fingerprints.json
       - scripts/fuji-deployer-audit.mjs
       - scripts/authority-inventory.mjs
+      - scripts/authority-rotation-plan.mjs
+      - scripts/authority-rotation-simulate.mjs
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -44,6 +46,8 @@ jobs:
         env:
           SUBJECT: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
         run: node scripts/authority-inventory.mjs | tee authority-inventory.json
+      - name: Simulate the authority rotation against live state (eth_call only; nothing signed or broadcast)
+        run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
         shell: bash
         run: |
@@ -68,3 +72,4 @@ jobs:
             bundle-addresses.txt
             fuji-deployer-audit.json
             authority-inventory.json
+            authority-rotation-simulation.json
