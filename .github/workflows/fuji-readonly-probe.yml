@@ -13,6 +13,7 @@ on:
       - scripts/fuji-marketplace-reconciliation-probe.mjs
       - scripts/data/marketplace-fingerprints.json
       - scripts/fuji-deployer-audit.mjs
+      - scripts/authority-inventory.mjs
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -23,7 +24,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +40,10 @@ jobs:
         env:
           DEPLOYER: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
         run: node scripts/fuji-deployer-audit.mjs | tee fuji-deployer-audit.json
+      - name: Authority inventory for the platform deployer (read-only, Fuji + C-Chain)
+        env:
+          SUBJECT: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
+        run: node scripts/authority-inventory.mjs | tee authority-inventory.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
         shell: bash
         run: |
@@ -62,3 +67,4 @@ jobs:
             fuji-marketplace-reconciliation-probe.json
             bundle-addresses.txt
             fuji-deployer-audit.json
+            authority-inventory.json
