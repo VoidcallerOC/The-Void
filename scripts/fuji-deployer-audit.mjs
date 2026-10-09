@@ -17,7 +17,10 @@ const labels = new Interface([
   "function releases() view returns (address)",
   "function nextListingId() view returns (uint256)",
   "function name() view returns (string)",
+  "function owner() view returns (address)",
+  "function hasRole(bytes32,address) view returns (bool)",
 ]);
+const DEFAULT_ADMIN_ROLE = `0x${"00".repeat(32)}`;
 
 async function read(provider, to, name) {
   try { return labels.decodeFunctionResult(name, await provider.call({ to, data: labels.encodeFunctionData(name) }))[0]; } catch { return undefined; }
@@ -47,6 +50,11 @@ for (let n = 0; n < nonce; n += 1) {
     const value = await read(provider, address, name);
     if (value !== undefined) entry[name] = typeof value === "bigint" ? value.toString() : value;
   }
+  const owner = await read(provider, address, "owner");
+  if (owner !== undefined) entry.owner = owner;
+  try {
+    entry.deployerIsDefaultAdmin = labels.decodeFunctionResult("hasRole", await provider.call({ to: address, data: labels.encodeFunctionData("hasRole", [DEFAULT_ADMIN_ROLE, DEPLOYER]) }))[0];
+  } catch { /* no AccessControl */ }
   contracts.push(entry);
 }
 console.log(JSON.stringify({ probedAt: new Date().toISOString(), deployer: DEPLOYER, nonce, tipBlock: tip, contractsCreated: contracts.length, contracts }, null, 2));
