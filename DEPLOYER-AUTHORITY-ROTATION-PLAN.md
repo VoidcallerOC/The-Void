@@ -1,53 +1,67 @@
-# Deployer Authority Rotation — Inventory, Risk Review and Unsigned Package — 2026-10-09
+# Deployer Authority Rotation — P0 Review and Unsigned Package — 2026-10-09
 
-**Status: PARTIAL.**
-- **Done:** the inventory, the live simulation and the risk review.
-- **Not yet possible:** the authorization package is final only as a template, because the replacement authority has not been chosen (decision R1).
+**Status: BLOCKED for signing; PARTIAL overall.**
+- **Done:** the inventory, the live simulations, the local-fork rehearsal and the P0 review.
+- **Blocked:** the P0 package cannot become executable yet. No replacement Safe exists, no backup address has been supplied, and a working Fuji Safe signing workflow has not been verified (R1 blockers, §5).
+- **Not part of this review:** P1/ALL are deliberately not reviewed or packaged here.
 
 **Mode:** read-only.
-- Nothing was signed or broadcast.
-- No credential, environment variable, database row or role was changed.
-- The cron `crn-dat953e0tbcc73acrepg` stayed suspended.
-- No pull request was merged.
+- Nothing was signed or broadcast to Fuji or any other network.
+- No credential, environment variable, access list, database row or role was changed.
+- The cron `crn-dat953e0tbcc73acrepg` stays suspended.
+- PR #142 is not merged.
+- The Fuji archive/reconciliation gate still stands, and nothing here claims mainnet readiness.
 
 **Subject (old authority):** `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`. This is the Fuji deployer and the cron key.
 
-**Chain access:** this sandbox cannot reach the Fuji RPC. All chain evidence comes from read-only GitHub Actions runs of the "Fuji read-only release probe" on PR #142, against the public RPC.
+**Evidence tiers** (kept separate throughout):
 
-| Run | Job | What it adds | Fuji tip |
+| Tier | Meaning | Source |
+|---|---|---|
+| **LIVE-READ** | Read from Fuji state | `eth_call`, `eth_getStorageAt`, `eth_getCode`, logs, via the public RPC from GitHub Actions |
+| **LIVE-SIM** | Simulated against current Fuji state; nothing executed | `eth_call` / `eth_estimateGas`. **LIVE-SIM+OVR** adds `eth_call` state overrides that model earlier steps' effects. |
+| **FORK-EXEC** | Real transactions executed on a **local anvil fork** of Fuji | Never sent to Fuji. The old key is impersonated; test signers are anvil's unlocked dev accounts; no private key anywhere. |
+| **SOURCE** | Derived from repository source and compiler output | — |
+| **UNVERIFIED** | Not readable with this session's access | — |
+
+**Runs used (latest first):**
+
+| Run / job | Head | What it adds | Fuji block |
 |---|---|---|---|
-| [37909396233](https://github.com/VoidcallerOC/The-Void/actions/runs/37909396233) | 113750622584 | `authority-inventory.mjs`: roles, owners, logs, payouts, pending balances | 59225727 |
-| [37910301344](https://github.com/VoidcallerOC/The-Void/actions/runs/37910301344) | 113753573531 | adds dispatcher selector checks and the Safe infrastructure check | 59226074 |
-| [37911017700](https://github.com/VoidcallerOC/The-Void/actions/runs/37911017700) | 113755901400 | `authority-rotation-simulate.mjs`: an `eth_call`/`eth_estimateGas` simulation of every step | 59226293 |
-| [37911342571](https://github.com/VoidcallerOC/The-Void/actions/runs/37911342571) | 113756963527 | adds the pre-rotation sale-close simulation and `perWalletLimit` | 59226369 |
+| [37915673243](https://github.com/VoidcallerOC/The-Void/actions/runs/37915673243) / 113771126783 `fork-rehearsal` | `770b22c` | FORK-EXEC of P-1, P-2, a 2-of-3 test Safe and the generated P0 package, with failure cases | fork at 59227256 |
+| [37914566511](https://github.com/VoidcallerOC/The-Void/actions/runs/37914566511) / 113767503241 `probe` | `7d634a4` | Inventory, LIVE-SIM(+OVR), Safe readiness, legacy-sale bytecode identity | 59227031–59227042 |
+| [37913533268](https://github.com/VoidcallerOC/The-Void/actions/runs/37913533268) / 113764115785 `probe` | `3c027f7` | First Safe readiness run, sequential P0 simulation with overrides, sale-close gates | 59226824–59226830 |
+| 37909396233, 37910301344, 37911017700, 37911342571, 37911815871 | earlier | Inventory and first simulations (previous report) | 59225727–59226472 |
 
-All three inventory runs agree exactly: the `summary` objects are identical. The old key's Fuji nonce is **59** in every run.
-
-**Evidence labels:**
-- **LIVE** means read from chain state or simulated against it in the runs above.
-- **SOURCE** means derived from repository source.
-- **UNVERIFIED** means not readable with the access this session has.
+All seven inventory runs return an identical `summary`. **The old key's Fuji nonce is 59 in every run.** Its last transaction (nonce 58) was the cron deploy on 2026-10-06.
 
 ---
 
-## 1. What changed from the 23-step draft
+## 1. Owner decisions recorded (input to this review)
 
-1. **The three legacy sale contracts cannot transfer ownership (LIVE).**
-   - The contracts are 0x51cC (live), 0xcc26 and 0x7D1a.
-   - Their deployed bytecode has no `transferOwnership(address)` selector.
-   - `eth_call transferOwnership(...)` from the owner reverts with empty data. That is the no-matching-function revert; the contracts have no fallback.
-   - They were built from `VoidPrimarySale.sol` *before* commit `80c32af` (2026-10-04), the commit that added `transferOwnership`.
-   - **Their `owner()` stays the old key permanently.** The draft's three sale `transferOwnership` steps and their fee-proof steps would have reverted, so they are removed.
-2. **The new authority's first action is now `revokeRole(DEFAULT_ADMIN_ROLE, old)`, not the ISSUER revoke.**
-   - Both revokes prove control equally well.
-   - Revoking admin first ends the window in which a possibly-compromised old key could revoke the new authority, one transaction sooner.
-3. **The package now has 17 core steps** (4 releases × 4, plus 1 factory transfer), plus up to 3 optional old-key pre-steps (§3, decision R3).
-4. **Unit tests now enforce three invariants:**
-   - no step revokes or renounces the new authority;
-   - no step targets a locked sale;
-   - the step count matches the inventory.
+| # | Decision |
+|---|---|
+| R1 | Replacement authority: a fresh Fuji Safe, provided its creation, signing, execution, owners and threshold workflow is verified. Do not invent an address or assume Safe UI support. |
+| R2 | Add an independently controlled backup admin. It must be able to administer before the old sole admin is removed. |
+| R3 | Close the two open editions on `0x82b26` before the old key's ARTIST_ROLE is revoked. Defer P-3 (the 0.019 AVAX withdrawal). |
+| R4 | P0 first; stop for verification and approval before P1/ALL. |
+| R5 | Do not change `0x284C` in this package. Its direct mint authority is a separate open security decision. |
+| R6 | Accept the permanent fee-lowering power of locked sales `0x51cC`, `0xcc26` and `0x7D1a`. No ownership transfers. |
+| R7 | The owner reviews and signs manually through the existing wallet workflow. No private keys in automation, logs, prompts or repository files. |
+| R8 | GitHub, Render, API lists, `artist_owners` and E2E wallet are separate cutover items. Inventory their dependencies first; change nothing yet; keep the cron suspended. |
 
-## 2. Completed authority inventory (Fuji 43113)
+## 2. Head and CI status
+
+| Head | `build-and-test` | `probe` | `fork-rehearsal` | Note |
+|---|---|---|---|---|
+| `3c027f7` | success (job 113764117033) | success (job 113764115785) | — (job added later) | head named in the request |
+| `9ded5a8` | — | — | **failure** (job 113767007039) | my bug: the rehearsal's sale ABI lacked `configureSale`; fixed in `7d634a4` |
+| `7d634a4` | success (113767503381) | success (113767503241) | **hung** (113767503011) | confirmation-based receipt wait stalled after `evm_revert`; fixed in `770b22c` |
+| `770b22c` | success (113771125677) | success (113771126532) | success (113771126783) | last commit that changes scripts or workflows |
+
+The commit that adds this document changes only Markdown. The `probe` and `fork-rehearsal` workflows filter on script and workflow paths, so they do not re-run for it. Their evidence is from `770b22c`, which has identical scripts. `build-and-test` status for the document head is reported separately.
+
+## 3. Authority inventory (Fuji 43113)
 
 The table uses these source-derived (SOURCE) mechanics:
 
@@ -96,7 +110,7 @@ Notes:
   - This is not the old key, so it is outside this rotation, but it is a second privileged key on the live release (decision R5).
   - Who controls `0x284C` is UNVERIFIED. It is the platform fee recipient on the legacy sales and the owner of the mainnet collection.
 
-## 3. Payout destinations, pending balances and editions that pay the old key
+## 4. Payout destinations, pending balances and editions that pay the old key
 
 Payout addresses are fixed per edition (`payoutOf`, set at `createEdition`). No setter exists (SOURCE). Sale proceeds accrue as pull balances that only the payee can `withdraw()`.
 
@@ -118,20 +132,351 @@ Pending pull balances (LIVE, run 3):
 
 Consequences:
 - **Any purchase of the two OPEN editions pays the old key, forever.** This holds whoever administers the contracts afterwards.
-- Only the edition artist can call `configureSale`, which needs ARTIST_ROLE **and** `artistOf == msg.sender`. That is the old key, and **only until step 12 revokes its ARTIST_ROLE.**
-- After step 12, the only way to stop those sales is for the new admin to `pause()` all of `0x82b26`. That also freezes transfers of every token on that release.
-- Hence the optional old-key pre-steps P-1/P-2 below (decision R3).
+- Only the edition artist can call `configureSale`, which needs ARTIST_ROLE **and** `artistOf == msg.sender`. That is the old key, and **only until the P1 step that revokes its ARTIST_ROLE on `0x82b26`.**
+- After that revoke, the only way to stop those sales is for the new admin to `pause()` all of `0x82b26`. That also freezes transfers of every token on that release.
+- Hence the old-key pre-steps P-1/P-2 (decision R3: required), verified in §6.
 - The old key keeps the right to `withdraw()` its 0.019 AVAX whatever is rotated. That function is not role-gated.
 
-**Optional pre-steps** (signer: old key; before step 9; same sale parameters with `paused = true`):
+P-3 (withdraw the 0.019 AVAX) is deferred by decision R3.
 
-| Step | To | Call | Calldata | Live simulation (run 37911342571) |
-|---|---|---|---|---|
-| P-1 | `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` | `configureSale` token 3377880292…, price 10000000000000000, maxSupply 25, perWallet 1, start 0, end 0, **paused true** | `0x23a126174aae1ffba437e9e91d04ea8032dfa64a3e8ed673475793a65bea7c266cf12563000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001` | OK from old key (≈56.0k gas); `AccessDenied(address)` from unprivileged |
-| P-2 | `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` | `configureSale` token 8633610952…, price 10000000000000000, maxSupply 25, perWallet 20, start 0, end 0, **paused true** | `0x23a12617bee0819ca9eed9d3493d57d05d81ffbd949d97dd4fdab700a285dcad6cbe5413000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001` | OK from old key (≈56.0k gas); `AccessDenied(address)` from unprivileged |
-| P-3 | `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` | `withdraw` | `0x3ccfd60b` | OK from old key (42,291 gas) |
+## 5. Replacement Safe and backup admin (R1, R2)
 
-## 4. Off-chain privilege inventory (separate from the on-chain rotation)
+### 5.1 Safe readiness on Fuji
+
+| Check | Result | Tier |
+|---|---|---|
+| Chain ID | `eth_chainId` = 43113 | LIVE-READ |
+| Safe v1.4.1 contracts present | SafeProxyFactory `0x4e1D…ec67`, Safe `0x4167…461a`, SafeL2 `0x29fc…C762`, CompatibilityFallbackHandler `0xfd07…Ec99`, MultiSend, MultiSendCallOnly, SignMessageLib, CreateCall, SimulateTxAccessor: all 9 have code on Fuji, **byte-identical** to Avalanche C-Chain | LIVE-READ |
+| SafeTx hash parity | The package's offline EIP-712 hash equals `getTransactionHash()` on the live Safe and SafeL2 singletons (`0xa3b8…f48c`, `0x641d…ee8e`) | LIVE-SIM |
+| Official Safe config service | `safe-config.safe.global/api/v1/chains/43113/` → **HTTP 404**. Fuji is not listed. | LIVE-READ (public GET) |
+| Official Safe client gateway | `safe-client.safe.global/v1/chains/43113` and `/43114` → **HTTP 403** from GitHub runners | **inconclusive** (blocked from CI) |
+| Contract-level workflow on a test Safe | Executed end to end; see 5.2 | FORK-EXEC |
+
+**Conclusion.** The Safe contracts on Fuji are canonical and work. **Official Safe{Wallet} web-app or transaction-service support for Fuji is not verified.** The config service does not list chain 43113. No proposed Safe address or backup address exists.
+
+**R1 is therefore BLOCKED at the signing-workflow and address stage. This review stops there.**
+
+### 5.2 What the local fork proved (FORK-EXEC, fork block 59227256)
+
+1. A Safe was created through the canonical factory: `createProxyWithNonce(SafeL2, setup(3 owners, threshold 2, CompatibilityFallbackHandler))`, gas 305,847. `VERSION` reads `1.4.1`; the owners and threshold read back as configured.
+2. Safe transactions executed with two owner EIP-712 signatures (`eth_signTypedData_v4`):
+   - step 4 used 91,057 gas; step 5 used 74,329;
+   - **any** account can submit once the signatures exist.
+3. Rejected cases:
+   - a single signature;
+   - signatures made for chain 43114;
+   - a signature from a non-owner (the backup).
+4. The generated package's `safeTxHash` equals the test Safe's own `getTransactionHash` for steps 4 and 5.
+5. A Safe transaction whose inner call fails reverted as a whole (`Error(string)`, GS013). Per Safe 1.4.1 source, with `safeTxGas = 0` and `gasPrice = 0`, a failed inner call reverts `execTransaction`, so the **nonce is not consumed** and a pre-signed transaction can be retried. The revert is FORK-EXEC; the nonce statement is SOURCE.
+
+**Not proven:**
+- that **the owner's** wallets can sign EIP-712 SafeTx data for chain 43113;
+- that any UI or transaction service works for Fuji;
+- anything about the real Safe, which does not exist yet.
+
+### 5.3 STOP: what the owner must do to clear R1
+
+1. **Choose and confirm the Fuji Safe signing path yourself.** Options:
+   - a Safe interface you confirm lists Avalanche Fuji (43113) and shows a SafeTx hash you can compare with the package;
+   - your own hardware wallets signing EIP-712 SafeTx data offline, with any account submitting `execTransaction`. The calldata and hashes are in the package; this path needs no UI or transaction service.
+
+   If neither is available on Fuji, decide whether to change R1, for example to a hardware-wallet EOA primary. Do not proceed on an unverified workflow.
+2. **Create the Safe** (you sign the creation):
+   - SafeL2 v1.4.1 via the canonical factory;
+   - 3 owners, threshold 2;
+   - no modules, no guard, CompatibilityFallbackHandler (or none).
+3. **Choose the backup admin:** a separate hardware wallet with its own seed, stored separately. It must not be a Safe owner, must not be the old key and must not be `0x284C`. Fund it with a small amount of test AVAX.
+4. **Send me only the two public addresses.** I then run:
+   - `SAFE_AUTHORITY=… BACKUP_ADMIN=… node scripts/safe-readiness-probe.mjs`;
+   - the simulator with the same variables.
+
+   All checks in 5.4 must pass.
+5. **Recommended live proof before step 1 (S-0).** The Safe executes one no-op transaction to itself (to = Safe, value 0, data `0x`) through your chosen path. This proves on Fuji that your owners can sign and execute, without touching any release contract. It consumes Safe nonce 0, so the package is then generated with `SAFE_NONCE=1`.
+
+### 5.4 Owner/threshold design and the checks enforced before signing
+
+| Element | Design | Why |
+|---|---|---|
+| Primary | Fresh Safe v1.4.1 (SafeL2), **2-of-3** owners on separate hardware wallets / seeds; no modules, no guard | Survives the loss of one key; needs two compromises |
+| Backup | Independent hardware-wallet EOA, cold, **not** a Safe owner | Independent recovery path. For mainnet, upgrade it to its own Safe. |
+| Role granted | `DEFAULT_ADMIN_ROLE` only, on `0x7Bba` in P0 | The only role needed to administer (grant, revoke, pause). Neither needs ARTIST or ISSUER. |
+
+`safe-readiness-probe.mjs` (LIVE-READ, run once addresses exist) **must** report:
+- the master copy is the canonical Safe or SafeL2 v1.4.1;
+- `VERSION` is `1.4.1`;
+- threshold ≥ 2 and owners > threshold;
+- no modules, no guard, and a canonical or no fallback handler;
+- no owner equals the old key, `0x284C` or the backup;
+- the backup is not a Safe owner;
+- if the backup is a Safe, it shares no owner with the primary;
+- current role membership on `0x7Bba` is false for both before step 1.
+
+**Both authorities can administer: FORK-EXEC.**
+- After the full P0 run, `grantRole` as a no-op simulates OK from the Safe and from the backup.
+- From the old key it is rejected; the old key also cannot mint.
+- LIVE-SIM+OVR on current Fuji state gives the same result.
+
+**Lockout paths rejected:**
+- The generator never revokes or renounces the Safe or the backup.
+- The old admin is removed only by the Safe's own transaction, after both grants and after the backup has acted.
+- Unresolved addresses produce **BLOCKED** steps with no calldata.
+
+All of the above is unit-tested in `scripts/authority-rotation-plan.test.mjs`. The verifier also rejects a threshold that cannot tolerate a lost key.
+
+**Residual:** if both the Safe (two of three keys) **and** the backup are lost, `0x7Bba` is permanently unadministered. No on-chain guard exists: renounce by the sole admin simulates OK (LIVE-SIM).
+
+## 6. Legacy sale layout and the two sale closes (R3)
+
+### 6.1 Exact deployed bytecode → source → storage layout (LIVE-READ + SOURCE)
+
+`scripts/legacy-sale-bytecode-check.mjs` compares each deployed runtime with four candidate builds:
+- two pre-`80c32af` sources: `fd31295`, `66f4938`;
+- two compiler settings: repo `foundry.toml` (solc 0.8.24, optimizer 200, cancun) and the Render image's defaults (solc 0.8.30, optimizer off, prague).
+
+The comparison zeroes immutables and strips metadata. The fingerprints are in `scripts/data/legacy-sale-fingerprints.json`.
+
+| Sale | Runtime bytes | Unique match | `transferOwnership` |
+|---|---|---|---|
+| `0x51cC` (live) | 4331 | `66f4938`, solc 0.8.24 opt 200 | absent |
+| **`0xcc26`** (P-1/P-2 target) | 4196 | **`fd31295`, solc 0.8.24 opt 200** | absent |
+| `0x7D1a` | 4196 | `fd31295`, solc 0.8.24 opt 200 | absent |
+
+Storage layout of the matched builds (solc `storageLayout`):
+
+| Slot | Variable |
+|---|---|
+| 0 | `_status` |
+| 1 | `platformFeeBps` |
+| 2 | `owner` |
+| 3 | `sales` (mapping) |
+| 4 | `walletPurchased` |
+| 5 | `balances` |
+
+The `Sale` struct occupies five slots:
+- `+0` priceWei
+- `+1` maxSupply
+- `+2` sold
+- `+3` perWalletLimit
+- `+4` one packed word:
+  - startTime: bytes 0–7
+  - endTime: bytes 8–15
+  - paused: byte 16
+  - configured: byte 17
+
+Cross-checked live:
+- `eth_getStorageAt(slot 2)` equals `owner()`;
+- slot 1 equals `platformFeeBps()`;
+- the `sales[token]` slots equal the `sales()` getter for both editions.
+
+### 6.2 P-1 and P-2
+
+| | P-1 | P-2 |
+|---|---|---|
+| Target | sale `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` (release `0x82b26Da2…82e5`, verified via `releases()`) | same |
+| Edition | `33778802922810732976408591241428358474475553907731009337085064305512658576739` | `86336109522257422783953313092869910591261689395232051112421244253165221467155` |
+| `artistOf` / `payoutOf` (LIVE-READ) | old key / old key | old key / old key |
+| Live sale | price 0.01 AVAX, maxSupply 25 (edition max 25), sold 2, perWallet 1, start 0, end 0, paused false, configured true | price 0.01 AVAX, maxSupply 25, sold 0, perWallet 20, start 0, end 0, paused false, configured true |
+| Decoded call | `configureSale(id, 10000000000000000, 25, 1, 0, 0, true)` | `configureSale(id, 10000000000000000, 25, 20, 0, 0, true)` |
+| Slot written | `0x55bfa2e9…e0ae52af` (`sales[id]+4`) | `0xb91c1b75…824f8b58` (`sales[id]+4`) |
+| Expected delta | byte 16 (`paused`) 0x00 → 0x01; every other byte and slot unchanged | same |
+| LIVE-SIM | OK from the old key (56,005 gas) | OK (55,993 gas) |
+| LIVE-SIM rejections | unprivileged → `AccessDenied(address)`; `0x284C` → `NotEditionArtist`; old key with ARTIST removed (OVR) → `AccessDenied(address)` | same |
+| FORK-EXEC | status 1, 55,203 gas | status 1, 55,191 gas |
+| FORK-EXEC storage | **only** `+4` of this edition changed (of the 10 monitored slots of both editions) | same |
+| FORK-EXEC log | `SaleConfigured`: price, max and perWallet unchanged; `paused = true` | same |
+| FORK-EXEC postconditions | price, maxSupply, sold, perWallet, start, end and configured unchanged; `payoutOf` unchanged | same |
+| FORK-EXEC purchases | before close OK; after close `SalePaused(id)` (`0x4616a078`); P-2's edition still open after P-1 | P-1's edition stays closed |
+
+**Payout cannot be redirected.**
+- `configureSale` has no payout parameter. `purchase()` reads `releases.payoutOf(tokenId)` (SOURCE), and that value is unchanged after the close (FORK-EXEC).
+- `configureSale` writes only `sales[tokenId]` (SOURCE).
+- The fork run observed exactly one changed word among the monitored slots.
+
+**Limit:** a full-contract storage diff was not taken. The public RPC returns "unsupported operation" for `eth_createAccessList`, and the fork run monitored the edition slots only.
+
+**Unrelated editions.** The other four old-key editions on `0x82b26` are unconfigured (`SaleNotConfigured`). They stay unsellable, and become permanently unconfigurable after the P1 ARTIST revoke.
+
+**Failure cases:**
+- Re-sending a close succeeds and changes nothing (idempotent; FORK-EXEC).
+- A close after the old key loses ARTIST reverts `AccessDenied(address)` (FORK-EXEC and LIVE-SIM+OVR).
+
+**The public-RPC purchase simulation was inconclusive** ("missing revert data", even before the close), so the purchase behaviour above rests on FORK-EXEC.
+
+**Ordering.**
+- P-1/P-2 must execute before the old key's ARTIST_ROLE is revoked on `0x82b26`. That revoke is a **P1** step, enforced by `requiresCompleted` and a unit test.
+- P0 does not touch `0x82b26`.
+- P-1/P-2 do not depend on R1 and are fully encoded, so they may be signed in the P0 session.
+- Immediately before signing, re-run the simulator and confirm the sale parameters are unchanged.
+
+## 7. P0 sequence: evidence by step and failure cases
+
+The P0 package covers `0x7Bba` only. LIVE-SIM+OVR is from probe run 37913533268 with stand-in addresses; FORK-EXEC is from run 37915673243, with fork-only test Safe and backup.
+
+| # | Signer | Call on `0x7Bba` | LIVE-SIM(+OVR) | FORK-EXEC | Admins after (FORK) |
+|---|---|---|---|---|---|
+| — | Safe (control) | `revokeRole(ADMIN, old)` before any grant | `AccessDenied(bytes32,address)` | — | {old} |
+| 1 | old key | `grantRole(ADMIN, SAFE)` | OK (48,884 gas, LIVE estimate) | status 1, 48,725 gas, `RoleGranted(ADMIN, SAFE, sender old)` | {old, SAFE} |
+| 2 | old key | `grantRole(ADMIN, BACKUP)` | OK | status 1, 48,725 gas, `RoleGranted(ADMIN, BACKUP, old)` | {old, SAFE, BACKUP} |
+| 3 | BACKUP | `revokeRole(ISSUER, old)` | OK | status 1, 27,090 gas, `RoleRevoked(ISSUER, old, sender BACKUP)`; old key ISSUER false | {old, SAFE, BACKUP} |
+| 4 | SAFE (2-of-3) | `revokeRole(ADMIN, old)` | OK | status 1, 91,057 gas, `RoleRevoked(ADMIN, old, sender SAFE)`; one signature rejected | **{SAFE, BACKUP}** |
+| 5 | SAFE (2-of-3) | `revokeRole(ARTIST, old)` | OK | status 1, 74,329 gas, `RoleRevoked(ARTIST, old, SAFE)` | {SAFE, BACKUP} |
+| end | — | old key grant / mint; Safe / backup admin no-op | old: `AccessDenied`; Safe and backup: OK | same | — |
+
+**Failure cases:**
+
+| Case | Result | Tier |
+|---|---|---|
+| Wrong address (zero, old key, `0x284C`, a rotated contract, a bad checksum, Safe == backup) | rejected by the generator; no calldata | unit tests |
+| Wrong address actually granted | recoverable: the old key revokes it before step 4 | FORK-EXEC |
+| Wrong chain | Safe signatures for 43114 rejected by the Safe. EOA steps: the package fixes `chainId` 43113; an EIP-155 signature for another chain is invalid on Fuji. | FORK-EXEC / SOURCE |
+| Already-closed edition | idempotent re-close | FORK-EXEC |
+| Missing roles | Safe before grant: `AccessDenied(bytes32,address)`; unprivileged grant or revoke: `AccessDenied`; close without ARTIST: `AccessDenied(address)` | LIVE-SIM(+OVR), FORK-EXEC |
+| Unresolved Safe configuration | package **BLOCKED** on steps 1–5 (`SAFE_AUTHORITY`, `BACKUP_ADMIN`, `SAFE_NONCE`) | FORK-EXEC output, unit tests |
+| Insufficient or foreign signatures | one signature, or a non-owner signature: rejected | FORK-EXEC |
+| Old key acts between grant and removal | Safe step 4 fails (see §8) | FORK-EXEC |
+
+**No batch or two-step admin path exists (LIVE-READ).** None of `multicall(bytes[])`, `multicall(uint256,bytes[])`, `beginDefaultAdminTransfer`, `acceptDefaultAdminTransfer` or `execute(address,uint256,bytes)` is present in any of the four release dispatchers.
+
+## 8. Compromised-key race (honest assessment)
+
+**Can a compromised old key act between grant and revoke? Yes.**
+- FORK-EXEC: after step 1 the old key revoked the Safe's admin role, and the Safe's step-4 transaction then failed.
+- Until step 4 is included in a block, the old key can do anything an admin can:
+  - revoke the Safe or backup;
+  - grant admin to a third party;
+  - pause or unpause;
+  - mint, until step 3;
+  - create editions, until step 5.
+
+**Is an atomic handoff supported? No.**
+- The release contracts have no batch, two-step or execute entry point (LIVE-READ).
+- The old key is an EOA, which cannot batch. EIP-7702 delegation could in principle batch an EOA's calls, but C-Chain support is UNVERIFIED, and it would put new code in control of the old key. Not proposed.
+- A Safe MultiSend batches only the Safe's own calls (steps 4–5). The grant must come from the old key first, so the window always spans at least two transactions from different signers.
+- A helper contract would itself need the admin grant first, which gives the same window.
+
+**Mitigations.** These reduce the race; they do not eliminate it.
+1. Collect the Safe signatures for steps 4 and 5 **before** step 1. The hash depends only on the Safe address, chain, nonce and calldata, and the package hash is proven equal to the Safe's own. Step 4 can then be submitted the moment step 3 confirms.
+2. Sign steps 1–3 back to back.
+3. Between steps, check `RoleGranted`/`RoleRevoked` on `0x7Bba` (§14 STOP conditions).
+4. A failed Safe step does not consume the nonce (SOURCE), so it can be retried after re-granting.
+5. If hostile actions appear, nobody wins on-chain: there is no role hierarchy.
+   - The decisive defensive act is completing step 4.
+   - If it is contested repeatedly, the fallback is to abandon `0x7Bba` (Fuji) and move releases to FactoryV2 clones.
+
+**Residual risk.**
+- There is no evidence the key is compromised: nonce 59 is unchanged since 2026-10-06, and there are no unexpected role holders.
+- The exposure window runs from step 1's inclusion to step 4's inclusion. With pre-signed Safe transactions that should be seconds to minutes.
+- The window is **not** zero, and this package does not claim it is.
+
+## 9. App dependencies on the old key and their recovery paths
+
+### 9.1 E2E mint control
+
+**Code.**
+- `src/lib/fuji-release.js:20-28`: `FUJI_E2E_MINT.wallet` is hard-coded to the old key.
+- That module's plan, encode, preflight and verify functions use it:
+  - `assertFujiE2EMintPlan` (~443);
+  - `encodeFujiE2EMint` mints `to` that wallet (~457);
+  - `readFujiE2EMintPreflight` (~466) requires the connected wallet to be that address **and** to hold ARTIST and ISSUER on `FUJI_RELEASE_CONFIG.contractAddress` = `0x7Bba`;
+  - `verifyFujiE2EMint` (~489).
+
+**UI consumers: none.** No component imports these functions (SOURCE). No production user flow calls them. They serve the Fuji certification/E2E procedure.
+
+**Coupled constant.** `src/lib/studio-wallet-catalog.js:6` (`STUDIO_ADMIN_DEPLOYER_WALLET = FUJI_E2E_MINT.wallet`), used by `ArtistStudioPage.jsx:197`, hides Voidcaller profiles when the deployer wallet connects. Role rotation does not affect it, but changing the E2E wallet would silently change this filter.
+
+**Tests:**
+- `src/lib/fuji-release.test.js` and `src/lib/studio-wallet-catalog.test.js` (mocked; no chain);
+- `server/production-gate-readiness.test.js` uses the address only as a DB fixture.
+
+**Effect of P0.** The preflight fails from step 3 (ISSUER) and step 5 (ARTIST). E2E mint on `0x7Bba` is unavailable until migrated.
+
+**Recovery plan.** A separate PR after approval; nothing is changed now.
+1. Decouple `STUDIO_ADMIN_DEPLOYER_WALLET` into its own constant.
+2. Move the E2E wallet into `config/fuji-release.json` (`e2eWallet`). Make it a **fresh test EOA with no admin role**.
+3. Either:
+   - (a) preferred: run E2E on a FactoryV2 clone owned by the E2E wallet, which needs no platform grant; or
+   - (b) have the Safe grant ARTIST and ISSUER on `0x7Bba` to the E2E wallet (one Safe transaction each).
+4. Update both unit-test files, and add a test asserting the E2E wallet holds no admin role.
+5. Re-run the E2E acceptance matrix.
+
+### 9.2 In-app publishing-role grant
+
+**Code.**
+- `src/components/VerifyPages.jsx:500-548`: `OnChainRolesPanel` on route `verify/review/:id`.
+- The grant button appears only if the connected wallet holds DEFAULT_ADMIN on `0x7Bba` (`canMutateFujiPublishingRoles`, `src/lib/fuji-release.js:708-710`).
+- `grantPublishingRoles` (`src/lib/fuji-release.js:748+`) also supports a reviewer path through `VoidRoleGranter`. However, `config/fuji-release.json` has no `roleGranterAddress` (it is not deployed), and the panel's admin gate hides the button before that path is reached.
+- Test: `src/components/OnChainRolesPanel.test.jsx`.
+
+**Affected flow.** A reviewer approves an application; an admin wallet then grants ARTIST and ISSUER on `0x7Bba` so the artist can publish on the shared release.
+
+**Effect of P0.**
+- The only admins are the Safe and the cold backup.
+- A Safe cannot use this dapp button on Fuji unless a Safe app or WalletConnect path supports 43113 (UNVERIFIED; the config service returns 404).
+- The backup should not be used for routine grants.
+- **The in-app grant stops working for `0x7Bba`.**
+
+**Recovery paths:**
+- **A, immediate:** the Safe executes `grantRole(ARTIST, artist)` and `grantRole(ISSUER, artist)` through the verified Safe workflow, per approved application. This is manual. The generator can be extended to emit these with hashes.
+- **B, recommended engineering path:** a separate PR plus a separate owner-signed deployment.
+  1. Deploy `contracts/VoidRoleGranter.sol` for `0x7Bba` with `owner = SAFE` and an explicit reviewer list.
+  2. The Safe grants it DEFAULT_ADMIN_ROLE. The custom AccessControl requires admin to call `grantRole`. Its code can only grant or revoke ARTIST and ISSUER, and cannot touch the Safe or backup (SOURCE).
+  3. Set `roleGranterAddress`.
+  4. Change `OnChainRolesPanel` to show the button for granter reviewers; `readRoleGranterReviewer` and the library path already exist.
+  5. Add tests.
+
+  Note: this adds a contract admin, and ISSUER grants still allow direct unpaid minting, as today.
+- **C, long term:** onboard artists on FactoryV2 per-artist releases, which need no platform role grant. This depends on the album redeploy decisions D1–D5.
+
+## 10. Residual risks
+
+1. **Locked-sale fee power (R6, accepted).**
+   - The old key, or anyone holding it, can set the platform fee on `0x51cC`, `0xcc26` and `0x7D1a` to any value from 0 to 500 bps, permanently.
+   - It cannot raise the fee: above 500 reverts `FeeAboveCap` (`0x7159abd8`, LIVE-SIM).
+   - It cannot redirect payouts, mint or move funds. The worst case is loss of the platform's 5% share on those sales.
+2. **Six immutable payout destinations on `0x82b26`.** These pay the old key forever:
+
+   ```
+   32973968306772830434393710851061790601314118564265222743771059411608976358491
+   23685155712394957401511510495110946071855190423032439714405816634523406427325
+   9404686040103260377530222232027412559186112217689961434973498871367969795642
+   33778802922810732976408591241428358474475553907731009337085064305512658576739
+   86336109522257422783953313092869910591261689395232051112421244253165221467155
+   69621777096996404494569967715110965261109496187347335164928263396549073080909
+   ```
+
+   - The two OPEN ones are closed by P-1/P-2.
+   - The other four are unconfigured, and become unconfigurable after the P1 ARTIST revoke.
+   - 0.019 AVAX stays withdrawable only by the old key (P-3 deferred).
+3. **`0x284C` mint authority (R5, unresolved).**
+   - It holds ARTIST and ISSUER on `0x7Bba` and `0x82b26`, so it can mint directly without sale payment.
+   - It is admin/owner of the FactoryV2 clones, platform fee recipient on the legacy sales, and owner of mainnet `0xd1b4`.
+   - Its controller is UNVERIFIED. **This needs a separate security decision.**
+4. **Possible GitHub secret exposure.**
+   - `DEPLOYER_PRIVATE_KEY` is strongly indicated to be the old key; the address is masked.
+   - It is referenced by 4 workflows, including the per-contract album redeploy and mainnet.
+   - The mainnet workflow has never run.
+   - All are `workflow_dispatch`, so anyone with write access could dispatch the Fuji workflows using this key.
+   - Other possible copies (the Render cron env, local machines) are UNVERIFIED.
+5. **Unverified off-chain items:**
+   - the contents of `MARKETPLACE_ADMIN_WALLETS` and `VERIFICATION_REVIEWER_WALLETS`;
+   - the `artist_owners` rows for the old key;
+   - who holds the E2E wallet key;
+   - who controls `0x284C`;
+   - the owner's ability to sign Fuji SafeTx data;
+   - Safe UI and transaction-service support for 43113.
+
+## 11. Remaining blockers
+
+| # | Blocker | Owner action |
+|---|---|---|
+| B1 | No verified Fuji Safe signing workflow | §5.3 step 1 |
+| B2 | No Safe address (`SAFE_AUTHORITY`) and no Safe nonce | §5.3 steps 2 and 5 |
+| B3 | No backup address (`BACKUP_ADMIN`) | §5.3 step 3 |
+| B4 | Readiness checks on the real Safe and backup not yet run | Send the two public addresses |
+| B5 | App dependencies: E2E and in-app grant | Approve recovery path 9.1 and 9.2 (A/B/C) before or with P0 |
+| B6 | Off-chain read access: API lists, `artist_owners` | Owner checks (§12) |
+
+## 12. Off-chain privilege inventory (R8 input)
 
 | Credential / list | Where | What it can do | Evidence | Status |
 |---|---|---|---|---|
@@ -156,181 +501,73 @@ Read-only query for the owner to run (it returns owner rows, no secrets):
 SELECT artist_id, role FROM artist_owners WHERE lower(owner_wallet) = '0xabd3746e8b852f55be52fc44fab6cab908b1c174';
 ```
 
-## 5. Fuji Safe infrastructure (LIVE)
+## 13. R8 cutover items: dependencies first, nothing changed
 
-Canonical Safe v1.4.1 contracts have code on Fuji:
-- SafeProxyFactory `0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67`
-- Safe `0x41675C099F32341bf84BFc5382aF534df5C7461a`
-- SafeL2 `0x29fcB43b46531BcA003ddC8FCB67FFE91900C762`
+Each item is independent of the on-chain rotation and of the others. Do not delete or modify anything until its replacement is verified.
 
-**What this does not show:**
-- that any proposed Safe exists;
-- its owners or threshold;
-- that the Safe web app or transaction service supports chain 43113.
-
-No Safe address was provided. The `ADMIN_SAFE_ADDRESS` secret is mainnet-only and its value is masked. Nothing here assumes a Safe exists or can act.
-
-If R1 is a Safe:
-1. Run `NEW_AUTHORITY=<safe> node scripts/authority-inventory.mjs`.
-2. Read `getOwners()`, `getThreshold()` and the code at the address before step 1.
-3. Every new-authority step becomes a Safe transaction with the same `to` and calldata. **Signing it end to end is the proof of control.**
-
-## 6. Transaction-by-transaction risk review
-
-Gas (LIVE `eth_estimateGas`): grant ≈ 48.9k, admin revoke ≈ 29.8k, role revoke ≈ 32.4k, `transferOwnership` ≈ 28.8k. `eth_gasPrice` was 160 wei.
-
-Totals:
-- old key: about 0.25M gas including the optional steps; it holds 0.4875 test AVAX;
-- new authority: about 0.38M gas, so it **must be funded before step 2**. A small test-AVAX amount is enough; the wallet quotes the exact fee.
-
-| Step | Signer | Call | Depends on | Failure / race | Reversible? | Recovery |
-|---|---|---|---|---|---|---|
-| P-1, P-2 (opt.) | old | `0xcc26.configureSale(token, same params, paused=true)` | before 12 | Wrong parameters revert harmlessly (validated). | yes; the old key can un-pause until step 12 | — |
-| P-3 (opt.) | old | `0xcc26.withdraw()` | none | — | n/a | not time-critical; stays available after rotation |
-| 1 | old | `0x7Bba.grantRole(ADMIN, NEW)` | NEW funded and validated; `hasRole(ADMIN, NEW)` must be false first | **Typo or wrong NEW → that address becomes admin.** | **yes**, while the old key is admin | old key: `revokeRole(ADMIN, NEW)` (`0xd547741f` + 32 zero bytes + NEW) |
-| 2 | **NEW** | `0x7Bba.revokeRole(ADMIN, old)` | step 1 confirmed; `hasRole(ADMIN, NEW)` true | **Race window 1→2:** a compromised old key could revoke NEW or grant a third party. Step 2 is the first point where only NEW administers. | no for the old key; NEW can re-grant | if NEW cannot sign: **do not proceed**, revoke NEW with the old key, re-plan |
-| 3 | NEW | `revokeRole(ISSUER, old)` | 2 | Until confirmed, the old key can mint existing editions directly | NEW can re-grant | — |
-| 4 | NEW | `revokeRole(ARTIST, old)` | 2 | none (the old key is artist of no `0x7Bba` edition) | NEW can re-grant | — |
-| 5–8 | as 1–4 | `0x262B` V1 | 4 (P0 proven) | Same; no sale contract references `0x262B` | as above | as above |
-| 9–12 | as 1–4 | `0x82b26` | P-1/P-2 if chosen | **12 freezes `configureSale` for the 6 old-key editions.** Any still OPEN keep selling to the old key. | NEW can re-grant ARTIST to the old key | NEW `pause()` on `0x82b26`, which halts all its sales and transfers |
-| 13–16 | as 1–4 | `0x7A78` | — | none (0 editions) | as above | — |
-| 17 | old | `0x8291.transferOwnership(NEW)` | **after 2 has proven NEW** | **Irreversible.** A wrong address is permanent. | **no** | none; only the unused factory V1 is affected |
-
-**Not in the package, and why:**
-- **Sale ownership** on `0x51cC`, `0xcc26` and `0x7D1a` is impossible (§1). **Residual risk:** the old key, or anyone holding it, can set the platform fee on those sales to anything from 0 to 500 bps.
-  - It cannot raise the fee above 500, redirect payouts, mint or move funds.
-  - This lasts while those sales are in use. Retiring them is decision R6.
-- `renounceRole` is never used. The new authority revokes instead, so the action is attributable and the proof is built in.
-
-### Cross-cutting risks
-
-1. **Compromised-key race.**
-   - No on-chain hierarchy can win an admin war: two admins can revoke each other indefinitely.
-   - Mitigations:
-     - send step 2 immediately after step 1 is confirmed;
-     - run P0 first;
-     - re-run `NEW_AUTHORITY=<new> node scripts/authority-inventory.mjs` after each release. The log reconstruction must show DEFAULT_ADMIN = {NEW} and no new holders.
-   - If a third-party grant appears, NEW revokes it before continuing.
-2. **Last-admin lockout.**
-   - The guard is LIVE-confirmed absent. After step 2, NEW is the **only** admin of each release. If NEW's key or Safe becomes unusable, those releases can never be administered again (no pause, no grant).
-   - Mitigation (decision R2): grant DEFAULT_ADMIN to a second, independently held recovery authority in the same session, or use a multi-owner Safe.
-   - The package never revokes or renounces NEW (unit-tested).
-3. **Irreversible ownership.** Only step 17 is irreversible. It is ordered after NEW has proven control on the live release.
-4. **Ordering dependency.** Old-key steps (1, 5, 9, 13, 17, P-x) need the old key to keep its authority. Do every old-key step for a release before NEW revokes on that release; the plan's per-release order guarantees this.
-5. **A passing test is not a safe live sequence.**
-   - Simulations prove each call's gate and encoding against current state.
-   - They cannot prove sequential behaviour, mempool ordering or the signer's custody.
-   - The NEW-signed revokes were simulated from the current admin, which passes the same `onlyRole(DEFAULT_ADMIN_ROLE)` gate in source.
-
-## 7. Credential cutover (off-chain)
-
-Do these only after §6 is complete and verified, and only on approval:
-
-1. **GitHub:**
-   - Delete the repo secret `DEPLOYER_PRIVATE_KEY`. Do not replace it with the new authority's key; keep no hot admin key in CI.
-   - Set `RELEASE_ADMIN_ADDRESS` to NEW only if the Fuji deploy workflows are still wanted. Without the key they fail closed at preflight.
-   - Mainnet deploys should be redesigned around the Safe before any use.
-2. **Render cron `crn-dat953e0tbcc73acrepg`:**
-   - Delete its deployer-key environment variable, or delete the service. It stays suspended either way.
-   - An env update does not trigger a run (verified earlier).
-3. **Render API:** remove the old key from `MARKETPLACE_ADMIN_WALLETS` and `VERIFICATION_REVIEWER_WALLETS` if it is listed. This is UNVERIFIED and a production env change.
-4. **DB:** after running the §4 query, remove or replace old-key `artist_owners` rows through a reviewed migration.
-5. **E2E:** move `FUJI_E2E_WALLET` to a dedicated test wallet that holds no admin role. Update `server/production-gate-readiness.test.js` and the acceptance matrix.
-6. **Old key:** after the cutover it keeps:
-   - the locked sale-fee power (§6);
-   - its 0.019 AVAX pull balance;
-   - its 0.4875 test AVAX.
-
-   Optionally sweep the AVAX. **Never import the old key into a new tool** to do so; use whichever existing signer the owner already controls.
-
-## 8. Compromise assessment
-
-**Potentially exposed, with no evidence of misuse.**
-- The key sat in a Render cron env and a GitHub secret, and the cron broadcast unreviewed deployments.
-- Old key nonce 59; last transaction is nonce 58 (2026-10-06 03:13:59 UTC, the cron deploy), unchanged across four runs today.
-- No unexpected role holders. No mainnet activity (nonce 0).
-- Pending balances are untouched.
-
-This does not prove the key is uncompromised.
-
-## 9. Unresolved access blockers
-
-| Item | Why blocked | How to resolve |
-|---|---|---|
-| Old-key membership of `MARKETPLACE_ADMIN_WALLETS` / `VERIFICATION_REVIEWER_WALLETS` | No read path that would not expose values | The owner checks the Render dashboard |
-| `artist_owners` rows for the old key | No access to the production DB | The owner runs the §4 query |
-| Proof that `DEPLOYER_PRIVATE_KEY` is the old key | GitHub masks the address | Accepted as strongly indicated; deleting the secret makes this moot |
-| E2E key custody | Off-system | The owner confirms |
-| Controller of `0x284C` | Off-system | The owner confirms |
-| Safe support for Fuji in the owner's tooling | Not testable read-only | The owner confirms, if R1 is a Safe |
-
-## 10. Decisions requiring approval
-
-| # | Decision | Recommendation |
-|---|---|---|
-| **R1** | Replacement authority: a hardware-wallet EOA or a Fuji Safe (address supplied by you) | You decide; it must be a fresh address. Verify it with the inventory script first. |
-| **R2** | Add a second recovery admin, or a multi-owner Safe, against lockout | Yes, for `0x7Bba` at minimum |
-| **R3** | Close the two OPEN old-key editions (P-1/P-2) before step 12, and/or withdraw 0.019 AVAX (P-3) | Close yes; withdraw optional |
-| **R4** | Scope: P0 only (steps 1–4), P1 (1–12) or ALL (1–17) | P0 now; P1 and ALL in the same session if P0 verifies |
-| **R5** | Have NEW revoke `0x284C`'s ISSUER on `0x7Bba`/`0x82b26` | Decide after confirming who controls `0x284C`; not in the package |
-| **R6** | Accept the permanent old-key fee power on the 3 legacy sales, or retire them in favour of FactoryV2 clones | Accept for Fuji; retire before mainnet |
-| **R7** | Signing path for old-key steps | Use the signer where you already hold the key. No new key export or import. A one-shot CI workflow using the secret is possible but is a new automated signing path, so it is not recommended. |
-| **R8** | Off-chain cutover items 1–5 in §7 | Approve each individually after on-chain verification |
-
-## 11. Unsigned authorization package (template until R1)
-
-Generate the final package, with every calldata filled in and validated, after R1:
-
-```bash
-NEW_AUTHORITY=0x<your address> SCOPE=P0|P1|ALL node scripts/authority-rotation-plan.mjs
-```
-
-The script rejects:
-- the zero address, the old key and any rotated contract;
-- an address with a bad checksum.
-
-It never signs and has no RPC access.
-
-All steps: chain 43113, value 0. **NEW** = the replacement authority.
-
-| # | Signer | To | Function | Calldata |
+| Item | What depends on it today | Replacement needed first | Verify before change | Earliest point |
 |---|---|---|---|---|
-| 1 | old key | `0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6` | `grantRole(DEFAULT_ADMIN_ROLE, NEW)` | `0x2f2ff15d0000000000000000000000000000000000000000000000000000000000000000{NEW, 24 zero hex + 40 hex}` |
-| 2 | **NEW** | `0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6` | `revokeRole(DEFAULT_ADMIN_ROLE, old)` | `0xd547741f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 3 | **NEW** | `0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6` | `revokeRole(ISSUER_ROLE, old)` | `0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 4 | **NEW** | `0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6` | `revokeRole(ARTIST_ROLE, old)` | `0xd547741f877a78dc988c0ec5f58453b44888a55eb39755c3d5ed8d8ea990912aa3ef29c6000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 5 | old key | `0x262B774cf9a1949170B58E2d57F6189980FE757b` | `grantRole(DEFAULT_ADMIN_ROLE, NEW)` | `0x2f2ff15d0000000000000000000000000000000000000000000000000000000000000000{NEW, 24 zero hex + 40 hex}` |
-| 6 | **NEW** | `0x262B774cf9a1949170B58E2d57F6189980FE757b` | `revokeRole(DEFAULT_ADMIN_ROLE, old)` | `0xd547741f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 7 | **NEW** | `0x262B774cf9a1949170B58E2d57F6189980FE757b` | `revokeRole(ISSUER_ROLE, old)` | `0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 8 | **NEW** | `0x262B774cf9a1949170B58E2d57F6189980FE757b` | `revokeRole(ARTIST_ROLE, old)` | `0xd547741f877a78dc988c0ec5f58453b44888a55eb39755c3d5ed8d8ea990912aa3ef29c6000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 9 | old key | `0x82b26Da27136935454Bdf1e40801190B521b82e5` | `grantRole(DEFAULT_ADMIN_ROLE, NEW)` | `0x2f2ff15d0000000000000000000000000000000000000000000000000000000000000000{NEW, 24 zero hex + 40 hex}` |
-| 10 | **NEW** | `0x82b26Da27136935454Bdf1e40801190B521b82e5` | `revokeRole(DEFAULT_ADMIN_ROLE, old)` | `0xd547741f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 11 | **NEW** | `0x82b26Da27136935454Bdf1e40801190B521b82e5` | `revokeRole(ISSUER_ROLE, old)` | `0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 12 | **NEW** | `0x82b26Da27136935454Bdf1e40801190B521b82e5` | `revokeRole(ARTIST_ROLE, old)` | `0xd547741f877a78dc988c0ec5f58453b44888a55eb39755c3d5ed8d8ea990912aa3ef29c6000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 13 | old key | `0x7A78F13Bef1a984676787Df1878F0C378b9dFc6e` | `grantRole(DEFAULT_ADMIN_ROLE, NEW)` | `0x2f2ff15d0000000000000000000000000000000000000000000000000000000000000000{NEW, 24 zero hex + 40 hex}` |
-| 14 | **NEW** | `0x7A78F13Bef1a984676787Df1878F0C378b9dFc6e` | `revokeRole(DEFAULT_ADMIN_ROLE, old)` | `0xd547741f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 15 | **NEW** | `0x7A78F13Bef1a984676787Df1878F0C378b9dFc6e` | `revokeRole(ISSUER_ROLE, old)` | `0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 16 | **NEW** | `0x7A78F13Bef1a984676787Df1878F0C378b9dFc6e` | `revokeRole(ARTIST_ROLE, old)` | `0xd547741f877a78dc988c0ec5f58453b44888a55eb39755c3d5ed8d8ea990912aa3ef29c6000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` |
-| 17 | old key | `0x8291A4F1936C1c5C6D8917b0966c80757cd5c265` | `transferOwnership(NEW)` | `0xf2fde38b{NEW, 24 zero hex + 40 hex}` |
+| GitHub `DEPLOYER_PRIVATE_KEY` (+ `RELEASE_ADMIN_ADDRESS`) | `deploy-release-fuji.yml`, `deploy-release-per-contract-fuji.yml` (the pending album redeploy, D1–D5), `deploy-release-v2-fuji.yml` (×2), `deploy-release-v2-mainnet.yml` (never run) | A decision on who deploys the album-capable FactoryV2. Recommended: owner-signed, with no hot key in CI. | The Fuji workflows fail closed at preflight without the key (SOURCE); confirm no scheduled workflow uses it | After P0..ALL verified, before any album redeploy |
+| Render cron `crn-dat953e0tbcc73acrepg` key | Only the suspended cron | None. The cron stays suspended; retiring it is M1. | Suspended state (`suspenders ["user"]`); an env change does not trigger a run (verified earlier) | Any time after the owner approves; not required for P0 |
+| Render API `MARKETPLACE_ADMIN_WALLETS`, `VERIFICATION_REVIEWER_WALLETS` | Marketplace presentation admin and verification reviewers (`server/marketplace-presentation-service.js:22`, `server/verification-service.js:33`). Unset means fail closed. | The intended reviewer and admin wallets | Owner reads the values in the Render dashboard (UNVERIFIED here) | After the owner confirms whether the old key is listed |
+| Studio `artist_owners` | Studio publishing authorization (`/studio/catalog`) | The owning wallet for each affected artist | Owner runs the §12 query | Through a reviewed migration only |
+| E2E wallet | §9.1: `FUJI_E2E_MINT.wallet`, coupled Studio filter constant, acceptance matrix | Fresh test EOA, or a FactoryV2 clone owned by it | Unit tests updated; E2E re-run | Separate PR; E2E is unavailable on `0x7Bba` from P0 step 3 |
 
-Scopes: **P0** = steps 1–4. **P1** = 1–12, with P-1…P-3 offered. **ALL** = 1–17.
+## 14. P0 unsigned package and manual signing checklist
 
-Recovery template (old key, only if NEW cannot sign step 2): `revokeRole(DEFAULT_ADMIN_ROLE, NEW)` = `0xd547741f` + 64 zero hex + NEW left-padded.
+**Package status: BLOCKED.** `SCOPE=P0 node scripts/authority-rotation-plan.mjs` returns `status: BLOCKED`, `blockedOn: [SAFE_AUTHORITY, BACKUP_ADMIN, SAFE_NONCE]`.
 
-**Verification after each release (read-only):**
+Calldata for steps 1–2 is **not encoded**, because it depends on unresolved addresses. Steps 3–5 have fixed calldata but remain blocked. Re-generate with the real addresses after §5.3. The generator then also emits the SafeTx and `safeTxHash` for steps 4–5.
 
-```bash
-SUBJECT=0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174 NEW_AUTHORITY=0x<new> node scripts/authority-inventory.mjs
-```
+**Chain for every step: Avalanche Fuji C-Chain, chainId 43113. Value 0.** Abort if the wallet shows any other chain.
 
-Pass condition per release:
-- `newAuthority.DEFAULT_ADMIN_ROLE == true`;
-- `subject.*` all false;
-- `roleHoldersFromLogs.DEFAULT_ADMIN_ROLE == [NEW]` (plus R2's recovery admin, if chosen).
+### Pre-flight (read-only, immediately before signing)
 
-For step 17: `owner() == NEW` on `0x8291`.
+1. Run `SAFE_AUTHORITY=… BACKUP_ADMIN=… node scripts/safe-readiness-probe.mjs`. Every check in §5.4 must be true.
+2. Run `SAFE_AUTHORITY=… BACKUP_ADMIN=… node scripts/authority-rotation-simulate.mjs`. Every step must simulate OK; the sale parameters for P-1/P-2 must be unchanged.
+3. Run `SUBJECT=0xaBd3…c174 NEW_AUTHORITY=<SAFE> node scripts/authority-inventory.mjs`. Role holders on `0x7Bba` must be:
+   - DEFAULT_ADMIN = {old};
+   - ARTIST = {old, `0x284C`};
+   - ISSUER = {old, `0x51cC`, `0x284C`}.
 
-Re-run `node scripts/authority-rotation-simulate.mjs` immediately before signing. It must show:
-- OPEN states unchanged;
-- grants and revokes OK from the old key;
-- `AccessDenied` for the unprivileged caller.
+   **STOP** if anything else appears.
+4. Check funding:
+   - the old key holds 0.4875 test AVAX;
+   - the backup and the Safe-transaction submitter each hold a small amount of test AVAX.
+5. Safe owners pre-sign steps 4 and 5. Each owner compares the hash on their device with `safeTxHash` in the package. **STOP** on any mismatch.
+6. Optional (recommended): S-0, the Safe no-op self-transaction (§5.3, step 5).
+
+### Pre-steps (independent of R1; may run in the P0 session)
+
+| Step | Signer | To | Function / decoded args | Calldata | Expected change | Gas | Evidence | Postcondition | STOP if |
+|---|---|---|---|---|---|---|---|---|---|
+| P-1 | old key (EOA) | `0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1` | `configureSale(33778802922810732976408591241428358474475553907731009337085064305512658576739, 10000000000000000, 25, 1, 0, 0, true)` | `0x23a126174aae1ffba437e9e91d04ea8032dfa64a3e8ed673475793a65bea7c266cf12563000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001` | `sales[id].paused` false → true | LIVE est. 56,005; FORK 55,203 | LIVE-SIM OK; FORK-EXEC OK | `sales(id).paused == true`; other fields unchanged; `payoutOf` unchanged | Receipt status ≠ 1, or any `SaleConfigured` field other than `paused` differs |
+| P-2 | old key (EOA) | same | `configureSale(86336109522257422783953313092869910591261689395232051112421244253165221467155, 10000000000000000, 25, 20, 0, 0, true)` | `0x23a12617bee0819ca9eed9d3493d57d05d81ffbd949d97dd4fdab700a285dcad6cbe5413000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001` | same | LIVE 55,993; FORK 55,191 | same | same | same |
+
+### P0 (`0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6`)
+
+| Step | Signer | Function / decoded args | Calldata | Expected change | Gas | Evidence | Postcondition | STOP if |
+|---|---|---|---|---|---|---|---|---|
+| 1 | old key (EOA) | `grantRole(DEFAULT_ADMIN_ROLE, SAFE)` | **BLOCKED: SAFE_AUTHORITY** | SAFE becomes admin; old key keeps all roles | ≈48.7–48.9k | LIVE-SIM+OVR OK; FORK-EXEC OK | `hasRole(ADMIN, SAFE)`; exactly one `RoleGranted`, naming SAFE | Status ≠ 1, or any other grant or revoke on `0x7Bba` |
+| 2 | old key (EOA) | `grantRole(DEFAULT_ADMIN_ROLE, BACKUP)` | **BLOCKED: BACKUP_ADMIN** | BACKUP becomes admin | ≈48.7–48.9k | same | Admin holders = {old, SAFE, BACKUP} | Same; or SAFE's admin role was revoked: go straight to step 4 only if SAFE is still admin |
+| 3 | BACKUP | `revokeRole(ISSUER_ROLE, 0xaBd3…c174)` | `0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` (fixed; **BLOCKED** until BACKUP is verified) | Old key loses ISSUER; proves the backup | ≈27.1k (FORK) / ≈32.4k (LIVE estimate) | LIVE-SIM+OVR OK; FORK-EXEC OK | `RoleRevoked(ISSUER, old, sender BACKUP)` | The backup cannot sign or the transaction reverts. **Do not run step 4.** Recovery: the old key revokes BACKUP and SAFE, then re-plan. |
+| 4 | SAFE (2-of-3, CALL) | `revokeRole(DEFAULT_ADMIN_ROLE, 0xaBd3…c174)` | `0xd547741f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` (fixed; **BLOCKED: SAFE_AUTHORITY, SAFE_NONCE**) | Old key loses admin; proves the Safe | ≈91k for the submitter | LIVE-SIM+OVR OK; FORK-EXEC OK; hash parity OK | Admin holders = {SAFE, BACKUP} **exactly** | Any third admin appears: the Safe revokes it **before** anything else. If execution fails, the nonce is not consumed; investigate the race (§8). |
+| 5 | SAFE (2-of-3, CALL) | `revokeRole(ARTIST_ROLE, 0xaBd3…c174)` | `0xd547741f877a78dc988c0ec5f58453b44888a55eb39755c3d5ed8d8ea990912aa3ef29c6000000000000000000000000abd3746e8b852f55be52fc44fab6cab908b1c174` (fixed; **BLOCKED: SAFE_AUTHORITY, SAFE_NONCE**) | Old key loses ARTIST | ≈74k | same | Old key has no role on `0x7Bba` | Status ≠ 1 |
+
+### After P0 (read-only)
+
+1. Re-run the inventory with `NEW_AUTHORITY=<SAFE>` and confirm on `0x7Bba`:
+   - DEFAULT_ADMIN = {SAFE, BACKUP};
+   - ARTIST = {`0x284C`};
+   - ISSUER = {`0x51cC`, `0x284C`};
+   - every `subject.*` is false.
+2. Confirm that live sales on `0x51cC` still work. The sale holds its own ISSUER role, which the rotation does not change.
+3. **STOP.** Report, and wait for owner approval before any P1 or ALL work.
+
+All rows above are **unsigned instructions**. "OK" in an evidence column means a simulation or a local-fork execution, **never** an executed Fuji transaction.
+
+## 15. Gates kept
+
+- **The Fuji archive/reconciliation gate stands.** P0 changes no marketplace, listing or indexer configuration, and does not undo the legacy marketplace deployments.
+- **No mainnet-readiness claim.** The mainnet workflow still references `DEPLOYER_PRIVATE_KEY`, and its handoff design must be re-reviewed against this rotation before any mainnet work.
+- **P1 and ALL are not covered by this review.** They need their own review and approval after P0 is executed and verified.
