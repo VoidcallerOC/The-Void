@@ -1,5 +1,5 @@
 {
- "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). Built with forge 1.3.1, solc 0.8.24, optimizer 200 runs, evm cancun; settingsAssumed=true means the source commit had no foundry.toml and current settings were used.",
+ "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). forge 1.3.1, solc 0.8.24, evm cancun. optimizer per entry: 200 runs = repository foundry.toml; disabled = forge defaults (the Render image does not copy foundry.toml). settingsAssumed=true: the source commit had no foundry.toml and repository settings were applied.",
  "versions": [
   {
    "contract": "MusicMarketplace",
@@ -24,7 +24,8 @@
      3028,
      32
     ]
-   ]
+   ],
+   "optimizer": "200 runs"
   },
   {
    "contract": "MusicMarketplace",
@@ -49,7 +50,8 @@
      3151,
      32
     ]
-   ]
+   ],
+   "optimizer": "200 runs"
   },
   {
    "contract": "MusicMarketplace",
@@ -118,7 +120,8 @@
      3080,
      32
     ]
-   ]
+   ],
+   "optimizer": "200 runs"
   },
   {
    "contract": "MusicMarketplaceV2",
@@ -195,7 +198,8 @@
      3142,
      32
     ]
-   ]
+   ],
+   "optimizer": "200 runs"
   },
   {
    "contract": "ReleaseMarketplaceV3",
@@ -262,6 +266,207 @@
     ],
     [
      3080,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 8416,
+   "fingerprint": "0x4fd79ad31018360f19c6ff98c6f56aa95055a534b5b54305b8462251aab22915",
+   "immutableRanges": [
+    [
+     1958,
+     32
+    ],
+    [
+     4867,
+     32
+    ],
+    [
+     1201,
+     32
+    ],
+    [
+     4521,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 8827,
+   "fingerprint": "0xeef742a8ab7a1e0b9d08c9245df5594ad220193c1de5259df3311fdd50e47ccc",
+   "immutableRanges": [
+    [
+     2198,
+     32
+    ],
+    [
+     5153,
+     32
+    ],
+    [
+     1441,
+     32
+    ],
+    [
+     4761,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 9834,
+   "fingerprint": "0x2ae655e905905444be42daa085744014549014e91c2c3bd3b0e66eace4823ad9",
+   "immutableRanges": [
+    [
+     2676,
+     32
+    ],
+    [
+     6024,
+     32
+    ],
+    [
+     1563,
+     32
+    ],
+    [
+     5632,
+     32
+    ],
+    [
+     4321,
+     32
+    ],
+    [
+     6366,
+     32
+    ],
+    [
+     1599,
+     32
+    ],
+    [
+     1638,
+     32
+    ],
+    [
+     2138,
+     32
+    ],
+    [
+     2177,
+     32
+    ],
+    [
+     2713,
+     32
+    ],
+    [
+     2752,
+     32
+    ],
+    [
+     4285,
+     32
+    ],
+    [
+     4453,
+     32
+    ],
+    [
+     4492,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 10202,
+   "fingerprint": "0x4eae4d8ca42c306437124f803c12bd66d545665fd59b12b13129a7c51223e091",
+   "immutableRanges": [
+    [
+     2729,
+     32
+    ],
+    [
+     6113,
+     32
+    ],
+    [
+     1616,
+     32
+    ],
+    [
+     5721,
+     32
+    ],
+    [
+     4410,
+     32
+    ],
+    [
+     6455,
+     32
+    ],
+    [
+     4310,
+     32
+    ],
+    [
+     6542,
+     32
+    ],
+    [
+     1652,
+     32
+    ],
+    [
+     1691,
+     32
+    ],
+    [
+     2191,
+     32
+    ],
+    [
+     2230,
+     32
+    ],
+    [
+     2766,
+     32
+    ],
+    [
+     2805,
+     32
+    ],
+    [
+     4374,
+     32
+    ],
+    [
+     4542,
+     32
+    ],
+    [
+     4581,
      32
     ]
    ]

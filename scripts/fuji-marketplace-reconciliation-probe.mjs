@@ -34,6 +34,53 @@ const getters = new Interface([
   "function nextListingId() view returns (uint256)",
   "function listingStatus(uint256) view returns (uint8)",
 ]);
+const tokenIface = new Interface([
+  "function balanceOf(address,uint256) view returns (uint256)",
+  "function isApprovedForAll(address,address) view returns (bool)",
+]);
+const word = (hex, index) => hex.slice(2 + index * 64, 2 + (index + 1) * 64);
+
+// getListing returns (listingId, seller, tokenContract, tokenId, amount, price, createdAt, expiresAt, status)
+// in every MusicMarketplace/ReleaseMarketplaceV3 version; decode by word to stay version-agnostic.
+async function activeListing(provider, marketplace, id) {
+  const data = await provider.call({ to: marketplace, data: `0x107a274a${id.toString(16).padStart(64, "0")}` });
+  if (!data || data.length < 2 + 9 * 64) return null;
+  const listing = {
+    listingId: BigInt(`0x${word(data, 0)}`),
+    seller: getAddress(`0x${word(data, 1).slice(24)}`),
+    tokenContract: getAddress(`0x${word(data, 2).slice(24)}`),
+    tokenId: BigInt(`0x${word(data, 3)}`),
+    amount: BigInt(`0x${word(data, 4)}`),
+    priceWei: BigInt(`0x${word(data, 5)}`),
+    createdAt: new Date(Number(BigInt(`0x${word(data, 6)}`)) * 1000).toISOString(),
+    expiresAt: BigInt(`0x${word(data, 7)}`),
+  };
+  const call = async (name, args) => { try { return tokenIface.decodeFunctionResult(name, await provider.call({ to: listing.tokenContract, data: tokenIface.encodeFunctionData(name, args) }))[0]; } catch { return null; } };
+  listing.sellerBalance = await call("balanceOf", [listing.seller, listing.tokenId]);
+  listing.sellerApprovedMarketplace = await call("isApprovedForAll", [listing.seller, marketplace]);
+  listing.fillableNow = listing.sellerBalance !== null && listing.sellerBalance >= listing.amount && listing.sellerApprovedMarketplace === true
+    && (listing.expiresAt === 0n || listing.expiresAt > BigInt(Math.floor(Date.now() / 1000)));
+  return listing;
+}
+
+// Earliest block with code at the address (binary search), then the transaction in that
+// block whose receipt created it. Covers addresses with no recorded deployment transaction.
+async function findCreation(provider, address, tipBlock) {
+  let low = 1;
+  let high = tipBlock;
+  if ((await provider.getCode(address, high)) === "0x") return null;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if ((await provider.getCode(address, mid)) === "0x") low = mid + 1; else high = mid;
+  }
+  const block = await provider.getBlock(low, false);
+  for (const hash of block?.transactions || []) {
+    const receipt = await provider.getTransactionReceipt(hash);
+    if (receipt?.contractAddress && getAddress(receipt.contractAddress) === address) return { transaction: hash, blockNumber: low, method: "binary search on eth_getCode" };
+  }
+  return { transaction: null, blockNumber: low, method: "binary search on eth_getCode; created by an internal call (no top-level creation receipt in block)" };
+}
+
 const registryIface = new Interface(["function implementation() view returns (address)", "function releaseCount() view returns (uint256)"]);
 
 function fingerprint(code, ranges) {
@@ -48,7 +95,7 @@ function fingerprint(code, ranges) {
 
 function identify(code) {
   for (const version of fingerprints.versions) {
-    if (fingerprint(code, version.immutableRanges) === version.fingerprint) return { contract: version.contract, sourceCommit: version.sourceCommit, settingsAssumed: version.settingsAssumed };
+    if (fingerprint(code, version.immutableRanges) === version.fingerprint) return { contract: version.contract, sourceCommit: version.sourceCommit, optimizer: version.optimizer, settingsAssumed: version.settingsAssumed };
   }
   return null;
 }
@@ -95,12 +142,14 @@ async function main() {
     };
     const nextListingId = await read(provider, address, "nextListingId");
     const statusCounts = {};
+    const activeListings = [];
     if (nextListingId !== null) {
       const last = nextListingId - 1n;
       for (let id = 1n; id <= last && id <= BigInt(MAX_LISTINGS_SCANNED); id += 1n) {
         const status = await read(provider, address, "listingStatus", [id]);
         const label = status === null ? "UNREADABLE" : STATUS[Number(status)] || `UNKNOWN_${status}`;
         statusCounts[label] = (statusCounts[label] || 0) + 1;
+        if (label === "ACTIVE") activeListings.push(await activeListing(provider, address, id).catch((error) => ({ listingId: id, error: error.message })));
       }
     }
     let registryState = null;
@@ -110,15 +159,21 @@ async function main() {
         releaseCount: await (async () => { try { return registryIface.decodeFunctionResult("releaseCount", await provider.call({ to: config.registry, data: registryIface.encodeFunctionData("releaseCount") }))[0]; } catch { return null; } })(),
       };
     }
-    const deploymentTransaction = candidate.deploymentTransaction || (explorer.error ? null : explorer[address]) || null;
-    let deployment = { transaction: deploymentTransaction, source: candidate.deploymentTransaction ? "recorded" : deploymentTransaction ? "explorer getcontractcreation" : "not found" };
+    let deploymentTransaction = candidate.deploymentTransaction || (explorer.error ? null : explorer[address]) || null;
+    let source = candidate.deploymentTransaction ? "recorded" : deploymentTransaction ? "explorer getcontractcreation" : null;
+    if (!deploymentTransaction && code !== "0x") {
+      const found = await findCreation(provider, address, tipBlock).catch((error) => ({ transaction: null, method: `search failed: ${error.message}` }));
+      deploymentTransaction = found?.transaction || null;
+      source = found?.method || "not found";
+    }
+    let deployment = { transaction: deploymentTransaction, source: source || "not found" };
     if (deploymentTransaction) {
       const [tx, receipt] = await Promise.all([provider.getTransaction(deploymentTransaction), provider.getTransactionReceipt(deploymentTransaction)]);
       const block = receipt ? await provider.getBlock(receipt.blockNumber) : null;
       const createdHere = receipt?.contractAddress && getAddress(receipt.contractAddress) === address;
       let constructorArgs = null;
       if (tx?.data && identity && createdHere) {
-        const types = identity.contract === "MusicMarketplaceV2" ? ["address", "uint256", "address", "address"] : ["address", "uint256", "address"];
+        const types = identity.contract === "MusicMarketplaceV2" ? ["address", "uint256", "address", "address"] : identity.contract === "MusicMarketplace" && identity.sourceCommit !== "0dfb240e90" ? ["address", "uint256"] : ["address", "uint256", "address"];
         try { constructorArgs = AbiCoder.defaultAbiCoder().decode(types, `0x${tx.data.slice(-64 * types.length)}`).map((v) => (typeof v === "string" ? getAddress(v) : v)); } catch { constructorArgs = null; }
       }
       deployment = { ...deployment, status: receipt?.status ?? null, blockNumber: receipt?.blockNumber ?? null, timestamp: block ? new Date(block.timestamp * 1000).toISOString() : null, from: tx?.from ? getAddress(tx.from) : null, createsThisAddress: Boolean(createdHere), constructorArgs };
@@ -131,7 +186,7 @@ async function main() {
       identity: identity || (code === "0x" ? "NO_CODE" : "UNMATCHED"),
       config,
       registryState,
-      listings: { nextListingId, created: nextListingId === null ? null : nextListingId - 1n, statusCounts },
+      listings: { nextListingId, created: nextListingId === null ? null : nextListingId - 1n, statusCounts, activeListings },
       nativeBalanceWei: await provider.getBalance(address),
       deployment,
       isCanonicalV3Config: address === getAddress(fujiV2.marketplaceAddress),
