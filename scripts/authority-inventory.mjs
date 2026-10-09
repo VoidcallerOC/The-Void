@@ -92,6 +92,10 @@ async function inspect(provider, contract, tip, withLogs) {
   const code = await provider.getCode(address);
   const entry = { address, label: contract.label, kind: contract.kind, codePresent: code !== "0x", subject: {}, newAuthority: NEW_AUTHORITY ? {} : undefined };
   if (code === "0x") return entry;
+  // Rotation entry points present in the deployed dispatcher (PUSH4 = 0x63 + selector).
+  const lowered = code.toLowerCase();
+  entry.rotationFunctions = Object.fromEntries(["grantRole(bytes32,address)", "revokeRole(bytes32,address)", "renounceRole(bytes32)", "renounceRole(bytes32,address)", "transferOwnership(address)", "acceptOwnership()", "setPlatformFeeBps(uint256)"]
+    .map((sig) => [sig, lowered.includes(`63${id(sig).slice(2, 10)}`)]).filter(([, present]) => present));
   for (const [name, hash] of Object.entries(ROLES)) {
     const held = await call(provider, address, "hasRole", [hash, SUBJECT]);
     if (held !== undefined) entry.subject[name] = held;
