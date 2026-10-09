@@ -58,7 +58,7 @@ jobs:
         run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
       - name: Identify the owner-supplied Safe on Fuji and C-Chain (read-only)
         env:
-          SAFE_CANDIDATE: "0xecC40c3CE983A2F3bB4a241EBAd4e08C261aeA10"
+          SAFE_CANDIDATE: "0xec40c3CE983A2F3bB4a241EBAd4e0a8C261aeA10"
         shell: bash
         run: |
           set -o pipefail
