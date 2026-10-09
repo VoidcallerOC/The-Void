@@ -70,6 +70,24 @@ function boundedPositiveInteger(value, fallback, name, { min, max }) {
   return parsed;
 }
 
+// Optional PEM bundle for verifying the database server certificate. Literal "\\n"
+// sequences are accepted because dashboard env fields are single-line.
+function databaseSslCa(value) {
+  const text = String(value ?? "").trim().replace(/\\n/g, "\n");
+  if (!text) return null;
+  if (!/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(text)) throw new ConfigurationError("DATABASE_SSL_CA must be a PEM certificate bundle.");
+  return text;
+}
+
+function databaseSslRejectUnauthorized(env, databaseUrl, ca) {
+  const explicit = env.DATABASE_SSL_REJECT_UNAUTHORIZED;
+  if (ca) {
+    if (explicit !== undefined && String(explicit).toLowerCase() === "false") throw new ConfigurationError("DATABASE_SSL_CA requires certificate verification; remove DATABASE_SSL_REJECT_UNAUTHORIZED=false.");
+    return true;
+  }
+  return String(explicit ?? (/([?&])sslmode=require(?:&|$)/i.test(databaseUrl) ? "false" : "true")).toLowerCase() !== "false";
+}
+
 function normalizedUrl(value, name) {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -149,7 +167,8 @@ export function loadServerConfig(env = process.env, { allowMissingDatabase = fal
   return Object.freeze({
     databaseUrl: databaseUrl || null,
     databaseSsl: String(env.DATABASE_SSL || "true").toLowerCase() !== "false",
-    databaseSslRejectUnauthorized: String(env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? (/([?&])sslmode=require(?:&|$)/i.test(databaseUrl) ? "false" : "true")).toLowerCase() !== "false",
+    databaseSslCa: databaseSslCa(env.DATABASE_SSL_CA),
+    databaseSslRejectUnauthorized: databaseSslRejectUnauthorized(env, databaseUrl, databaseSslCa(env.DATABASE_SSL_CA)),
     poolMax: positiveInteger(env.DATABASE_POOL_MAX, 10),
     poolIdleTimeoutMs: positiveInteger(env.DATABASE_POOL_IDLE_TIMEOUT_MS, 30000),
     poolConnectionTimeoutMs: positiveInteger(env.DATABASE_POOL_CONNECTION_TIMEOUT_MS, 5000),

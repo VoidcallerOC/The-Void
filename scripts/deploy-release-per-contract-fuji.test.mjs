@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FUJI_CHAIN_ID, buildDryRunPlan, run, validateDeploymentEnv } from "./deploy-release-per-contract-fuji.mjs";
+import { getAddress, id } from "ethers";
+import { ALBUM_SIGNATURES, FUJI_CHAIN_ID, assertAlbumCapableArtifact, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, missingAlbumSelectors, run, validateDeploymentEnv } from "./deploy-release-per-contract-fuji.mjs";
 
 const KEY = `0x${"11".repeat(32)}`;
 const BASE = {
@@ -13,6 +14,23 @@ const BASE = {
 };
 
 const provider = { getNetwork: async () => ({ chainId: BigInt(FUJI_CHAIN_ID) }) };
+const assertAlbumCapable = async () => {};
+const albumRuntime = `0x${ALBUM_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
+const FACTORY = "0x00000000000000000000000000000000000000F1";
+const MARKET = "0x00000000000000000000000000000000000000F2";
+const IMPL = "0x00000000000000000000000000000000000000F3";
+function fakeDeploy() {
+  const calls = [];
+  const deploy = async (artifact, args) => {
+    calls.push({ artifact: artifact.name, args });
+    if (artifact.name === "factory") return { address: FACTORY, receipt: { hash: "0xf1", blockNumber: 1 }, contract: { implementation: async () => IMPL } };
+    return { address: MARKET, receipt: { hash: "0xf2", blockNumber: 2 }, contract: { registry: async () => FACTORY } };
+  };
+  return { calls, deploy };
+}
+const loadArtifacts = (runtime = albumRuntime) => async (path) => (path.includes("VoidRelease1155V4")
+  ? { name: "implementation", deployedBytecode: { object: runtime } }
+  : { name: path.includes("Factory") ? "factory" : "marketplace" });
 
 describe("release-per-contract Fuji deployment preflight", () => {
   it("validates the new architecture configuration and does not require broadcast confirmation for dry-run", () => {
@@ -25,7 +43,7 @@ describe("release-per-contract Fuji deployment preflight", () => {
   });
 
   it("runs the default path as a dry-run without a transaction broadcaster", async () => {
-    await expect(run(["--dry-run"], BASE, { provider })).resolves.toMatchObject({ mode: "DRY_RUN" });
+    await expect(run(["--dry-run"], BASE, { provider, assertAlbumCapable })).resolves.toMatchObject({ mode: "DRY_RUN" });
   });
 
   it("requires explicit confirmation before any future broadcast", () => {
@@ -48,6 +66,40 @@ describe("release-per-contract Fuji deployment preflight", () => {
   });
 
   it("rejects a provider reporting any chain other than Fuji", async () => {
-    await expect(run([], BASE, { provider: { getNetwork: async () => ({ chainId: 43114n }) } })).rejects.toThrow(/non-Fuji/);
+    await expect(run([], BASE, { provider: { getNetwork: async () => ({ chainId: 43114n }) }, assertAlbumCapable })).rejects.toThrow(/non-Fuji/);
+  });
+
+  it("refuses to plan or broadcast when the compiled implementation lacks album functions", async () => {
+    expect(missingAlbumSelectors(albumRuntime)).toEqual([]);
+    expect(missingAlbumSelectors("0x63deadbeef")).toEqual(ALBUM_SIGNATURES);
+    await expect(assertAlbumCapableArtifact(loadArtifacts("0x"))).rejects.toThrow(/lacks album functions/);
+    await expect(run(["--dry-run"], BASE, { provider, assertAlbumCapable: () => assertAlbumCapableArtifact(loadArtifacts("0x")) })).rejects.toThrow(/lacks album functions/);
+  });
+
+  it("does not deploy anything when the album guard fails during broadcast", async () => {
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(BASE), provider, { load: loadArtifacts("0x"), deploy, writeRecord: async () => {}, log: () => {}, wallet: {} })).rejects.toThrow(/lacks album functions/);
+    expect(calls).toEqual([]);
+  });
+
+  it("logs each mined address immediately and writes a per-factory record without overwriting the existing one", async () => {
+    const { calls, deploy } = fakeDeploy();
+    const logs = [];
+    const writes = [];
+    const record = await broadcastDeployment(validateDeploymentEnv(BASE), provider, { load: loadArtifacts(), deploy, writeRecord: async (path, value) => writes.push({ path, value }), log: (value) => logs.push(value), wallet: {} });
+    expect(calls.map((call) => call.artifact)).toEqual(["factory", "marketplace"]);
+    expect(calls[1].args).toEqual(["0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", 250, getAddress(FACTORY)]);
+    expect(logs.map((entry) => entry.step)).toEqual(["FACTORY_MINED", "MARKETPLACE_MINED", "RECORD"]);
+    expect(writes[0].path).toBe(deploymentRecordPath(FACTORY));
+    expect(writes[0].path).not.toBe("deployments/release-per-contract-fuji.json");
+    expect(record).toMatchObject({ factory: { address: getAddress(FACTORY), implementationAddress: getAddress(IMPL), implementationAlbumCapable: true }, marketplace: { address: getAddress(MARKET), factoryAddress: getAddress(FACTORY) } });
+  });
+
+  it("keeps the mined record in the log when writing the record file fails", async () => {
+    const { deploy } = fakeDeploy();
+    const logs = [];
+    await expect(broadcastDeployment(validateDeploymentEnv(BASE), provider, { load: loadArtifacts(), deploy, writeRecord: async () => { throw new Error("EEXIST"); }, log: (value) => logs.push(value), wallet: {} })).resolves.toMatchObject({ factory: { address: getAddress(FACTORY) } });
+    expect(logs.find((entry) => entry.step === "RECORD").record.marketplace.address).toBe(getAddress(MARKET));
+    expect(logs.at(-1)).toMatchObject({ step: "RECORD_WRITE_FAILED" });
   });
 });

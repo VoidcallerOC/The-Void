@@ -2,14 +2,36 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { ContractFactory, JsonRpcProvider, Wallet, getAddress, isAddress } from "ethers";
+import { ContractFactory, JsonRpcProvider, Wallet, getAddress, id, isAddress } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 
 export const FUJI_CHAIN_ID = 43113;
+// Record of the 2026-10-05 pre-album FactoryV2 broadcast; new broadcasts use deploymentRecordPath().
 export const DEPLOYMENT_RECORD_PATH = "deployments/release-per-contract-fuji.json";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FACTORY_ARTIFACT_PATH = "out/VoidReleaseFactoryV2.sol/VoidReleaseFactoryV2.json";
 const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV3.sol/ReleaseMarketplaceV3.json";
+const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4.sol/VoidRelease1155V4.json";
+// The clone implementation must carry Album Contract semantics. The 2026-10-05
+// FactoryV2 broadcast predates them, so this is checked before any broadcast.
+export const ALBUM_SIGNATURES = Object.freeze([
+  "createAlbum(bytes32)",
+  "createAlbumTrack(bytes32,bytes32,uint256,string,address,uint96,bool,uint64)",
+  "closeAlbum(bytes32)",
+  "albumCreated()",
+  "createEditionWithMintEnd(bytes32,bytes32,uint256,string,address,uint96,uint64)",
+]);
+
+/** Album selectors missing from runtime bytecode (Solidity dispatch uses PUSH4 = 0x63). */
+export function missingAlbumSelectors(runtimeBytecode) {
+  const code = String(runtimeBytecode || "").toLowerCase();
+  return ALBUM_SIGNATURES.filter((signature) => !code.includes(`63${id(signature).slice(2, 10)}`));
+}
+
+/** One record per factory, so a new broadcast can never collide with an earlier record. */
+export function deploymentRecordPath(factoryAddress) {
+  return `deployments/release-per-contract-fuji-${getAddress(factoryAddress)}.json`;
+}
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
 export class DeploymentError extends Error {}
@@ -78,7 +100,7 @@ export function buildDryRunPlan(config) {
       },
     },
     postDeployment: {
-      record: DEPLOYMENT_RECORD_PATH,
+      record: "deployments/release-per-contract-fuji-<factory address>.json (existing records are never overwritten)",
       indexer: "Configure RELEASE_FACTORY and MARKETPLACE entries only with actual mined addresses and deployment blocks.",
       database: "Apply migrations 001-035 to the disposable/staging database before E2E; this workflow does not provision or modify a database.",
     },
@@ -96,18 +118,45 @@ function printPlan(plan) {
   console.log("No transaction was broadcast. Set BROADCAST_DEPLOYMENT=yes and CONFIRM_FUJI_DEPLOY=yes for a future controlled broadcast.");
 }
 
-async function broadcastDeployment(config, provider) {
-  const wallet = new Wallet(config.deployerPrivateKey, provider);
-  const factoryArtifact = await loadArtifact(FACTORY_ARTIFACT_PATH);
-  const marketplaceArtifact = await loadArtifact(MARKETPLACE_ARTIFACT_PATH);
-  const factory = await new ContractFactory(factoryArtifact.abi, factoryArtifact.bytecode.object, wallet).deploy(config.platformRecipient);
-  const factoryReceipt = await factory.deploymentTransaction().wait();
-  const factoryAddress = getAddress(await factory.getAddress());
-  const implementationAddress = getAddress(await factory.implementation());
-  const marketplace = await new ContractFactory(marketplaceArtifact.abi, marketplaceArtifact.bytecode.object, wallet).deploy(config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress);
-  const marketplaceReceipt = await marketplace.deploymentTransaction().wait();
-  const marketplaceAddress = getAddress(await marketplace.getAddress());
-  const registryAddress = getAddress(await marketplace.registry());
+export async function assertAlbumCapableArtifact(load = loadArtifact) {
+  const implementation = await load(IMPLEMENTATION_ARTIFACT_PATH);
+  const missing = missingAlbumSelectors(implementation.deployedBytecode?.object);
+  if (missing.length) throw new DeploymentError(`Refusing to broadcast: compiled VoidRelease1155V4 lacks album functions (${missing.join(", ")}).`);
+}
+
+async function deployContract(artifact, args, wallet) {
+  const contract = await new ContractFactory(artifact.abi, artifact.bytecode.object, wallet).deploy(...args);
+  const receipt = await contract.deploymentTransaction().wait();
+  return { contract, receipt, address: getAddress(await contract.getAddress()) };
+}
+
+async function writeRecordFile(relativePath, record) {
+  const recordPath = resolve(ROOT, relativePath);
+  await mkdir(dirname(recordPath), { recursive: true });
+  await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
+}
+
+export async function broadcastDeployment(config, provider, {
+  load = loadArtifact,
+  deploy = deployContract,
+  writeRecord = writeRecordFile,
+  log = (value) => console.log(JSON.stringify(value)),
+  wallet = new Wallet(config.deployerPrivateKey, provider),
+} = {}) {
+  await assertAlbumCapableArtifact(load);
+  const factoryArtifact = await load(FACTORY_ARTIFACT_PATH);
+  const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
+  // Each mined step is logged immediately: a later failure must not lose a deployed address.
+  const factory = await deploy(factoryArtifact, [config.platformRecipient], wallet);
+  const factoryReceipt = factory.receipt;
+  const factoryAddress = getAddress(factory.address);
+  const implementationAddress = getAddress(await factory.contract.implementation());
+  log({ step: "FACTORY_MINED", factoryAddress, implementationAddress, transaction: factoryReceipt.hash, block: factoryReceipt.blockNumber });
+  const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress], wallet);
+  const marketplaceReceipt = marketplace.receipt;
+  const marketplaceAddress = getAddress(marketplace.address);
+  log({ step: "MARKETPLACE_MINED", marketplaceAddress, transaction: marketplaceReceipt.hash, block: marketplaceReceipt.blockNumber });
+  const registryAddress = getAddress(await marketplace.contract.registry());
   if (registryAddress !== factoryAddress) throw new DeploymentError("ReleaseMarketplaceV3 registry does not match the deployed factory.");
   const record = {
     network: "fuji",
@@ -119,6 +168,8 @@ async function broadcastDeployment(config, provider) {
       deploymentBlock: factoryReceipt.blockNumber,
       implementationAddress,
       implementationVersion: 2,
+      implementationAlbumCapable: true,
+      sourceCommit: process.env.GITHUB_SHA || null,
       platformRecipient: config.platformRecipient,
       platformFeeBps: config.platformFeeBps,
     },
@@ -132,9 +183,14 @@ async function broadcastDeployment(config, provider) {
       feeBps: config.platformFeeBps,
     },
   };
-  const recordPath = resolve(ROOT, DEPLOYMENT_RECORD_PATH);
-  await mkdir(dirname(recordPath), { recursive: true });
-  await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
+  const recordPath = deploymentRecordPath(factoryAddress);
+  log({ step: "RECORD", path: recordPath, record });
+  try {
+    await writeRecord(recordPath, record);
+  } catch (error) {
+    // The contracts are already mined and the record is in the log above; never fail the run here.
+    log({ step: "RECORD_WRITE_FAILED", path: recordPath, error: error.message });
+  }
   return record;
 }
 
@@ -144,6 +200,7 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   const network = await provider.getNetwork();
   if (network.chainId !== BigInt(FUJI_CHAIN_ID)) throw new DeploymentError(`Refusing non-Fuji chain: ${network.chainId}. Expected ${FUJI_CHAIN_ID}.`);
   const plan = buildDryRunPlan(config);
+  await (dependencies.assertAlbumCapable || assertAlbumCapableArtifact)();
   if (!config.broadcast) {
     printPlan(plan);
     return { mode: "DRY_RUN", plan };

@@ -89,10 +89,20 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
-            npm run deploy:release-per-contract:fuji
+            npm run deploy:release-per-contract:fuji | tee deployment-output.log
           else
-            npm run deploy:release-per-contract:fuji -- --dry-run
+            npm run deploy:release-per-contract:fuji -- --dry-run | tee deployment-output.log
           fi
+
+      - name: Preserve deployment output and record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-per-contract-fuji-${{ github.run_id }}
+          path: |
+            deployment-output.log
+            deployments/release-per-contract-fuji-*.json
+          if-no-files-found: ignore
 
       - name: Broadcast safety assertion
         shell: bash

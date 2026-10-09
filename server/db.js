@@ -3,8 +3,10 @@ import { loadServerConfig } from "./config.js";
 
 const { Pool } = pg;
 
-function connectionStringForPool(connectionString, rejectUnauthorized) {
-  if (rejectUnauthorized !== false) return connectionString;
+// sslmode in the URL would override the explicit ssl object below, so it is removed
+// whenever verification is disabled or a CA bundle supplies the trust anchor.
+function connectionStringForPool(connectionString, rejectUnauthorized, { ca = null } = {}) {
+  if (rejectUnauthorized !== false && !ca) return connectionString;
   try {
     const url = new URL(connectionString);
     url.searchParams.delete("sslmode");
@@ -18,11 +20,11 @@ function connectionStringForPool(connectionString, rejectUnauthorized) {
 export function createDatabasePool(config = loadServerConfig()) {
   if (!config.databaseUrl) throw new Error("Cannot create a database pool without DATABASE_URL.");
   return new Pool({
-    connectionString: connectionStringForPool(config.databaseUrl, config.databaseSslRejectUnauthorized),
+    connectionString: connectionStringForPool(config.databaseUrl, config.databaseSslRejectUnauthorized, { ca: config.databaseSslCa }),
     max: config.poolMax,
     idleTimeoutMillis: config.poolIdleTimeoutMs,
     connectionTimeoutMillis: config.poolConnectionTimeoutMs,
-    ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized !== false } : false,
+    ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized !== false, ...(config.databaseSslCa ? { ca: config.databaseSslCa } : {}) } : false,
     application_name: "voidcaller-persistence",
   });
 }
