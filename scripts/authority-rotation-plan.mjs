@@ -120,6 +120,19 @@ export const SAFE_TX_TYPES = Object.freeze({
     { name: "nonce", type: "uint256" },
   ],
 });
+/**
+ * The two 32-byte values a Ledger shows when it cannot clear-sign EIP-712 data:
+ * the domain separator and the SafeTx struct hash. Owners compare both on the device
+ * with these values before approving. safeTxHash = keccak(0x1901 ‖ domain ‖ message).
+ */
+export function safeTypedDataHashes({ safe, chainId = CHAIN_ID, tx }) {
+  return {
+    domainSeparator: TypedDataEncoder.hashDomain({ chainId, verifyingContract: safe }),
+    messageHash: TypedDataEncoder.from(SAFE_TX_TYPES).hash(tx),
+    safeTxHash: safeTxHash({ safe, chainId, tx }),
+  };
+}
+
 export function safeTxHash({ safe, chainId = CHAIN_ID, tx }) {
   return TypedDataEncoder.hash({ chainId, verifyingContract: safe }, SAFE_TX_TYPES, tx);
 }

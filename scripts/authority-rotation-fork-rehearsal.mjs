@@ -15,6 +15,7 @@
 import { AbiCoder, Interface, JsonRpcProvider, ZeroAddress, getAddress, keccak256, toBeHex } from "ethers";
 import { LEGACY_RELEASE_82B26, LEGACY_SALE_82B26, OLD_AUTHORITY, OPEN_OLD_KEY_SALES, ROLES, SAFE_TX_TYPES, buildRotationPlan, buildSafeCreation, buildSafeSelfTest, buildSaleCloseSteps, packageStatus, releaseIface, safeTxHash } from "./authority-rotation-plan.mjs";
 import { verifySafeSignatures } from "./verify-safe-signatures.mjs";
+import { factoryIface as cfFactoryIface, predictSafeAddress } from "./safe-counterfactual.mjs";
 
 const URL_ = process.env.ANVIL_URL || "http://127.0.0.1:8545";
 const SAFE_L2 = "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762";
@@ -155,6 +156,9 @@ async function main() {
   out.safe = { address: safe, creationStatus: created.status, creationGas: created.gasUsed, version: await read("VERSION"), owners: (await read("getOwners")).map(getAddress), threshold: Number(await read("getThreshold")), nonce: (await read("nonce")).toString() };
 
   out.safe.predictedEqualsCreated = (await provider.getCode(predicted)) !== "0x";
+  // The offline CREATE2 predictor (used for the owner's counterfactual Safe) must match the factory.
+  const proxyCreationCode = cfFactoryIface.decodeFunctionResult("proxyCreationCode", await provider.call({ to: FACTORY, data: cfFactoryIface.encodeFunctionData("proxyCreationCode") }))[0];
+  out.safe.offlinePredictorMatchesCreated = predictSafeAddress({ factory: FACTORY, singleton: SAFE_L2, initializer: creation.initializer, saltNonce: creation.saltNonce, proxyCreationCode }) === predicted;
   out.safe.fallbackHandlerFromGenerator = FALLBACK;
   const rolesOf = async () => Object.fromEntries(await Promise.all(Object.entries({ old, safe, backup }).map(async ([who, a]) => [who, Object.fromEntries(await Promise.all(Object.keys(ROLES).map(async (r) => [r, await hasRole(P0_RELEASE, r, a)])))])));
 
