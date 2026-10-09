@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseAlbumState, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
@@ -19,6 +19,7 @@ import { ipfsToHttp } from "../lib/web3.js";
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
 const label = { display: "block", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)", marginTop: 16 };
+const ALBUM_UNSUPPORTED_MESSAGE = "This release contract was deployed from the pre-album implementation and has no Album Contract functions. Albums and singles need the album-capable factory deployment; publish this release as an EP / standalone release instead.";
 const STEPS = [
   ["release", "Your release"],
   ["track", "Tracks"],
@@ -134,8 +135,12 @@ export function ArtistStudioPage() {
   const [releaseId, setReleaseId] = useState("");
   const [provisioning, setProvisioning] = useState(null);
   const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
-  const [albumActivated, setAlbumActivated] = useState(false);
+  // Album state is read from the release clone, never assumed locally: clones of the
+  // pre-album implementation cannot run album transactions at all.
+  const [albumState, setAlbumState] = useState({ status: "idle" });
   const [activeReleaseAsset, setActiveReleaseAsset] = useState(null);
+  const albumSupported = albumState.status === "ready" && albumState.supported;
+  const albumActivated = albumSupported && albumState.created;
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
   const [configuredSale, setConfiguredSale] = useState(null);
@@ -222,6 +227,17 @@ export function ArtistStudioPage() {
       .catch((error) => { if (!cancelled && error?.code !== "RELEASE_FACTORY_V2_NOT_CONFIGURED") setNotice(error.message); });
     return () => { cancelled = true; };
   }, [canUseStudio, headers, ownedStudioCatalog, requestedReleaseId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const releaseContract = activeReleaseAsset?.releaseContractAddress;
+    if (form.releaseType !== "ALBUM" || provisioningState !== "CONFIRMED" || !releaseContract) { setAlbumState({ status: "idle" }); return undefined; }
+    setAlbumState({ status: "checking" });
+    readReleaseAlbumState(createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), releaseContract)
+      .then((state) => { if (!cancelled) setAlbumState({ status: "ready", ...state }); })
+      .catch((error) => { if (!cancelled) setAlbumState({ status: "error", message: error?.message || "Album state could not be read from Fuji." }); });
+    return () => { cancelled = true; };
+  }, [activeReleaseAsset?.releaseContractAddress, form.releaseType, provisioningState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -339,11 +355,13 @@ export function ArtistStudioPage() {
     try {
       if (form.releaseType !== "ALBUM") throw new Error("Choose Album Contract as the release type first.");
       if (!activeReleaseAsset?.releaseContractAddress || !provisioning?.releaseKey) throw new Error("Confirm the Factory V2 release before activating its Album Contract.");
+      if (!albumSupported) throw new Error(ALBUM_UNSUPPORTED_MESSAGE);
+      if (albumActivated) throw new Error("This Album Contract is already active on-chain.");
       const provider = wallet.getProvider?.();
       const encoded = encodeCreateReleaseAlbum({ releaseKey: provisioning.releaseKey });
       await simulateReleaseCall(provider, { from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data, chainId: activeReleaseAsset.chainId });
       const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data });
-      setAlbumActivated(true);
+      setAlbumState((current) => ({ ...current, created: true }));
       setTxEvidence({ status: "submitted", transactionHash: transaction.hash, explorerUrl: fujiExplorerUrl("tx", transaction.hash), contractAddress: activeReleaseAsset.releaseContractAddress, chainId: activeReleaseAsset.chainId });
       setNotice(`Album Contract activated. Add up to 13 tracks and designate up to 4 as singles.`);
     } catch (error) {
@@ -448,7 +466,9 @@ export function ArtistStudioPage() {
       const provider = wallet.getProvider?.();
       const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.primarySaleAddress && metadata.provenanceAnchorAddress && Number(metadata.chainId) === Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId));
       if (!releaseScoped) throw new Error("This Studio release is not bound to its verified V2 release, dedicated sale, and provenance anchor. Legacy V2/shared-contract fallback is disabled.");
+      if (form.releaseType === "ALBUM" && !albumSupported) throw new Error(ALBUM_UNSUPPORTED_MESSAGE);
       if (form.releaseType === "ALBUM" && !albumActivated) throw new Error("Activate the Album Contract before creating album tracks.");
+      if (form.releaseType === "ALBUM" && albumState.closed) throw new Error("This Album Contract is closed. No more tracks can be added.");
       const mintEnd = form.mintEnd ? Math.floor(new Date(form.mintEnd).getTime() / 1000) : 0;
       const encoded = form.releaseType === "ALBUM"
         ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, single: form.albumSingle, mintEnd })
@@ -807,10 +827,13 @@ export function ArtistStudioPage() {
               <dt>Factory</dt><dd>{provisioning.factoryAddress}</dd><dt>Chain</dt><dd>{provisioning.chainId}</dd><dt>Release key</dt><dd>{provisioning.releaseKey}</dd><dt>Artist / gas payer</dt><dd>{provisioning.artistWallet}</dd><dt>Name</dt><dd>{provisioning.name}</dd><dt>Symbol</dt><dd>{provisioning.symbol}</dd><dt>Contract URI</dt><dd>{provisioning.contractURI || "(empty string)"}</dd><dt>Parameters digest</dt><dd>{provisioning.authorizationDigest}</dd>
             </dl> : <p style={{ color: "var(--vc-bone-dim)" }}>Provisioning has not been prepared. Existing V1 Factory is deliberately not used.</p>}
             <p role="status">Provisioning state: {provisioningState}</p>
+            {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
+            {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on Fuji: {albumState.message}</p>}
+            {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh exact parameters" : "Prepare provisioning"}</button>
               {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain · artist pays gas"}</button>}
-              {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
+              {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Reconcile release</button> : null}
             </div>
           </div>}
@@ -949,7 +972,7 @@ export function ArtistStudioPage() {
             <div>
               <p><strong>Artist</strong><br />{activeArtist?.name || form.artistName || "—"}</p>
               <p><strong>Release</strong><br />{form.releaseTitle || "—"}</p>
-              <p><strong>Type</strong><br />EP</p>
+              <p><strong>Type</strong><br />{form.releaseType === "ALBUM" ? `Album${form.albumSingle ? " · this track is a Single" : ""}` : "EP / standalone release"}</p>
               <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
               <p><strong>Experiences</strong><br />{form.experienceTitle || experienceCategoryLabel(form.productType)}</p>
               <p><strong>How many</strong><br />{supplyLabel(form.quantity)}</p>

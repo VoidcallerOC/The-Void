@@ -5,13 +5,14 @@ vi.mock("./web3.js", async (importOriginal) => {
   return { ...actual, waitForReceipt: vi.fn(), switchChain: vi.fn() };
 });
 
-import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, submitPurchase, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
+import { LISTING_CREATED_TOPIC, LISTING_STATUS, MARKETPLACE_SELECTORS, PURCHASE_STATE, assertCanonicalMarketplaceTarget, createListingRecord, encodeApproval, encodeBuy, encodeCreateListing, listingIdFromReceipt, requiredPayment, submitPurchase, transitionListing, validateListingDraft, validatePurchase, verifyPurchaseReceipt } from "./marketplace.js";
 import { waitForReceipt } from "./web3.js";
 
 const seller = "0x1111111111111111111111111111111111111111";
 const buyer = "0x3333333333333333333333333333333333333333";
 const contract = "0x2222222222222222222222222222222222222222";
 const marketplace = "0x4444444444444444444444444444444444444444";
+const canonical = Object.freeze({ address: marketplace, chainId: 43114, enabled: true });
 const topic = "0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811";
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const address = (value) => value.slice(2).padStart(64, "0");
@@ -75,8 +76,8 @@ describe("marketplace ABI, receipt verification, and lifecycle", () => {
     };
     waitForReceipt.mockResolvedValueOnce(receipt);
     const onState = vi.fn();
-    const provider = { request: vi.fn().mockResolvedValue(`0x${"c".repeat(64)}`) };
-    await submitPurchase({ provider, buyer, marketplace, listing, quantity: 1, chain: { id: 43114, key: "avalanche" }, chainId: 43114, onState });
+    const provider = { request: vi.fn(async ({ method }) => (method === "eth_chainId" ? "0xa86a" : `0x${"c".repeat(64)}`)) };
+    await submitPurchase({ provider, buyer, marketplace, listing, quantity: 1, chain: { id: 43114, key: "avalanche" }, chainId: 43114, onState, canonical });
     expect(onState.mock.calls.map(([state]) => state)).toEqual([PURCHASE_STATE.WALLET_CONFIRMATION, PURCHASE_STATE.SUBMITTED, PURCHASE_STATE.PENDING, PURCHASE_STATE.OBSERVED]);
     expect(onState).not.toHaveBeenCalledWith(PURCHASE_STATE.CONFIRMED);
   });
@@ -87,4 +88,25 @@ describe("marketplace ABI, receipt verification, and lifecycle", () => {
   });
   it("exposes the explicit purchase state machine", () => expect([PURCHASE_STATE.READY, PURCHASE_STATE.WALLET_CONFIRMATION, PURCHASE_STATE.SUBMITTED, PURCHASE_STATE.PENDING, PURCHASE_STATE.CONFIRMED]).toHaveLength(5));
   it("rejects duplicate terminal transitions", () => expect(() => transitionListing(active({ status: LISTING_STATUS.CANCELLED }), LISTING_STATUS.ACTIVE)).toThrow(/Cannot transition/));
+});
+
+describe("canonical marketplace purchase target", () => {
+  const foreign = "0x5555555555555555555555555555555555555555";
+  const payingProvider = (chainHex = "0xa86a") => ({ request: vi.fn(async ({ method }) => (method === "eth_chainId" ? chainHex : `0x${"c".repeat(64)}`)) });
+  it("accepts only the configured marketplace on its configured chain", () => {
+    expect(assertCanonicalMarketplaceTarget({ marketplace: marketplace.toUpperCase().replace("0X", "0x"), chainId: 43114, config: canonical })).toBe(marketplace);
+    expect(() => assertCanonicalMarketplaceTarget({ marketplace: foreign, chainId: 43114, config: canonical })).toThrow(/verified marketplace/);
+    expect(() => assertCanonicalMarketplaceTarget({ marketplace, chainId: 43113, config: canonical })).toThrow(/marketplace network/);
+    expect(() => assertCanonicalMarketplaceTarget({ marketplace, chainId: 43114, config: { address: "", chainId: 0, enabled: false } })).toThrow(/not configured/);
+  });
+  it("never sends value to a marketplace address that differs from the configured one", async () => {
+    const provider = payingProvider();
+    await expect(submitPurchase({ provider, buyer, marketplace: foreign, listing: active(), quantity: 1, chain: { id: 43114, key: "avalanche" }, chainId: 43114, canonical })).rejects.toMatchObject({ code: "MARKETPLACE_TARGET_MISMATCH" });
+    expect(provider.request).not.toHaveBeenCalled();
+  });
+  it("refuses to send when the wallet is still on another chain after switching", async () => {
+    const provider = payingProvider("0xa869");
+    await expect(submitPurchase({ provider, buyer, marketplace, listing: active(), quantity: 1, chain: { id: 43114, key: "avalanche" }, chainId: 43113, canonical })).rejects.toMatchObject({ code: "WRONG_CHAIN" });
+    expect(provider.request.mock.calls.map(([call]) => call.method)).not.toContain("eth_sendTransaction");
+  });
 });

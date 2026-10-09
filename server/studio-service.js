@@ -465,7 +465,7 @@ export class ArtistStudioService {
     const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
     const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
     const previewAudio = await this.vettedPreviewAudio({ artistId: release.artist_id, uri: input.previewAudio ?? edition.application_metadata?.previewAudio });
-    const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, previewAudio, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: input.releaseType, tier: edition.tier });
+    const generated = canonicalMetadata({ release, edition, artist: { name: release.display_name }, artwork: input.artwork, previewAudio, includes: input.includes || edition.application_metadata?.includes, experiences: experiences.rows, releaseType: releaseType(release.release_metadata?.releaseType), tier: edition.tier });
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;

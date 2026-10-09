@@ -365,6 +365,37 @@ export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply
   return { tokenId: tokenId === 0n ? 1n : tokenId, data: v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps, Boolean(single), BigInt(mintEnd || 0)]) };
 }
 
+const v4AlbumStateIface = new ethers.Interface([
+  "function albumCreated() view returns (bool)",
+  "function albumClosed() view returns (bool)",
+  "function albumTrackCount() view returns (uint256)",
+  "function albumSingleCount() view returns (uint256)",
+]);
+
+/** Reads Album Contract state from a release clone. Clones of the pre-album V4
+ * implementation have no album functions; those calls revert or return no data,
+ * which is reported as `supported: false` so the Studio never offers album
+ * transactions that cannot succeed. Any other read failure throws. */
+export async function readReleaseAlbumState(provider, releaseContractAddress) {
+  if (!ethers.isAddress(releaseContractAddress) || ethers.getAddress(releaseContractAddress) === ethers.ZeroAddress) throw new Error("The indexed release contract address is invalid.");
+  const to = ethers.getAddress(releaseContractAddress);
+  const call = async (name) => {
+    const result = await provider.request({ method: "eth_call", params: [{ to, data: v4AlbumStateIface.encodeFunctionData(name) }, "latest"] });
+    if (typeof result !== "string" || result === "0x") return null;
+    return v4AlbumStateIface.decodeFunctionResult(name, result)[0];
+  };
+  let created;
+  try {
+    created = await call("albumCreated");
+  } catch (error) {
+    if (extractFujiRevertData(error) || /revert/i.test(String(error?.message || ""))) return { supported: false, created: false, closed: false, trackCount: 0n, singleCount: 0n };
+    throw error;
+  }
+  if (created === null) return { supported: false, created: false, closed: false, trackCount: 0n, singleCount: 0n };
+  const [closed, trackCount, singleCount] = await Promise.all([call("albumClosed"), call("albumTrackCount"), call("albumSingleCount")]);
+  return { supported: true, created: Boolean(created), closed: Boolean(closed), trackCount: BigInt(trackCount ?? 0n), singleCount: BigInt(singleCount ?? 0n) };
+}
+
 export async function simulateFujiCall(provider, { from, to, data }) {
   await assertFujiProvider(provider);
   const target = assertFujiTransactionTarget(to || FUJI_RELEASE_CONFIG.contractAddress);

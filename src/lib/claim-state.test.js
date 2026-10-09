@@ -6,7 +6,7 @@ const edition = {
   releaseContractAddress: "0x1111111111111111111111111111111111111111",
   contractAddress: "0x1111111111111111111111111111111111111111",
   primarySaleAddress: "0x2222222222222222222222222222222222222222",
-  factoryAddress: "0x8291A4F1936C1c5C6D8917b0966c80757cd5c265",
+  factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
   tokenIds: ["7"],
   publicationArchitecture: "release-per-contract",
 };
@@ -19,6 +19,10 @@ describe("Claim release identity", () => {
     const legacy = { ...edition, releaseContractAddress: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6", contractAddress: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6" };
     expect(releaseBindingFor(legacy).valid).toBe(false);
     expect(claimState({ edition: legacy, walletConnected: true, chainId: 43113 }).state).toBe(CLAIM_STATES.INVALID_RELEASE_BINDING);
+  });
+  it("rejects a binding from the superseded V1 release factory", () => {
+    const v1 = { ...edition, factoryAddress: "0x8291A4F1936C1c5C6D8917b0966c80757cd5c265" };
+    expect(releaseBindingFor(v1).valid).toBe(false);
   });
   it("does not enable the CTA when the claim executor is unavailable", () => {
     expect(claimState({ edition, walletConnected: true, chainId: 43113, balance: 0n }).state).toBe(CLAIM_STATES.RELEASE_UNAVAILABLE);
