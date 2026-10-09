@@ -15,6 +15,7 @@ const NEW_AUTHORITY = process.env.NEW_AUTHORITY ? getAddress(process.env.NEW_AUT
 const FUJI_RPC = process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
 const MAINNET_RPC = process.env.MAINNET_RPC_URL || "https://api.avax.network/ext/bc/C/rpc";
 const LOG_CHUNK = Number(process.env.LOG_CHUNK || 2048);
+const LOG_CONCURRENCY = Number(process.env.LOG_CONCURRENCY || 4);
 
 const ROLES = {
   DEFAULT_ADMIN_ROLE: `0x${"00".repeat(32)}`,
@@ -75,19 +76,34 @@ async function call(provider, to, name, args = []) {
 }
 
 async function logs(provider, address, fromBlock, toBlock, topics) {
-  const out = [];
-  for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK) {
-    const end = Math.min(start + LOG_CHUNK - 1, toBlock);
+  const ranges = [];
+  for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK) ranges.push([start, Math.min(start + LOG_CHUNK - 1, toBlock)]);
+  const fetchRange = async ([start, end]) => {
     for (let attempt = 0; ; attempt += 1) {
-      try { out.push(...await provider.getLogs({ address, fromBlock: start, toBlock: end, topics: [topics] })); break; } catch (error) { if (attempt >= 3) throw error; }
+      try { return await provider.getLogs({ address, fromBlock: start, toBlock: end, topics: [topics] }); } catch (error) {
+        if (attempt >= 4) throw new Error(`eth_getLogs ${start}-${end} failed: ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
     }
-  }
+  };
+  const out = [];
+  for (let i = 0; i < ranges.length; i += LOG_CONCURRENCY) out.push(...(await Promise.all(ranges.slice(i, i + LOG_CONCURRENCY).map(fetchRange))).flat());
   return out;
 }
 
 const str = (v) => (typeof v === "bigint" ? v.toString() : v);
 
-async function inspect(provider, contract, tip, withLogs) {
+// One pass over the whole range: every candidate address and every relevant topic per
+// request (eth_getLogs ORs the address list and the topic0 list).
+async function fetchAllLogs(provider, contracts, tip) {
+  const fromBlock = Math.min(...contracts.map((c) => c.fromBlock));
+  const all = await logs(provider, contracts.map((c) => getAddress(c.address)), fromBlock, tip, Object.values(TOPICS));
+  const byAddress = {};
+  for (const log of all) (byAddress[getAddress(log.address)] ||= []).push(log);
+  return { byAddress, fromBlock, toBlock: tip, total: all.length };
+}
+
+async function inspect(provider, contract, tip, withLogs, logIndex = null) {
   const address = getAddress(contract.address);
   const code = await provider.getCode(address);
   const entry = { address, label: contract.label, kind: contract.kind, codePresent: code !== "0x", subject: {}, newAuthority: NEW_AUTHORITY ? {} : undefined };
@@ -112,7 +128,8 @@ async function inspect(provider, contract, tip, withLogs) {
     if (pending !== undefined) entry.subject.pendingWithdrawalWei = str(pending);
   }
   if (withLogs && contract.fromBlock) {
-    const roleLogs = await logs(provider, address, contract.fromBlock, tip, [TOPICS.RoleGranted, TOPICS.RoleRevoked]);
+    const own = (logIndex?.byAddress[address] || []).sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
+    const roleLogs = own.filter((l) => l.topics[0] === TOPICS.RoleGranted || l.topics[0] === TOPICS.RoleRevoked);
     const holders = {};
     for (const log of roleLogs) {
       const parsed = iface.parseLog(log);
@@ -122,10 +139,10 @@ async function inspect(provider, contract, tip, withLogs) {
     }
     entry.roleHoldersFromLogs = Object.fromEntries(Object.entries(holders).map(([role, accounts]) => [role, Object.entries(accounts).filter(([, on]) => on).map(([a]) => a)]));
     entry.roleEventCount = roleLogs.length;
-    const ownerLogs = await logs(provider, address, contract.fromBlock, tip, [TOPICS.OwnershipTransferred]);
+    const ownerLogs = own.filter((l) => l.topics[0] === TOPICS.OwnershipTransferred);
     if (ownerLogs.length) entry.ownershipHistory = ownerLogs.map((l) => { const p = iface.parseLog(l); return { from: p.args.previousOwner, to: p.args.newOwner, block: l.blockNumber, tx: l.transactionHash }; });
     if (contract.kind === "release") {
-      const editionLogs = await logs(provider, address, contract.fromBlock, tip, [TOPICS.EditionCreated]);
+      const editionLogs = own.filter((l) => l.topics[0] === TOPICS.EditionCreated);
       entry.editions = [];
       for (const log of editionLogs) {
         const tokenId = BigInt(log.topics[1]);
@@ -153,7 +170,9 @@ const result = {
   fuji: [],
   mainnet: [],
 };
-for (const contract of FUJI_CONTRACTS) result.fuji.push(await inspect(fuji, contract, fujiTip, true));
+const logIndex = await fetchAllLogs(fuji, FUJI_CONTRACTS, fujiTip);
+result.logScan = { fromBlock: logIndex.fromBlock, toBlock: logIndex.toBlock, chunk: LOG_CHUNK, logs: logIndex.total };
+for (const contract of FUJI_CONTRACTS) result.fuji.push(await inspect(fuji, contract, fujiTip, true, logIndex));
 for (const contract of MAINNET_CONTRACTS) {
   try { result.mainnet.push(await inspect(mainnet, contract, 0, false)); } catch (error) { result.mainnet.push({ address: contract.address, error: error.message }); }
 }
