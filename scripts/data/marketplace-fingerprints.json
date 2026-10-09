@@ -1,5 +1,5 @@
 {
- "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). forge 1.3.1, solc 0.8.24, evm cancun. optimizer per entry: 200 runs = repository foundry.toml; disabled = forge defaults (the Render image does not copy foundry.toml). settingsAssumed=true: the source commit had no foundry.toml and repository settings were applied.",
+ "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). forge 1.3.1; solc and evm per entry (repository: 0.8.24/cancun; Render image: 0.8.30/prague). optimizer per entry: 200 runs = repository foundry.toml; disabled = forge defaults (the Render image does not copy foundry.toml). settingsAssumed=true: the source commit had no foundry.toml and repository settings were applied.",
  "versions": [
   {
    "contract": "MusicMarketplace",
@@ -400,6 +400,206 @@
    "optimizer": "disabled (forge defaults, no foundry.toml)",
    "runtimeBytes": 10202,
    "fingerprint": "0x4eae4d8ca42c306437124f803c12bd66d545665fd59b12b13129a7c51223e091",
+   "immutableRanges": [
+    [
+     2729,
+     32
+    ],
+    [
+     6113,
+     32
+    ],
+    [
+     1616,
+     32
+    ],
+    [
+     5721,
+     32
+    ],
+    [
+     4410,
+     32
+    ],
+    [
+     6455,
+     32
+    ],
+    [
+     4310,
+     32
+    ],
+    [
+     6542,
+     32
+    ],
+    [
+     1652,
+     32
+    ],
+    [
+     1691,
+     32
+    ],
+    [
+     2191,
+     32
+    ],
+    [
+     2230,
+     32
+    ],
+    [
+     2766,
+     32
+    ],
+    [
+     2805,
+     32
+    ],
+    [
+     4374,
+     32
+    ],
+    [
+     4542,
+     32
+    ],
+    [
+     4581,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 8416,
+   "fingerprint": "0x7c8c89759d254515a12b422c9405901033b26b9b43767e2cc9eaa435b983c0a3",
+   "immutableRanges": [
+    [
+     1958,
+     32
+    ],
+    [
+     4867,
+     32
+    ],
+    [
+     1201,
+     32
+    ],
+    [
+     4521,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 8827,
+   "fingerprint": "0xed4af992a7502a17e07720c28af4ff5942fc4386b8976218275e7c7b0d938ea7",
+   "immutableRanges": [
+    [
+     2198,
+     32
+    ],
+    [
+     5153,
+     32
+    ],
+    [
+     1441,
+     32
+    ],
+    [
+     4761,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 9834,
+   "fingerprint": "0x5f76831a6dd798b395337a49cd4fa009a335eae7c581aaa3b14c2334d478a3bd",
+   "immutableRanges": [
+    [
+     2676,
+     32
+    ],
+    [
+     6024,
+     32
+    ],
+    [
+     1563,
+     32
+    ],
+    [
+     5632,
+     32
+    ],
+    [
+     4321,
+     32
+    ],
+    [
+     6366,
+     32
+    ],
+    [
+     1599,
+     32
+    ],
+    [
+     1638,
+     32
+    ],
+    [
+     2138,
+     32
+    ],
+    [
+     2177,
+     32
+    ],
+    [
+     2713,
+     32
+    ],
+    [
+     2752,
+     32
+    ],
+    [
+     4285,
+     32
+    ],
+    [
+     4453,
+     32
+    ],
+    [
+     4492,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 10202,
+   "fingerprint": "0x7f3729896fe96d8483b8abb55a21ddfe8c4d6898dcee78822ae93623ed9be1bd",
    "immutableRanges": [
     [
      2729,
