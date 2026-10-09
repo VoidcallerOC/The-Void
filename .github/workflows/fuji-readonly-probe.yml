@@ -59,7 +59,10 @@ jobs:
       - name: Identify the owner-supplied Safe on Fuji and C-Chain (read-only)
         env:
           SAFE_CANDIDATE: "0xecC40c3CE983A2F3bB4a241EBAd4e08C261aeA10"
-        run: node scripts/safe-identity-probe.mjs | tee safe-identity.json
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/safe-identity-probe.mjs | tee safe-identity.json
       - name: Identify legacy sale bytecode (source commit and compiler) for the storage layout
         run: node scripts/legacy-sale-bytecode-check.mjs | tee legacy-sale-bytecode.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)

@@ -12,7 +12,13 @@
 import { Interface, JsonRpcProvider, getAddress, keccak256 } from "ethers";
 import { ARTIST_WALLET_0x284C, OLD_AUTHORITY, ROLES, releaseIface } from "./authority-rotation-plan.mjs";
 
-const SAFE = getAddress(String(process.env.SAFE_CANDIDATE || "").trim());
+// The address is probed exactly as supplied (same 20 bytes). Its EIP-55 checksum is
+// reported, not silently corrected: a failed checksum can mean a retyped address.
+const GIVEN = String(process.env.SAFE_CANDIDATE || "").trim();
+if (!/^0x[0-9a-fA-F]{40}$/.test(GIVEN)) throw new Error("SAFE_CANDIDATE must be a 20-byte hex address.");
+const SAFE = getAddress(GIVEN.toLowerCase());
+const hexPart = GIVEN.slice(2);
+const CHECKSUM = { given: GIVEN, eip55: SAFE, givenChecksumValid: GIVEN === SAFE || hexPart === hexPart.toLowerCase() || hexPart === hexPart.toUpperCase() };
 const CHAINS = [
   { name: "Avalanche Fuji", chainId: 43113, rpc: process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc", routescan: "testnet" },
   { name: "Avalanche C-Chain", chainId: 43114, rpc: process.env.MAINNET_RPC_URL || "https://api.avax.network/ext/bc/C/rpc", routescan: "mainnet" },
@@ -99,7 +105,7 @@ async function inspect(chain) {
 }
 
 async function main() {
-  const out = { probedAt: new Date().toISOString(), safe: SAFE, chains: [] };
+  const out = { probedAt: new Date().toISOString(), safe: SAFE, checksum: CHECKSUM, chains: [] };
   for (const chain of CHAINS) {
     try { out.chains.push(await inspect(chain)); } catch (error) { out.chains.push({ network: chain.name, error: String(error?.message || error).slice(0, 160) }); }
   }
