@@ -23,7 +23,9 @@
    - It matches the manifest `deployments/release-per-contract-fuji.json`, the config `config/fuji-release-per-contract-v2.json`, Vercel production `VITE_MARKETPLACE_ADDRESS` and the indexer `MARKETPLACE` checkpoint.
    - It has 0 listings and holds 0 AVAX.
 2. **The three reported deployments are real.** All are confirmed on-chain (status 1) and created by `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`. They are not three isolated events: the same Render cron, same key and same script **also created `0x982b28352fd612fe934c5e1ad8fea399689190d2` (2026-09-29) and `0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b` (2026-10-01)**, in runs that Render recorded as **unsuccessful**. Those two were then adopted as the app's marketplace.
-3. **None of the five MusicMarketplace deployments matches the repository build settings.** The Render image does not copy `foundry.toml` (`Dockerfile:25-32`), so `forge create` compiled with forge defaults (optimizer off). Optimizer-off builds reproduce the exact on-chain runtime sizes (9,834 and 8,827 bytes). Byte identity is **UNVERIFIED** (§3).
+3. **All five MusicMarketplace deployments are reproduced exactly from repository source, but not with repository build settings.** The Render image does not copy `foundry.toml` (`Dockerfile:25-32`), so `forge create` used forge defaults: **solc 0.8.30, optimizer off, EVM prague**. Rebuilt that way:
+   - `MusicMarketplace.sol` @ `0dfb240e` (blob `ba389bcf`, identical to current `main`) reproduces the cron-logged creation SHA-256 `0x6e707e33…85c785`, and matches `0xd13f…` with **zero non-immutable byte differences**, including the metadata hash;
+   - @ `9e5411f0` matches `0x982b…` the same way (§3).
 4. **Legacy state still exists:**
    - `0x982b…` and `0xa03b…` each hold **one ACTIVE on-chain listing** (listing 2) from seller `0x6a86…d2fb`. Both are **expired**, so neither can be filled now. Neither is in the production database.
    - The database's sold listing #1 on each is the only legacy activity it knows about.
@@ -88,12 +90,18 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 - None has an owner, admin, pause or withdraw function, by source of every version (`grep owner|admin|pause|withdraw`). No party can disable, upgrade or reconfigure them.
 - Constructor args for the MusicMarketplace rows were not decoded (`constructorArgs: null`), because decoding is only attempted after a fingerprint match. The immutable getters above report the same values directly from contract state (tier 2).
 
-**Bytecode identity.**
-- **Repository evidence.** All three reported runs built from byte-identical inputs: `contracts/MusicMarketplace.sol` blob `ba389bcf`, `scripts/deploy-marketplace.mjs` blob `58670388`, `foundry.toml` blob `33a4cfa6`. Each run logged the same SHA-256 of creation bytecode, `0x6e707e33…85c785`.
-- **Local reproduction.** Partial: forge 1.3.1 and solc 0.8.24 reproduce the runtime *size* only with the optimizer off. The creation hash is not reproduced (`0x82ca1f32…`).
-- **What would close it:**
-  - the solc version the image's forge auto-selected for `pragma ^0.8.24`;
-  - a byte diff of the on-chain code. The code dump of `0xd13f` and `0x982b` is printed by the deployer-audit step.
+**Bytecode identity (COMPLETE).**
+- **Inputs.** All three reported runs built from byte-identical inputs: `contracts/MusicMarketplace.sol` blob `ba389bcf`, `scripts/deploy-marketplace.mjs` blob `58670388`, `foundry.toml` blob `33a4cfa6`. The image does not contain `foundry.toml`. Each run logged SHA-256(creation bytecode) `0x6e707e33…85c785`.
+- **On-chain metadata.** The CBOR tail of the deployed code names **solc 0.8.30**.
+- **Rebuild.** forge 1.3.1 + solc 0.8.30 (official `v0.8.30` static binary, sha256 `f3e987dc…428f7`), optimizer off, EVM prague:
+
+  | Source | vs on-chain | Non-immutable byte diffs | Creation SHA-256 |
+  |---|---|---|---|
+  | `MusicMarketplace.sol` @ `0dfb240e` | `0xd13f…` (9,834 B) | **0** (100 differing bytes, all inside immutable slots) | `0x6e707e33…85c785` = **cron-logged** |
+  | `MusicMarketplace.sol` @ `9e5411f0` | `0x982b…` (8,827 B) | **0** (42 differing bytes, all immutable) | `0xed1542d5…db87` (no log retained) |
+
+- **Same code elsewhere.** `0xa03b…` and `0xced4…` have runtime byte-identical to `0xd13f…`, including immutables (same full code hash `0x4530…5431`). `0x1bc4…` differs only in the `feeRecipient` immutable.
+- **Probe identity.** The fingerprint table now carries these exact builds, so the probe identifies every one on-chain (§11 run).
 
 ---
 
@@ -137,7 +145,7 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
    - **Hypothesis:** the broadcast succeeded but the script failed afterwards (output parsing or record writing), so the deploy was invisible to whoever triggered it. The code paths at commits `8fd88ba…0bfebf7` would explain this; the run logs have expired, so it is not proven.
 2. **The 2026-10-06 run was "canceled" after it had deployed.** Run `crn-…-1791256432` started 03:13:52Z. Its creation tx was mined at 03:13:59Z and the record was logged at 03:14:01Z. `voidcalleroc@gmail.com` cancelled it at 03:14:02Z.
 3. **On-chain listings missing from the DB.** On both legacy marketplaces, listing 2 was created on 2026-10-03 (`0x982b`: 20:00:56Z; `0xa03b`: 20:39:29Z). The DB only has listing 1 on each. The likely cause is that the indexer stopped indexing those marketplaces when `INDEXER_CONTRACTS_JSON` changed; that is hypothesis-level, because the secret's history is not visible. Both listings expired on 2026-10-03, at `expiresAt` 1791058500 and 1791061200 (UTC 20:15:00 and 21:00:00), and cannot be filled.
-4. **`bytecodeHash` mismatch with the repository build.** The Docker image omits `foundry.toml`. The repository builds with optimizer 200; the deployed code was compiled without it.
+4. **`bytecodeHash` differs from the repository build.** Root cause, proven by exact reproduction: the Docker image omits `foundry.toml`. Deployed code was compiled with solc 0.8.30, optimizer off and EVM prague; the repository build uses 0.8.24, optimizer 200 and cancun. **Implication:** "same source" does not mean "same bytecode" for anything deployed from the Render image.
 
 ---
 
@@ -211,7 +219,7 @@ Source: reconciliation probe, run 37907784942. All deployers are `0xaBd3746e8b85
 | M3 | Mark `0x982b…` and `0xa03b…` as LEGACY in the API (code change) while keeping their history? | Yes |
 | M4 | Ask seller `0x6a86…d2fb` to revoke approvals for the legacy marketplaces? | Optional; the listings are expired and Fuji-only. |
 | M5 | Delete the unused Vercel `VITE_FUJI_LISTING_*` variables? | Yes. It also removes `0xa03b` from the bundle. |
-| U1 | Exact byte identity of the MusicMarketplace deployments | Needs the solc version the image used, plus the code diff printed by the deployer audit |
+| U1 | ~~Byte identity of the MusicMarketplace deployments~~ | **Resolved:** exact rebuild (§3) |
 | U2 | Full DB `contracts` and `listings` contents | Needs read-only DB access |
 | U3 | Render `INDEXER_CONTRACTS_JSON` and `MARKETPLACE_ADDRESS` values | Needs a secure dashboard export |
 
