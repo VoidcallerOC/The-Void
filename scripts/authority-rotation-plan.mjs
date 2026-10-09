@@ -53,6 +53,38 @@ export const LOCKED_OWNABLES = Object.freeze([
   { address: "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", label: "Primary sale for 0x7A78", priority: "P2" },
 ]);
 
+// Optional old-key steps before the ARTIST revoke on 0x82b26 (decision R3). Two
+// editions there pay OLD_AUTHORITY and were OPEN for purchase in the live
+// simulation; only their artist (the old key, while it holds ARTIST_ROLE) can close
+// them. Parameters are the live sale values with paused = true; re-read them
+// (scripts/authority-rotation-simulate.mjs) immediately before signing.
+export const saleIface = new Interface([
+  "function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)",
+  "function withdraw()",
+]);
+const LEGACY_SALE_82B26 = "0xcc26cd6D6dc25654652D1FBB64dB5F61E20F60F1";
+export const OPEN_OLD_KEY_SALES = Object.freeze([
+  { tokenId: "33778802922810732976408591241428358474475553907731009337085064305512658576739", priceWei: "10000000000000000", maxSupply: "25", perWalletLimit: "1", startTime: "0", endTime: "0" },
+  { tokenId: "86336109522257422783953313092869910591261689395232051112421244253165221467155", priceWei: "10000000000000000", maxSupply: "25", perWalletLimit: "20", startTime: "0", endTime: "0" },
+]);
+export function buildOptionalPreSteps() {
+  const steps = OPEN_OLD_KEY_SALES.map((e, i) => ({
+    step: `P-${i + 1}`, phase: "optional pre-rotation sale close", chainId: CHAIN_ID, value: "0", signer: OLD_AUTHORITY, to: LEGACY_SALE_82B26,
+    contract: "Primary sale for 0x82b26", function: "configureSale(uint256,uint256,uint256,uint256,uint64,uint64,bool)",
+    args: { ...e, paused: true },
+    calldata: saleIface.encodeFunctionData("configureSale", [e.tokenId, e.priceWei, e.maxSupply, e.perWalletLimit, e.startTime, e.endTime, true]),
+    expected: "Same sale parameters with paused = true: purchase() reverts SalePaused, so no further proceeds accrue to the old key. Must precede the ARTIST_ROLE revoke on 0x82b26.",
+    verify: `sales(${e.tokenId}).paused == true on ${LEGACY_SALE_82B26}`,
+  }));
+  steps.push({
+    step: "P-3", phase: "optional withdrawal", chainId: CHAIN_ID, value: "0", signer: OLD_AUTHORITY, to: LEGACY_SALE_82B26,
+    contract: "Primary sale for 0x82b26", function: "withdraw()", args: {}, calldata: saleIface.encodeFunctionData("withdraw", []),
+    expected: "Pays the old key's pull balance (0.019 test AVAX at probe time) to the old key itself. Not role-gated and not time-critical.",
+    verify: `balances(${OLD_AUTHORITY}) == 0 on ${LEGACY_SALE_82B26}`,
+  });
+  return steps;
+}
+
 export function validateNewAuthority(value) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -143,5 +175,6 @@ const invokedDirectly = process.argv[1] && import.meta.url === `file://${process
 if (invokedDirectly) {
   const newAuthority = validateNewAuthority(process.env.NEW_AUTHORITY);
   const scope = process.env.SCOPE || "ALL";
-  console.log(JSON.stringify({ chainId: CHAIN_ID, oldAuthority: OLD_AUTHORITY, newAuthority, scope, unsigned: true, steps: buildRotationPlan({ newAuthority, scope }) }, null, 2));
+  const optionalPreSteps = scope === "P0" ? [] : buildOptionalPreSteps();
+  console.log(JSON.stringify({ chainId: CHAIN_ID, oldAuthority: OLD_AUTHORITY, newAuthority, scope, unsigned: true, optionalPreSteps, steps: buildRotationPlan({ newAuthority, scope }), lockedOwnables: LOCKED_OWNABLES }, null, 2));
 }

@@ -13,7 +13,7 @@
 // state that does not exist yet, so they are simulated from the current admin
 // (same onlyRole(DEFAULT_ADMIN_ROLE) gate in source) and labelled as such.
 import { Interface, JsonRpcProvider, getAddress } from "ethers";
-import { OLD_AUTHORITY, ROLES, RELEASES, OWNABLES, releaseIface, ownableIface } from "./authority-rotation-plan.mjs";
+import { OLD_AUTHORITY, ROLES, RELEASES, OWNABLES, LOCKED_OWNABLES, releaseIface, ownableIface } from "./authority-rotation-plan.mjs";
 
 const FUJI_RPC = process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
 // Simulation-only stand-ins. Neither is a proposed replacement authority.
@@ -83,8 +83,8 @@ async function main() {
     out.releases.push(r);
   }
 
-  for (const c of OWNABLES) {
-    const o = { address: c.address, label: c.label };
+  for (const c of [...OWNABLES.map((x) => ({ ...x, expectTransferable: true })), ...LOCKED_OWNABLES.map((x) => ({ ...x, expectTransferable: false }))]) {
+    const o = { address: c.address, label: c.label, expectTransferable: c.expectTransferable };
     o.transferOwnershipFromOwner = await simulate(old, c.address, ownableIface.encodeFunctionData("transferOwnership", [PROBE_GRANTEE]));
     o.transferOwnershipFromUnprivileged = await simulate(UNPRIVILEGED, c.address, ownableIface.encodeFunctionData("transferOwnership", [PROBE_GRANTEE]));
     try {

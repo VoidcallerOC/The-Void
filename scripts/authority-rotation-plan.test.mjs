@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getAddress, id } from "ethers";
-import { LOCKED_OWNABLES, OLD_AUTHORITY, OWNABLES, RELEASES, ROLES, buildRotationPlan, ownableIface, releaseIface, validateNewAuthority } from "./authority-rotation-plan.mjs";
+import { LOCKED_OWNABLES, OLD_AUTHORITY, OPEN_OLD_KEY_SALES, OWNABLES, RELEASES, ROLES, buildOptionalPreSteps, buildRotationPlan, ownableIface, releaseIface, saleIface, validateNewAuthority } from "./authority-rotation-plan.mjs";
 
 // Deterministic test-only address; NOT a proposed replacement authority.
 const NEW = getAddress("0x00000000000000000000000000000000000000a1");
@@ -82,5 +82,19 @@ describe("authority rotation plan", () => {
   it("scopes the package to P0 when requested", () => {
     const targets = new Set(buildRotationPlan({ newAuthority: NEW, scope: "P0" }).map((s) => s.to));
     expect([...targets]).toEqual(["0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6"]);
+  });
+
+  it("encodes the optional sale-close pre-steps with unchanged parameters and paused = true", () => {
+    const pre = buildOptionalPreSteps();
+    expect(pre.map((s) => s.step)).toEqual(["P-1", "P-2", "P-3"]);
+    pre.slice(0, 2).forEach((step, i) => {
+      const parsed = saleIface.parseTransaction({ data: step.calldata });
+      const e = OPEN_OLD_KEY_SALES[i];
+      expect(parsed.args.map(String)).toEqual([e.tokenId, e.priceWei, e.maxSupply, e.perWalletLimit, e.startTime, e.endTime, "true"]);
+      expect(step.signer).toBe(OLD_AUTHORITY);
+    });
+    // Live simulation (run 37911342571) produced exactly this calldata for P-1.
+    expect(pre[0].calldata.slice(0, 74)).toBe("0x23a126174aae1ffba437e9e91d04ea8032dfa64a3e8ed673475793a65bea7c266cf12563");
+    expect(pre[2].calldata).toBe("0x3ccfd60b");
   });
 });
