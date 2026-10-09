@@ -1,0 +1,137 @@
+name: Fuji read-only release probe
+
+# Read-only chain evidence for the release-per-contract deployment: album
+# capability of the deployed implementation, ReleaseMarketplaceV3 parity, and
+# the MusicMarketplace deployments made by the suspended Render cron.
+# Uses the public Fuji RPC; no secrets, no signing, no broadcast.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/fuji-release-capability-probe.mjs
+      - scripts/fuji-marketplace-reconciliation-probe.mjs
+      - scripts/data/marketplace-fingerprints.json
+      - scripts/fuji-deployer-audit.mjs
+      - scripts/authority-inventory.mjs
+      - scripts/authority-rotation-plan.mjs
+      - scripts/authority-rotation-simulate.mjs
+      - scripts/safe-readiness-probe.mjs
+      - scripts/legacy-sale-bytecode-check.mjs
+      - scripts/authority-rotation-fork-rehearsal.mjs
+      - scripts/verify-safe-signatures.mjs
+      - scripts/safe-identity-probe.mjs
+      - scripts/safe-replay-check.mjs
+      - scripts/safe-counterfactual.mjs
+      - scripts/data/legacy-sale-fingerprints.json
+      - config/fuji-release-per-contract-v2.json
+      - deployments/**
+      - .github/workflows/fuji-readonly-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Probe Fuji (read-only)
+        run: node scripts/fuji-release-capability-probe.mjs | tee fuji-release-capability-probe.json
+      - name: Probe Fuji marketplaces (read-only)
+        run: node scripts/fuji-marketplace-reconciliation-probe.mjs | tee fuji-marketplace-reconciliation-probe.json
+      - name: Enumerate contracts created by the marketplace deployer (read-only)
+        env:
+          DEPLOYER: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
+        run: node scripts/fuji-deployer-audit.mjs | tee fuji-deployer-audit.json
+      - name: Authority inventory for the platform deployer (read-only, Fuji + C-Chain)
+        env:
+          SUBJECT: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
+        run: node scripts/authority-inventory.mjs | tee authority-inventory.json
+      - name: Simulate the authority rotation against live state (eth_call only; nothing signed or broadcast)
+        run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
+      - name: Safe readiness for the replacement admin (read-only RPC and public GET only)
+        run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
+      - name: Identify the owner-supplied Safe on Fuji and C-Chain (read-only)
+        env:
+          SAFE_CANDIDATE: "0xec40c3CE983A2F3bB4a241EBAd4e0a8C261aeA10"
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/safe-identity-probe.mjs | tee safe-identity.json
+      - name: Can the owner's counterfactual Safe be replayed on Fuji? (read-only eth_call/getCode)
+        shell: bash
+        env:
+          SAFE_TARGET: "0xec40c3CE983A2F3bB4a241EBAd4e0a8C261aeA10"
+        run: |
+          set -o pipefail
+          node scripts/safe-replay-check.mjs | tee safe-replay-check.json
+      - name: Identify legacy sale bytecode (source commit and compiler) for the storage layout
+        run: node scripts/legacy-sale-bytecode-check.mjs | tee legacy-sale-bytecode.json
+      - name: Scan the production frontend bundle for contract addresses (read-only GET)
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="https://the-void-alpha.vercel.app"
+          curl -fsSL "$site/" -o index.html
+          : > bundle-addresses.txt
+          for path in $(grep -oE '/assets/[^"]+\.js' index.html | sort -u); do
+            curl -fsSL "$site$path" | grep -oiE '0x[0-9a-f]{40}' | tr 'A-F' 'a-f' >> bundle-addresses.txt || true
+          done
+          sort -u bundle-addresses.txt -o bundle-addresses.txt
+          echo "bundle scripts: $(grep -oE '/assets/[^"]+\.js' index.html | sort -u | tr '\n' ' ')"
+          for a in 0x42b740aa92a6f48380f6d97ad91e332a7921a744 0x228734c7a6325f7b6f570ebcac80239495fdedf0 0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b 0x982b28352fd612fe934c5e1ad8fea399689190d2 0xd13f6184f4e3166901c7ed322e8c2c6be5915f92 0xced494f8c5e51053fe631d68c5165856633e7a29 0x1bc4cc82e658856d9bd53793612d97b0b23a6e04 0xa5cba0f91cb0a81e0a9ce89a6722cbe4eec93505 0x8291a4f1936c1c5c6d8917b0966c80757cd5c265; do
+            if grep -qx "$a" bundle-addresses.txt; then echo "IN_BUNDLE $a"; else echo "ABSENT    $a"; fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuji-release-capability-probe
+          path: |
+            fuji-release-capability-probe.json
+            fuji-marketplace-reconciliation-probe.json
+            bundle-addresses.txt
+            fuji-deployer-audit.json
+            authority-inventory.json
+            authority-rotation-simulation.json
+            safe-readiness.json
+            legacy-sale-bytecode.json
+            safe-identity.json
+            safe-replay-check.json
+
+  # Executes the rotation package on a LOCAL anvil fork of Fuji. Nothing is sent to
+  # Fuji: the script refuses any endpoint that is not a local anvil node, the old key
+  # is impersonated, and test signers are anvil's unlocked dev accounts (no keys).
+  fork-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+      - name: Rehearse P-1, P-2 and P0 on a local fork (no broadcast to Fuji)
+        shell: bash
+        run: |
+          set -euo pipefail
+          anvil --fork-url https://api.avax-test.network/ext/bc/C/rpc --host 127.0.0.1 --port 8545 --silent &
+          for i in $(seq 1 60); do
+            if curl -sf -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' http://127.0.0.1:8545 >/dev/null; then break; fi
+            sleep 1
+          done
+          ANVIL_URL=http://127.0.0.1:8545 timeout 600 node scripts/authority-rotation-fork-rehearsal.mjs | tee authority-rotation-fork-rehearsal.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: authority-rotation-fork-rehearsal
+          path: authority-rotation-fork-rehearsal.json

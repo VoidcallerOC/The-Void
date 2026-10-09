@@ -1,0 +1,675 @@
+{
+ "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). forge 1.3.1; solc and evm per entry (repository: 0.8.24/cancun; Render image: 0.8.30/prague). optimizer per entry: 200 runs = repository foundry.toml; disabled = forge defaults (the Render image does not copy foundry.toml). settingsAssumed=true: the source commit had no foundry.toml and repository settings were applied.",
+ "versions": [
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": true,
+   "runtimeBytes": 4921,
+   "fingerprint": "0x33c32711d5c076e0d280b76985cfd39d5fbf41d225805fd11e357bf9246f3294",
+   "immutableRanges": [
+    [
+     437,
+     32
+    ],
+    [
+     3305,
+     32
+    ],
+    [
+     308,
+     32
+    ],
+    [
+     3028,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": true,
+   "runtimeBytes": 5099,
+   "fingerprint": "0xa0394f8ea5b5141a6e1259ff52d8a8ab72095a69c2cee6f2364ee44c7ec57c07",
+   "immutableRanges": [
+    [
+     506,
+     32
+    ],
+    [
+     3450,
+     32
+    ],
+    [
+     377,
+     32
+    ],
+    [
+     3151,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "runtimeBytes": 5815,
+   "fingerprint": "0xb500d3ea77454351fdd44459ad8fc025496ecdfe8d197d4c0deab010d6f61251",
+   "immutableRanges": [
+    [
+     543,
+     32
+    ],
+    [
+     4084,
+     32
+    ],
+    [
+     414,
+     32
+    ],
+    [
+     3785,
+     32
+    ],
+    [
+     791,
+     32
+    ],
+    [
+     4295,
+     32
+    ],
+    [
+     740,
+     32
+    ],
+    [
+     1235,
+     32
+    ],
+    [
+     1287,
+     32
+    ],
+    [
+     1592,
+     32
+    ],
+    [
+     1644,
+     32
+    ],
+    [
+     1908,
+     32
+    ],
+    [
+     1960,
+     32
+    ],
+    [
+     3029,
+     32
+    ],
+    [
+     3080,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "runtimeBytes": 6024,
+   "fingerprint": "0x085fd941b0e3b0a73d7da6c7555b25d61310a5c49609bf6469a0fb0a904b68db",
+   "immutableRanges": [
+    [
+     554,
+     32
+    ],
+    [
+     4146,
+     32
+    ],
+    [
+     425,
+     32
+    ],
+    [
+     3847,
+     32
+    ],
+    [
+     853,
+     32
+    ],
+    [
+     4357,
+     32
+    ],
+    [
+     660,
+     32
+    ],
+    [
+     4447,
+     32
+    ],
+    [
+     802,
+     32
+    ],
+    [
+     1297,
+     32
+    ],
+    [
+     1349,
+     32
+    ],
+    [
+     1654,
+     32
+    ],
+    [
+     1706,
+     32
+    ],
+    [
+     1970,
+     32
+    ],
+    [
+     2022,
+     32
+    ],
+    [
+     3091,
+     32
+    ],
+    [
+     3142,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "ReleaseMarketplaceV3",
+   "sourceCommit": "44cc90dede",
+   "settingsAssumed": false,
+   "runtimeBytes": 5891,
+   "fingerprint": "0xf69aadd1574f98f76c82fc304a80c34179f6bb0bd99736b8543f9740e945e12f",
+   "immutableRanges": [
+    [
+     543,
+     32
+    ],
+    [
+     4076,
+     32
+    ],
+    [
+     414,
+     32
+    ],
+    [
+     3781,
+     32
+    ],
+    [
+     649,
+     32
+    ],
+    [
+     4317,
+     32
+    ],
+    [
+     791,
+     32
+    ],
+    [
+     1235,
+     32
+    ],
+    [
+     1287,
+     32
+    ],
+    [
+     1592,
+     32
+    ],
+    [
+     1644,
+     32
+    ],
+    [
+     1908,
+     32
+    ],
+    [
+     1960,
+     32
+    ],
+    [
+     3029,
+     32
+    ],
+    [
+     3080,
+     32
+    ]
+   ],
+   "optimizer": "200 runs"
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 8416,
+   "fingerprint": "0x4fd79ad31018360f19c6ff98c6f56aa95055a534b5b54305b8462251aab22915",
+   "immutableRanges": [
+    [
+     1958,
+     32
+    ],
+    [
+     4867,
+     32
+    ],
+    [
+     1201,
+     32
+    ],
+    [
+     4521,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 8827,
+   "fingerprint": "0xeef742a8ab7a1e0b9d08c9245df5594ad220193c1de5259df3311fdd50e47ccc",
+   "immutableRanges": [
+    [
+     2198,
+     32
+    ],
+    [
+     5153,
+     32
+    ],
+    [
+     1441,
+     32
+    ],
+    [
+     4761,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 9834,
+   "fingerprint": "0x2ae655e905905444be42daa085744014549014e91c2c3bd3b0e66eace4823ad9",
+   "immutableRanges": [
+    [
+     2676,
+     32
+    ],
+    [
+     6024,
+     32
+    ],
+    [
+     1563,
+     32
+    ],
+    [
+     5632,
+     32
+    ],
+    [
+     4321,
+     32
+    ],
+    [
+     6366,
+     32
+    ],
+    [
+     1599,
+     32
+    ],
+    [
+     1638,
+     32
+    ],
+    [
+     2138,
+     32
+    ],
+    [
+     2177,
+     32
+    ],
+    [
+     2713,
+     32
+    ],
+    [
+     2752,
+     32
+    ],
+    [
+     4285,
+     32
+    ],
+    [
+     4453,
+     32
+    ],
+    [
+     4492,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "optimizer": "disabled (forge defaults, no foundry.toml)",
+   "runtimeBytes": 10202,
+   "fingerprint": "0x4eae4d8ca42c306437124f803c12bd66d545665fd59b12b13129a7c51223e091",
+   "immutableRanges": [
+    [
+     2729,
+     32
+    ],
+    [
+     6113,
+     32
+    ],
+    [
+     1616,
+     32
+    ],
+    [
+     5721,
+     32
+    ],
+    [
+     4410,
+     32
+    ],
+    [
+     6455,
+     32
+    ],
+    [
+     4310,
+     32
+    ],
+    [
+     6542,
+     32
+    ],
+    [
+     1652,
+     32
+    ],
+    [
+     1691,
+     32
+    ],
+    [
+     2191,
+     32
+    ],
+    [
+     2230,
+     32
+    ],
+    [
+     2766,
+     32
+    ],
+    [
+     2805,
+     32
+    ],
+    [
+     4374,
+     32
+    ],
+    [
+     4542,
+     32
+    ],
+    [
+     4581,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 8416,
+   "fingerprint": "0x7c8c89759d254515a12b422c9405901033b26b9b43767e2cc9eaa435b983c0a3",
+   "immutableRanges": [
+    [
+     1958,
+     32
+    ],
+    [
+     4867,
+     32
+    ],
+    [
+     1201,
+     32
+    ],
+    [
+     4521,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 8827,
+   "fingerprint": "0xed4af992a7502a17e07720c28af4ff5942fc4386b8976218275e7c7b0d938ea7",
+   "immutableRanges": [
+    [
+     2198,
+     32
+    ],
+    [
+     5153,
+     32
+    ],
+    [
+     1441,
+     32
+    ],
+    [
+     4761,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 9834,
+   "fingerprint": "0x5f76831a6dd798b395337a49cd4fa009a335eae7c581aaa3b14c2334d478a3bd",
+   "immutableRanges": [
+    [
+     2676,
+     32
+    ],
+    [
+     6024,
+     32
+    ],
+    [
+     1563,
+     32
+    ],
+    [
+     5632,
+     32
+    ],
+    [
+     4321,
+     32
+    ],
+    [
+     6366,
+     32
+    ],
+    [
+     1599,
+     32
+    ],
+    [
+     1638,
+     32
+    ],
+    [
+     2138,
+     32
+    ],
+    [
+     2177,
+     32
+    ],
+    [
+     2713,
+     32
+    ],
+    [
+     2752,
+     32
+    ],
+    [
+     4285,
+     32
+    ],
+    [
+     4453,
+     32
+    ],
+    [
+     4492,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "optimizer": "disabled; solc 0.8.30; evm prague (forge defaults in the Render image, which lacks foundry.toml)",
+   "runtimeBytes": 10202,
+   "fingerprint": "0x7f3729896fe96d8483b8abb55a21ddfe8c4d6898dcee78822ae93623ed9be1bd",
+   "immutableRanges": [
+    [
+     2729,
+     32
+    ],
+    [
+     6113,
+     32
+    ],
+    [
+     1616,
+     32
+    ],
+    [
+     5721,
+     32
+    ],
+    [
+     4410,
+     32
+    ],
+    [
+     6455,
+     32
+    ],
+    [
+     4310,
+     32
+    ],
+    [
+     6542,
+     32
+    ],
+    [
+     1652,
+     32
+    ],
+    [
+     1691,
+     32
+    ],
+    [
+     2191,
+     32
+    ],
+    [
+     2230,
+     32
+    ],
+    [
+     2766,
+     32
+    ],
+    [
+     2805,
+     32
+    ],
+    [
+     4374,
+     32
+    ],
+    [
+     4542,
+     32
+    ],
+    [
+     4581,
+     32
+    ]
+   ]
+  }
+ ]
+}
