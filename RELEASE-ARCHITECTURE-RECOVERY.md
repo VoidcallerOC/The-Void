@@ -18,7 +18,7 @@ Evidence rules: [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md). This session could
 | Object | Address | Status | Evidence |
 |---|---|---|---|
 | VoidReleaseFactoryV2 | `0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505` | Deployed | Receipt `0x734b…5b0d` (chain-authority probe, tier 1) |
-| Clone implementation | `0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4` | Deployed. It is the **pre-album** V4 build. | Factory deployed 2026-10-05 from `9ec82e2`. The album/open-edition V4 source was merged 2026-10-06 (`f67a643`). EIP-1167 clones cannot be upgraded. Bytecode check is **UNVERIFIED** this session (RPC blocked). |
+| Clone implementation | `0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4` | Deployed. It is the **pre-album** V4 build. | **VERIFIED** by probe run 37905878502 at block 59224329: none of the album selectors are present, and `albumCreated()` reverts on both clones. Factory deployed 2026-10-05; album source merged 2026-10-06 (`f67a643`). |
 | ReleaseMarketplaceV3 | `0x42B740aA92A6F48380F6D97AD91e332a7921a744` | Deployed, `registry() == FactoryV2` | Chain-authority probe |
 | Factory releases | `0x1AaF…9BfC` (sale `0x1cBc…b996`), `0x12Ff…0Fe6` (sale `0x3671…5aFD`) | Created on-chain | Two `ReleaseCreated` logs (probe) |
 | Published editions on any per-release clone | — | **None** | Production `/api/editions` (2026-10-09 08:06Z) lists only editions on the shared V2 `0x7Bba…95B6` and the legacy C-Chain collection |
