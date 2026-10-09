@@ -10,6 +10,8 @@ on:
   pull_request:
     paths:
       - scripts/fuji-release-capability-probe.mjs
+      - scripts/fuji-marketplace-reconciliation-probe.mjs
+      - scripts/data/marketplace-fingerprints.json
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -30,7 +32,27 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Probe Fuji (read-only)
         run: node scripts/fuji-release-capability-probe.mjs | tee fuji-release-capability-probe.json
+      - name: Probe Fuji marketplaces (read-only)
+        run: node scripts/fuji-marketplace-reconciliation-probe.mjs | tee fuji-marketplace-reconciliation-probe.json
+      - name: Scan the production frontend bundle for contract addresses (read-only GET)
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="https://the-void-alpha.vercel.app"
+          curl -fsSL "$site/" -o index.html
+          : > bundle-addresses.txt
+          for path in $(grep -oE '/assets/[^"]+\.js' index.html | sort -u); do
+            curl -fsSL "$site$path" | grep -oiE '0x[0-9a-f]{40}' | tr 'A-F' 'a-f' >> bundle-addresses.txt || true
+          done
+          sort -u bundle-addresses.txt -o bundle-addresses.txt
+          echo "bundle scripts: $(grep -oE '/assets/[^"]+\.js' index.html | sort -u | tr '\n' ' ')"
+          for a in 0x42b740aa92a6f48380f6d97ad91e332a7921a744 0x228734c7a6325f7b6f570ebcac80239495fdedf0 0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b 0x982b28352fd612fe934c5e1ad8fea399689190d2 0xd13f6184f4e3166901c7ed322e8c2c6be5915f92 0xced494f8c5e51053fe631d68c5165856633e7a29 0x1bc4cc82e658856d9bd53793612d97b0b23a6e04 0xa5cba0f91cb0a81e0a9ce89a6722cbe4eec93505 0x8291a4f1936c1c5c6d8917b0966c80757cd5c265; do
+            if grep -qx "$a" bundle-addresses.txt; then echo "IN_BUNDLE $a"; else echo "ABSENT    $a"; fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: fuji-release-capability-probe
-          path: fuji-release-capability-probe.json
+          path: |
+            fuji-release-capability-probe.json
+            fuji-marketplace-reconciliation-probe.json
+            bundle-addresses.txt

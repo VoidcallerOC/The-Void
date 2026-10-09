@@ -1,0 +1,270 @@
+{
+ "note": "keccak256 of runtime bytecode with immutable ranges zeroed and the trailing CBOR metadata removed (partial match). Built with forge 1.3.1, solc 0.8.24, optimizer 200 runs, evm cancun; settingsAssumed=true means the source commit had no foundry.toml and current settings were used.",
+ "versions": [
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "6123174c35",
+   "settingsAssumed": true,
+   "runtimeBytes": 4921,
+   "fingerprint": "0x33c32711d5c076e0d280b76985cfd39d5fbf41d225805fd11e357bf9246f3294",
+   "immutableRanges": [
+    [
+     437,
+     32
+    ],
+    [
+     3305,
+     32
+    ],
+    [
+     308,
+     32
+    ],
+    [
+     3028,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "9e5411f0da",
+   "settingsAssumed": true,
+   "runtimeBytes": 5099,
+   "fingerprint": "0xa0394f8ea5b5141a6e1259ff52d8a8ab72095a69c2cee6f2364ee44c7ec57c07",
+   "immutableRanges": [
+    [
+     506,
+     32
+    ],
+    [
+     3450,
+     32
+    ],
+    [
+     377,
+     32
+    ],
+    [
+     3151,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplace",
+   "sourceCommit": "0dfb240e90",
+   "settingsAssumed": false,
+   "runtimeBytes": 5815,
+   "fingerprint": "0xb500d3ea77454351fdd44459ad8fc025496ecdfe8d197d4c0deab010d6f61251",
+   "immutableRanges": [
+    [
+     543,
+     32
+    ],
+    [
+     4084,
+     32
+    ],
+    [
+     414,
+     32
+    ],
+    [
+     3785,
+     32
+    ],
+    [
+     791,
+     32
+    ],
+    [
+     4295,
+     32
+    ],
+    [
+     740,
+     32
+    ],
+    [
+     1235,
+     32
+    ],
+    [
+     1287,
+     32
+    ],
+    [
+     1592,
+     32
+    ],
+    [
+     1644,
+     32
+    ],
+    [
+     1908,
+     32
+    ],
+    [
+     1960,
+     32
+    ],
+    [
+     3029,
+     32
+    ],
+    [
+     3080,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "MusicMarketplaceV2",
+   "sourceCommit": "57f258b234",
+   "settingsAssumed": false,
+   "runtimeBytes": 6024,
+   "fingerprint": "0x085fd941b0e3b0a73d7da6c7555b25d61310a5c49609bf6469a0fb0a904b68db",
+   "immutableRanges": [
+    [
+     554,
+     32
+    ],
+    [
+     4146,
+     32
+    ],
+    [
+     425,
+     32
+    ],
+    [
+     3847,
+     32
+    ],
+    [
+     853,
+     32
+    ],
+    [
+     4357,
+     32
+    ],
+    [
+     660,
+     32
+    ],
+    [
+     4447,
+     32
+    ],
+    [
+     802,
+     32
+    ],
+    [
+     1297,
+     32
+    ],
+    [
+     1349,
+     32
+    ],
+    [
+     1654,
+     32
+    ],
+    [
+     1706,
+     32
+    ],
+    [
+     1970,
+     32
+    ],
+    [
+     2022,
+     32
+    ],
+    [
+     3091,
+     32
+    ],
+    [
+     3142,
+     32
+    ]
+   ]
+  },
+  {
+   "contract": "ReleaseMarketplaceV3",
+   "sourceCommit": "44cc90dede",
+   "settingsAssumed": false,
+   "runtimeBytes": 5891,
+   "fingerprint": "0xf69aadd1574f98f76c82fc304a80c34179f6bb0bd99736b8543f9740e945e12f",
+   "immutableRanges": [
+    [
+     543,
+     32
+    ],
+    [
+     4076,
+     32
+    ],
+    [
+     414,
+     32
+    ],
+    [
+     3781,
+     32
+    ],
+    [
+     649,
+     32
+    ],
+    [
+     4317,
+     32
+    ],
+    [
+     791,
+     32
+    ],
+    [
+     1235,
+     32
+    ],
+    [
+     1287,
+     32
+    ],
+    [
+     1592,
+     32
+    ],
+    [
+     1644,
+     32
+    ],
+    [
+     1908,
+     32
+    ],
+    [
+     1960,
+     32
+    ],
+    [
+     3029,
+     32
+    ],
+    [
+     3080,
+     32
+    ]
+   ]
+  }
+ ]
+}
