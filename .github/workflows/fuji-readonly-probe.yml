@@ -12,6 +12,7 @@ on:
       - scripts/fuji-release-capability-probe.mjs
       - scripts/fuji-marketplace-reconciliation-probe.mjs
       - scripts/data/marketplace-fingerprints.json
+      - scripts/fuji-deployer-audit.mjs
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -34,6 +35,11 @@ jobs:
         run: node scripts/fuji-release-capability-probe.mjs | tee fuji-release-capability-probe.json
       - name: Probe Fuji marketplaces (read-only)
         run: node scripts/fuji-marketplace-reconciliation-probe.mjs | tee fuji-marketplace-reconciliation-probe.json
+      - name: Enumerate contracts created by the marketplace deployer (read-only)
+        env:
+          DEPLOYER: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
+          PRINT_CODE: "0xd13f6184f4e3166901c7ed322e8c2c6be5915f92,0x982b28352fd612fe934c5e1ad8fea399689190d2"
+        run: node scripts/fuji-deployer-audit.mjs | tee fuji-deployer-audit.json
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
         shell: bash
         run: |
@@ -56,3 +62,4 @@ jobs:
             fuji-release-capability-probe.json
             fuji-marketplace-reconciliation-probe.json
             bundle-addresses.txt
+            fuji-deployer-audit.json
