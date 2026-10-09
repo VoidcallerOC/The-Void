@@ -44,12 +44,18 @@ const releaseEvents = new Interface([
 const roleName = Object.fromEntries(Object.entries(ROLES).map(([k, v]) => [v, k]));
 const coder = AbiCoder.defaultAbiCoder();
 
-const provider = new JsonRpcProvider(URL_, undefined, { staticNetwork: false });
+const provider = new JsonRpcProvider(URL_, undefined, { staticNetwork: false, cacheTimeout: -1 });
 
 async function send(from, to, data, value = 0n) {
   const hash = await provider.send("eth_sendTransaction", [{ from, to, data, value: toBeHex(value), gas: toBeHex(3_000_000) }]);
-  const receipt = await provider.waitForTransaction(hash);
-  return { hash, status: receipt.status, gasUsed: receipt.gasUsed.toString(), logs: receipt.logs };
+  // Raw receipt polling: after evm_revert the chain height goes backwards, which can
+  // stall confirmation-based waits that track a cached block number.
+  for (let i = 0; i < 120; i += 1) {
+    const r = await provider.send("eth_getTransactionReceipt", [hash]);
+    if (r) return { hash, status: Number(r.status), gasUsed: BigInt(r.gasUsed).toString(), logs: r.logs.map((l) => ({ ...l, topics: l.topics, data: l.data })) };
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`No receipt for ${hash} on the local fork.`);
 }
 async function call(from, to, data, value = 0n) {
   try { return { ok: true, result: await provider.call({ from, to, data, value }) }; } catch (error) {
@@ -90,6 +96,8 @@ async function main() {
   // --- Pre-steps P-1/P-2: close the two open sales that pay the old key.
   const allEditionSlots = OPEN_OLD_KEY_SALES.map((e) => ({ tokenId: e.tokenId, slots: saleSlots(e.tokenId) }));
   const snapshotStorage = async () => Object.fromEntries(await Promise.all(allEditionSlots.flatMap(({ tokenId, slots }) => slots.map(async (s, i) => [`${tokenId.slice(0, 10)}+${i}`, await provider.getStorage(LEGACY_SALE_82B26, s)]))));
+  const progress = (msg) => console.error(`[fork-rehearsal] ${msg}`);
+  progress(`fork block ${forkBlock}; pre-steps`);
   for (const pre of buildSaleCloseSteps()) {
     const tokenId = pre.args.tokenId;
     const other = OPEN_OLD_KEY_SALES.find((e) => e.tokenId !== tokenId).tokenId;
@@ -116,6 +124,7 @@ async function main() {
     });
   }
 
+  progress("close failure cases");
   // Failure cases on the closes (each on a snapshot that is reverted afterwards).
   {
     const pre = buildSaleCloseSteps()[0];
@@ -132,6 +141,7 @@ async function main() {
     await revertTo(id1);
   }
 
+  progress("test Safe creation");
   // --- Test Safe: 2-of-3 through the canonical factory and SafeL2 singleton.
   const initializer = safeIface.encodeFunctionData("setup", [[o1, o2, o3], 2, ZeroAddress, "0x", FALLBACK, ZeroAddress, 0, ZeroAddress]);
   const createData = factoryIface.encodeFunctionData("createProxyWithNonce", [SAFE_L2, initializer, BigInt(forkBlock)]);
@@ -166,7 +176,9 @@ async function main() {
     out.failureCases.compromisedOldKeyRace = { oldKeyRevokedSafeAfterGrant: !(await hasRole(P0_RELEASE, "DEFAULT_ADMIN_ROLE", safe)), safeRemovalOfOldAdminThenFails: !attempt.ok, revert: attempt.revertData, note: "the race is real: until the Safe's removal executes, the old key can undo the grant" };
     await revertTo(id3);
   }
+  progress("P0 package");
   for (const step of plan) {
+    progress(`P0 step ${step.step} ${step.phase}`);
     const entry = { step: step.step, phase: step.phase, function: step.function, args: step.args };
     if (step.safeTx) {
       const t = step.safeTx;

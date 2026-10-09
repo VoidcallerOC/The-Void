@@ -110,7 +110,7 @@ jobs:
             if curl -sf -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}' http://127.0.0.1:8545 >/dev/null; then break; fi
             sleep 1
           done
-          ANVIL_URL=http://127.0.0.1:8545 node scripts/authority-rotation-fork-rehearsal.mjs | tee authority-rotation-fork-rehearsal.json
+          ANVIL_URL=http://127.0.0.1:8545 timeout 600 node scripts/authority-rotation-fork-rehearsal.mjs | tee authority-rotation-fork-rehearsal.json
       - uses: actions/upload-artifact@v4
         with:
           name: authority-rotation-fork-rehearsal
