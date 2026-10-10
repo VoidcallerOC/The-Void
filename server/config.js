@@ -19,7 +19,12 @@ function chainLabel(chainId) {
 const PLACEHOLDER_CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000001";
 const ERC1155_EVENT_TOPICS = Object.freeze({
   TransferSingle: id("TransferSingle(address,address,address,uint256,uint256)"),
-  TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])")
+  TransferBatch: id("TransferBatch(address,address,address,uint256[],uint256[])"),
+  // VoidRelease1155V4 album lifecycle. Pre-album ERC1155 contracts never emit these.
+  AlbumCreated: id("AlbumCreated(bytes32)"),
+  AlbumTrackCreated: id("AlbumTrackCreated(uint256,bool,uint64)"),
+  AlbumClosed: id("AlbumClosed(bytes32)"),
+  ExpandedReleaseApproved: id("ExpandedReleaseApproved(uint256,uint256)")
 });
 const PRIMARY_SALE_EVENT_TOPICS = Object.freeze({
   Purchased: id("Purchased(uint256,address,uint256,uint256,uint256,uint256)")
