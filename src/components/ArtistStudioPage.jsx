@@ -10,7 +10,7 @@ import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseAlbumState, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
-import { editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
+import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
@@ -169,6 +169,9 @@ export function ArtistStudioPage() {
   const selectedMintRelease = ownedStudioCatalog?.releases?.find((release) => release.id === mintReleaseId) || null;
   const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
   const mintTracks = useMemo(() => tracksOnRelease(selectedMintRelease, mintEditions), [selectedMintRelease, mintEditions]);
+  // The clone this release is bound to: the persisted catalog binding (survives a
+  // reload of a bound or published release), else the one confirmed this session.
+  const albumReleaseContract = boundReleaseContract(ownedStudioCatalog, releaseId, FUJI_RELEASE_FACTORY_V2_CONFIG.chainId) || activeReleaseAsset?.releaseContractAddress || "";
 
   const openPublishedSale = (catalog, requestedReleaseId) => {
     const resumed = resumeOwnedRelease(catalog, requestedReleaseId);
@@ -230,14 +233,13 @@ export function ArtistStudioPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const releaseContract = activeReleaseAsset?.releaseContractAddress;
-    if (form.releaseType !== "ALBUM" || provisioningState !== "CONFIRMED" || !releaseContract) { setAlbumState({ status: "idle" }); return undefined; }
+    if (form.releaseType !== "ALBUM" || !albumReleaseContract) { setAlbumState({ status: "idle" }); return undefined; }
     setAlbumState({ status: "checking" });
-    readReleaseAlbumState(createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), releaseContract)
+    readReleaseAlbumState(createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), albumReleaseContract)
       .then((state) => { if (!cancelled) setAlbumState({ status: "ready", ...state }); })
       .catch((error) => { if (!cancelled) setAlbumState({ status: "error", message: error?.message || "Album state could not be read from Fuji." }); });
     return () => { cancelled = true; };
-  }, [activeReleaseAsset?.releaseContractAddress, form.releaseType, provisioningState]);
+  }, [albumReleaseContract, form.releaseType]);
 
   useEffect(() => {
     let cancelled = false;
@@ -565,12 +567,15 @@ export function ArtistStudioPage() {
     setForm((prior) => ({
       ...prior,
       releaseTitle: selectedMintRelease.title || prior.releaseTitle,
+      releaseType: selectedMintRelease.releaseType === "ALBUM" ? "ALBUM" : "EP",
       releaseDescription: selectedMintRelease.description || "",
       releaseArtwork: selectedMintRelease.artwork || "",
       trackTitle: "",
       trackDescription: "",
       trackArtwork: "",
       trackPreview: "",
+      albumSingle: false,
+      mintEnd: "",
       experienceTitle: "",
       experienceDescription: "",
     }));

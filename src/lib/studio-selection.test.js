@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quantityFromSupply, resumeOwnedRelease, selectReleaseTemplate } from "./studio-selection.js";
+import { boundReleaseContract, quantityFromSupply, resumeOwnedRelease, selectReleaseTemplate } from "./studio-selection.js";
 
 describe("Studio release selection", () => {
   it("loads a public release as a new wallet-owned template without reusing server IDs", () => {
@@ -75,5 +75,33 @@ describe("Studio release selection", () => {
       editions: [{ id: "edition-2", releaseId: "release-2", title: "Unset", status: "draft", supply: null }],
     };
     expect(resumeOwnedRelease(missing, "release-2").form).not.toHaveProperty("quantity");
+  });
+
+  it("carries the persisted release type into a resumed release, EP when absent", () => {
+    const catalog = {
+      releases: [
+        { id: "album", title: "Album", status: "draft", releaseType: "ALBUM" },
+        { id: "album-out", title: "Album Out", status: "published", releaseType: "ALBUM" },
+        { id: "legacy", title: "Legacy", status: "draft" },
+      ],
+      editions: [{ id: "edition-out", releaseId: "album-out", status: "available", tokenIds: ["7"] }],
+    };
+    expect(resumeOwnedRelease(catalog, "album").form.releaseType).toBe("ALBUM");
+    expect(resumeOwnedRelease(catalog, "album-out").form.releaseType).toBe("ALBUM");
+    expect(resumeOwnedRelease(catalog, "legacy").form.releaseType).toBe("EP");
+  });
+
+  it("finds the release contract a release's editions are bound to on the given chain", () => {
+    const catalog = {
+      editions: [
+        { id: "other", releaseId: "release-2", chainId: 43113, contractAddress: "0x2222222222222222222222222222222222222222" },
+        { id: "mainnet", releaseId: "release-1", chainId: 43114, contractAddress: "0x3333333333333333333333333333333333333333" },
+        { id: "bound", releaseId: "release-1", chainId: 43113, contractAddress: "0x1111111111111111111111111111111111111111", releaseContractAddress: "0x1111111111111111111111111111111111111111" },
+      ],
+    };
+    expect(boundReleaseContract(catalog, "release-1", 43113)).toBe("0x1111111111111111111111111111111111111111");
+    expect(boundReleaseContract(catalog, "release-3", 43113)).toBe("");
+    expect(boundReleaseContract(catalog, "", 43113)).toBe("");
+    expect(boundReleaseContract(null, "release-1", 43113)).toBe("");
   });
 });
