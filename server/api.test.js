@@ -411,3 +411,63 @@ describe("artist portfolio file route", () => {
     expect(studioService.uploadArtwork).not.toHaveBeenCalled();
   });
 });
+
+describe("indexer health covers factory-discovered release contracts", () => {
+  const staticRelease = "0x3333333333333333333333333333333333333333";
+  const staticSale = "0x4444444444444444444444444444444444444444";
+  const clone = "0x5555555555555555555555555555555555555555";
+  const cloneSale = "0x6666666666666666666666666666666666666666";
+  const indexerConfig = { chainId: 43113, contracts: [{ chainId: 43113, address: staticRelease, contractType: "ERC1155" }, { chainId: 43113, address: staticSale, contractType: "PRIMARY_SALE" }] };
+  const healthy = (address, type) => ({ address, type, status: "IDLE" });
+  const db = () => ({ query: vi.fn().mockResolvedValue({ rows: [{ ok: 1 }] }) });
+
+  // Mirrors IndexerStore.getIndexerHealth: one row per chain, filtered by address.
+  function healthStore({ checkpoints, discovered = [] }) {
+    return {
+      listDiscoveredReleaseContracts: vi.fn().mockResolvedValue(discovered),
+      getIndexerHealth: vi.fn(async ({ addresses = null } = {}) => {
+        const contracts = checkpoints.filter((checkpoint) => !addresses || addresses.includes(checkpoint.address));
+        return contracts.length ? [{ chain_id: 43113, last_successful_run_at: "2026-10-10T00:00:00.000Z", contracts }] : [];
+      }),
+    };
+  }
+
+  it("reports a discovered release clone and its primary sale in indexer health", async () => {
+    const indexerStore = healthStore({ checkpoints: [healthy(staticRelease, "ERC1155"), healthy(staticSale, "PRIMARY_SALE"), healthy(clone, "ERC1155"), healthy(cloneSale, "PRIMARY_SALE")], discovered: [{ release_contract_address: clone, primary_sale_address: cloneSale }] });
+    const service = new ApiService({ db: db(), repository: {}, indexerStore, indexerConfig });
+    const checkpoints = await service.getIndexerHealth({});
+    expect(indexerStore.listDiscoveredReleaseContracts).toHaveBeenCalledWith({ chainId: 43113 });
+    expect(indexerStore.getIndexerHealth).toHaveBeenCalledWith({ chainId: null, addresses: [staticRelease, staticSale, clone, cloneSale] });
+    expect(checkpoints[0].contracts.map((contract) => contract.address)).toEqual([staticRelease, staticSale, clone, cloneSale]);
+    const ready = await service.getOperationalHealth();
+    expect(ready.ok).toBe(true);
+    expect(ready.contracts.release).toMatchObject({ healthy: true, address: staticRelease, addresses: [staticRelease, clone] });
+    expect(ready.contracts.primarySale).toMatchObject({ healthy: true, address: staticSale, addresses: [staticSale, cloneSale] });
+  });
+
+  it("fails readiness closed when a discovered clone checkpoint is FAILED or missing", async () => {
+    const discovered = [{ release_contract_address: clone, primary_sale_address: cloneSale }];
+    const failed = healthStore({ checkpoints: [healthy(staticRelease, "ERC1155"), healthy(staticSale, "PRIMARY_SALE"), { address: clone, type: "ERC1155", status: "FAILED" }, healthy(cloneSale, "PRIMARY_SALE")], discovered });
+    const failedHealth = await new ApiService({ db: db(), repository: {}, indexerStore: failed, indexerConfig }).getOperationalHealth();
+    expect(failedHealth.ok).toBe(false);
+    expect(failedHealth.indexer.ok).toBe(false);
+    expect(failedHealth.contracts.release.healthy).toBe(false);
+    const missing = healthStore({ checkpoints: [healthy(staticRelease, "ERC1155"), healthy(staticSale, "PRIMARY_SALE"), healthy(clone, "ERC1155")], discovered });
+    const missingHealth = await new ApiService({ db: db(), repository: {}, indexerStore: missing, indexerConfig }).getOperationalHealth();
+    expect(missingHealth.ok).toBe(false);
+    expect(missingHealth.contracts.primarySale).toMatchObject({ healthy: false, addresses: [staticSale, cloneSale] });
+  });
+
+  it("keeps the static health scope unchanged when no factory releases are registered", async () => {
+    const indexerStore = healthStore({ checkpoints: [healthy(staticRelease, "ERC1155"), healthy(staticSale, "PRIMARY_SALE"), { address: clone, type: "ERC1155", status: "FAILED" }] });
+    const service = new ApiService({ db: db(), repository: {}, indexerStore, indexerConfig });
+    await service.getIndexerHealth({ chainId: "43113" });
+    expect(indexerStore.getIndexerHealth).toHaveBeenLastCalledWith({ chainId: 43113, addresses: [staticRelease, staticSale] });
+    const ready = await service.getOperationalHealth();
+    expect(indexerStore.getIndexerHealth).toHaveBeenLastCalledWith({ chainId: null, addresses: [staticRelease, staticSale] });
+    expect(ready.ok).toBe(true);
+    expect(ready.contracts.release).toMatchObject({ healthy: true, address: staticRelease, addresses: [staticRelease] });
+    await service.getIndexerHealth({ chainId: "43114" });
+    expect(indexerStore.getIndexerHealth).toHaveBeenLastCalledWith({ chainId: 43114 });
+  });
+});
