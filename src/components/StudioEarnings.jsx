@@ -3,7 +3,7 @@ import { Eyebrow } from "./Atoms.jsx";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG, fujiExplorerUrl } from "../lib/fuji-release.js";
 import { createFujiPublicProvider, formatAvax } from "../lib/primary-sale.js";
-import { earningsTargets, earningsTotals, explainWithdrawError, readSaleEarnings, readStudioEarnings, withdrawSaleProceeds } from "../lib/sale-earnings.js";
+import { discoverFactoryBindings, earningsTargets, earningsTotals, explainWithdrawError, readSaleEarnings, readStudioEarnings, withdrawSaleProceeds } from "../lib/sale-earnings.js";
 import { shortAddr } from "../lib/web3.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -16,10 +16,22 @@ const dim = { color: "var(--vc-bone-dim)" };
  */
 export function StudioEarnings({ catalog, wallet, readProvider }) {
   const provider = useMemo(() => readProvider || createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), [readProvider]);
-  const targets = useMemo(() => earningsTargets(catalog || {}), [catalog]);
+  const account = wallet?.account || "";
+  // Bindings from the factories themselves, merged with the API's, so a release
+  // the API has not reported still shows its sale contract.
+  const [chainBindings, setChainBindings] = useState({ status: "loading", bindings: [] });
+  useEffect(() => {
+    let cancelled = false;
+    setChainBindings({ status: "loading", bindings: [] });
+    discoverFactoryBindings(provider, account)
+      .then((bindings) => { if (!cancelled) setChainBindings({ status: "ready", bindings }); })
+      .catch(() => { if (!cancelled) setChainBindings({ status: "ready", bindings: [] }); });
+    return () => { cancelled = true; };
+  }, [account, provider]);
+  const targets = useMemo(() => earningsTargets({ ...(catalog || {}), releaseBindings: [...(catalog?.releaseBindings || []), ...chainBindings.bindings] }), [catalog, chainBindings]);
+  const discovering = chainBindings.status === "loading";
   const [state, setState] = useState({ status: "idle", results: [] });
   const [withdrawals, setWithdrawals] = useState({});
-  const account = wallet?.account || "";
 
   const load = useCallback(async () => {
     setState((prior) => ({ ...prior, status: "loading", error: "" }));
@@ -32,13 +44,14 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
 
   useEffect(() => {
     let cancelled = false;
+    if (discovering) { setState({ status: "loading", results: [] }); return undefined; }
     if (!targets.length) { setState({ status: "ready", results: [] }); return undefined; }
     setState((prior) => ({ ...prior, status: "loading" }));
     readStudioEarnings(provider, targets, account)
       .then((results) => { if (!cancelled) setState({ status: "ready", results }); })
       .catch((error) => { if (!cancelled) setState({ status: "error", results: [], error: error?.message || "Balances could not be read from Fuji." }); });
     return () => { cancelled = true; };
-  }, [account, provider, targets]);
+  }, [account, discovering, provider, targets]);
 
   const withdraw = async (result) => {
     const key = result.primarySaleAddress.toLowerCase();
