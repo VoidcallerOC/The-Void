@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { releaseTypeOf } from "./release-types.js";
 import { portfolioImageSrc, profileSocials } from "./artist-profile.js";
 import {
   createArtist,
@@ -155,9 +156,9 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       updatedAt: row.updated_at || row.updatedAt || null,
       artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
       publicationArchitecture: meta.publicationArchitecture || row.publication_architecture || "",
-      // Persisted Studio release type (server releaseType()): only EP or ALBUM.
+      // Persisted Studio release type (server releaseType()): SINGLE, EP or ALBUM.
       // Legacy rows have no releaseType and stay EP.
-      releaseType: String(meta.releaseType ?? "").trim().toUpperCase() === "ALBUM" ? "ALBUM" : "EP",
+      releaseType: releaseTypeOf(meta.releaseType),
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
     });

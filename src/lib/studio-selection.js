@@ -1,3 +1,4 @@
+import { releaseTypeOf } from "./release-types.js";
 // Stored 0 is an open edition. Null means the supply was never sent, so a
 // limited draft keeps its form default instead of becoming open.
 export function quantityFromSupply(supply) {
@@ -59,7 +60,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
       title: release.title || "",
       form: {
         releaseTitle: release.title || "",
-        releaseType: release.releaseType === "ALBUM" ? "ALBUM" : "EP",
+        releaseType: releaseTypeOf(release.releaseType),
         releaseDescription: release.description || "",
         quantity: quantityFromSupply(edition?.supply) ?? "",
         priceWei: edition?.priceWei ? String(edition.priceWei) : undefined,
@@ -76,7 +77,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
     gated: editionHasGatedTrack(catalog, edition?.id),
     form: {
       releaseTitle: release.title || "",
-      releaseType: release.releaseType === "ALBUM" ? "ALBUM" : "EP",
+      releaseType: releaseTypeOf(release.releaseType),
       releaseDescription: release.description || "",
       releaseArtwork: release.artwork && !release.artwork.startsWith("/assets/") ? release.artwork : "",
       trackTitle: edition?.title || release.title || "",

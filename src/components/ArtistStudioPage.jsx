@@ -11,6 +11,7 @@ import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleas
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
+import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
@@ -138,6 +139,8 @@ export function ArtistStudioPage() {
   // Album state is read from the release clone, never assumed locally: clones of the
   // pre-album implementation cannot run album transactions at all.
   const [albumState, setAlbumState] = useState({ status: "idle" });
+  const [albumSingleChoice, setAlbumSingleChoice] = useState("");
+  const [albumSinglePosition, setAlbumSinglePosition] = useState("");
   const [activeReleaseAsset, setActiveReleaseAsset] = useState(null);
   const albumSupported = albumState.status === "ready" && albumState.supported;
   const albumActivated = albumSupported && albumState.created;
@@ -197,7 +200,7 @@ export function ArtistStudioPage() {
     studioFetch("/studio/catalog", { headers })
       .then((payload) => {
         if (cancelled) return;
-        const catalog = studioCatalogForConnectedWallet(mapPublishedCatalog(payload), wallet.account);
+        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [] }, wallet.account);
         setOwnedStudioCatalog(catalog);
         if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
       })
@@ -554,8 +557,31 @@ export function ArtistStudioPage() {
     }
   };
 
+  const addSingleToAlbum = async () => {
+    setBusy("album-single");
+    setNotice("");
+    try {
+      if (!releaseId) throw new Error("Create the album release first.");
+      if (!albumSingleChoice) throw new Error("Choose a released single.");
+      const trackPosition = Number(albumSinglePosition || nextAlbumTrackPosition(ownedStudioCatalog, releaseId));
+      const link = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/album-singles`, { method: "POST", payload: { singleReleaseId: albumSingleChoice, trackPosition }, headers });
+      setOwnedStudioCatalog((prior) => ({ ...(prior || {}), albumSingles: [...(prior?.albumSingles || []), { album_release_id: link.albumReleaseId, single_release_id: link.singleReleaseId, single_edition_id: link.singleEditionId, track_position: link.trackPosition }] }));
+      setAlbumSingleChoice("");
+      setAlbumSinglePosition("");
+      setNotice(`Single added to the album at track ${link.trackPosition}. It keeps its own release, contract and collectors.`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const startNewTrack = () => {
     if (!selectedMintRelease) return;
+    if (singleIsComplete(ownedStudioCatalog, selectedMintRelease)) {
+      setNotice(`${selectedMintRelease.title} is a single and already has its track. Create a new release for another song.`);
+      return;
+    }
     setSelectedReleaseId(selectedMintRelease.id);
     setArtistId(selectedMintRelease.artistId || "");
     setReleaseId(selectedMintRelease.id);
@@ -567,7 +593,7 @@ export function ArtistStudioPage() {
     setForm((prior) => ({
       ...prior,
       releaseTitle: selectedMintRelease.title || prior.releaseTitle,
-      releaseType: selectedMintRelease.releaseType === "ALBUM" ? "ALBUM" : "EP",
+      releaseType: releaseTypeOf(selectedMintRelease.releaseType),
       releaseDescription: selectedMintRelease.description || "",
       releaseArtwork: selectedMintRelease.artwork || "",
       trackTitle: "",
@@ -763,7 +789,7 @@ export function ArtistStudioPage() {
               )}
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-              <button type="button" style={primaryBtn} onClick={startNewTrack}>Add track</button>
+              <button type="button" style={primaryBtn} disabled={singleIsComplete(ownedStudioCatalog, selectedMintRelease)} onClick={startNewTrack}>{singleIsComplete(ownedStudioCatalog, selectedMintRelease) ? "Single already has its track" : "Add track"}</button>
               <button type="button" style={ghostBtn} onClick={() => { setWorkflow("catalog"); setStep("release"); }}>Back to catalog editor</button>
             </div>
           </>
@@ -819,8 +845,7 @@ export function ArtistStudioPage() {
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
           <label style={label}>Release type
             <select value={form.releaseType} onChange={(event) => set("releaseType", event.target.value)} style={field}>
-              <option value="EP">EP / standalone release</option>
-              <option value="ALBUM">Album Contract · up to 13 tracks / 4 singles</option>
+              {RELEASE_TYPES.map((type) => <option key={type} value={type}>{RELEASE_TYPE_LABELS[type]}</option>)}
             </select>
           </label>
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
@@ -841,6 +866,25 @@ export function ArtistStudioPage() {
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Reconcile release</button> : null}
             </div>
+          </div>}
+          {form.releaseType === "ALBUM" && releaseId && canUseStudio && <div style={{ ...card, marginTop: 18 }}>
+            <Eyebrow red>Released singles on this album</Eyebrow>
+            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Add a single you already released. It keeps its own release, contract, provenance and collectors; the album only lists it at a track position.</p>
+            {linkedAlbumSingles(ownedStudioCatalog, releaseId).length > 0 && <ol style={{ paddingLeft: 18 }}>{linkedAlbumSingles(ownedStudioCatalog, releaseId).map((link) => <li key={link.singleReleaseId} value={link.trackPosition}>{link.title} · track {link.trackPosition}</li>)}</ol>}
+            {albumSingleCandidates(ownedStudioCatalog, ownedStudioCatalog?.releases?.find((item) => item.id === releaseId)).length === 0
+              ? <p style={{ color: "var(--vc-bone-dim)" }}>No other released singles are available to add.</p>
+              : <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+                <label style={label}>Single
+                  <select value={albumSingleChoice} onChange={(event) => setAlbumSingleChoice(event.target.value)} style={field}>
+                    <option value="">Choose a released single</option>
+                    {albumSingleCandidates(ownedStudioCatalog, ownedStudioCatalog?.releases?.find((item) => item.id === releaseId)).map((release) => <option key={release.id} value={release.id}>{release.title}</option>)}
+                  </select>
+                </label>
+                <label style={label}>Track position
+                  <input type="number" min="1" max="999" value={albumSinglePosition} placeholder={String(nextAlbumTrackPosition(ownedStudioCatalog, releaseId))} onChange={(event) => setAlbumSinglePosition(event.target.value)} style={field} />
+                </label>
+                <button type="button" style={ghostBtn} disabled={busy !== "" || !albumSingleChoice} onClick={addSingleToAlbum}>{busy === "album-single" ? "Adding…" : "Add single to album"}</button>
+              </div>}
           </div>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
@@ -977,7 +1021,7 @@ export function ArtistStudioPage() {
             <div>
               <p><strong>Artist</strong><br />{activeArtist?.name || form.artistName || "—"}</p>
               <p><strong>Release</strong><br />{form.releaseTitle || "—"}</p>
-              <p><strong>Type</strong><br />{form.releaseType === "ALBUM" ? `Album${form.albumSingle ? " · this track is a Single" : ""}` : "EP / standalone release"}</p>
+              <p><strong>Type</strong><br />{form.releaseType === "ALBUM" ? `Album${form.albumSingle ? " · this track is a Single" : ""}` : form.releaseType === "SINGLE" ? "Single · standalone release" : "EP / multi-track release"}</p>
               <p><strong>Collector receives</strong><br />{form.includes.split("\n").filter(Boolean).join(" · ") || "—"}</p>
               <p><strong>Experiences</strong><br />{form.experienceTitle || experienceCategoryLabel(form.productType)}</p>
               <p><strong>How many</strong><br />{supplyLabel(form.quantity)}</p>
