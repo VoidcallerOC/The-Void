@@ -55,5 +55,6 @@ export function studioCatalogForConnectedWallet(catalog = {}, wallet = "") {
     return editionId ? keepEditionIds.has(editionId) : false;
   });
   const tokens = asArray(catalog.tokens).filter((token) => keepEditionIds.has(String(token.editionId || token.edition_id || "").trim()));
-  return { ...catalog, artists, releases, editions, experiences, tokens };
+  const albumSingles = catalog.albumSingles === undefined ? {} : { albumSingles: asArray(catalog.albumSingles).filter((link) => keepReleaseIds.has(String(link.album_release_id ?? link.albumReleaseId ?? "").trim())) };
+  return { ...catalog, artists, releases, editions, experiences, tokens, ...albumSingles };
 }
