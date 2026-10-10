@@ -218,7 +218,18 @@ export class ApiService {
     const key = requiredText(idOrSlug, "release");
     const { rows } = await this.db.query(`SELECT ${RELEASE_PUBLIC_SELECT} FROM releases r JOIN artists a ON a.id=r.artist_id WHERE r.status=$1 AND (r.id=$2 OR r.slug=$2) LIMIT 1`, [PUBLIC_STATUS, key]);
     if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "RELEASE_NOT_FOUND", "Release was not found.");
-    return toPublicRow(rows[0], RELEASE_PUBLIC_FIELDS);
+    const release = toPublicRow(rows[0], RELEASE_PUBLIC_FIELDS);
+    // Album <-> standalone single links (migration 038). Each side keeps its own release and
+    // contract; only published counterparts are listed.
+    const type = String(rows[0].release_metadata?.releaseType ?? "EP").toUpperCase();
+    if (type === "ALBUM") {
+      const singles = await this.db.query(`SELECT s.track_position, s.single_release_id, s.single_edition_id, sr.slug, sr.title, c.chain_id, c.address AS contract_address, t.token_id::text AS token_id FROM release_album_singles s JOIN releases sr ON sr.id=s.single_release_id AND sr.status=$2 JOIN editions e ON e.id=s.single_edition_id AND e.status=$2 LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND t.contract_id=e.contract_id WHERE s.album_release_id=$1 ORDER BY s.track_position ASC`, [rows[0].id, PUBLIC_STATUS]);
+      release.albumSingles = singles.rows.map((row) => ({ trackPosition: row.track_position, releaseId: row.single_release_id, slug: row.slug, title: row.title, editionId: row.single_edition_id, chainId: row.chain_id === null ? null : Number(row.chain_id), contractAddress: row.contract_address ? String(row.contract_address).toLowerCase() : null, tokenId: row.token_id }));
+    } else if (type === "SINGLE") {
+      const albums = await this.db.query(`SELECT s.track_position, s.album_release_id, ar.slug, ar.title FROM release_album_singles s JOIN releases ar ON ar.id=s.album_release_id AND ar.status=$2 WHERE s.single_release_id=$1 ORDER BY ar.published_at ASC NULLS LAST, ar.id ASC`, [rows[0].id, PUBLIC_STATUS]);
+      release.appearsOnAlbums = albums.rows.map((row) => ({ releaseId: row.album_release_id, slug: row.slug, title: row.title, trackPosition: row.track_position }));
+    }
+    return release;
   }
 
   async listReleases({ artistId = null, limit, offset }) {
