@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForFactory } from "../config/release-network.js";
+import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../config/release-network.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
@@ -91,6 +91,23 @@ function contractAddress(value, field) {
 const CERTIFIED_CHAIN_ID = deployment.chainId;
 const CERTIFIED_CONTRACT = deployment.contractAddress.toLowerCase();
 export const EDITION_ABI = "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))";
+// VoidRelease1155V5 (Factory V3) records the provenance root inside the edition-creating
+// transaction and is its own anchor; the event signature matches VoidProvenanceAnchor's.
+export const RELEASE_PROVENANCE_ABI = Object.freeze([
+  "event ProvenanceAnchored(bytes32 indexed provenanceRoot, bytes32 indexed releaseId, bytes32 indexed editionId, uint256 tokenId, address artist, address releaseContract)",
+  "function isAnchored(bytes32 releaseId, bytes32 editionId, bytes32 provenanceRoot) view returns (bool)",
+  "function provenanceRootOf(uint256 tokenId) view returns (bytes32)",
+]);
+const releaseProvenanceIface = new ethers.Interface(RELEASE_PROVENANCE_ABI);
+function provenanceRootBytes32(root) {
+  const hash = String(root || "").trim().toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(hash) || /^0{64}$/.test(hash)) throw new ApiError(409, "PROVENANCE_ROOT_REQUIRED", "The edition has no canonical provenance root to record on-chain.");
+  return `0x${hash}`;
+}
+// A binding's implementation version is the ReleaseCreated version the trusted factory emitted.
+function bindingAnchorsAtCreation(binding) {
+  return Boolean(binding) && anchorsProvenanceAtCreation(binding.implementation_version);
+}
 function hashedAsset(value, assetType) {
   if (value == null || value === "") return null;
   if (typeof value === "string") return { sha256: value, assetType, version: 1 };
@@ -168,7 +185,12 @@ function provisioningFactoryFor(provisioningRequest) {
   if (!provisioningRequest?.factory_address) return active;
   const recorded = releaseDeploymentForFactory(provisioningRequest.factory_address);
   if (!recorded || Number(recorded.chainId) !== Number(active.chainId)) throw new ApiError(409, "PROVISIONING_FACTORY_UNKNOWN", "This release was prepared on a factory that is not a recorded release deployment.");
-  return { ...active, factoryAddress: ethers.getAddress(recorded.factoryAddress), albumCapable: recorded.albumCapable };
+  return { ...active, factoryAddress: ethers.getAddress(recorded.factoryAddress), albumCapable: recorded.albumCapable, releaseVersion: recorded.releaseVersion };
+}
+
+function expectedReleaseVersion(factory) {
+  const version = Number(factory?.releaseVersion ?? 2);
+  return Number.isSafeInteger(version) && version > 0 ? version : 2;
 }
 
 function requiresFactoryRelease(release) {
@@ -316,12 +338,16 @@ export class ArtistStudioService {
     const indexed = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_contract_address)=lower($3) AND lower(release_key)=lower($4) AND lower(artist_wallet)=lower($5) LIMIT 1", [selectedChainId, factoryConfig.factoryAddress, selectedReleaseAddress, selectedReleaseKey, identity.wallet]);
     const deployment = indexed.rows[0];
     if (!deployment) throw new ApiError(409, "RELEASE_DEPLOYMENT_NOT_INDEXED", "This release contract is not a confirmed factory deployment for the authenticated artist.");
-    if (Number(deployment.implementation_version) !== 2 || (provisioning.transaction_hash && String(provisioning.transaction_hash).toLowerCase() !== String(deployment.transaction_hash).toLowerCase())) throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed V2 event does not match this release's stored transaction.");
+    const releaseVersion = expectedReleaseVersion(factoryConfig);
+    if (Number(deployment.implementation_version) !== releaseVersion || (provisioning.transaction_hash && String(provisioning.transaction_hash).toLowerCase() !== String(deployment.transaction_hash).toLowerCase())) throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed factory event does not match this release's factory version or stored transaction.");
+    const inlineAnchor = anchorsProvenanceAtCreation(releaseVersion);
+    // A Factory V3 clone is its own provenance anchor; a V2 anchor must be a distinct contract.
+    if (inlineAnchor !== (String(deployment.provenance_anchor_address).toLowerCase() === String(deployment.release_contract_address).toLowerCase())) throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed provenance anchor does not match this factory version.");
     const saved = await this.repository.inTransaction(async (repository) => {
-      const releaseContract = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.release_contract_address, contractType: "ERC1155", name: "VoidRelease1155V4", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { source: "RELEASE_FACTORY", factory: deployment.factory_address, releaseKey: deployment.release_key, implementation: deployment.implementation_address, implementationVersion: deployment.implementation_version } });
-      const factory = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.factory_address, contractType: "OTHER", name: "VoidReleaseFactoryV2", deploymentTxHash: null, deploymentBlockNumber: null, metadata: { role: "RELEASE_FACTORY", version: 2 } });
+      const releaseContract = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.release_contract_address, contractType: "ERC1155", name: inlineAnchor ? "VoidRelease1155V5" : "VoidRelease1155V4", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { source: "RELEASE_FACTORY", factory: deployment.factory_address, releaseKey: deployment.release_key, implementation: deployment.implementation_address, implementationVersion: deployment.implementation_version, ...(inlineAnchor ? { provenanceAtCreation: true } : {}) } });
+      const factory = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.factory_address, contractType: "OTHER", name: inlineAnchor ? "VoidReleaseFactoryV3" : "VoidReleaseFactoryV2", deploymentTxHash: null, deploymentBlockNumber: null, metadata: { role: "RELEASE_FACTORY", version: releaseVersion } });
       const primarySale = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.primary_sale_address, contractType: "OTHER", name: "VoidPrimarySale", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PRIMARY_SALE", releaseContract: deployment.release_contract_address } });
-      const anchor = await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.provenance_anchor_address, contractType: "OTHER", name: "VoidProvenanceAnchor", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PROVENANCE_ANCHOR", releaseContract: deployment.release_contract_address } });
+      const anchor = inlineAnchor ? releaseContract : await repository.saveContract({ chainId: selectedChainId, chainKey: String(selectedChainId), address: deployment.provenance_anchor_address, contractType: "OTHER", name: "VoidProvenanceAnchor", deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, metadata: { role: "PROVENANCE_ANCHOR", releaseContract: deployment.release_contract_address } });
       return repository.saveReleaseContract({ releaseId: release.id, chainId: selectedChainId, releaseContractId: releaseContract.id, factoryContractId: factory.id, primarySaleContractId: primarySale.id, provenanceAnchorContractId: anchor.id, releaseKey: deployment.release_key, artistWallet: deployment.artist_wallet, implementationAddress: deployment.implementation_address, implementationVersion: deployment.implementation_version, deploymentTxHash: deployment.transaction_hash, deploymentBlockNumber: deployment.deployment_block_number, creationLogIndex: input.creationLogIndex ?? null, status: "DEPLOYED", metadata: { factoryIndex: deployment.factory_index } });
     });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CONTRACT_BOUND", subjectType: "release", subjectId: release.id, payload: { chainId: selectedChainId, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, releaseKey: deployment.release_key } });
@@ -391,8 +417,8 @@ export class ArtistStudioService {
     const { rows: indexed } = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_key)=lower($3) AND lower(artist_wallet)=lower($4) LIMIT 1", [factory.chainId, factory.factoryAddress, provisioning.release_key, identity.wallet]);
     const deployment = indexed[0];
     if (!deployment) return { requestId: provisioning.request_id, state: provisioning.state, releaseId: id, releaseKey: provisioning.release_key, transactionHash: provisioning.transaction_hash || null };
-    if (Number(deployment.implementation_version) !== 2 || (provisioning.transaction_hash && String(deployment.transaction_hash).toLowerCase() !== String(provisioning.transaction_hash).toLowerCase())) {
-      throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed Factory event does not match the expected V2 provisioning request.");
+    if (Number(deployment.implementation_version) !== expectedReleaseVersion(factory) || (provisioning.transaction_hash && String(deployment.transaction_hash).toLowerCase() !== String(provisioning.transaction_hash).toLowerCase())) {
+      throw new ApiError(409, "RELEASE_DEPLOYMENT_EVENT_MISMATCH", "The indexed Factory event does not match the expected provisioning request.");
     }
     const provider = this.publicationChain || new ethers.JsonRpcProvider(factory.rpcUrl, Number(factory.chainId), { staticNetwork: true });
     const clone = new ethers.Contract(deployment.release_contract_address, ["function owner() view returns(address)", "function releaseKey() view returns(bytes32)", "function name() view returns(string)", "function symbol() view returns(string)", "function contractURI() view returns(string)"], provider);
@@ -505,7 +531,10 @@ export class ArtistStudioService {
     const proof = this.provenanceRecords ? await persistPublicationProof(this.provenanceRecords, { release, edition, wallet: identity.wallet, provenance }) : null;
     await this.audit({ identity, request, eventType: "STUDIO_METADATA_PUBLISHED", subjectType: "release", subjectId: release.id, payload: { editionId: edition.id, digest: generated.digest, provenanceRoot: provenance.root } });
     const editionSlug = generatedSlug(edition.title, "edition name");
-    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
+    // Factory V3 releases pass this exact root into the edition-creating call; confirmation
+    // refuses success unless the same transaction recorded it on the release contract.
+    const provenanceAtCreation = bindingAnchorsAtCreation(binding);
+    return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, implementationVersion: binding ? Number(binding.implementation_version) : null, provenanceAtCreation, ...(provenanceAtCreation ? { provenanceRootBytes32: provenanceRootBytes32(provenance.root) } : {}), chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -551,6 +580,10 @@ export class ArtistStudioService {
       if (creator !== String(event.args.artist || "").toLowerCase()) throw new Error("on-chain edition creator does not match the publication event");
       const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
       if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
+      const provenanceAtCreation = bindingAnchorsAtCreation(binding);
+      const onChainProvenance = provenanceAtCreation
+        ? await this.verifyProvenanceAtCreation({ receipt, provider, publicationContract, releaseId: expectedReleaseId, editionId: expectedEditionId, tokenId: expectedTokenId, artist: creator, provenanceRoot: provenance.root })
+        : null;
       let proof = currentProof;
       if (this.metadataFetcher && proof?.verification_status !== "VERIFIED") {
         try {
@@ -605,13 +638,40 @@ export class ArtistStudioService {
       await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: edition.application_metadata || {} });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
-      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root } });
-      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, chainId: publicationChainId, releaseContractAddress: publicationContract, anchorEvent: "EditionCreated", copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
+      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root, provenanceAnchoredAtCreation: Boolean(onChainProvenance) } });
+      return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, chainId: publicationChainId, releaseContractAddress: publicationContract, anchorEvent: "EditionCreated", provenanceAtCreation, onChainProvenance, separateAnchorAvailable: Boolean(binding) && !provenanceAtCreation, copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
       throw new ApiError(409, "PUBLICATION_NOT_CONFIRMED", "The blockchain publication could not be verified. Your release remains unpublished and can be retried.");
     }
+  }
+
+  /** Factory V3 publication: the edition transaction itself must carry the release contract's
+   * ProvenanceAnchored event for this exact root and edition, and the contract must report it.
+   * Anything missing or different refuses publication; nothing is inferred from success alone. */
+  async verifyProvenanceAtCreation({ receipt, provider, publicationContract, releaseId, editionId, tokenId, artist, provenanceRoot }) {
+    const root = provenanceRootBytes32(provenanceRoot);
+    const anchoredLogs = (receipt.logs || []).filter((log) => String(log.address || "").toLowerCase() === publicationContract).map((log) => { try { return releaseProvenanceIface.parseLog(log); } catch { return null; } }).filter((parsed) => parsed?.name === "ProvenanceAnchored");
+    if (!anchoredLogs.length) throw new ApiError(409, "PROVENANCE_ROOT_NOT_ANCHORED", "The publication transaction did not record a provenance root. The release remains unpublished.");
+    const event = anchoredLogs.find((parsed) => String(parsed.args.releaseId).toLowerCase() === String(releaseId).toLowerCase() && parsed.args.editionId === editionId && parsed.args.tokenId === tokenId);
+    if (!event || String(event.args.provenanceRoot).toLowerCase() !== root || String(event.args.artist).toLowerCase() !== String(artist).toLowerCase() || String(event.args.releaseContract).toLowerCase() !== publicationContract) {
+      throw new ApiError(409, "PROVENANCE_ROOT_MISMATCH", "The on-chain provenance root does not match this edition's canonical provenance. The release remains unpublished.");
+    }
+    let anchored;
+    let storedRoot;
+    try {
+      if (this.publicationChain?.isAnchored) {
+        [anchored, storedRoot] = await Promise.all([this.publicationChain.isAnchored({ releaseId, editionId, provenanceRoot: root }), this.publicationChain.provenanceRootOf(tokenId)]);
+      } else {
+        const contract = new ethers.Contract(publicationContract, RELEASE_PROVENANCE_ABI, provider);
+        [anchored, storedRoot] = await Promise.all([contract.isAnchored(releaseId, editionId, root), contract.provenanceRootOf(tokenId)]);
+      }
+    } catch {
+      throw new ApiError(503, "PROVENANCE_STATE_UNAVAILABLE", "The release contract's provenance state could not be read. The release remains unpublished and can be retried.");
+    }
+    if (anchored !== true || String(storedRoot || "").toLowerCase() !== root) throw new ApiError(409, "PROVENANCE_ROOT_MISMATCH", "The release contract does not record this provenance root. The release remains unpublished.");
+    return { event: "ProvenanceAnchored", contract: publicationContract, provenanceRoot: root, artist: String(event.args.artist).toLowerCase(), tokenId: tokenId.toString() };
   }
 
   async createArtist({ request, input }) {

@@ -259,7 +259,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         }
         else if (method === "POST" && base[0] === "studio" && base[1] === "releases" && base[3] === "provenance" && base[4] === "anchor" && base.length === 6) {
           if (!provenanceAnchor) throw new ApiError(503, "PROVENANCE_ANCHOR_UNAVAILABLE", "Provenance anchoring is unavailable.");
-          if (base[5] === "prepare") data = await provenanceAnchor.prepare({ request: apiRequest, releaseId: base[2] });
+          if (base[5] === "prepare") data = await provenanceAnchor.prepare({ request: apiRequest, releaseId: base[2], input: body });
           else if (base[5] === "submit") data = await provenanceAnchor.submit({ request: apiRequest, releaseId: base[2], input: body });
           else if (base[5] === "confirm") data = await provenanceAnchor.confirm({ request: apiRequest, releaseId: base[2], input: body });
           else throw Object.assign(new Error("Route not found."), { code: "NOT_FOUND", status: 404 });
