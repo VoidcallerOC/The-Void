@@ -69,6 +69,35 @@ export function decodeAlbumLog(log, { chainId, blockTimestamp = null, eventTopic
   return { ...common, maxTracks: uintWord(word(log.data, 0)), maxSingles: uintWord(word(log.data, 1)) };
 }
 
+/** VoidRelease1155V5 ProvenanceAnchored(root, releaseId, editionId, tokenId, artist, releaseContract).
+ * The clone is its own anchor, so the emitter must equal the logged release contract. */
+export function decodeProvenanceAnchoredLog(log, { chainId, blockTimestamp = null, eventTopics = {} }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  if (!eventTopics.ProvenanceAnchored || String(eventTopics.ProvenanceAnchored).toLowerCase() !== topic) return null;
+  if (log.topics.length < 4) throw new Error("ProvenanceAnchored requires root, release and edition topics.");
+  const contractAddress = String(log.address || "").toLowerCase();
+  const releaseContract = addressWord(log.data, 2);
+  if (releaseContract !== contractAddress) throw new Error("ProvenanceAnchored release contract does not match the emitting release.");
+  const provenanceRoot = bytes32Topic(log.topics[1]);
+  if (/^0x0{64}$/.test(provenanceRoot)) throw new Error("ProvenanceAnchored root is zero.");
+  return {
+    chainId,
+    eventType: "ProvenanceAnchored",
+    contractAddress,
+    transactionHash: String(log.transactionHash || "").toLowerCase(),
+    blockNumber: Number(log.blockNumber),
+    blockHash: String(log.blockHash || "").toLowerCase(),
+    logIndex: Number(log.logIndex),
+    blockTimestamp,
+    provenanceRoot,
+    releaseId: bytes32Topic(log.topics[2]),
+    editionId: bytes32Topic(log.topics[3]),
+    tokenId: uintWord(word(log.data, 0)),
+    artist: addressWord(log.data, 1),
+    releaseContract,
+  };
+}
+
 export function decodePurchasedLog(log, { chainId, blockTimestamp, tokenAddress, eventTopic }) {
   const topic = String(log?.topics?.[0] || "").toLowerCase();
   const expected = String(eventTopic || "").toLowerCase();
@@ -515,14 +544,22 @@ export class BlockchainIndexer {
     }
     let transferItems;
     let albumEvent = null;
+    let provenanceEvent = null;
     try {
+      // Factory V3 clones emit ProvenanceAnchored in the edition-creating transaction. It is recorded
+      // as a canonical event; publication confirmation re-reads it from the chain independently.
+      if (config.contractType === "ERC1155") provenanceEvent = decodeProvenanceAnchoredLog({ ...log, address: base.contractAddress, blockHash: base.blockHash }, { chainId, blockTimestamp: base.blockTimestamp, eventTopics: config.eventTopics || {} });
       // Album events are matched first: ExpandedReleaseApproved has no indexed topics for the transfer decoder.
-      if (config.contractType === "ERC1155") albumEvent = decodeAlbumLog({ ...log, address: base.contractAddress, blockHash: base.blockHash }, { chainId, blockTimestamp: base.blockTimestamp, eventTopics: config.eventTopics || {} });
-      transferItems = config.contractType === "ERC1155" && !albumEvent ? decodeTransferLog(log, { ...base, eventTopics: config.eventTopics || {} }) : [];
+      if (config.contractType === "ERC1155" && !provenanceEvent) albumEvent = decodeAlbumLog({ ...log, address: base.contractAddress, blockHash: base.blockHash }, { chainId, blockTimestamp: base.blockTimestamp, eventTopics: config.eventTopics || {} });
+      transferItems = config.contractType === "ERC1155" && !albumEvent && !provenanceEvent ? decodeTransferLog(log, { ...base, eventTopics: config.eventTopics || {} }) : [];
     } catch (error) {
       await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
       await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_EVENT", message: error.message, payload: log });
       return { duplicate: false, malformed: true };
+    }
+    if (provenanceEvent) {
+      const inserted = await this.store.recordEvent({ ...base, eventType: "ProvenanceAnchored", eventData: provenanceEvent, isMalformed: false });
+      return { duplicate: !inserted, eventType: "ProvenanceAnchored", provenanceRoot: provenanceEvent.provenanceRoot };
     }
     if (albumEvent) {
       const inserted = await this.store.recordEvent({ ...base, eventType: albumEvent.eventType, eventData: albumEvent, isMalformed: false });

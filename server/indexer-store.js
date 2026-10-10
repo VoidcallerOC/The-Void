@@ -1,5 +1,6 @@
 import { withTransaction } from "./db.js";
 import { normalizeBlockTimestamp } from "./indexer-utils.js";
+import { anchorsProvenanceAtCreation } from "../config/release-network.js";
 
 function lower(value) { return String(value || "").toLowerCase(); }
 function address(value, label = "address") {
@@ -236,7 +237,9 @@ export class IndexerStore {
     const tx = lower(transactionHash);
     if (!/^0x[0-9a-f]{64}$/.test(tx)) throw new Error("transactionHash is invalid.");
     return withTransaction(this.db, async (client) => {
-      await client.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name, deployment_tx_hash, deployment_block_number, metadata) VALUES ($1, $2::text, $3, 'ERC1155', 'VoidRelease1155V4', $4, $5, $6) ON CONFLICT (chain_id, address) DO UPDATE SET metadata = contracts.metadata || EXCLUDED.metadata, deployment_block_number = COALESCE(contracts.deployment_block_number, EXCLUDED.deployment_block_number), updated_at = now()", [chainId, String(chainId), release, tx, deploymentBlock, { source: "RELEASE_FACTORY", factory, releaseKey: key, artist, primarySale, provenanceAnchor, implementation, implementationVersion: version, releaseIndex: index }]);
+      // Factory V3 (version 3) clones VoidRelease1155V5, which is its own provenance anchor.
+      const contractName = anchorsProvenanceAtCreation(version) ? "VoidRelease1155V5" : "VoidRelease1155V4";
+      await client.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name, deployment_tx_hash, deployment_block_number, metadata) VALUES ($1, $2::text, $3, 'ERC1155', $7, $4, $5, $6) ON CONFLICT (chain_id, address) DO UPDATE SET metadata = contracts.metadata || EXCLUDED.metadata, deployment_block_number = COALESCE(contracts.deployment_block_number, EXCLUDED.deployment_block_number), updated_at = now()", [chainId, String(chainId), release, tx, deploymentBlock, { source: "RELEASE_FACTORY", factory, releaseKey: key, artist, primarySale, provenanceAnchor, implementation, implementationVersion: version, releaseIndex: index, ...(anchorsProvenanceAtCreation(version) ? { provenanceAtCreation: true } : {}) }, contractName]);
       const { rows } = await client.query("INSERT INTO factory_releases (chain_id, factory_address, release_contract_address, release_key, artist_wallet, primary_sale_address, provenance_anchor_address, implementation_address, factory_index, implementation_version, deployment_block_number, transaction_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (chain_id, factory_address, release_contract_address) DO UPDATE SET updated_at=now() WHERE factory_releases.release_key=EXCLUDED.release_key AND factory_releases.artist_wallet=EXCLUDED.artist_wallet AND factory_releases.primary_sale_address=EXCLUDED.primary_sale_address AND factory_releases.provenance_anchor_address=EXCLUDED.provenance_anchor_address AND factory_releases.implementation_address=EXCLUDED.implementation_address AND factory_releases.factory_index=EXCLUDED.factory_index AND factory_releases.implementation_version=EXCLUDED.implementation_version AND factory_releases.deployment_block_number=EXCLUDED.deployment_block_number AND factory_releases.transaction_hash=EXCLUDED.transaction_hash RETURNING *", [chainId, factory, release, key, artist, primarySale, provenanceAnchor, implementation, index, version, deploymentBlock, tx]);
       if (!rows[0]) throw new Error("Release factory event conflicts with an immutable registry row.");
       return rows[0];

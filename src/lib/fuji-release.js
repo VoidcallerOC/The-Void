@@ -123,7 +123,7 @@ export async function verifyArtistReleaseCreation(provider, { transactionHash, e
   const event = (receipt.logs || []).filter((log) => String(log.address || "").toLowerCase() === config.factoryAddress.toLowerCase()).map((log) => {
     try { return releaseFactoryV2Iface.parseLog(log); } catch { return null; }
   }).find((parsed) => parsed?.name === "ReleaseCreated" && String(parsed.args.releaseKey).toLowerCase() === String(expected.releaseKey).toLowerCase());
-  if (!event || String(event.args.artist).toLowerCase() !== String(expected.artistWallet).toLowerCase() || BigInt(event.args.version) !== 2n) throw new Error("The confirmed transaction did not emit the exact V2 ReleaseCreated event for this artist and release key.");
+  if (!event || String(event.args.artist).toLowerCase() !== String(expected.artistWallet).toLowerCase() || BigInt(event.args.version) !== BigInt(config.releaseVersion ?? 2)) throw new Error("The confirmed transaction did not emit the exact ReleaseCreated event for this artist, release key, and Factory version.");
   const releaseContractAddress = ethers.getAddress(event.args.releaseContract);
   const primarySaleAddress = ethers.getAddress(event.args.primarySale);
   const provenanceAnchorAddress = ethers.getAddress(event.args.provenanceAnchor);
@@ -196,6 +196,17 @@ const v2CreateIface = new ethers.Interface([
 const v4CreateIface = new ethers.Interface([
   "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps) returns (uint256 tokenId)",
 ]);
+// VoidRelease1155V5 (Factory V3): the same calls plus the edition's provenance root, recorded on-chain
+// in the same transaction. V5 disables the root-less selectors, and V4 clones have no root-taking ones.
+const v5CreateIface = new ethers.Interface([
+  "function createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps, bytes32 provenanceRoot) returns (uint256 tokenId)",
+]);
+const v5AlbumTrackIface = new ethers.Interface([
+  "function createAlbumTrack(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps, bool single, uint64 mintEnd, bytes32 provenanceRoot) returns (uint256 tokenId)",
+]);
+const releaseProvenanceIface = new ethers.Interface([
+  "event ProvenanceAnchored(bytes32 indexed provenanceRoot, bytes32 indexed releaseId, bytes32 indexed editionId, uint256 tokenId, address artist, address releaseContract)",
+]);
 const v4AlbumIface = new ethers.Interface(["function createAlbum(bytes32 releaseId)"]);
 const v4AlbumTrackIface = new ethers.Interface([
   "function createAlbumTrack(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string metadataUri, address payout, uint96 royaltyBps, bool single, uint64 mintEnd) returns (uint256 tokenId)",
@@ -219,6 +230,9 @@ const fujiErrorIface = new ethers.Interface([
   "error LengthMismatch()",
   "error ZeroQuantity()",
   "error UnsafeRecipient()",
+  "error ProvenanceRootRequired()",
+  "error InvalidRoot()",
+  "error AlreadyAnchored(bytes32 provenanceRoot)",
 ]);
 
 function extractFujiRevertData(error) {
@@ -275,6 +289,11 @@ export function explainFujiEditionError(error) {
       return { ...base, message: "Mint quantity must be at least 1." };
     case "UnsafeRecipient":
       return { ...base, message: "The receiving wallet is a contract that cannot accept ERC-1155 tokens." };
+    case "ProvenanceRootRequired":
+    case "InvalidRoot":
+      return { ...base, message: "This release records provenance when the edition is created, but no provenance root was supplied. Nothing was published." };
+    case "AlreadyAnchored":
+      return { ...base, message: "This provenance root is already recorded for another edition of this release. Nothing was published." };
     default: {
       const code = error?.code ?? error?.info?.error?.code ?? error?.cause?.code;
       const message = String(error?.shortMessage || error?.message || "");
@@ -333,7 +352,15 @@ export function encodeCreateFujiEdition({ releaseId, editionId, maxSupply, metad
 
 /** Encode a createEdition call for one factory-created V4 clone. V4 derives
  * token IDs from the edition ID alone and rejects a mismatched release key. */
-export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0 }) {
+/** A non-zero bytes32 provenance root (the server's SHA-256 manifest root), or null when absent. */
+export function releaseProvenanceRoot(value) {
+  if (value == null || value === "") return null;
+  const hash = String(value).trim().toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(hash) || /^0{64}$/.test(hash)) throw new Error("The provenance root must be a non-zero 32-byte digest.");
+  return `0x${hash}`;
+}
+
+export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for this release.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
@@ -342,7 +369,9 @@ export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, m
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);
-  return { tokenId: tokenId === 0n ? 1n : tokenId, data: v4CreateIface.encodeFunctionData("createEdition", [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps]) };
+  const root = releaseProvenanceRoot(provenanceRoot);
+  const args = [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps];
+  return { tokenId: tokenId === 0n ? 1n : tokenId, provenanceRoot: root, data: root ? v5CreateIface.encodeFunctionData("createEdition", [...args, root]) : v4CreateIface.encodeFunctionData("createEdition", args) };
 }
 
 // Dry-run a release-contract call from this wallet so a revert surfaces its
@@ -353,7 +382,7 @@ export function encodeCreateReleaseAlbum({ releaseKey }) {
   return { data: v4AlbumIface.encodeFunctionData("createAlbum", [releaseKey]) };
 }
 
-export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0 }) {
+export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album tracks.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
@@ -362,7 +391,9 @@ export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);
-  return { tokenId: tokenId === 0n ? 1n : tokenId, data: v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps, Boolean(single), BigInt(mintEnd || 0)]) };
+  const root = releaseProvenanceRoot(provenanceRoot);
+  const args = [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps, Boolean(single), BigInt(mintEnd || 0)];
+  return { tokenId: tokenId === 0n ? 1n : tokenId, provenanceRoot: root, data: root ? v5AlbumTrackIface.encodeFunctionData("createAlbumTrack", [...args, root]) : v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", args) };
 }
 
 const v4AlbumStateIface = new ethers.Interface([
@@ -568,6 +599,18 @@ export async function sendFujiTransaction({ provider, from, data, to, value, anc
   return { hash, receipt, blockNumber: receipt.blockNumber ? Number.parseInt(receipt.blockNumber, 16) : null };
 }
 
+const provenanceAnchorIface = new ethers.Interface(["function anchor(bytes32 releaseId, bytes32 editionId, bytes32 provenanceRoot)"]);
+
+/** One-time separate anchor for an edition on a pre-V3 release. The server prepares the calldata; this
+ * refuses anything that is not exactly anchor(...) to a dedicated anchor distinct from the release. */
+export async function sendReleaseProvenanceAnchor({ provider, from, prepared, releaseContractAddress, receiptProvider = provider }) {
+  if (!prepared?.data || !ethers.isAddress(prepared.contractAddress || "")) throw new Error("The provenance anchor transaction was not prepared.");
+  if (!ethers.isAddress(releaseContractAddress || "") || ethers.getAddress(prepared.contractAddress) === ethers.getAddress(releaseContractAddress)) throw new Error("The provenance anchor must be a dedicated contract, not the release contract.");
+  const parsed = (() => { try { return provenanceAnchorIface.parseTransaction({ data: prepared.data }); } catch { return null; } })();
+  if (parsed?.name !== "anchor" || parsed.args.provenanceRoot.toLowerCase() !== releaseProvenanceRoot(prepared.provenanceRoot)) throw new Error("The prepared anchor call does not commit this edition's provenance root.");
+  return sendReleaseTransaction({ provider, from, to: prepared.contractAddress, data: prepared.data, receiptProvider });
+}
+
 export async function sendReleaseTransaction({ provider, from, to, data, receiptProvider = provider }) {
   await assertFujiProvider(provider);
   if (!ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("The indexed release contract address is invalid.");
@@ -671,7 +714,7 @@ export async function verifyFujiEditionCreation(provider, { transactionHash, rel
   return { receipt, event, edition };
 }
 
-export async function verifyReleaseEditionCreation(provider, { transactionHash, releaseContractAddress, releaseKey, editionId, tokenId }) {
+export async function verifyReleaseEditionCreation(provider, { transactionHash, releaseContractAddress, releaseKey, editionId, tokenId, provenanceRoot = null }) {
   await assertFujiProvider(provider);
   if (!ethers.isAddress(releaseContractAddress) || !/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("The indexed release identity is incomplete.");
   const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
@@ -681,7 +724,13 @@ export async function verifyReleaseEditionCreation(provider, { transactionHash, 
     try { return editionIface.parseLog(log); } catch { return null; }
   }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === BigInt(tokenId) && parsed.args.releaseId.toLowerCase() === String(releaseKey).toLowerCase() && parsed.args.editionId === expectedEditionId);
   if (!event) throw new Error("Create Edition receipt succeeded, but the expected release-local EditionCreated event was not found.");
-  return { receipt, event };
+  const root = releaseProvenanceRoot(provenanceRoot);
+  if (!root) return { receipt, event };
+  const anchored = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === releaseContractAddress.toLowerCase()).map((log) => {
+    try { return releaseProvenanceIface.parseLog(log); } catch { return null; }
+  }).find((parsed) => parsed?.name === "ProvenanceAnchored" && parsed.args.provenanceRoot.toLowerCase() === root && parsed.args.tokenId === BigInt(tokenId) && parsed.args.releaseId.toLowerCase() === String(releaseKey).toLowerCase() && parsed.args.editionId === expectedEditionId && String(parsed.args.releaseContract).toLowerCase() === releaseContractAddress.toLowerCase());
+  if (!anchored) throw new Error("Create Edition receipt succeeded, but it did not record this edition's provenance root on-chain.");
+  return { receipt, event, provenanceEvent: anchored };
 }
 
 export function fujiExplorerUrl(kind, value) { return `${FUJI_RELEASE_CONFIG.explorer}/${kind}/${value}`; }

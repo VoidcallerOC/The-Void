@@ -76,7 +76,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   // Header art is a local site file. Release artwork still uses artworkUploader (Pinata).
   const marketplaceHeroStore = createLocalMarketplaceHeroStore({ root: fileURLToPath(new URL("../public/assets/marketplace-heroes", import.meta.url)), db: pool });
   const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, heroStore: marketplaceHeroStore });
-  const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env) });
+  const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env), audit: (event) => repository.appendAuditEvent(event) });
   const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, genesisClaim, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
   return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier, genesisClaim };
