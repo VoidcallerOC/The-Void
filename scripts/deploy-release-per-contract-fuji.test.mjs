@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { getAddress, id } from "ethers";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { Wallet, getAddress, id } from "ethers";
 import { ALBUM_SIGNATURES, FUJI_CHAIN_ID, assertAlbumCapableArtifact, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, missingAlbumSelectors, run, validateDeploymentEnv } from "./deploy-release-per-contract-fuji.mjs";
 
 const KEY = `0x${"11".repeat(32)}`;
@@ -13,9 +15,11 @@ const BASE = {
   BROADCAST_DEPLOYMENT: "no",
 };
 
-const provider = { getNetwork: async () => ({ chainId: BigInt(FUJI_CHAIN_ID) }) };
-const assertAlbumCapable = async () => {};
 const albumRuntime = `0x${ALBUM_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
+const provider = { getNetwork: async () => ({ chainId: BigInt(FUJI_CHAIN_ID) }), getCode: async () => albumRuntime };
+const assertAlbumCapable = async () => {};
+const DEPLOYER = new Wallet(KEY).address;
+const BROADCAST = { ...BASE, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
 const FACTORY = "0x00000000000000000000000000000000000000F1";
 const MARKET = "0x00000000000000000000000000000000000000F2";
 const IMPL = "0x00000000000000000000000000000000000000F3";
@@ -23,7 +27,7 @@ function fakeDeploy() {
   const calls = [];
   const deploy = async (artifact, args) => {
     calls.push({ artifact: artifact.name, args });
-    if (artifact.name === "factory") return { address: FACTORY, receipt: { hash: "0xf1", blockNumber: 1 }, contract: { implementation: async () => IMPL } };
+    if (artifact.name === "factory") return { address: FACTORY, receipt: { hash: "0xf1", blockNumber: 1 }, contract: { implementation: async () => IMPL, RELEASE_VERSION: async () => 2n } };
     return { address: MARKET, receipt: { hash: "0xf2", blockNumber: 2 }, contract: { registry: async () => FACTORY } };
   };
   return { calls, deploy };
@@ -92,7 +96,52 @@ describe("release-per-contract Fuji deployment preflight", () => {
     expect(logs.map((entry) => entry.step)).toEqual(["FACTORY_MINED", "MARKETPLACE_MINED", "RECORD"]);
     expect(writes[0].path).toBe(deploymentRecordPath(FACTORY));
     expect(writes[0].path).not.toBe("deployments/release-per-contract-fuji.json");
-    expect(record).toMatchObject({ factory: { address: getAddress(FACTORY), implementationAddress: getAddress(IMPL), implementationAlbumCapable: true }, marketplace: { address: getAddress(MARKET), factoryAddress: getAddress(FACTORY) } });
+    expect(record).toMatchObject({ factory: { address: getAddress(FACTORY), implementationAddress: getAddress(IMPL), implementationVersion: 2, implementationAlbumCapable: true }, marketplace: { address: getAddress(MARKET), factoryAddress: getAddress(FACTORY) } });
+  });
+
+  it("guards approveExpandedRelease with the other album functions", () => {
+    expect(ALBUM_SIGNATURES).toContain("approveExpandedRelease(bytes32,uint256,uint256)");
+    expect(id("approveExpandedRelease(bytes32,uint256,uint256)").slice(0, 10)).toBe("0x01ce03c5");
+  });
+
+  it("stops before the marketplace when the mined implementation lacks album functions", async () => {
+    const { calls, deploy } = fakeDeploy();
+    const logs = [];
+    const writes = [];
+    const preAlbum = { ...provider, getCode: async (target) => (getAddress(target) === getAddress(IMPL) ? "0x63deadbeef" : albumRuntime) };
+    await expect(broadcastDeployment(validateDeploymentEnv(BASE), preAlbum, { load: loadArtifacts(), deploy, writeRecord: async (path, value) => writes.push({ path, value }), log: (value) => logs.push(value), wallet: {} })).rejects.toThrow(/lacks album functions.*marketplace was not deployed/);
+    expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
+    expect(logs.map((entry) => entry.step)).toEqual(["FACTORY_MINED", "IMPLEMENTATION_NOT_ALBUM_CAPABLE"]);
+    expect(logs[1].missing).toEqual(ALBUM_SIGNATURES);
+    expect(writes).toEqual([]);
+  });
+
+  it("records the implementation version read from the mined factory", async () => {
+    const { deploy } = fakeDeploy();
+    const versioned = async (artifact, args, wallet) => {
+      const deployed = await deploy(artifact, args, wallet);
+      return artifact.name === "factory" ? { ...deployed, contract: { ...deployed.contract, RELEASE_VERSION: async () => 3n } } : deployed;
+    };
+    const record = await broadcastDeployment(validateDeploymentEnv(BASE), provider, { load: loadArtifacts(), deploy: versioned, writeRecord: async () => {}, log: () => {}, wallet: {} });
+    expect(record.factory.implementationVersion).toBe(3);
+  });
+
+  it("refuses a broadcast unless the deployer key belongs to the owner-reviewed address", () => {
+    expect(() => validateDeploymentEnv({ ...BROADCAST, EXPECTED_DEPLOYER_ADDRESS: "" })).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
+    expect(() => validateDeploymentEnv({ ...BROADCAST, EXPECTED_DEPLOYER_ADDRESS: "0x0000000000000000000000000000000000000011" })).toThrow(/does not belong to EXPECTED_DEPLOYER_ADDRESS/);
+    expect(() => validateDeploymentEnv({ ...BROADCAST, EXPECTED_DEPLOYER_ADDRESS: "not-an-address" })).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
+    expect(validateDeploymentEnv({ ...BROADCAST, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER.toLowerCase() })).toMatchObject({ broadcast: true, deployerAddress: DEPLOYER });
+    expect(validateDeploymentEnv(BASE)).toMatchObject({ broadcast: false, deployerAddress: DEPLOYER });
+  });
+
+  it("exposes the expected deployer input and checks it, with the nonce, before any broadcast step", async () => {
+    const workflow = await readFile(resolve(import.meta.dirname, "..", ".github/workflows/deploy-release-per-contract-fuji.yml"), "utf8");
+    const dispatch = workflow.slice(workflow.indexOf("workflow_dispatch:"), workflow.indexOf("permissions:"));
+    expect(dispatch).toContain("expected_deployer_address:");
+    expect(workflow).toContain("EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}");
+    const validation = workflow.slice(workflow.indexOf("Validate deployer credential without broadcasting"), workflow.indexOf("Install pinned Foundry toolchain"));
+    for (const line of ["deployer_nonce=", "deployer_pending_nonce=", "deployer_matches_expected=", "A broadcast requires expected_deployer_address.", "refusing to broadcast"]) expect(validation).toContain(line);
+    expect(workflow.indexOf("Validate deployer credential without broadcasting")).toBeLessThan(workflow.indexOf("npm run deploy:release-per-contract:fuji"));
   });
 
   it("keeps the mined record in the log when writing the record file fails", async () => {

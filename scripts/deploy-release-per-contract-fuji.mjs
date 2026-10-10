@@ -20,6 +20,7 @@ export const ALBUM_SIGNATURES = Object.freeze([
   "closeAlbum(bytes32)",
   "albumCreated()",
   "createEditionWithMintEnd(bytes32,bytes32,uint256,string,address,uint96,uint64)",
+  "approveExpandedRelease(bytes32,uint256,uint256)",
 ]);
 
 /** Album selectors missing from runtime bytecode (Solidity dispatch uses PUSH4 = 0x63). */
@@ -77,7 +78,12 @@ export function validateDeploymentEnv(env = process.env) {
   const confirmFuji = String(env.CONFIRM_FUJI_DEPLOY || "").trim();
   const broadcast = String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes";
   if (broadcast && confirmFuji !== "yes") throw new DeploymentError("Broadcast requires CONFIRM_FUJI_DEPLOY=yes.");
-  return Object.freeze({ network, rpcUrl, deployerPrivateKey, platformRecipient, marketplaceFeeRecipient, platformFeeBps, confirmFuji, broadcast });
+  // The owner names the deployer they reviewed; a broadcast from any other key is refused.
+  const deployerAddress = new Wallet(deployerPrivateKey).address;
+  const expectedText = String(env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
+  if (broadcast && !expectedText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
+  if (expectedText && address(expectedText, "EXPECTED_DEPLOYER_ADDRESS") !== deployerAddress) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
+  return Object.freeze({ network, rpcUrl, deployerPrivateKey, deployerAddress, platformRecipient, marketplaceFeeRecipient, platformFeeBps, confirmFuji, broadcast });
 }
 
 export function buildDryRunPlan(config) {
@@ -152,6 +158,14 @@ export async function broadcastDeployment(config, provider, {
   const factoryAddress = getAddress(factory.address);
   const implementationAddress = getAddress(await factory.contract.implementation());
   log({ step: "FACTORY_MINED", factoryAddress, implementationAddress, transaction: factoryReceipt.hash, block: factoryReceipt.blockNumber });
+  // The compiled artifact was checked above; the mined clone implementation must carry album semantics too,
+  // or the marketplace (whose registry is immutable) would be bound to a pre-album factory.
+  const missingOnChain = missingAlbumSelectors(await provider.getCode(implementationAddress));
+  if (missingOnChain.length) {
+    log({ step: "IMPLEMENTATION_NOT_ALBUM_CAPABLE", implementationAddress, missing: missingOnChain });
+    throw new DeploymentError(`Deployed implementation ${implementationAddress} lacks album functions (${missingOnChain.join(", ")}); the marketplace was not deployed.`);
+  }
+  const implementationVersion = Number(await factory.contract.RELEASE_VERSION());
   const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress], wallet);
   const marketplaceReceipt = marketplace.receipt;
   const marketplaceAddress = getAddress(marketplace.address);
@@ -167,7 +181,7 @@ export async function broadcastDeployment(config, provider, {
       deploymentTransaction: factoryReceipt.hash,
       deploymentBlock: factoryReceipt.blockNumber,
       implementationAddress,
-      implementationVersion: 2,
+      implementationVersion,
       implementationAlbumCapable: true,
       sourceCommit: process.env.GITHUB_SHA || null,
       platformRecipient: config.platformRecipient,

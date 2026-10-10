@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ""
+      expected_deployer_address:
+        description: Deployer address (0x...) the owner reviewed. Required for a broadcast; a different key is refused.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -34,6 +39,7 @@ env:
   RELEASE_MARKETPLACE_FEE_RECIPIENT: ${{ secrets.RELEASE_MARKETPLACE_FEE_RECIPIENT }}
   CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_RELEASE_PER_CONTRACT_DEPLOY' && 'yes' || 'no' }}
   BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
+  EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
 
 jobs:
   preflight:
@@ -54,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           node --input-type=module <<'JS'
-          import { JsonRpcProvider, Wallet } from "ethers";
+          import { JsonRpcProvider, Wallet, getAddress, getCreateAddress, isAddress } from "ethers";
 
           const provider = new JsonRpcProvider(
             process.env.AVALANCHE_FUJI_RPC_URL,
@@ -70,6 +76,23 @@ jobs:
           console.log(`deployer_address=${wallet.address}`);
           console.log(`fuji_chain_id=${network.chainId}`);
           console.log(`fuji_balance_wei=${balance}`);
+          // Nonce and predicted CREATE addresses are for owner cross-check only, never for wiring.
+          const nonce = await provider.getTransactionCount(wallet.address, "latest");
+          const pendingNonce = await provider.getTransactionCount(wallet.address, "pending");
+          console.log(`deployer_nonce=${nonce}`);
+          console.log(`deployer_pending_nonce=${pendingNonce}`);
+          console.log(`predicted_factory_address=${getCreateAddress({ from: wallet.address, nonce })}`);
+          console.log(`predicted_marketplace_address=${getCreateAddress({ from: wallet.address, nonce: nonce + 1 })}`);
+          const expected = String(process.env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
+          if (expected) {
+            const matches = isAddress(expected) && getAddress(expected) === wallet.address;
+            console.log(`deployer_matches_expected=${matches}`);
+            if (!matches) throw new Error("DEPLOYER_PRIVATE_KEY does not belong to expected_deployer_address.");
+          } else {
+            console.log("deployer_matches_expected=not_provided");
+            if (process.env.BROADCAST_DEPLOYMENT === "yes") throw new Error("A broadcast requires expected_deployer_address.");
+          }
+          if (process.env.BROADCAST_DEPLOYMENT === "yes" && pendingNonce !== nonce) throw new Error("The deployer has pending transactions; refusing to broadcast.");
           console.log("broadcasted=false");
           JS
 
