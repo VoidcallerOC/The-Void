@@ -84,11 +84,12 @@ function blockNumber(value, { required = false } = {}) {
 
 /** The two on-chain events this table may record as a provenance anchor.
  *
- * - `EditionCreated` is the Studio publication anchor: the certified Fuji
- *   release's own `createEdition` transaction commits the immutable metadata
- *   CID, and `verifyEditionPublication` (publication-anchor.js) is the only
- *   producer of that verification. It is valid solely on the canonical V2
- *   release contract on Fuji; historical V1 rows are never rewritten by it.
+ * - `EditionCreated` is the Studio publication anchor: the release contract's
+ *   own `createEdition` transaction commits the immutable metadata CID, and
+ *   `verifyEditionPublication` (publication-anchor.js) is the only producer of
+ *   that verification. It is valid on the canonical V2 release contract on
+ *   Fuji, or on the release contract bound to the proof's own release (on that
+ *   binding's chain); historical V1 rows are never rewritten by it.
  * - `ProvenanceAnchored` belongs to the separate VoidProvenanceAnchor
  *   subsystem (provenance-anchor.js) and must point at that dedicated
  *   contract, never at a release collection.
@@ -119,26 +120,28 @@ function anchorContract(value) {
 }
 
 /** Binds the anchor event to the contract that may legitimately emit it. */
-function anchorContractFor(eventName, value) {
+function anchorContractFor(eventName, value, boundRelease = null) {
   const address = anchorContract(value);
   if (eventName === ANCHOR_EVENTS.EDITION_CREATED) {
     if (address === LEGACY_FUJI_V1_RELEASE) invalid("EditionCreated on the historical Fuji V1 release is not a V2 publication anchor.");
-    if (address !== CANONICAL_FUJI_RELEASE) invalid("EditionCreated must come from the canonical Fuji release contract.");
-    return address;
+    if (address === CANONICAL_FUJI_RELEASE || address === boundRelease?.address) return address;
+    invalid("EditionCreated must come from the canonical Fuji release contract or this release's bound release contract.");
   }
   if (RELEASE_COLLECTIONS.has(address)) invalid("ProvenanceAnchored must come from the dedicated anchor contract, not a release collection.");
   return address;
 }
 
 /** A VERIFIED row must carry the evidence the matching verifier produces. */
-function verifiedAnchorEvidence(eventName, { chainKey: key, chainId: chain, mechanism, metadataCid }) {
+function verifiedAnchorEvidence(eventName, { chainKey: key, chainId: chain, mechanism, metadataCid }, boundRelease = null) {
   const expectedMechanism = ANCHOR_MECHANISMS[eventName];
   if (mechanism != null && mechanism !== "" && mechanism !== expectedMechanism) invalid(`mechanism must be ${expectedMechanism} for ${eventName}.`);
   if (eventName !== ANCHOR_EVENTS.EDITION_CREATED) return;
   if (mechanism !== expectedMechanism) invalid("A Studio publication anchor requires the edition-metadata-cid verification result.");
   if (!CID.test(String(metadataCid ?? "").trim())) invalid("A Studio publication anchor requires the verified metadata CID.");
-  if (chain !== CANONICAL_FUJI_CHAIN_ID) invalid(`EditionCreated must be anchored on chain ${CANONICAL_FUJI_CHAIN_ID}.`);
-  if (key !== "fuji") invalid("EditionCreated must be anchored on the fuji network.");
+  const expectedChain = boundRelease ? boundRelease.chainId : CANONICAL_FUJI_CHAIN_ID;
+  const expectedKey = boundRelease ? boundRelease.chainKey : "fuji";
+  if (chain !== expectedChain) invalid(`EditionCreated must be anchored on chain ${expectedChain}.`);
+  if (key !== expectedKey) invalid(`EditionCreated must be anchored on the ${expectedKey} network.`);
 }
 
 function failureCode(value) {
@@ -328,6 +331,25 @@ export class ProvenanceRecords {
     }
   }
 
+  /** The release's own bound release contract, from the binding row that only a
+   * confirmed factory deployment can create; caller-supplied identity is never trusted. */
+  async boundReleaseContract(releaseId, value) {
+    const address = anchorContract(value);
+    if (RELEASE_COLLECTIONS.has(address)) return null;
+    const { rows } = await this.db.query(
+      `SELECT c.address, c.chain_id, c.chain_key
+       FROM release_contracts rc
+       JOIN contracts c ON c.id = rc.release_contract_id
+       WHERE rc.release_id = $1 AND rc.status IN ('DEPLOYED', 'VERIFIED') AND rc.chain_id = c.chain_id AND lower(c.address) = $2
+       LIMIT 1`,
+      [releaseId, address],
+    );
+    const row = rows[0];
+    const boundChain = Number(row?.chain_id);
+    if (!row || String(row.address || "").toLowerCase() !== address || !Number.isSafeInteger(boundChain) || boundChain <= 0 || !row.chain_key) return null;
+    return { address, chainId: boundChain, chainKey: String(row.chain_key) };
+  }
+
   async recordVerifiedAnchor({ id, creatorWallet, chainKey: network, chainId, transactionHash: txHash, blockNumber: block, blockTimestamp = null, anchorContract: contract, anchorEvent: eventName, mechanism = null, metadataCid = null, verifiedAt = new Date() }) {
     const current = await this.loadOwned(id, creatorWallet);
     if (current.verification_status === "VERIFIED") throw new ApiError(409, "PROVENANCE_ALREADY_VERIFIED", "This provenance record is already verified.");
@@ -336,8 +358,9 @@ export class ProvenanceRecords {
     const chain = optionalChainId(chainId);
     if (!key || !chain) invalid("A verified anchor requires chainKey and chainId.");
     const event = anchorEventName(eventName);
-    const anchoredAt = anchorContractFor(event, contract);
-    verifiedAnchorEvidence(event, { chainKey: key, chainId: chain, mechanism, metadataCid });
+    const boundRelease = event === ANCHOR_EVENTS.EDITION_CREATED ? await this.boundReleaseContract(current.release_id, contract) : null;
+    const anchoredAt = anchorContractFor(event, contract, boundRelease);
+    verifiedAnchorEvidence(event, { chainKey: key, chainId: chain, mechanism, metadataCid }, boundRelease);
     try {
       const { rows } = await this.db.query(
         `UPDATE provenance_proofs
