@@ -17,7 +17,7 @@ const ACTIVE_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
 const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
 const HASH = `0x${"ab".repeat(32)}`;
 
-const iface = new ethers.Interface(["function balances(address) view returns (uint256)", "function payoutOf(uint256) view returns (address)", "function withdraw()"]);
+const iface = new ethers.Interface(["function balances(address) view returns (uint256)", "function payoutOf(uint256) view returns (address)", "function withdraw()", "function releasesOf(address) view returns (address[])", "function primarySaleOf(address) view returns (address)"]);
 const coder = ethers.AbiCoder.defaultAbiCoder();
 
 function catalog({ oldPayoutToken = "9" } = {}) {
@@ -34,7 +34,7 @@ function catalog({ oldPayoutToken = "9" } = {}) {
   };
 }
 
-function chain({ balances, payouts, log = [] }) {
+function chain({ balances, payouts, factoryReleases = {}, log = [] }) {
   const readProvider = {
     request: vi.fn(async ({ method, params }) => {
       if (method === "eth_chainId") return "0xa869";
@@ -47,6 +47,8 @@ function chain({ balances, payouts, log = [] }) {
       const { to, data, from } = params[0];
       if (data === WITHDRAW_CALLDATA) { log.push(`simulate:${from}:${to}`); return "0x"; }
       const parsed = iface.parseTransaction({ data });
+      if (parsed.name === "releasesOf") return coder.encode(["address[]"], [(factoryReleases[to.toLowerCase()] || []).map(([release]) => release)]);
+      if (parsed.name === "primarySaleOf") return coder.encode(["address"], [Object.values(factoryReleases).flat().find(([release]) => release.toLowerCase() === parsed.args[0].toLowerCase())[1]]);
       if (parsed.name === "payoutOf") return coder.encode(["address"], [payouts[`${to}:${parsed.args[0]}`.toLowerCase()]]);
       if (parsed.name === "balances") return coder.encode(["uint256"], [balances[`${to}:${parsed.args[0]}`.toLowerCase()] ?? 0n]);
       throw new Error(`unexpected call ${parsed.name}`);
@@ -62,7 +64,7 @@ function chain({ balances, payouts, log = [] }) {
   return { readProvider, walletProvider, log };
 }
 
-function setup({ balances = {}, payouts } = {}) {
+function setup({ balances = {}, payouts, factoryReleases, catalogValue = catalog() } = {}) {
   const state = chain({
     balances: {
       [`${SALE_NEW}:${ARTIST}`.toLowerCase()]: ethers.parseEther("0.00975"),
@@ -70,9 +72,10 @@ function setup({ balances = {}, payouts } = {}) {
       ...balances,
     },
     payouts: payouts || { [`${CLONE_NEW}:7`.toLowerCase()]: ARTIST, [`${CLONE_OLD}:9`.toLowerCase()]: ARTIST },
+    factoryReleases,
   });
   const wallet = { account: ARTIST, getProvider: () => state.walletProvider };
-  render(<StudioEarnings catalog={catalog()} wallet={wallet} readProvider={state.readProvider} />);
+  render(<StudioEarnings catalog={catalogValue} wallet={wallet} readProvider={state.readProvider} />);
   return state;
 }
 
@@ -111,6 +114,19 @@ describe("Studio earnings", () => {
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
     expect(walletProvider.request).not.toHaveBeenCalled();
+  });
+
+  it("finds sale contracts from the factories when the API returns no release bindings", async () => {
+    const { releaseBindings, ...withoutBindings } = catalog();
+    expect(releaseBindings).toHaveLength(2);
+    setup({
+      catalogValue: withoutBindings,
+      factoryReleases: { [ACTIVE_FACTORY.toLowerCase()]: [[CLONE_NEW, SALE_NEW]], [OLD_FACTORY.toLowerCase()]: [[CLONE_OLD, SALE_OLD]] },
+    });
+    const ff = await screen.findByRole("listitem", { name: "Earnings for Forgive & Forget 28" });
+    expect(within(ff).getByText("0.00975 AVAX")).toBeTruthy();
+    expect(within(ff).getByText("Factory V2 (active)")).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: "Earnings for Old Factory Single" })).toBeTruthy();
   });
 
   it("names the payout wallet when it is not the connected wallet and offers no withdraw", async () => {

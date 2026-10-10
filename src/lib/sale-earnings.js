@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG, fujiExplorerUrl, requestWithTimeout } from "./fuji-release.js";
 import { SIMULATION_GAS } from "./primary-sale.js";
-import { releaseDeploymentForFactory } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS, releaseDeploymentForFactory } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 
 // VoidPrimarySale holds proceeds as pull payments: purchase() credits
@@ -17,6 +17,10 @@ export const SALE_EARNINGS_ABI = Object.freeze([
 ]);
 const saleIface = new ethers.Interface(SALE_EARNINGS_ABI);
 const releaseIface = new ethers.Interface(["function payoutOf(uint256 tokenId) view returns (address)"]);
+const factoryIface = new ethers.Interface([
+  "function releasesOf(address artist) view returns (address[])",
+  "function primarySaleOf(address release) view returns (address)",
+]);
 export const WITHDRAW_CALLDATA = saleIface.encodeFunctionData("withdraw", []);
 
 function checksum(value) {
@@ -65,7 +69,9 @@ export function earningsTargets(catalog = {}, { chainId = FUJI_RELEASE_FACTORY_V
       existing.artistWallet ||= checksum(artistWallet);
       return existing;
     }
-    const entry = { releaseId, title: titles.get(releaseId) || releaseId, chainId: Number(chainId), primarySaleAddress: sale, releaseContractAddress: release, factoryAddress: checksum(factoryAddress), artistWallet: checksum(artistWallet), tokenIds: [] };
+    const edition = (catalog.editions || []).find((item) => same(item.releaseContractAddress || item.contractAddress, release));
+    const knownReleaseId = releaseId || edition?.releaseId || "";
+    const entry = { releaseId: knownReleaseId, title: titles.get(knownReleaseId) || knownReleaseId || `Release ${release.slice(0, 6)}…${release.slice(-4)}`, chainId: Number(chainId), primarySaleAddress: sale, releaseContractAddress: release, factoryAddress: checksum(factoryAddress), artistWallet: checksum(artistWallet), tokenIds: [] };
     targets.set(key, entry);
     return entry;
   };
@@ -82,6 +88,30 @@ export function earningsTargets(catalog = {}, { chainId = FUJI_RELEASE_FACTORY_V
     for (const tokenId of edition.tokenIds) if (!target.tokenIds.includes(String(tokenId))) target.tokenIds.push(String(tokenId));
   }
   return [...targets.values()].map((target) => ({ ...target, factoryLabel: factoryLabel(target.factoryAddress) }));
+}
+
+/**
+ * Release bindings read straight from every V2 factory: releasesOf(wallet) and
+ * primarySaleOf(release). Covers releases the API has not reported (or an API
+ * that predates releaseBindings). A factory that cannot be read is skipped.
+ */
+export async function discoverFactoryBindings(provider, account, deployments = FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS) {
+  const wallet = checksum(account);
+  if (!wallet) return [];
+  const bindings = [];
+  for (const deployment of deployments) {
+    const factory = checksum(deployment.factoryAddress);
+    if (!factory) continue;
+    try {
+      const releases = await call(provider, factory, factoryIface, "releasesOf", [wallet]);
+      for (const releaseAddress of releases) {
+        const releaseContractAddress = checksum(releaseAddress);
+        const primarySaleAddress = checksum(await call(provider, factory, factoryIface, "primarySaleOf", [releaseContractAddress]));
+        if (releaseContractAddress && primarySaleAddress) bindings.push({ releaseId: "", chainId: Number(deployment.chainId), releaseContractAddress, primarySaleAddress, factoryAddress: factory, artistWallet: wallet });
+      }
+    } catch { /* this factory could not be read; API bindings still apply */ }
+  }
+  return bindings;
 }
 
 async function call(provider, to, iface, name, args) {
