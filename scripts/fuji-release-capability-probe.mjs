@@ -19,6 +19,7 @@ const ALBUM_SIGNATURES = [
   "closeAlbum(bytes32)",
   "albumCreated()",
   "createEditionWithMintEnd(bytes32,bytes32,uint256,string,address,uint96,uint64)",
+  "approveExpandedRelease(bytes32,uint256,uint256)",
 ];
 
 // Fuji MusicMarketplace deployments broadcast by the (now suspended) Render cron
