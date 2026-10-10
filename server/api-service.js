@@ -156,15 +156,30 @@ export class ApiService {
     }
   }
 
-  async getIndexerHealth({ chainId: requestedChainId = null } = {}) {
+  async getIndexerHealth({ chainId: requestedChainId = null } = {}, healthContracts = null) {
     if (!this.indexerStore?.getIndexerHealth) throw new ApiError(503, "INDEXER_UNAVAILABLE", "Indexer health storage is not configured.");
     const selectedChainId = requestedChainId === null || requestedChainId === undefined || requestedChainId === "" ? null : chainId(requestedChainId);
-    const addresses = selectedChainId === null && this.indexerConfig?.chainId
-      ? this.indexerConfig.contracts.map((contract) => contract.address)
-      : selectedChainId !== null && this.indexerConfig?.chainId === selectedChainId
-        ? this.indexerConfig.contracts.map((contract) => contract.address)
-        : null;
-    return this.indexerStore.getIndexerHealth(addresses ? { chainId: selectedChainId, addresses } : { chainId: selectedChainId });
+    const scoped = Boolean(this.indexerConfig?.chainId) && (selectedChainId === null || this.indexerConfig.chainId === selectedChainId);
+    if (!scoped) return this.indexerStore.getIndexerHealth({ chainId: selectedChainId });
+    const addresses = (healthContracts || await this.getHealthContracts()).map((contract) => contract.address);
+    return this.indexerStore.getIndexerHealth({ chainId: selectedChainId, addresses });
+  }
+
+  // Static INDEXER_CONTRACTS_JSON entries plus every release clone and primary sale
+  // discovered through the release factory on the configured chain. Discovered
+  // contracts are expected exactly like static ones, so a missing or FAILED
+  // checkpoint for any of them fails readiness closed.
+  async getHealthContracts() {
+    const configured = this.indexerConfig?.contracts || [];
+    if (!this.indexerConfig?.chainId || !this.indexerStore?.listDiscoveredReleaseContracts) return configured;
+    const discovered = await this.indexerStore.listDiscoveredReleaseContracts({ chainId: this.indexerConfig.chainId });
+    return [
+      ...configured,
+      ...discovered.flatMap((row) => [
+        { address: String(row.release_contract_address).toLowerCase(), contractType: "ERC1155" },
+        ...(row.primary_sale_address ? [{ address: String(row.primary_sale_address).toLowerCase(), contractType: "PRIMARY_SALE" }] : []),
+      ]),
+    ];
   }
 
   async getOperationalHealth() {
@@ -173,9 +188,10 @@ export class ApiService {
     const contracts = { release: empty.release, primarySale: empty.primarySale };
     if (!database.ok) return { ok: false, database, indexer: { ok: false, reason: "DATABASE_UNAVAILABLE" }, contracts };
     try {
-      const checkpoints = await this.getIndexerHealth({});
+      const healthContracts = await this.getHealthContracts();
+      const checkpoints = await this.getIndexerHealth({}, healthContracts);
       const indexed = checkpoints.flatMap((checkpoint) => Array.isArray(checkpoint.contracts) && checkpoint.contracts.length ? checkpoint.contracts : [checkpoint]);
-      const reported = reportIndexedContracts({ indexed, configured: this.indexerConfig?.contracts || [] });
+      const reported = reportIndexedContracts({ indexed, configured: healthContracts });
       const checkpointHealthy = checkpoints.length > 0 && indexed.length > 0 && indexed.every((contract) => ["IDLE", "RUNNING"].includes(String(contract.status || "").toUpperCase())) && checkpoints.every((checkpoint) => checkpoint.last_successful_run_at);
       const indexer = { ok: Boolean(checkpointHealthy && reported.ok), checkpoints };
       return { ok: database.ok && indexer.ok, database, indexer, contracts: { release: reported.release, primarySale: reported.primarySale } };

@@ -256,6 +256,13 @@ export class IndexerStore {
     return rows[0] || null;
   }
 
+  // Every factory-discovered release clone and its primary sale on a chain, so
+  // health reporting covers them alongside the static INDEXER_CONTRACTS_JSON set.
+  async listDiscoveredReleaseContracts({ chainId }) {
+    const { rows } = await this.db.query("SELECT release_contract_address, primary_sale_address FROM factory_releases WHERE chain_id=$1 ORDER BY deployment_block_number ASC, release_contract_address ASC", [chainId]);
+    return rows;
+  }
+
   async applyMarketplaceEvent(event) {
     return withTransaction(this.db, async (client) => {
       const marker = await client.query(`INSERT INTO marketplace_event_projections (chain_id, marketplace_address, transaction_hash, log_index, listing_id, event_type) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING *`, [event.chainId, address(event.marketplaceAddress, "marketplaceAddress"), lower(event.transactionHash), event.logIndex, numeric(event.listingId, "listingId", { positive: true }), event.eventType]);

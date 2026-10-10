@@ -98,6 +98,13 @@ describe("indexer health contract filtering", () => {
     await new IndexerStore(db).getIndexerHealth({ chainId: 43113, addresses: [token] });
     expect(db.query).toHaveBeenCalledWith(expect.stringContaining("contract_address = ANY($2::text[])"), [43113, [token]]);
   });
+
+  it("lists factory-discovered release clones and primary sales for one chain", async () => {
+    const rows = [{ release_contract_address: token, primary_sale_address: buyer }];
+    const db = { query: vi.fn().mockResolvedValue({ rows }) };
+    await expect(new IndexerStore(db).listDiscoveredReleaseContracts({ chainId: 43113 })).resolves.toEqual(rows);
+    expect(db.query).toHaveBeenCalledWith(expect.stringMatching(/SELECT release_contract_address, primary_sale_address FROM factory_releases WHERE chain_id=\$1/), [43113]);
+  });
 });
 
 describe("ERC1155 transfer projection storage", () => {
