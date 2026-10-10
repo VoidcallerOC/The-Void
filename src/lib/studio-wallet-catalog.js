@@ -56,5 +56,6 @@ export function studioCatalogForConnectedWallet(catalog = {}, wallet = "") {
   });
   const tokens = asArray(catalog.tokens).filter((token) => keepEditionIds.has(String(token.editionId || token.edition_id || "").trim()));
   const albumSingles = catalog.albumSingles === undefined ? {} : { albumSingles: asArray(catalog.albumSingles).filter((link) => keepReleaseIds.has(String(link.album_release_id ?? link.albumReleaseId ?? "").trim())) };
-  return { ...catalog, artists, releases, editions, experiences, tokens, ...albumSingles };
+  const releaseBindings = catalog.releaseBindings === undefined ? {} : { releaseBindings: asArray(catalog.releaseBindings).filter((binding) => keepReleaseIds.has(String(binding.release_id ?? binding.releaseId ?? "").trim())) };
+  return { ...catalog, artists, releases, editions, experiences, tokens, ...albumSingles, ...releaseBindings };
 }

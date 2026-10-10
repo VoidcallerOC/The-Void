@@ -575,4 +575,19 @@ describe("Studio catalog wallet ownership", () => {
     const catalog = await instance.listCatalog({ request });
     expect(catalog.releases.map((release) => release.title)).toEqual(["Forgive & Forget"]);
   });
+
+  it("listCatalog returns the owner's release bindings from every factory so Studio can read sale balances", async () => {
+    const artistWallet = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
+    const { instance, db } = service({ authenticatedWallet: artistWallet });
+    const bindings = [
+      { release_id: "ff", chain_id: 43113, artist_wallet: artistWallet, release_contract_address: "0x1111111111111111111111111111111111111111", factory_address: "0x3e4e0d9187f6fd11bd6d792a7088d0c2de8e3ac8", primary_sale_address: "0xfb13eed6d3f1457937d845a06f33f2bc0c407cc3" },
+      { release_id: "old", chain_id: 43113, artist_wallet: artistWallet, release_contract_address: "0x3333333333333333333333333333333333333333", factory_address: "0xa5cba0f91cb0a81e0a9ce89a6722cbe4eec93505", primary_sale_address: "0x2222222222222222222222222222222222222222" },
+    ];
+    db.query.mockImplementation(async (sql) => (sql.includes("FROM release_contracts rc JOIN releases r") ? { rows: bindings } : { rows: [] }));
+    const catalog = await instance.listCatalog({ request });
+    expect(catalog.releaseBindings).toEqual(bindings);
+    const sql = db.query.mock.calls.map(([text]) => text).find((text) => text.includes("FROM release_contracts rc JOIN releases r"));
+    expect(sql).toContain("lower(ao.owner_wallet)=lower($1)");
+    expect(sql).not.toContain("factory_contract_id=$");
+  });
 });

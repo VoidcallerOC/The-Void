@@ -16,6 +16,8 @@ import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
+import { mapReleaseBindings } from "../lib/sale-earnings.js";
+import { StudioEarnings } from "./StudioEarnings.jsx";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -200,7 +202,7 @@ export function ArtistStudioPage() {
     studioFetch("/studio/catalog", { headers })
       .then((payload) => {
         if (cancelled) return;
-        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [] }, wallet.account);
+        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [], releaseBindings: mapReleaseBindings(payload?.releaseBindings) }, wallet.account);
         setOwnedStudioCatalog(catalog);
         if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
       })
@@ -715,6 +717,11 @@ export function ArtistStudioPage() {
           <h2>Add tracks</h2>
           <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Add another song. Each song is either limited or open, and you pick that when you publish it.</p>
         </button>
+        <button type="button" className={`vc-studio-action${workflow === "earnings" ? " is-primary" : ""}`} onClick={() => { setWorkflow("earnings"); setStep("earnings"); setNotice(""); }}>
+          <Eyebrow>03</Eyebrow>
+          <h2>Earnings</h2>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>See what each release has earned and withdraw it.</p>
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28 }}>
@@ -749,6 +756,10 @@ export function ArtistStudioPage() {
           <div style={{ marginTop: 6 }}>Contract {txEvidence.contractAddress} · chain {txEvidence.chainId}</div>
         </div>
       )}
+
+      {workflow === "earnings" && (canUseStudio
+        ? (ownedStudioCatalog ? <StudioEarnings catalog={ownedStudioCatalog} wallet={wallet} /> : <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Loading your catalog…</p>)
+        : <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to see earnings.</p>)}
 
       {workflow === "mint" && step === "mint" && (
         <section style={card} aria-label="Add a track">
