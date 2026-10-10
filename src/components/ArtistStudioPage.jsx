@@ -8,7 +8,11 @@ import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseAlbumState, readReleaseEdition, sendReleaseProvenanceAnchor, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
-import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure, validateSaleSupply } from "../lib/primary-sale.js";
+import { getAddress } from "ethers";
+import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure } from "../lib/primary-sale.js";
+import { SALE_DURATION_PRESETS, SALE_STATUS_LABELS, applyDurationPreset, buildSaleChange, describeSaleWindow, formatSaleInstant, nowSeconds, saleFormFromChain, saleStatus, saleWindowWarning } from "../lib/sale-editor.js";
+import { normalizeSaleTimeToUnixSeconds } from "../lib/sale-time.js";
+import { readGenesisClaimSaleGuard } from "../lib/genesis-claim.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
@@ -122,6 +126,239 @@ function initialState() {
   };
 }
 
+const notePanel = { border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 };
+const warnPanel = { border: "1px solid var(--vc-crimson)", padding: 16, marginTop: 18 };
+const mono = { fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" };
+
+function sameAddress(a, b) {
+  try { return getAddress(a) === getAddress(b); } catch { return false; }
+}
+
+function SaleTime({ seconds, emptyText }) {
+  const instant = formatSaleInstant(seconds);
+  if (!instant) return <>{emptyText}</>;
+  return <>{instant.local} your time · {instant.utc}</>;
+}
+
+function UtcHint({ value }) {
+  let seconds;
+  try { seconds = normalizeSaleTimeToUnixSeconds(value); } catch { return null; }
+  const instant = formatSaleInstant(seconds);
+  return instant ? <p style={{ ...mono, margin: "6px 0 0" }}>= {instant.utc}</p> : null;
+}
+
+function ClaimGuardNotice({ claim }) {
+  if (!claim || claim.state === "none" || claim.state === "loading") return null;
+  if (claim.state !== "active") {
+    return (
+      <div role="alert" style={warnPanel}>
+        <strong>Genesis holder claim not checked</strong>
+        <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>The Genesis holder claim for this token could not be checked{claim.message ? `: ${claim.message}` : ""}. Sale edits are blocked until it can be checked.</p>
+      </div>
+    );
+  }
+  const minimum = formatSaleInstant(claim.minimumStart);
+  return (
+    <div role="alert" style={warnPanel}>
+      <strong>Genesis holder claim is configured for this token</strong>
+      <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
+        Claim contract {claim.claimContract}. The sale cap must stay {claim.publicAllocation.toString()} (the public allocation).
+        {claim.live ? ` Claims are still open (${claim.claimedSupply.toString()} of ${claim.allocation.toString()} claimed), so the sale cannot start before ${minimum.local} your time (${minimum.utc}).` : " All holder claims are used."}
+        {" "}Edits that break these rules are blocked.
+      </p>
+    </div>
+  );
+}
+
+const PENDING_TITLES = { configure: "Put this song on sale", edit: "Update the sale", pause: "Pause the sale", unpause: "Unpause the sale" };
+
+// The live on-chain primary sale for one published token, with edit, reopen and
+// pause/unpause. VoidPrimarySale.configureSale may be called again by the
+// edition artist, so every change goes through the same path: validate with
+// the contract's rules (and the Genesis claim invariants), confirm the window
+// in plain language, simulate, then send one configureSale from the artist wallet.
+export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, defaults = {}, busy, setBusy, onNotice, onTxEvidence, onBack }) {
+  const [live, setLive] = useState({ status: "loading" });
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [errors, setErrors] = useState([]);
+  const [pending, setPending] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const target = useMemo(() => ({ ...releaseAsset, tokenId }), [releaseAsset, tokenId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const provider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+    (async () => {
+      const [sale, edition] = await Promise.all([readReleasePrimarySale(provider, target, wallet.account), readReleaseEdition(provider, target)]);
+      if (!edition?.exists) throw new Error("The published edition could not be found on Fuji.");
+      let claim;
+      try { claim = await readGenesisClaimSaleGuard(provider, target); } catch (error) { claim = { state: "unknown", message: error?.message || "" }; }
+      return { sale: sale?.configured ? sale : null, edition, claim };
+    })()
+      .then((loaded) => { if (!cancelled) setLive({ status: "ready", ...loaded }); })
+      .catch((error) => { if (!cancelled) setLive({ status: "error", message: error?.message || "The live sale could not be read from Fuji." }); });
+    return () => { cancelled = true; };
+  }, [target, wallet.account, reloadKey]);
+
+  const refresh = () => { setLive({ status: "loading" }); setReloadKey((key) => key + 1); };
+  const { sale, edition, claim } = live;
+  const status = saleStatus(sale, nowSeconds());
+  const isArtist = live.status === "ready" && sameAddress(edition.artist, wallet.account);
+  const showForm = live.status === "ready" && !pending && (editing || !sale);
+
+  const initialDraft = () => {
+    if (sale) return saleFormFromChain(sale);
+    const capped = BigInt(edition.maxSupply) !== 0n;
+    return {
+      price: defaults.price || "0.01",
+      maxSupply: String(defaults.maxSupply || "").trim() || (capped ? edition.maxSupply.toString() : ""),
+      perWalletLimit: defaults.perWalletLimit ?? "1",
+      start: defaults.start || "",
+      end: defaults.end || "",
+      paused: Boolean(defaults.paused),
+    };
+  };
+  const form = draft ?? (live.status === "ready" ? initialDraft() : null);
+  const setField = (key, value) => setDraft((prior) => ({ ...(prior ?? form), [key]: value }));
+
+  const review = (kind) => {
+    setErrors([]);
+    // Pause/unpause keeps every other on-chain value exactly, to the second.
+    const input = kind === "pause" || kind === "unpause"
+      ? { ...saleFormFromChain(sale), start: sale.startTime.toString(), end: sale.endTime.toString(), paused: kind === "pause" }
+      : form;
+    const nowSec = nowSeconds();
+    const { values, errors: found } = buildSaleChange({ form: input, sale, editionMaxSupply: edition.maxSupply, claim, nowSec });
+    if (found.length) { setErrors(found); return; }
+    setPending({ kind, values, summary: describeSaleWindow({ ...values, nowSec }), warning: saleWindowWarning({ ...values, nowSec }) });
+  };
+
+  const send = async () => {
+    const { values } = pending;
+    setBusy("sale"); onNotice(""); onTxEvidence(null);
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      if (wallet.chainId !== FUJI_RELEASE_CONFIG.chainId) throw Object.assign(new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}) before changing the sale.`), { code: "CHAIN_MISMATCH" });
+      if (!isArtist) throw new Error(`Only the edition artist wallet (${edition.artist}) can change this sale.`);
+      const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+      const data = encodeConfigureSale({ tokenId, ...values });
+      // Simulate the exact call from the artist wallet before the wallet is asked to sign.
+      await simulateReleaseSaleConfigure(publicProvider, { from: wallet.account, to: releaseAsset.primarySaleAddress, data, chainId: releaseAsset.chainId });
+      const walletProvider = wallet.getProvider?.();
+      if (!walletProvider?.request) throw Object.assign(new Error("The wallet provider is unavailable. Reconnect your wallet before changing the sale."), { code: "WALLET_PROVIDER_UNAVAILABLE" });
+      let transaction;
+      try {
+        transaction = await sendReleaseTransaction({ provider: walletProvider, receiptProvider: publicProvider, from: wallet.account, data, to: releaseAsset.primarySaleAddress });
+      } catch (error) {
+        const rejected = error?.code === "ACTION_REJECTED" || error?.code === 4001;
+        throw Object.assign(new Error(explainConfigureSaleError({ ...error, code: rejected ? error.code : "TRANSACTION_SUBMISSION_FAILED" }).message), { code: rejected ? "TRANSACTION_REJECTED" : "TRANSACTION_SUBMISSION_FAILED", cause: error, transactionHash: error?.transactionHash });
+      }
+      onNotice(`${PENDING_TITLES[pending.kind]}: confirmed. Transaction ${transaction.hash}`);
+      setPending(null); setEditing(false); setDraft(null);
+      refresh();
+    } catch (error) {
+      onNotice(explainConfigureSaleError(error).message);
+      onTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  if (live.status === "loading") return <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Reading the live sale from Fuji…</p>;
+  if (live.status === "error") {
+    return (
+      <div role="alert" style={warnPanel}>
+        <p style={{ marginTop: 0 }}>{live.message}</p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="button" style={ghostBtn} onClick={onBack}>Back</button>
+          <button type="button" style={ghostBtn} onClick={refresh}>Check again</button>
+        </div>
+      </div>
+    );
+  }
+
+  const openEdition = BigInt(edition.maxSupply) === 0n;
+  return (
+    <>
+      {sale ? (
+        <div role="status" aria-label="Live sale" style={notePanel}>
+          <strong>Live sale · {SALE_STATUS_LABELS[status]}{sale.paused ? " · Paused" : ""}</strong>
+          <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 14px", margin: "12px 0 0", color: "var(--vc-bone-dim)" }}>
+            <dt>Price</dt><dd style={{ margin: 0 }}>{formatAvax(sale.priceWei)}</dd>
+            <dt>Cap</dt><dd style={{ margin: 0 }}>{sale.maxSupply === 0n ? "No cap" : sale.maxSupply.toString()}</dd>
+            <dt>Sold</dt><dd style={{ margin: 0 }}>{sale.sold.toString()}</dd>
+            <dt>Per wallet</dt><dd style={{ margin: 0 }}>{sale.perWalletLimit === 0n ? "No limit" : sale.perWalletLimit.toString()}</dd>
+            <dt>Start</dt><dd style={{ margin: 0 }}><SaleTime seconds={sale.startTime} emptyText="As soon as it was configured" /></dd>
+            <dt>End</dt><dd style={{ margin: 0 }}><SaleTime seconds={sale.endTime} emptyText="No end time" /></dd>
+            <dt>Paused</dt><dd style={{ margin: 0 }}>{sale.paused ? "Yes" : "No"}</dd>
+          </dl>
+          {!isArtist && <p style={{ color: "var(--vc-crimson)", marginBottom: 0 }}>Only the edition artist wallet ({edition.artist}) can change this sale.</p>}
+          {!editing && !pending && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+              <button type="button" style={primaryBtn} disabled={busy !== "" || !isArtist} onClick={() => { setErrors([]); setDraft(saleFormFromChain(sale)); setEditing(true); }}>Edit sale</button>
+              <button type="button" style={ghostBtn} disabled={busy !== "" || !isArtist} onClick={() => review(sale.paused ? "unpause" : "pause")}>{sale.paused ? "Unpause sale" : "Pause sale"}</button>
+              <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This song isn't for sale yet. Fill this in to put it on sale.</p>
+      )}
+
+      <ClaimGuardNotice claim={claim} />
+
+      {showForm && (
+        <div>
+          <TextField title="Price (AVAX)" value={form.price} onChange={(value) => setField("price", value)} placeholder="0.01" />
+          <TextField title={openEdition ? "Sale cap (leave empty for no cap)" : "Sale cap"} value={form.maxSupply} onChange={(value) => setField("maxSupply", value)} placeholder={openEdition ? "No cap" : edition.maxSupply.toString()} />
+          {sale && <p style={{ ...mono, margin: "6px 0 0" }}>{sale.sold.toString()} already sold. The cap can't go below that.</p>}
+          <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => setField("perWalletLimit", value)} placeholder={openEdition ? "Leave empty for no limit" : "1"} />
+          <DayTimeField title="Sale start (your time). Leave empty to start now." value={form.start} onChange={(value) => setField("start", value)} />
+          <UtcHint value={form.start} />
+          <DayTimeField title={openEdition ? "Sale end (your time). Required." : "Sale end (your time). Leave empty if it should stay up."} value={form.end} onChange={(value) => setField("end", value)} required={openEdition} />
+          <UtcHint value={form.end} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+            <span style={mono}>Run for</span>
+            {SALE_DURATION_PRESETS.map((preset) => (
+              <button key={preset.seconds} type="button" style={ghostBtn} onClick={() => setDraft(applyDurationPreset(form, preset.seconds, nowSeconds()))}>{preset.label}</button>
+            ))}
+          </div>
+          {openEdition && <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>This song is an open edition. People can keep buying until the end time.</p>}
+          <label style={label}>
+            <input type="checkbox" checked={form.paused} onChange={(event) => setField("paused", event.target.checked)} /> Paused
+          </label>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
+            <button type="button" style={ghostBtn} onClick={() => { if (sale) { setEditing(false); setDraft(null); setErrors([]); } else onBack(); }}>{sale ? "Cancel" : "Back"}</button>
+            <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !isArtist} onClick={() => review(sale ? "edit" : "configure")}>Review sale</button>
+          </div>
+        </div>
+      )}
+
+      {errors.length > 0 && (
+        <ul role="alert" aria-label="Sale problems" style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>
+          {errors.map((message) => <li key={message}>{message}</li>)}
+        </ul>
+      )}
+
+      {pending && (
+        <div role="dialog" aria-label="Confirm sale change" style={notePanel}>
+          <strong>{PENDING_TITLES[pending.kind]}</strong>
+          <p style={{ fontSize: 18, lineHeight: 1.6 }}>{pending.summary}</p>
+          {pending.warning && <p style={{ color: "var(--vc-crimson)", fontWeight: 700 }}>{pending.warning}</p>}
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
+            Price {formatAvax(pending.values.priceWei)} · {pending.values.maxSupply === 0n ? "No cap" : `Cap ${pending.values.maxSupply.toString()}`} · {pending.values.perWalletLimit === 0n ? "No limit per wallet" : `${pending.values.perWalletLimit.toString()} per wallet`} · {pending.values.paused ? "Paused" : "Not paused"}
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => setPending(null)}>Go back</button>
+            <button type="button" style={primaryBtn} disabled={busy !== ""} onClick={send}>{busy === "sale" ? "Sending…" : "Confirm and sign"}</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Stable key for a track in the mint picker.
 
 export function ArtistStudioPage() {
@@ -148,7 +385,6 @@ export function ArtistStudioPage() {
   const albumActivated = albumSupported && albumState.created;
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
-  const [configuredSale, setConfiguredSale] = useState(null);
   // null: unknown. "AT_PUBLICATION": recorded by the publishing transaction (Factory V3).
   // "ANCHORED": recorded by the separate anchor contract. "NOT_ANCHORED": a one-time anchor is offered.
   const [onChainProvenance, setOnChainProvenance] = useState(null);
@@ -193,7 +429,6 @@ export function ArtistStudioPage() {
     const boundEdition = (catalog?.editions || []).find((item) => item.id === resumed.editionId);
     setActiveReleaseAsset(boundEdition?.contractAddress && boundEdition?.primarySaleAddress ? { chainId: Number(boundEdition.chainId), releaseContractAddress: boundEdition.contractAddress, primarySaleAddress: boundEdition.primarySaleAddress, tokenId: resumed.tokenId } : null);
     setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined).map(([key, value]) => [key, key === "priceWei" ? weiToAvax(value) : value])) }));
-    setConfiguredSale(null);
     setWorkflow("catalog");
     setStep("sale");
     setNotice(`${resumed.title} is loaded from the published catalog. Check the on-chain primary sale state below.`);
@@ -250,15 +485,6 @@ export function ArtistStudioPage() {
     return () => { cancelled = true; };
   }, [albumReleaseContract, form.releaseType]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!canUseStudio || step !== "sale" || !publishedTokenId || !activeReleaseAsset?.primarySaleAddress) return undefined;
-    const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
-    readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account)
-      .then((sale) => { if (!cancelled) setConfiguredSale(sale); })
-      .catch(() => { if (!cancelled) setConfiguredSale(null); });
-    return () => { cancelled = true; };
-  }, [activeReleaseAsset, canUseStudio, publishedTokenId, step, wallet, wallet.account]);
 
 
 
@@ -534,64 +760,6 @@ export function ArtistStudioPage() {
       setNotice(`Provenance root recorded on-chain. Transaction confirmed: ${transaction.hash}`);
     } catch (error) {
       setNotice(error.message);
-      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const configureSale = async () => {
-    setBusy("sale"); setTxEvidence(null);
-    setNotice("");
-    try {
-      const sale = activeReleaseAsset?.primarySaleAddress;
-      if (!sale || !activeReleaseAsset?.releaseContractAddress || !activeReleaseAsset?.chainId) throw new Error("This release has no verified dedicated primary sale bound to its V2 Factory deployment. Shared legacy sales are disabled.");
-      if (!publishedTokenId) throw new Error("Publish the release before setting up the sale.");
-      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
-      if (wallet.chainId !== FUJI_RELEASE_CONFIG.chainId) throw Object.assign(new Error(`Switch your wallet to ${FUJI_RELEASE_CONFIG.network} (chain ${FUJI_RELEASE_CONFIG.chainId}) before configuring the sale.`), { code: "CHAIN_MISMATCH" });
-      // All reads and the exact preflight use the public Fuji RPC. The wallet
-      // provider is intentionally acquired only after preflight succeeds, for
-      // the user-confirmed transaction submission below.
-      const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
-      const edition = await readReleaseEdition(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId });
-      if (!edition?.exists) throw new Error("The published edition could not be found on Fuji. Refresh the edition before configuring its sale.");
-      const existingSale = await readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account);
-      if (existingSale?.configured) {
-        setConfiguredSale(existingSale);
-        setNotice("This release already has a primary sale configured. No transaction was submitted.");
-        return;
-      }
-      const openEdition = BigInt(edition.maxSupply) === 0n;
-      const rawSaleSupply = String(form.saleSupply ?? "").trim();
-      const requestedSaleSupply = rawSaleSupply === "" ? (openEdition ? "0" : (form.quantity || edition.maxSupply)) : rawSaleSupply;
-      const saleSupply = validateSaleSupply(requestedSaleSupply, edition.maxSupply);
-      if (openEdition && !String(form.saleEnd ?? "").trim()) {
-        throw new Error("An unlimited edition must have a sale end time. That end time closes the edition.");
-      }
-      const perWalletLimit = String(form.perWalletLimit ?? "").trim() === "" && openEdition ? "0" : form.perWalletLimit;
-      const data = encodeConfigureSale({
-        tokenId: publishedTokenId,
-        priceWei: avaxToWei(form.priceWei),
-        maxSupply: saleSupply,
-        perWalletLimit,
-        startTime: form.saleStart,
-        endTime: form.saleEnd,
-        paused: form.salePaused,
-        openEdition,
-      });
-      await simulateReleaseSaleConfigure(publicProvider, { from: wallet.account, to: sale, data, chainId: activeReleaseAsset.chainId });
-      const walletProvider = wallet.getProvider?.();
-      if (!walletProvider?.request) throw Object.assign(new Error("The wallet provider is unavailable. Reconnect your wallet before configuring the sale."), { code: "WALLET_PROVIDER_UNAVAILABLE" });
-      let transaction;
-      try {
-        transaction = await sendReleaseTransaction({ provider: walletProvider, receiptProvider: publicProvider, from: wallet.account, data, to: sale });
-      } catch (error) {
-        throw Object.assign(new Error(explainConfigureSaleError({ ...error, code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? error.code : "TRANSACTION_SUBMISSION_FAILED" }).message), { code: error?.code === "ACTION_REJECTED" || error?.code === 4001 ? "TRANSACTION_REJECTED" : "TRANSACTION_SUBMISSION_FAILED", cause: error, transactionHash: error?.transactionHash });
-      }
-      setNotice(`Sale configured at ${form.priceWei} AVAX. Transaction confirmed: ${transaction.hash}`);
-      setConfiguredSale(await readReleasePrimarySale(publicProvider, { ...activeReleaseAsset, tokenId: publishedTokenId }, wallet.account));
-    } catch (error) {
-      setNotice(explainConfigureSaleError(error).message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
     } finally {
       setBusy("");
@@ -1136,37 +1304,19 @@ export function ArtistStudioPage() {
                   </button>
                 </div>
               )}
-              {configuredSale?.configured ? (
-                <div role="status" style={{ border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 }}>
-                  <strong>Primary sale configured</strong>
-                  <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
-                    Price {formatAvax(configuredSale.priceWei)} · {configuredSale.maxSupply === 0n ? "Open until it stops" : `${configuredSale.remaining.toString()} left of ${configuredSale.maxSupply.toString()}`} · {configuredSale.perWalletLimit === 0n ? "No limit per person" : `${configuredSale.perWalletLimit.toString()} per person`}{configuredSale.paused ? " · Sale paused" : ""}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <p style={{ color: "var(--vc-crimson)", lineHeight: 1.7 }}>This song isn't for sale yet. Fill this in to put it on sale.</p>
-                  <TextField title="Price (AVAX)" value={form.priceWei} onChange={(value) => set("priceWei", value)} placeholder="0.01" />
-                  <TextField title="Stop the sale early after this many?" value={form.saleSupply} onChange={(value) => set("saleSupply", value)} placeholder={isUnlimitedQuantity(form.quantity) ? "Leave empty to keep selling until the end" : (form.quantity || "Same as the copy limit")} />
-                  <TextField title="Most one person can buy" value={form.perWalletLimit} onChange={(value) => set("perWalletLimit", value)} placeholder="Leave empty for no limit" />
-                  <DayTimeField title="When can people start buying? Leave empty to start now." value={form.saleStart} onChange={(value) => set("saleStart", value)} />
-                  <DayTimeField title={isUnlimitedQuantity(form.quantity) ? "When does it stop? Required." : "When does it stop? Leave empty if it should stay up."} value={form.saleEnd} onChange={(value) => set("saleEnd", value)} required={isUnlimitedQuantity(form.quantity)} />
-                  {isUnlimitedQuantity(form.quantity) && (
-                    <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
-                      This song is open. People can keep buying until the stop time. After that, it ends. There is no button to make more later.
-                    </p>
-                  )}
-                  <label style={label}>
-                    <input type="checkbox" checked={form.salePaused} onChange={(event) => set("salePaused", event.target.checked)} /> Paused
-                  </label>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-                    <button type="button" style={ghostBtn} onClick={() => setStep("publish")}>Back</button>
-                    <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !publishedTokenId} onClick={configureSale}>
-                      {busy === "sale" ? "Configuring…" : "Configure Primary Sale"}
-                    </button>
-                  </div>
-                </>
-              )}
+              <StudioSalePanel
+                key={`${activeReleaseAsset.primarySaleAddress}:${publishedTokenId}`}
+                releaseAsset={activeReleaseAsset}
+                tokenId={publishedTokenId}
+                wallet={wallet}
+                canUseStudio={canUseStudio}
+                defaults={{ price: form.priceWei, maxSupply: form.saleSupply, perWalletLimit: form.perWalletLimit, start: form.saleStart, end: form.saleEnd, paused: form.salePaused }}
+                busy={busy}
+                setBusy={setBusy}
+                onNotice={setNotice}
+                onTxEvidence={setTxEvidence}
+                onBack={() => setStep("publish")}
+              />
             </>
           )}
         </section>
