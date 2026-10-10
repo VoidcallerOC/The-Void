@@ -155,6 +155,9 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       updatedAt: row.updated_at || row.updatedAt || null,
       artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
       publicationArchitecture: meta.publicationArchitecture || row.publication_architecture || "",
+      // Persisted Studio release type (server releaseType()): only EP or ALBUM.
+      // Legacy rows have no releaseType and stay EP.
+      releaseType: String(meta.releaseType ?? "").trim().toUpperCase() === "ALBUM" ? "ALBUM" : "EP",
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
     });

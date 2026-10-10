@@ -27,6 +27,16 @@ export function editionHasGatedTrack(catalog, editionId) {
   return (catalog?.experiences || []).some((experience) => experience?.editionId === editionId && experience?.media?.protected === true);
 }
 
+// The release contract a release's own catalog editions were created on. The
+// server creates every edition of a Factory-bound release on its bound clone,
+// so after a reload this is the persisted binding even before any provisioning
+// status has been read in this session.
+export function boundReleaseContract(catalog, releaseId, chainId) {
+  if (!releaseId) return "";
+  const edition = (catalog?.editions || []).find((item) => item?.releaseId === releaseId && (item.releaseContractAddress || item.contractAddress) && (chainId == null || Number(item.chainId) === Number(chainId)));
+  return edition ? edition.releaseContractAddress || edition.contractAddress : "";
+}
+
 // Resume an artist's OWN release (from GET /studio/catalog) for publishing.
 // Unlike selectReleaseTemplate, it keeps the release and edition ids, so
 // publishing updates that release instead of creating a new, empty one, and it
@@ -49,6 +59,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
       title: release.title || "",
       form: {
         releaseTitle: release.title || "",
+        releaseType: release.releaseType === "ALBUM" ? "ALBUM" : "EP",
         releaseDescription: release.description || "",
         quantity: quantityFromSupply(edition?.supply) ?? "",
         priceWei: edition?.priceWei ? String(edition.priceWei) : undefined,
@@ -65,6 +76,7 @@ export function resumeOwnedRelease(catalog, releaseId) {
     gated: editionHasGatedTrack(catalog, edition?.id),
     form: {
       releaseTitle: release.title || "",
+      releaseType: release.releaseType === "ALBUM" ? "ALBUM" : "EP",
       releaseDescription: release.description || "",
       releaseArtwork: release.artwork && !release.artwork.startsWith("/assets/") ? release.artwork : "",
       trackTitle: edition?.title || release.title || "",
