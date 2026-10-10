@@ -151,3 +151,31 @@ describe("indexer worker configuration", () => {
     expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: "0x0000000000000000000000000000000000000001", contractType: "MARKETPLACE", startBlock: 0 }]) })).toThrow(/placeholder contract address/);
   });
 });
+
+describe("configured marketplace bootstrap", () => {
+  const marketplace = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const sale = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  it("registers only configured MARKETPLACE contracts once before the first sync", async () => {
+    const indexerConfig = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([
+      { chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 10 },
+      { chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: contract, startBlock: 10 },
+      { chainId: 43113, address: marketplace.toUpperCase().replace("0X", "0x"), contractType: "MARKETPLACE", startBlock: 10 },
+    ]) });
+    const order = [];
+    const checkpoints = new Map();
+    const durableStore = store({
+      registerMarketplaceContract: vi.fn(async (value) => { order.push("register"); return value.address === marketplace ? { id: "marketplace-contract" } : null; }),
+      getCheckpoint: vi.fn(async ({ address }) => { order.push(`sync:${address}`); return checkpoints.get(address) || null; }),
+      setCheckpoint: vi.fn(async (value) => { checkpoints.set(value.address, value); return value; }),
+    });
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(0) };
+    const { worker } = createProductionIndexerWorker({ serverConfig: {}, indexerConfig, pool: {}, rpc, store: durableStore, logger });
+    await worker.runOnce();
+    await worker.runOnce();
+    expect(durableStore.registerMarketplaceContract).toHaveBeenCalledTimes(1);
+    expect(durableStore.registerMarketplaceContract).toHaveBeenCalledWith({ chainId: 43113, address: marketplace });
+    expect(order[0]).toBe("register");
+    expect(order.filter((step) => step.startsWith("sync:"))).toHaveLength(6);
+  });
+});

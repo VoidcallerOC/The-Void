@@ -208,6 +208,14 @@ export class IndexerStore {
     return rows;
   }
 
+  // A marketplace configured in INDEXER_CONTRACTS_JSON. Inserts the contracts row that
+  // applyMarketplaceEvent requires; an existing row for the address is never modified.
+  async registerMarketplaceContract({ chainId, address: marketplaceAddress, name = "ReleaseMarketplaceV3" }) {
+    const marketplace = address(marketplaceAddress, "marketplaceAddress");
+    const { rows } = await this.db.query("INSERT INTO contracts (chain_id, chain_key, address, contract_type, name, metadata) VALUES ($1, $2::text, $3, 'MARKETPLACE', $4, $5) ON CONFLICT (chain_id, address) DO NOTHING RETURNING *", [chainId, String(chainId), marketplace, name, { source: "INDEXER_CONFIG" }]);
+    return rows[0] || null;
+  }
+
   async applyMarketplaceEvent(event) {
     return withTransaction(this.db, async (client) => {
       const marker = await client.query(`INSERT INTO marketplace_event_projections (chain_id, marketplace_address, transaction_hash, log_index, listing_id, event_type) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING *`, [event.chainId, address(event.marketplaceAddress, "marketplaceAddress"), lower(event.transactionHash), event.logIndex, numeric(event.listingId, "listingId", { positive: true }), event.eventType]);
