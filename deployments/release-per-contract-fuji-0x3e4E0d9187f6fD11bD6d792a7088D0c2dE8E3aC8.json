@@ -1,0 +1,41 @@
+{
+  "network": "fuji",
+  "chainId": 43113,
+  "architecture": "release-per-contract",
+  "factory": {
+    "name": "VoidReleaseFactoryV2",
+    "address": "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8",
+    "deploymentTransaction": "0x9c0e56db0437e97d6d8f8118c3316a60b1d3b1c7bf2c90683faa0dd75a35463a",
+    "deploymentBlock": 59269207,
+    "deployer": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+    "implementationAddress": "0x45c3FFBb3C0Db3a8C87453d4612c9B3b6392E452",
+    "implementationVersion": 2,
+    "implementationAlbumCapable": true,
+    "sourceCommit": "3861d74835b3ed4c649b199a6fdee31b76ff492f",
+    "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "platformFeeBps": 250
+  },
+  "marketplace": {
+    "name": "ReleaseMarketplaceV3",
+    "address": "0xa464edb22C4959943334DB07001e3ba63989C898",
+    "deploymentTransaction": "0xc17d1858c3e5e3e6c65331a52092aec6f7a3cab3f3d565caddc704eee4df311d",
+    "deploymentBlock": 59269210,
+    "chainId": 43113,
+    "factoryAddress": "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8",
+    "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "feeBps": 250
+  },
+  "verification": {
+    "workflowRunId": 38054831224,
+    "dryRunWorkflowRunId": 38052768313,
+    "factoryReceiptStatus": 1,
+    "marketplaceReceiptStatus": 1,
+    "implementationAlbumSelectorsVerifiedOnChain": true,
+    "factoryImplementationMatches": true,
+    "marketplaceRegistryIsFactory": true,
+    "marketplacePlatformFeeBps": 250,
+    "implementationDefaultAlbumMaxTracks": 13,
+    "verifiedAt": "2026-10-10T13:20:00Z",
+    "note": "Recorded from the broadcast job log (FACTORY_MINED, MARKETPLACE_MINED, RECORD) and independent eth_getTransactionReceipt / eth_call reads. Masked recipient and fee values in the log are the locked treasury and 250 bps that the deploy script enforces."
+  }
+}

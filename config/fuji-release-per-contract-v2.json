@@ -3,9 +3,11 @@
   "networkName": "Avalanche Fuji",
   "chainId": 43113,
   "chainHexId": "0xa869",
-  "factoryAddress": "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
-  "implementationAddress": "0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4",
-  "marketplaceAddress": "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
+  "factoryAddress": "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8",
+  "implementationAddress": "0x45c3FFBb3C0Db3a8C87453d4612c9B3b6392E452",
+  "marketplaceAddress": "0xa464edb22C4959943334DB07001e3ba63989C898",
+  "factoryDeploymentBlock": 59269207,
+  "marketplaceDeploymentBlock": 59269210,
   "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   "marketplaceFeeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
   "primaryFeeBps": 250,
@@ -15,5 +17,19 @@
   "source": "VoidReleaseFactoryV2",
   "releaseVersion": 2,
   "provisioningEnabled": true,
-  "deploymentAuthorized": true
+  "deploymentAuthorized": true,
+  "albumCapable": true,
+  "record": "deployments/release-per-contract-fuji-0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8.json",
+  "historicalDeployments": [
+    {
+      "factoryAddress": "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
+      "implementationAddress": "0xAe3257a441C5119Ee496330Dd93Deb06ab0eB8b4",
+      "marketplaceAddress": "0x42B740aA92A6F48380F6D97AD91e332a7921a744",
+      "factoryDeploymentBlock": 59082607,
+      "marketplaceDeploymentBlock": 59082610,
+      "releaseVersion": 2,
+      "albumCapable": false,
+      "record": "deployments/release-per-contract-fuji.json"
+    }
+  ]
 }

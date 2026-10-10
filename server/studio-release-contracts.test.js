@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArtistStudioService, deriveStudioReleaseKey } from "./studio-service.js";
+import { ArtistStudioService, deriveStudioApplicationReleaseId, deriveStudioReleaseKey } from "./studio-service.js";
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const RELEASE = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -53,3 +53,48 @@ describe("Studio release contract binding", () => {
     expect(deriveStudioReleaseKey({ releaseId: "release-1", artistWallet: OWNER, factoryAddress, chainId: 43114 })).not.toBe(first);
   });
 });
+
+describe("provisioning across factory deployments", () => {
+  const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
+  const NEW_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
+  const request = { headers: {} };
+  function provisioningHarness({ existingRequest = null, releaseKey } = {}) {
+    const release = { id: "release-p", artist_id: "artist-1", slug: "p", title: "Prepared Release", status: "DRAFT", release_metadata: { applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), ...(releaseKey ? { releaseKey } : {}) } };
+    const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [release] } : String(sql).startsWith("UPDATE releases SET release_metadata") ? { rows: [{ id: release.id }] } : { rows: [] })) };
+    const repo = repository();
+    repo.getReleaseProvisioningRequest = vi.fn(async () => existingRequest);
+    repo.createReleaseProvisioningRequest = vi.fn(async (input) => ({ request_id: "req-1", state: "PREPARED", ...input }));
+    const instance = new ArtistStudioService({ db, repository: repo, authenticator: vi.fn().mockResolvedValue({ wallet: OWNER }), logger: { error: vi.fn() } });
+    return { instance, repo, db };
+  }
+
+  it("prepares a new release on the active album-capable factory", async () => {
+    const { instance, repo } = provisioningHarness();
+    const prepared = await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" });
+    expect(prepared.factoryAddress).toBe(NEW_FACTORY);
+    expect(prepared.releaseKey).toBe(deriveStudioReleaseKey({ releaseId: "release-p", artistWallet: OWNER, factoryAddress: NEW_FACTORY }));
+    expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ factoryAddress: NEW_FACTORY }));
+  });
+
+  it("keeps a release already provisioned on the historical factory on that factory and key", async () => {
+    const oldKey = deriveStudioReleaseKey({ releaseId: "release-p", artistWallet: OWNER, factoryAddress: OLD_FACTORY });
+    const { instance, repo } = provisioningHarness({ releaseKey: oldKey, existingRequest: { request_id: "req-old", state: "CONFIRMED", factory_address: OLD_FACTORY.toLowerCase(), release_key: oldKey, artist_wallet: OWNER } });
+    const prepared = await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" });
+    expect(prepared).toMatchObject({ factoryAddress: OLD_FACTORY, releaseKey: oldKey });
+    expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ factoryAddress: OLD_FACTORY, releaseKey: oldKey }));
+  });
+
+  it("reads provisioning status from the recorded factory's deployments", async () => {
+    const oldKey = deriveStudioReleaseKey({ releaseId: "release-p", artistWallet: OWNER, factoryAddress: OLD_FACTORY });
+    const { instance, db } = provisioningHarness({ releaseKey: oldKey, existingRequest: { request_id: "req-old", state: "CONFIRMED", factory_address: OLD_FACTORY.toLowerCase(), release_key: oldKey, artist_wallet: OWNER } });
+    await expect(instance.releaseProvisioningStatus({ request, releaseId: "release-p" })).resolves.toMatchObject({ state: "CONFIRMED" });
+    const lookup = db.query.mock.calls.find(([sql]) => String(sql).includes("FROM factory_releases"));
+    expect(lookup[1][1]).toBe(OLD_FACTORY);
+  });
+
+  it("refuses a provisioning request recorded on a factory that is not a known deployment", async () => {
+    const { instance } = provisioningHarness({ existingRequest: { request_id: "req-x", state: "PREPARED", factory_address: "0x8291a4f1936c1c5c6d8917b0966c80757cd5c265", release_key: KEY, artist_wallet: OWNER } });
+    await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 409, code: "PROVISIONING_FACTORY_UNKNOWN" });
+  });
+});
+

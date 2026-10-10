@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2 } from "../config/release-network.js";
+import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForFactory } from "../config/release-network.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
@@ -160,6 +160,17 @@ function provisioningFactoryConfig() {
   return { ...config, factoryAddress: ethers.getAddress(address) };
 }
 
+// A release that already has a provisioning request stays on the factory recorded there, so
+// releases prepared on a historical factory keep their key, clone and binding. New releases use
+// the active (album-capable) factory.
+function provisioningFactoryFor(provisioningRequest) {
+  const active = provisioningFactoryConfig();
+  if (!provisioningRequest?.factory_address) return active;
+  const recorded = releaseDeploymentForFactory(provisioningRequest.factory_address);
+  if (!recorded || Number(recorded.chainId) !== Number(active.chainId)) throw new ApiError(409, "PROVISIONING_FACTORY_UNKNOWN", "This release was prepared on a factory that is not a recorded release deployment.");
+  return { ...active, factoryAddress: ethers.getAddress(recorded.factoryAddress), albumCapable: recorded.albumCapable };
+}
+
 function requiresFactoryRelease(release) {
   return String(release?.release_metadata?.publicationArchitecture || "").trim().toLowerCase() === "release-per-contract";
 }
@@ -296,9 +307,9 @@ export class ArtistStudioService {
     const selectedChainId = chainId(input.chainId, "chainId");
     const selectedReleaseAddress = contractAddress(input.releaseContractAddress, "releaseContractAddress");
     const selectedReleaseKey = releaseKey(input.releaseKey);
-    const factoryConfig = provisioningFactoryConfig();
-    if (selectedChainId !== Number(factoryConfig.chainId) || String(release.release_metadata?.releaseKey || "").toLowerCase() !== selectedReleaseKey) throw new ApiError(409, "RELEASE_PROVISIONING_MISMATCH", "The release key or chain does not match this application's prepared provisioning request.");
+    if (selectedChainId !== Number(provisioningFactoryConfig().chainId) || String(release.release_metadata?.releaseKey || "").toLowerCase() !== selectedReleaseKey) throw new ApiError(409, "RELEASE_PROVISIONING_MISMATCH", "The release key or chain does not match this application's prepared provisioning request.");
     const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: selectedChainId });
+    const factoryConfig = provisioningFactoryFor(provisioning);
     if (!provisioning || String(provisioning.release_key).toLowerCase() !== selectedReleaseKey || String(provisioning.artist_wallet).toLowerCase() !== identity.wallet.toLowerCase()) throw new ApiError(409, "PROVISIONING_REQUEST_REQUIRED", "This release must have a durable artist provisioning request before it can be bound.");
     const indexed = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_contract_address)=lower($3) AND lower(release_key)=lower($4) AND lower(artist_wallet)=lower($5) LIMIT 1", [selectedChainId, factoryConfig.factoryAddress, selectedReleaseAddress, selectedReleaseKey, identity.wallet]);
     const deployment = indexed.rows[0];
@@ -321,12 +332,12 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may provision a blockchain release. Verified managers cannot create releases on-chain.");
     if (release.status !== "DRAFT") throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "Only a draft release can be provisioned.");
-    const factory = provisioningFactoryConfig();
+    const existingRequest = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: provisioningFactoryConfig().chainId });
+    const factory = provisioningFactoryFor(existingRequest);
     const applicationReleaseId = deriveStudioApplicationReleaseId(release.id);
     if (String(release.release_metadata?.applicationReleaseId || "").toLowerCase() !== applicationReleaseId) throw new ApiError(409, "APPLICATION_RELEASE_ID_MISMATCH", "The stored application release digest does not match this release.");
     const expectedKey = deriveStudioReleaseKey({ releaseId: release.id, applicationReleaseId, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, chainId: factory.chainId });
     const persistedKey = String(release.release_metadata?.releaseKey || "").toLowerCase();
-    const existingRequest = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: factory.chainId });
     if (existingRequest && persistedKey !== expectedKey) throw new ApiError(409, "RELEASE_KEY_MISMATCH", "The persisted release key no longer matches its durable provisioning request.");
     if (!existingRequest && persistedKey !== expectedKey) {
       const updated = await this.db.query("UPDATE releases SET release_metadata=jsonb_set(COALESCE(release_metadata,'{}'::jsonb),'{releaseKey}',to_jsonb($2::text),true), updated_at=now() WHERE id=$1 AND status='DRAFT' RETURNING id", [release.id, expectedKey]);
@@ -343,11 +354,11 @@ export class ArtistStudioService {
 
   async recordReleaseProvisioningSubmission({ request, releaseId, input = {} }) {
     const identity = await this.identity(request);
-    const factory = provisioningFactoryConfig();
     const id = requiredText(releaseId, "releaseId");
     const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
     if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may submit this release deployment.");
-    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId });
+    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: provisioningFactoryConfig().chainId });
+    const factory = provisioningFactoryFor(provisioning);
     if (!provisioning || String(provisioning.artist_wallet).toLowerCase() !== identity.wallet.toLowerCase() || String(provisioning.factory_address).toLowerCase() !== factory.factoryAddress.toLowerCase()) throw new ApiError(409, "PROVISIONING_REQUEST_REQUIRED", "Prepare this exact release deployment in Studio before submitting its transaction.");
     const transactionHash = requiredText(input.transactionHash, "transactionHash", { max: 66 }).toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The release creation transaction hash is invalid.");
@@ -369,12 +380,12 @@ export class ArtistStudioService {
 
   async releaseProvisioningStatus({ request, releaseId }) {
     const identity = await this.identity(request);
-    const factory = provisioningFactoryConfig();
     const id = requiredText(releaseId, "releaseId");
     const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
     if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may view this provisioning request.");
-    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId });
+    const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: provisioningFactoryConfig().chainId });
     if (!provisioning) return { state: "NOT_STARTED", releaseId: id };
+    const factory = provisioningFactoryFor(provisioning);
     const { rows: indexed } = await this.db.query("SELECT * FROM factory_releases WHERE chain_id=$1 AND lower(factory_address)=lower($2) AND lower(release_key)=lower($3) AND lower(artist_wallet)=lower($4) LIMIT 1", [factory.chainId, factory.factoryAddress, provisioning.release_key, identity.wallet]);
     const deployment = indexed[0];
     if (!deployment) return { requestId: provisioning.request_id, state: provisioning.state, releaseId: id, releaseKey: provisioning.release_key, transactionHash: provisioning.transaction_hash || null };

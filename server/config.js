@@ -1,6 +1,7 @@
 import process from "node:process";
 import { resolve } from "node:path";
 import { id } from "ethers";
+import { FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS } from "../config/release-network.js";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 
@@ -149,6 +150,29 @@ function parseIndexerContracts(value, { chainId }) {
   return Object.freeze(contracts.map((contract) => contract.contractType === "ERC1155" ? Object.freeze({ ...contract, skipMintOperators: saleAddresses }) : contract));
 }
 
+// The committed deployment manifest (config/fuji-release-per-contract-v2.json) is authoritative for
+// release factories and their marketplaces. Each deployment on the indexed chain with a recorded
+// deployment block is indexed even when INDEXER_CONTRACTS_JSON does not list it; an address the env
+// already lists keeps its env entry. Set INDEXER_INCLUDE_RELEASE_MANIFEST=false to opt out.
+export function withManifestReleaseDeployments(contracts, { chainId, deployments = FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS } = {}) {
+  const known = new Set(contracts.map((contract) => contract.address));
+  const added = [];
+  for (const deployment of deployments) {
+    if (Number(deployment.chainId) !== chainId) continue;
+    const entries = [
+      { address: deployment.factoryAddress, contractType: "RELEASE_FACTORY", startBlock: deployment.factoryDeploymentBlock, platformFeeBps: null, eventTopics: RELEASE_FACTORY_EVENT_TOPICS },
+      { address: deployment.marketplaceAddress, contractType: "MARKETPLACE", startBlock: deployment.marketplaceDeploymentBlock, platformFeeBps: 250, eventTopics: undefined },
+    ];
+    for (const entry of entries) {
+      const address = evmAddress(entry.address, `${entry.contractType} manifest address`);
+      if (known.has(address) || !Number.isSafeInteger(entry.startBlock) || entry.startBlock < 0) continue;
+      known.add(address);
+      added.push(Object.freeze({ chainId, address, contractType: entry.contractType, startBlock: entry.startBlock, platformFeeBps: entry.platformFeeBps, tokenAddress: null, reconcileListings: true, eventTopics: entry.eventTopics }));
+    }
+  }
+  return added.length ? Object.freeze([...contracts, ...added]) : contracts;
+}
+
 export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {
   const databaseUrl = String(env.DATABASE_URL || env.POSTGRES_URL || "").trim();
   if (!databaseUrl && !allowMissingDatabase) throw new ConfigurationError("DATABASE_URL is required for the persistence layer.");
@@ -214,7 +238,9 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
   return Object.freeze({
     chainId,
     rpcUrl: normalizedUrl(rpcUrlValue, "INDEXER_RPC_URL").toString(),
-    contracts: parseIndexerContracts(contractsValue, { chainId }),
+    contracts: String(env.INDEXER_INCLUDE_RELEASE_MANIFEST ?? "true").trim().toLowerCase() === "false"
+      ? parseIndexerContracts(contractsValue, { chainId })
+      : withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }),
     confirmations: boundedPositiveInteger(env.INDEXER_CONFIRMATIONS, 12, "INDEXER_CONFIRMATIONS", { min: 1, max: 500 }),
     chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 500, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),
     pollIntervalMs: boundedPositiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15_000, "INDEXER_POLL_INTERVAL_MS", { min: 1_000, max: 300_000 }),
