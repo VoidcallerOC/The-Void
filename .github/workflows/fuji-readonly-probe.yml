@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - scripts/fuji-release-capability-probe.mjs
+      - scripts/fuji-provisioning-preflight.mjs
       - scripts/fuji-marketplace-reconciliation-probe.mjs
       - scripts/data/marketplace-fingerprints.json
       - scripts/fuji-deployer-audit.mjs
@@ -32,6 +33,22 @@ permissions:
   contents: read
 
 jobs:
+  provisioning-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Preflight the pending Studio provisioning request (eth_call/estimateGas only; nothing signed or broadcast)
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/fuji-provisioning-preflight.mjs | tee fuji-provisioning-preflight.json
+
   probe:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
