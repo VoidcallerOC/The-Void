@@ -43,10 +43,17 @@ const PRODUCT_TYPES = Object.freeze({
   DIGITAL_DOWNLOAD: "DOWNLOAD", ALTERNATE_ARTWORK: "ARTWORK", COLLECTOR_ARCHIVE: "DOWNLOAD",
   MEMBERSHIP: "TICKET", VIP_BACKSTAGE: "VIP_ACCESS", PHYSICAL_DIGITAL: "PHYSICAL_REDEMPTION",
 });
+// SINGLE: a standalone release with exactly one published edition on its own contract.
+// EP: a standalone multi-track release. ALBUM: a release contract with album semantics.
+// Releases created before release types existed carry no type and remain EP.
+const RELEASE_TYPES = Object.freeze(["SINGLE", "EP", "ALBUM"]);
 function releaseType(value) {
   const type = String(value ?? "EP").trim().toUpperCase();
-  if (!["EP", "ALBUM"].includes(type)) throw new ApiError(400, "INVALID_RELEASE_TYPE", "Release type must be EP or ALBUM.");
+  if (!RELEASE_TYPES.includes(type)) throw new ApiError(400, "INVALID_RELEASE_TYPE", "Release type must be SINGLE, EP or ALBUM.");
   return type;
+}
+function storedReleaseType(release) {
+  return releaseType(release?.release_metadata?.releaseType);
 }
 
 function normalizedSlug(value, field) {
@@ -251,17 +258,18 @@ export class ArtistStudioService {
   async listCatalog({ request } = {}) {
     const identity = await this.identity(request);
     const owner = identity.wallet;
-    const [artists, releases, editions, experiences] = await Promise.all([
+    const [artists, releases, editions, experiences, albumSingles] = await Promise.all([
       this.db.query("SELECT a.id, a.slug, a.display_name, a.status, ao.owner_wallet, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY a.display_name LIMIT 100", [owner]),
       this.db.query("SELECT r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY r.created_at DESC LIMIT 500", [owner]),
       // token_id only for PUBLISHED editions: a draft's token does not exist on-chain yet.
       this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT s.album_release_id, s.single_release_id, s.single_edition_id, s.track_position FROM release_album_singles s JOIN releases r ON r.id=s.album_release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY s.album_release_id, s.track_position LIMIT 1000", [owner]),
     ]);
     // artist_owners already scopes the rows to this wallet. The admin/deployer
     // wallet still drops Voidcaller artist profiles so those releases stay with
     // the platform artist wallet.
-    return studioCatalogForConnectedWallet({ artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows }, owner);
+    return studioCatalogForConnectedWallet({ artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows, albumSingles: albumSingles.rows }, owner);
   }
   async ownedArtist({ artistId, request, lock = false }) {
     const identity = await this.identity(request);
@@ -474,6 +482,7 @@ export class ArtistStudioService {
     const edition = editionResult.rows[0];
     if (!edition && release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
+    await this.assertSingleOpenForEdition(release, edition.id);
     const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
     const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
     const previewAudio = await this.vettedPreviewAudio({ artistId: release.artist_id, uri: input.previewAudio ?? edition.application_metadata?.previewAudio });
@@ -508,6 +517,7 @@ export class ArtistStudioService {
     const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY CASE WHEN e.status IN ('DRAFT','REVIEW') THEN 0 ELSE 1 END, e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
+    await this.assertSingleOpenForEdition(release, edition.id);
     const provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
     const currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
     const editionOpen = edition.status === "DRAFT" || edition.status === "REVIEW";
@@ -655,11 +665,59 @@ export class ArtistStudioService {
     if (status === "ARCHIVED" && await this.collectorsCanStillBuy(release)) {
       throw new ApiError(409, "MINTABLE_RELEASE_LOCKED", "A published release collectors can still buy stays on the site.");
     }
-    const metadata = input.metadata === undefined ? { ...(release.release_metadata || {}), ...(input.releaseType === undefined ? {} : { releaseType: releaseType(input.releaseType) }) } : jsonObject(input.metadata, "release.metadata");
+    const metadata = input.metadata === undefined ? { ...(release.release_metadata || {}) } : jsonObject(input.metadata, "release.metadata");
+    const requestedType = input.releaseType ?? (input.metadata === undefined ? undefined : metadata.releaseType);
+    if (requestedType !== undefined) metadata.releaseType = releaseType(requestedType);
+    else if (release.release_metadata?.releaseType !== undefined) metadata.releaseType = release.release_metadata.releaseType;
+    // Published metadata embeds the release type, so it is fixed once any edition is published.
+    if (releaseType(metadata.releaseType) !== storedReleaseType(release) && await this.hasPublishedEdition(release.id)) {
+      throw new ApiError(409, "RELEASE_TYPE_LOCKED", "The release type cannot change after an edition has been published.");
+    }
     const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata, publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
     return saved;
+  }
+
+  async hasPublishedEdition(releaseId, exceptEditionId = null) {
+    const { rows } = await this.db.query("SELECT 1 FROM editions WHERE release_id=$1 AND status='PUBLISHED' AND ($2::text IS NULL OR id<>$2) LIMIT 1", [releaseId, exceptEditionId]);
+    return Boolean(rows[0]);
+  }
+
+  // A SINGLE is exactly one standalone edition: once one is published, no other edition may be created or published.
+  async assertSingleOpenForEdition(release, editionId = null) {
+    if (storedReleaseType(release) !== "SINGLE") return;
+    if (await this.hasPublishedEdition(release.id, editionId)) {
+      throw new ApiError(409, "SINGLE_ALREADY_PUBLISHED", "A single is one standalone edition and this single is already published. Create a new release for another track.");
+    }
+  }
+
+  // Lists a published standalone SINGLE on one of the same artist's ALBUM releases. The single's
+  // release, contract, edition, provenance and ownership rows are never modified.
+  async associateAlbumSingle({ request, albumReleaseId, input = {} }) {
+    const identity = await this.identity(request);
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(albumReleaseId, "albumReleaseId"), identity.wallet]);
+    const album = rows[0];
+    if (!album) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
+    if (storedReleaseType(album) !== "ALBUM") throw new ApiError(409, "ALBUM_RELEASE_REQUIRED", "Singles can only be added to an Album release.");
+    if (album.status === "ARCHIVED") throw new ApiError(409, "ALBUM_RELEASE_ARCHIVED", "This album has been taken off the site.");
+    const single = (await this.db.query("SELECT r.* FROM releases r WHERE r.id=$1 LIMIT 1", [requiredText(input.singleReleaseId, "singleReleaseId", { max: 128 })])).rows[0];
+    if (!single || single.artist_id !== album.artist_id) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "Only this artist's own singles can be added to the album.");
+    if (storedReleaseType(single) !== "SINGLE") throw new ApiError(409, "SINGLE_RELEASE_REQUIRED", "Only a release published as a Single can be added to an album.");
+    const edition = (await this.db.query("SELECT id FROM editions WHERE release_id=$1 AND status='PUBLISHED' ORDER BY created_at ASC LIMIT 1", [single.id])).rows[0];
+    if (single.status !== "PUBLISHED" || !edition) throw new ApiError(409, "SINGLE_NOT_PUBLISHED", "Publish the single before adding it to an album.");
+    const position = Number(input.trackPosition);
+    if (!Number.isInteger(position) || position < 1 || position > 999) throw new ApiError(400, "INVALID_TRACK_POSITION", "trackPosition must be a whole number from 1 to 999.");
+    let inserted;
+    try {
+      inserted = (await this.db.query("INSERT INTO release_album_singles (album_release_id, single_release_id, single_edition_id, track_position, associated_by_wallet) VALUES ($1,$2,$3,$4,$5) RETURNING album_release_id, single_release_id, single_edition_id, track_position, created_at", [album.id, single.id, edition.id, position, String(identity.wallet).toLowerCase()])).rows[0];
+    } catch (error) {
+      if (error?.code !== "23505") throw error;
+      const takenPosition = String(error.constraint || error.detail || "").includes("track_position");
+      throw new ApiError(409, takenPosition ? "ALBUM_TRACK_POSITION_TAKEN" : "ALBUM_SINGLE_ALREADY_ADDED", takenPosition ? "Another single already holds that track position on this album." : "This single is already on the album.");
+    }
+    await this.audit({ identity, request, eventType: "STUDIO_ALBUM_SINGLE_ASSOCIATED", subjectType: "release", subjectId: album.id, payload: { singleReleaseId: single.id, singleEditionId: edition.id, trackPosition: position } });
+    return { albumReleaseId: inserted.album_release_id, singleReleaseId: inserted.single_release_id, singleEditionId: inserted.single_edition_id, trackPosition: inserted.track_position, createdAt: inserted.created_at };
   }
 
   async createEdition({ request, releaseId, input }) {
@@ -667,6 +725,7 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
+    await this.assertSingleOpenForEdition(release);
     const binding = await this.releaseContractBinding(release.id);
     if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "Create and bind the release through VoidReleaseFactory before creating an edition. No legacy shared contract fallback is allowed.");
     const selectedChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;

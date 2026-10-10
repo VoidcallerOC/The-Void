@@ -102,3 +102,64 @@ describe("Artist Studio release type after reload", () => {
     expect(screen.getByLabelText(/Track mint end/).value).toBe("");
   });
 });
+
+describe("Artist Studio standalone singles", () => {
+  it("offers Single, EP and Album and reloads a published SINGLE as SINGLE without reading album state", async () => {
+    studioFetch.mockResolvedValue(publishedCatalog({ releaseType: "SINGLE" }));
+    renderStudio("rel-out");
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Catalog editor workflow" })).getByRole("button", { name: /Your release/ }));
+    const type = screen.getByLabelText(/Release type/);
+    await waitFor(() => expect(type.value).toBe("SINGLE"));
+    expect([...type.querySelectorAll("option")].map((option) => option.value)).toEqual(["SINGLE", "EP", "ALBUM"]);
+    expect(readReleaseAlbumState).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a second track on a published single", async () => {
+    studioFetch.mockResolvedValue(publishedCatalog({ releaseType: "SINGLE" }));
+    renderStudio("rel-out");
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.click((await screen.findByText("Add tracks", { selector: "h2" })).closest("button"));
+    fireEvent.change(screen.getByLabelText(/Select album \/ collection/), { target: { value: "rel-out" } });
+    const button = await screen.findByRole("button", { name: "Single already has its track" });
+    expect(button.disabled).toBe(true);
+  });
+
+  it("adds a released single to an album draft at a track position without re-creating the single", async () => {
+    const catalog = {
+      artists,
+      releases: [
+        { id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } },
+        { id: "rel-single", artist_id: "artist-a", title: "Lead Single", status: "PUBLISHED", release_metadata: { releaseType: "SINGLE" } },
+        { id: "rel-ep", artist_id: "artist-a", title: "Some EP", status: "PUBLISHED", release_metadata: { releaseType: "EP" } },
+      ],
+      editions: [{ id: "ed-single", release_id: "rel-single", title: "Lead Single", status: "PUBLISHED", supply: "10", chain_id: CHAIN_ID, contract_address: "0x5555555555555555555555555555555555555555", token_id: "9", application_metadata: {} }],
+      experiences: [],
+      albumSingles: [],
+    };
+    const calls = [];
+    studioFetch.mockImplementation(async (path, options = {}) => {
+      calls.push({ path, ...options });
+      if (path === "/studio/catalog") return catalog;
+      if (path.endsWith("/provisioning/prepare")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account };
+      if (path.endsWith("/provisioning/status")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseContractAddress: CLONE, primarySaleAddress: SALE, provenanceAnchorAddress: ANCHOR };
+      if (path === "/studio/releases/rel-draft/album-singles") return { albumReleaseId: "rel-draft", singleReleaseId: "rel-single", singleEditionId: "ed-single", trackPosition: 3 };
+      throw new Error(`unexpected ${path}`);
+    });
+    readReleaseAlbumState.mockResolvedValue(PRE_ALBUM);
+    renderStudio("rel-draft");
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Catalog editor workflow" })).getByRole("button", { name: /Your release/ }));
+    const choice = await screen.findByLabelText(/^Single/);
+    // Only the artist's published singles are offered, never an EP.
+    expect([...choice.querySelectorAll("option")].map((option) => option.value)).toEqual(["", "rel-single"]);
+    fireEvent.change(choice, { target: { value: "rel-single" } });
+    fireEvent.change(screen.getByLabelText(/Track position/), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add single to album" }));
+    expect(await screen.findByText("Lead Single · track 3")).toBeTruthy();
+    const post = calls.find((call) => call.path === "/studio/releases/rel-draft/album-singles");
+    expect(post).toMatchObject({ method: "POST", payload: { singleReleaseId: "rel-single", trackPosition: 3 } });
+    // Nothing re-creates or edits the single release or its edition.
+    expect(calls.some((call) => /rel-single|ed-single/.test(call.path))).toBe(false);
+  });
+});
