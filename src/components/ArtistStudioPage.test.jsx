@@ -1,15 +1,32 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { Interface } from "ethers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WalletCtx } from "../lib/wallet-context.js";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG } from "../lib/fuji-release.js";
 
 const studioFetch = vi.fn();
 const readReleaseAlbumState = vi.fn();
+const readReleaseEdition = vi.fn();
+const sendReleaseTransaction = vi.fn();
+const readReleasePrimarySale = vi.fn(async () => null);
+const simulateReleaseSaleConfigure = vi.fn();
+const readGenesisClaimSaleGuard = vi.fn(async () => ({ state: "none" }));
 vi.mock("../lib/studio-api.js", async (importOriginal) => ({ ...(await importOriginal()), studioFetch: (...args) => studioFetch(...args) }));
-vi.mock("../lib/fuji-release.js", async (importOriginal) => ({ ...(await importOriginal()), readReleaseAlbumState: (...args) => readReleaseAlbumState(...args) }));
-vi.mock("../lib/primary-sale.js", async (importOriginal) => ({ ...(await importOriginal()), createFujiPublicProvider: () => ({ request: vi.fn() }), readReleasePrimarySale: vi.fn(async () => null) }));
+vi.mock("../lib/fuji-release.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readReleaseAlbumState: (...args) => readReleaseAlbumState(...args),
+  readReleaseEdition: (...args) => readReleaseEdition(...args),
+  sendReleaseTransaction: (...args) => sendReleaseTransaction(...args),
+}));
+vi.mock("../lib/primary-sale.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  createFujiPublicProvider: () => ({ request: vi.fn() }),
+  readReleasePrimarySale: (...args) => readReleasePrimarySale(...args),
+  simulateReleaseSaleConfigure: (...args) => simulateReleaseSaleConfigure(...args),
+}));
+vi.mock("../lib/genesis-claim.js", async (importOriginal) => ({ ...(await importOriginal()), readGenesisClaimSaleGuard: (...args) => readGenesisClaimSaleGuard(...args) }));
 const { ArtistStudioPage } = await import("./ArtistStudioPage.jsx");
 
 const CHAIN_ID = Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId);
@@ -17,7 +34,8 @@ const CLONE = "0x1111111111111111111111111111111111111111";
 const SALE = "0x2222222222222222222222222222222222222222";
 const ANCHOR = "0x3333333333333333333333333333333333333333";
 const PRE_ALBUM = { supported: false, created: false, closed: false, trackCount: 0n, singleCount: 0n };
-const wallet = { connected: true, authenticated: true, account: "0x4444444444444444444444444444444444444444", chainId: CHAIN_ID, authHeaders: { authorization: "Bearer session" }, getProvider: () => null };
+const walletProvider = { request: vi.fn() };
+const wallet = { connected: true, authenticated: true, account: "0x4444444444444444444444444444444444444444", chainId: CHAIN_ID, authHeaders: { authorization: "Bearer session" }, getProvider: () => walletProvider };
 const artists = [{ id: "artist-a", display_name: "Artist A", slug: "artist-a" }];
 
 function renderStudio(releaseId) {
@@ -50,7 +68,13 @@ function mockConfirmedAlbumDraft() {
   });
 }
 
-afterEach(() => { cleanup(); studioFetch.mockReset(); readReleaseAlbumState.mockReset(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  for (const mock of [studioFetch, readReleaseAlbumState, readReleaseEdition, sendReleaseTransaction, simulateReleaseSaleConfigure]) mock.mockReset();
+  readReleasePrimarySale.mockReset().mockImplementation(async () => null);
+  readGenesisClaimSaleGuard.mockReset().mockImplementation(async () => ({ state: "none" }));
+});
 
 describe("Artist Studio release type after reload", () => {
   it("reloads a published ALBUM release as ALBUM and reads album state from its bound contract", async () => {
@@ -161,5 +185,196 @@ describe("Artist Studio standalone singles", () => {
     expect(post).toMatchObject({ method: "POST", payload: { singleReleaseId: "rel-single", trackPosition: 3 } });
     // Nothing re-creates or edits the single release or its edition.
     expect(calls.some((call) => /rel-single|ed-single/.test(call.path))).toBe(false);
+  });
+});
+
+// Fuji, 2026-10-10: forgive-forget-28 was configured for 18:45-18:50 UTC (5 minutes),
+// closed with 0 sold, and Studio could not reopen it.
+const NOW = Date.UTC(2026, 9, 10, 19, 29, 0);
+const NOW_SEC = BigInt(NOW / 1000);
+const TOKEN = "5";
+const saleIface = new Interface(["function configureSale(uint256 tokenId, uint256 priceWei, uint256 maxSupply, uint256 perWalletLimit, uint64 startTime, uint64 endTime, bool paused)"]);
+
+function localInput(seconds) {
+  const date = new Date(Number(seconds) * 1000);
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function chainSale(overrides = {}) {
+  return {
+    priceWei: 10_000_000_000_000_000n,
+    maxSupply: 0n,
+    sold: 0n,
+    perWalletLimit: 1n,
+    startTime: BigInt(Date.UTC(2026, 9, 10, 18, 45) / 1000),
+    endTime: BigInt(Date.UTC(2026, 9, 10, 18, 50) / 1000),
+    paused: false,
+    configured: true,
+    purchased: 0n,
+    remaining: null,
+    ...overrides,
+  };
+}
+
+function renderSaleStep({ sale = chainSale(), editionSupply = 0n, claim = { state: "none" } } = {}) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  const catalog = publishedCatalog({ releaseType: "SINGLE" });
+  catalog.editions[0].primary_sale_address = SALE;
+  catalog.editions[0].token_id = TOKEN;
+  studioFetch.mockResolvedValue(catalog);
+  readReleasePrimarySale.mockResolvedValue(sale);
+  readReleaseEdition.mockResolvedValue({ exists: true, artist: wallet.account, maxSupply: editionSupply, mintedSupply: sale?.sold ?? 0n });
+  readGenesisClaimSaleGuard.mockResolvedValue(claim);
+  simulateReleaseSaleConfigure.mockResolvedValue("0x");
+  sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}`, receipt: { status: "0x1" } });
+  return renderStudio("rel-out");
+}
+
+function decodeSent() {
+  expect(sendReleaseTransaction).toHaveBeenCalledTimes(1);
+  const [{ data, to, from }] = sendReleaseTransaction.mock.calls[0];
+  expect(to).toBe(SALE);
+  expect(from).toBe(wallet.account);
+  return saleIface.decodeFunctionData("configureSale", data);
+}
+
+function problems() {
+  return screen.getByRole("alert", { name: "Sale problems" }).textContent;
+}
+
+describe("Artist Studio live primary sale", () => {
+  it("shows the configured on-chain sale with local and UTC times and its status", async () => {
+    renderSaleStep({ sale: chainSale({ sold: 2n, perWalletLimit: 3n }) });
+    const panel = await screen.findByRole("status", { name: "Live sale" });
+    expect(panel.textContent).toContain("Live sale · Ended");
+    expect(panel.textContent).toContain("0.01 AVAX");
+    expect(panel.textContent).toMatch(/CapNo cap/);
+    expect(panel.textContent).toMatch(/Sold2/);
+    expect(panel.textContent).toMatch(/Per wallet3/);
+    expect(panel.textContent).toContain("18:45 UTC");
+    expect(panel.textContent).toContain("18:50 UTC");
+    expect(panel.textContent).toContain("your time");
+    expect(panel.textContent).toMatch(/PausedNo/);
+    expect(screen.getByRole("button", { name: "Edit sale" }).disabled).toBe(false);
+    expect(readReleasePrimarySale).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ primarySaleAddress: SALE, releaseContractAddress: CLONE, tokenId: TOKEN }), wallet.account);
+  });
+
+  it("reopens an ended sale: one configureSale with the new values, after simulation", async () => {
+    renderSaleStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    expect(screen.getByLabelText(/Price \(AVAX\)/).value).toBe("0.01");
+    expect(screen.getByLabelText(/Sale end/).value).toBe(localInput(Date.UTC(2026, 9, 10, 18, 50) / 1000));
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "1 hour" }));
+    const end = NOW_SEC + 3600n;
+    expect(screen.getByLabelText(/Sale end/).value).toBe(localInput(end));
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "Confirm sale change" });
+    expect(confirm.textContent).toContain("Sale runs for 1 hour");
+    expect(confirm.textContent).toContain("your time");
+    expect(confirm.textContent).toContain("20:29 UTC");
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+    expect(simulateReleaseSaleConfigure).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirm).getByRole("button", { name: "Confirm and sign" }));
+    await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalled());
+    const [tokenId, priceWei, maxSupply, perWalletLimit, startTime, endTime, paused] = decodeSent();
+    expect({ tokenId, priceWei, maxSupply, perWalletLimit, startTime, endTime, paused }).toEqual({ tokenId: 5n, priceWei: 10_000_000_000_000_000n, maxSupply: 0n, perWalletLimit: 1n, startTime: 0n, endTime: end, paused: false });
+    expect(simulateReleaseSaleConfigure).toHaveBeenCalledTimes(1);
+    expect(simulateReleaseSaleConfigure.mock.calls[0][1]).toMatchObject({ from: wallet.account, to: SALE, data: sendReleaseTransaction.mock.calls[0][0].data });
+    expect(simulateReleaseSaleConfigure.mock.invocationCallOrder[0]).toBeLessThan(sendReleaseTransaction.mock.invocationCallOrder[0]);
+  });
+
+  it("warns about a short window before signing", async () => {
+    renderSaleStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: localInput(NOW_SEC + 600n) } });
+    fireEvent.change(screen.getByLabelText(/Sale end/), { target: { value: localInput(NOW_SEC + 900n) } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    const confirm = await screen.findByRole("dialog", { name: "Confirm sale change" });
+    expect(confirm.textContent).toContain("Sale runs for 5 minutes");
+    expect(confirm.textContent).toContain("Short window: the sale is open for only 5 minutes.");
+  });
+
+  it("rejects an open edition without an end time", async () => {
+    renderSaleStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    fireEvent.change(screen.getByLabelText(/Sale end/), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    expect(problems()).toContain("An open edition needs an end time");
+    expect(screen.queryByRole("dialog", { name: "Confirm sale change" })).toBeNull();
+    expect(simulateReleaseSaleConfigure).not.toHaveBeenCalled();
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cap below the copies already sold", async () => {
+    renderSaleStep({ sale: chainSale({ maxSupply: 10n, sold: 3n, remaining: 7n }), editionSupply: 25n });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    fireEvent.change(screen.getByLabelText(/^Sale cap/), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/Most one person can buy/), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/Sale end/), { target: { value: localInput(NOW_SEC + 86_400n) } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    expect(problems()).toContain("can't be lower than the 3 already sold");
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an end time at or before the start", async () => {
+    renderSaleStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    const at = localInput(NOW_SEC + 7200n);
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: at } });
+    fireEvent.change(screen.getByLabelText(/Sale end/), { target: { value: at } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    expect(problems()).toContain("The end time must be after the start time.");
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("duration presets set the end from the start time, or from now", async () => {
+    renderSaleStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
+    const start = NOW_SEC + 3600n;
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: localInput(start) } });
+    fireEvent.click(screen.getByRole("button", { name: "24 hours" }));
+    expect(screen.getByLabelText(/Sale end/).value).toBe(localInput(start + 86_400n));
+    fireEvent.click(screen.getByRole("button", { name: "5 days" }));
+    expect(screen.getByLabelText(/Sale end/).value).toBe(localInput(start + 432_000n));
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "1 hour" }));
+    expect(screen.getByLabelText(/Sale end/).value).toBe(localInput(NOW_SEC + 3600n));
+  });
+
+  it("pauses through the same configureSale path, keeping every other value", async () => {
+    const sale = chainSale({ startTime: 0n, endTime: NOW_SEC + 3601n });
+    renderSaleStep({ sale });
+    fireEvent.click(await screen.findByRole("button", { name: "Pause sale" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Confirm sale change" })).getByRole("button", { name: "Confirm and sign" }));
+    await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalled());
+    const [, priceWei, maxSupply, perWalletLimit, startTime, endTime, paused] = decodeSent();
+    expect({ priceWei, maxSupply, perWalletLimit, startTime, endTime, paused }).toEqual({ priceWei: sale.priceWei, maxSupply: 0n, perWalletLimit: 1n, startTime: 0n, endTime: NOW_SEC + 3601n, paused: true });
+    expect(simulateReleaseSaleConfigure).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns about a Genesis holder claim and blocks edits that break its invariants", async () => {
+    const claimsOpenedAt = NOW_SEC - 3600n;
+    const claim = { state: "active", claimContract: "0x6666666666666666666666666666666666666666", allocation: 5n, publicAllocation: 20n, claimsOpenedAt, claimedSupply: 1n, minimumStart: claimsOpenedAt + 86_400n, live: true };
+    renderSaleStep({ sale: chainSale({ maxSupply: 20n, startTime: claimsOpenedAt + 86_400n, endTime: claimsOpenedAt + 172_800n, remaining: 20n }), editionSupply: 25n, claim });
+    const warning = await screen.findByText(/Genesis holder claim is configured for this token/);
+    expect(warning.closest("[role=alert]").textContent).toContain("The sale cap must stay 20");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit sale" }));
+    fireEvent.change(screen.getByLabelText(/^Sale cap/), { target: { value: "21" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    expect(problems()).toContain("The sale cap must stay 20");
+
+    fireEvent.change(screen.getByLabelText(/^Sale cap/), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: localInput(NOW_SEC + 600n) } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    expect(problems()).toContain("Genesis holder claims are still open");
+    expect(screen.queryByRole("dialog", { name: "Confirm sale change" })).toBeNull();
+    expect(simulateReleaseSaleConfigure).not.toHaveBeenCalled();
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
   });
 });

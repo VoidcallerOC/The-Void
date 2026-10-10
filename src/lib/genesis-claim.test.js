@@ -4,8 +4,10 @@ import {
   confirmGenesisClaim,
   executeGenesisClaim,
   fetchGenesisClaimConfig,
+  readGenesisClaimSaleGuard,
   requestGenesisVoucher,
 } from "./genesis-claim.js";
+import { Interface } from "ethers";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const RELEASE = "0x2222222222222222222222222222222222222222";
@@ -106,5 +108,42 @@ describe("Genesis claim browser executor", () => {
       verifyOwnership: async () => 0n,
       quantity: "1",
     })).rejects.toMatchObject({ code: "POST_CLAIM_OWNERSHIP_UNVERIFIED" });
+  });
+});
+
+describe("Genesis claim sale guard", () => {
+  const binding = { chainId: 43113, releaseContractAddress: RELEASE, primarySaleAddress: SALE, tokenId: "55" };
+  const claimIface = new Interface([
+    "function releaseContract() view returns (address)",
+    "function primarySale() view returns (address)",
+    "function tokenId() view returns (uint256)",
+    "function allocation() view returns (uint256)",
+    "function publicAllocation() view returns (uint256)",
+    "function claimsOpenedAt() view returns (uint256)",
+    "function claimedSupply() view returns (uint256)",
+  ]);
+  const onchain = { releaseContract: RELEASE, primarySale: SALE, tokenId: 55n, allocation: 20n, publicAllocation: 100n, claimsOpenedAt: 1_791_000_000n, claimedSupply: 4n };
+  const provider = {
+    request: vi.fn(async ({ method, params }) => {
+      if (method === "eth_chainId") return "0xa869";
+      const name = claimIface.parseTransaction({ data: params[0].data }).name;
+      expect(params[0].to).toBe(CLAIM);
+      return claimIface.encodeFunctionResult(name, [onchain[name]]);
+    }),
+  };
+
+  it("reads the claim invariants when the claim targets this sale", async () => {
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target })).resolves.toMatchObject({
+      state: "active", claimContract: CLAIM, publicAllocation: 100n, minimumStart: 1_791_086_400n, live: true,
+    });
+  });
+
+  it("reports no claim when none is configured or it targets another token", async () => {
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => { throw Object.assign(new Error("off"), { code: "CLAIM_UNAVAILABLE" }); } })).resolves.toEqual({ state: "none" });
+    await expect(readGenesisClaimSaleGuard(provider, { ...binding, tokenId: "56" }, { fetchConfig: async () => target })).resolves.toEqual({ state: "none" });
+  });
+
+  it("throws when the claim binding cannot be checked", async () => {
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => { throw Object.assign(new Error("mismatch"), { code: "CLAIM_BINDING_MISMATCH", status: 503 }); } })).rejects.toThrow("mismatch");
   });
 });

@@ -44,6 +44,56 @@ export function fetchGenesisClaimConfig(options = {}) {
   return apiRequest("config", options).then(validateTarget);
 }
 
+const CLAIM_GUARD_INTERFACE = new Interface([
+  "function releaseContract() view returns (address)",
+  "function primarySale() view returns (address)",
+  "function tokenId() view returns (uint256)",
+  "function allocation() view returns (uint256)",
+  "function publicAllocation() view returns (uint256)",
+  "function claimsOpenedAt() view returns (uint256)",
+  "function claimedSupply() view returns (uint256)",
+]);
+
+const CLAIM_GUARD_WINDOW_SECONDS = 86_400n;
+
+/**
+ * Whether a Genesis holder claim is bound to this release token and sale, and
+ * the on-chain values its _assertPublicAllocation check depends on. Returns
+ * { state: "none" } when no claim is configured or it targets another token,
+ * { state: "active", ... } when it targets this sale, and throws when the
+ * binding cannot be checked (callers should then block sale edits).
+ */
+export async function readGenesisClaimSaleGuard(provider, { chainId, releaseContractAddress, primarySaleAddress, tokenId }, { fetchConfig = fetchGenesisClaimConfig } = {}) {
+  let target;
+  try {
+    target = await fetchConfig();
+  } catch (error) {
+    if (error?.code === "CLAIM_UNAVAILABLE" || error?.status === 404) return { state: "none" };
+    throw error;
+  }
+  if (getAddress(target.releaseContract) !== getAddress(releaseContractAddress) || String(target.tokenId) !== String(tokenId)) return { state: "none" };
+  await assertReleaseProvider(provider, chainId);
+  const read = async (name) => {
+    const result = await provider.request({ method: "eth_call", params: [{ to: getAddress(target.claimContract), data: CLAIM_GUARD_INTERFACE.encodeFunctionData(name, []) }, "latest"] });
+    return CLAIM_GUARD_INTERFACE.decodeFunctionResult(name, result)[0];
+  };
+  const [claimRelease, claimSale, claimToken, allocation, publicAllocation, claimsOpenedAt, claimedSupply] = await Promise.all(
+    ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimsOpenedAt", "claimedSupply"].map(read),
+  );
+  if (getAddress(claimRelease) !== getAddress(releaseContractAddress) || BigInt(claimToken) !== BigInt(tokenId)) return { state: "none" };
+  if (getAddress(claimSale) !== getAddress(primarySaleAddress)) return { state: "none" };
+  return {
+    state: "active",
+    claimContract: getAddress(target.claimContract),
+    allocation: BigInt(allocation),
+    publicAllocation: BigInt(publicAllocation),
+    claimsOpenedAt: BigInt(claimsOpenedAt),
+    claimedSupply: BigInt(claimedSupply),
+    minimumStart: BigInt(claimsOpenedAt) + CLAIM_GUARD_WINDOW_SECONDS,
+    live: BigInt(claimedSupply) < BigInt(allocation),
+  };
+}
+
 export function checkGenesisEligibility(wallet, options = {}) {
   if (!isAddress(wallet)) throw new Error("A connected claimant wallet is required.");
   return apiRequest("eligibility", { ...options, method: "POST", body: { wallet: getAddress(wallet) } });
