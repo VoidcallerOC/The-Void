@@ -178,6 +178,55 @@ describe("provenance anchor verification", () => {
   });
 });
 
+describe("one-time anchor for editions published before roots were recorded on-chain", () => {
+  // forgive-forget on Fuji: publication verified by the EditionCreated metadata CID, isAnchored false.
+  const publicationVerified = proof({ anchor_status: "ANCHORED", verification_status: "VERIFIED", anchor_event: "EditionCreated", transaction_hash: `0x${"cd".repeat(32)}` });
+
+  it("offers the anchor call while the anchor contract has not recorded the root", async () => {
+    const reader = readerFor({ anchored: false });
+    const anchor = service({ reader, records: { findOwnedByRoot: vi.fn().mockResolvedValue(publicationVerified) } });
+    const prepared = await anchor.prepare({ request: {}, releaseId: "release-1", input: { editionId: "edition-1" } });
+    expect(prepared).toMatchObject({ alreadyAnchored: false, oneTimeAnchor: true, data: call.data, contractAddress: anchorAddress, verificationStatus: "VERIFIED" });
+    expect(reader.isAnchored).toHaveBeenCalledWith({ releaseId: call.releaseId, editionId: call.editionId, provenanceRoot: call.provenanceRoot });
+    expect(anchor.db.query.mock.calls[0][1]).toEqual(["release-1", owner, 43113, "edition-1"]);
+  });
+
+  it("reports already anchored from the contract state or from a ProvenanceAnchored proof", async () => {
+    const onChain = service({ reader: readerFor({ anchored: true }), records: { findOwnedByRoot: vi.fn().mockResolvedValue(publicationVerified) } });
+    await expect(onChain.prepare({ request: {}, releaseId: "release-1" })).resolves.toMatchObject({ alreadyAnchored: true, data: null });
+
+    const reader = readerFor();
+    const recorded = service({ reader, records: { findOwnedByRoot: vi.fn().mockResolvedValue(proof({ anchor_status: "ANCHORED", verification_status: "VERIFIED", anchor_event: "ProvenanceAnchored" })) } });
+    await expect(recorded.prepare({ request: {}, releaseId: "release-1" })).resolves.toMatchObject({ alreadyAnchored: true, data: null });
+    expect(reader.isAnchored).not.toHaveBeenCalled();
+  });
+
+  it("verifies the separate anchor transaction without rewriting the publication proof", async () => {
+    const audit = vi.fn().mockResolvedValue({});
+    const anchor = service({ reader: readerFor(), records: { findOwnedByRoot: vi.fn().mockResolvedValue(publicationVerified) } });
+    anchor.audit = audit;
+    await expect(anchor.confirm({ request: { requestId: "req-1" }, releaseId: "release-1", input: { editionId: "edition-1", transactionHash: tx } })).resolves.toMatchObject({
+      anchorStatus: "ANCHORED", verificationStatus: "VERIFIED", onChainAnchored: true, oneTimeAnchor: true, transactionHash: tx, contractAddress: anchorAddress, blockNumber: 90,
+    });
+    expect(anchor.records.recordVerifiedAnchor).not.toHaveBeenCalled();
+    expect(anchor.records.recordSubmittedAnchor).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_PROVENANCE_ANCHORED", actorWallet: owner, subjectId: "edition-1", payload: expect.objectContaining({ transactionHash: tx, anchorContract: anchorAddress, provenanceRoot: manifest.root }) }));
+  });
+
+  it("fails closed on a wrong event or unrecorded state for the one-time anchor", async () => {
+    const wrongEvent = service({ reader: readerFor({ receipt: { status: 1, blockNumber: 90, logs: [logFor(boundReleaseAddress)] } }), records: { findOwnedByRoot: vi.fn().mockResolvedValue(publicationVerified) } });
+    await expect(wrongEvent.confirm({ request: {}, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "ANCHOR_EVENT_MISMATCH" });
+    const unrecorded = service({ reader: readerFor({ anchored: false }), records: { findOwnedByRoot: vi.fn().mockResolvedValue(publicationVerified) } });
+    await expect(unrecorded.confirm({ request: {}, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "ANCHOR_STATE_MISMATCH" });
+    expect(unrecorded.records.recordAnchorFailure).not.toHaveBeenCalled();
+  });
+
+  it("refuses a separate anchor for Factory V3 releases, which record the root at publication", async () => {
+    const anchor = service({ reader: readerFor(), row: { ...editionRow(), implementation_version: 3, provenance_anchor_address: boundReleaseAddress } });
+    await expect(anchor.prepare({ request: {}, releaseId: "release-1" })).rejects.toMatchObject({ status: 409, code: "PROVENANCE_ANCHORED_AT_PUBLICATION" });
+  });
+});
+
 describe("provenance anchor HTTP", () => {
   function responseDouble() {
     return { status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } };

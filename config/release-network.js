@@ -14,6 +14,15 @@ export const FUJI_RELEASE_PER_CONTRACT = Object.freeze(fujiPerContract);
 // disabled until a future, separately authorized deployment is configured.
 export const FUJI_RELEASE_PER_CONTRACT_V2 = Object.freeze(fujiPerContractV2);
 
+// Factory V3 (ReleaseCreated version 3) clones VoidRelease1155V5, which records the provenance
+// root inside the edition-creating transaction and is its own provenance anchor. Releases from
+// version 2 factories keep the separate VoidProvenanceAnchor transaction.
+export const PROVENANCE_AT_CREATION_RELEASE_VERSION = 3;
+export function anchorsProvenanceAtCreation(releaseVersion) {
+  const version = Number(releaseVersion);
+  return Number.isSafeInteger(version) && version >= PROVENANCE_AT_CREATION_RELEASE_VERSION;
+}
+
 // Every V2 release-per-contract deployment on Fuji: the active (album-capable) factory first,
 // then historical ones. Factory clones are immutable and each ReleaseMarketplaceV3 accepts only
 // its own factory's releases, so a release always trades on the marketplace of the factory that
@@ -21,7 +30,7 @@ export const FUJI_RELEASE_PER_CONTRACT_V2 = Object.freeze(fujiPerContractV2);
 export const FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS = Object.freeze([
   { factoryAddress: fujiPerContractV2.factoryAddress, implementationAddress: fujiPerContractV2.implementationAddress, marketplaceAddress: fujiPerContractV2.marketplaceAddress, factoryDeploymentBlock: fujiPerContractV2.factoryDeploymentBlock, marketplaceDeploymentBlock: fujiPerContractV2.marketplaceDeploymentBlock, releaseVersion: fujiPerContractV2.releaseVersion, albumCapable: fujiPerContractV2.albumCapable === true, active: true },
   ...(fujiPerContractV2.historicalDeployments || []).map((deployment) => ({ ...deployment, albumCapable: deployment.albumCapable === true, active: false })),
-].map((deployment) => Object.freeze({ ...deployment, chainId: Number(fujiPerContractV2.chainId) })));
+].map((deployment) => Object.freeze({ ...deployment, chainId: Number(fujiPerContractV2.chainId), provenanceAtCreation: anchorsProvenanceAtCreation(deployment.releaseVersion) })));
 
 const sameAddress = (a, b) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase() && a.trim() !== "";
 

@@ -25,7 +25,9 @@ const ERC1155_EVENT_TOPICS = Object.freeze({
   AlbumCreated: id("AlbumCreated(bytes32)"),
   AlbumTrackCreated: id("AlbumTrackCreated(uint256,bool,uint64)"),
   AlbumClosed: id("AlbumClosed(bytes32)"),
-  ExpandedReleaseApproved: id("ExpandedReleaseApproved(uint256,uint256)")
+  ExpandedReleaseApproved: id("ExpandedReleaseApproved(uint256,uint256)"),
+  // VoidRelease1155V5 (Factory V3) records the provenance root when an edition is created.
+  ProvenanceAnchored: id("ProvenanceAnchored(bytes32,bytes32,bytes32,uint256,address,address)")
 });
 const PRIMARY_SALE_EVENT_TOPICS = Object.freeze({
   Purchased: id("Purchased(uint256,address,uint256,uint256,uint256,uint256)")
