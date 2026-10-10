@@ -141,6 +141,54 @@ describe("Artist Studio publication pipeline", () => {
     expect(harness.repo.saveToken).not.toHaveBeenCalled();
   });
 
+  it("publishes metadata for a new draft edition (track) on an already published release", async () => {
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue(null), createProof: vi.fn().mockResolvedValue({ id: "proof-2", anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
+    const metadataStorage = { write: vi.fn().mockResolvedValue({ uri: "ipfs://metadata-2" }) };
+    const harness = studio({ records, metadataStorage });
+    harness.db.query
+      .mockResolvedValueOnce({ rows: [releaseRow("PUBLISHED")] })
+      .mockResolvedValueOnce({ rows: [{ ...editionRow(), id: "edition-2", title: "Chapter II", status: "DRAFT", metadata_uri: null, metadata: null, metadata_version: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const published = await harness.instance.publishMetadata({ request, releaseId: "release-1", input: {} });
+    expect(published).toMatchObject({ provenanceStatus: "PROVENANCE_PENDING", fullyPublished: false });
+    expect(metadataStorage.write).toHaveBeenCalledOnce();
+    expect(records.createProof).toHaveBeenCalledWith(expect.objectContaining({ releaseId: "release-1", editionId: "edition-2" }));
+    // Only an open (DRAFT/REVIEW) edition may receive metadata; a published edition is never selected for rewrite.
+    const editionQuery = harness.db.query.mock.calls.map(([sql]) => String(sql)).find((sql) => sql.includes("FROM editions e"));
+    expect(editionQuery).toContain("e.status IN ('DRAFT','REVIEW')");
+    expect(harness.repo.saveRelease).not.toHaveBeenCalled();
+  });
+
+  it("confirms a new draft edition on a published release and marks only that edition published", async () => {
+    const identity = ids("the-record", "chapter-i");
+    const secondTrack = metadataFor();
+    secondTrack.provenance.editionId = "edition-2";
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ id: "proof-2", anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };
+    const chain = { getTransactionReceipt: vi.fn().mockResolvedValue(editionCreatedReceipt()), edition: vi.fn().mockResolvedValue([identity.releaseId, identity.editionId, owner, 10n, 0n, "ipfs://metadata", true]) };
+    const harness = studio({ records, chain });
+    harness.db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("FROM experiences")) return { rows: [] };
+      if (String(sql).includes("FROM editions")) return { rows: [{ ...editionRow(secondTrack), id: "edition-2", status: "DRAFT" }] };
+      return { rows: [{ ...releaseRow("PUBLISHED"), published_at: "2026-10-01T00:00:00.000Z" }] };
+    });
+    const confirmed = await harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } });
+    expect(confirmed).toMatchObject({ editionId: "edition-2", status: "PUBLISHED", provenanceStatus: "PROVENANCE_PENDING" });
+    expect(harness.repo.saveEdition).toHaveBeenCalledWith(expect.objectContaining({ id: "edition-2", status: "PUBLISHED" }));
+    expect(harness.repo.saveRelease).toHaveBeenCalledWith(expect.objectContaining({ status: "PUBLISHED", publishedAt: "2026-10-01T00:00:00.000Z" }));
+    const editionQuery = harness.db.query.mock.calls.map(([sql]) => String(sql)).find((sql) => sql.includes("FROM editions e"));
+    expect(editionQuery).toContain("ORDER BY CASE WHEN e.status IN ('DRAFT','REVIEW') THEN 0 ELSE 1 END");
+  });
+
+  it("still refuses to re-confirm a published edition whose provenance is verified", async () => {
+    const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ anchor_status: "ANCHORED", verification_status: "VERIFIED" }) };
+    const harness = studio({ records, chain: { getTransactionReceipt: vi.fn() } });
+    harness.db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions") ? { rows: [{ ...editionRow(), status: "PUBLISHED" }] } : { rows: [releaseRow("PUBLISHED")] });
+    await expect(harness.instance.confirmPublication({ request, releaseId: "release-1", input: { transactionHash: tx } })).rejects.toMatchObject({ code: "RELEASE_ALREADY_PUBLISHED" });
+    expect(harness.chain.getTransactionReceipt).not.toHaveBeenCalled();
+    expect(harness.repo.saveEdition).not.toHaveBeenCalled();
+  });
+
   it("keeps catalog publication unverified for provenance until the anchor is confirmed", async () => {
     const identity = ids("the-record", "chapter-i");
     const records = { findOwnedByRoot: vi.fn().mockResolvedValue({ id: "proof-1", anchor_status: "PENDING", verification_status: "UNVERIFIED" }) };

@@ -207,7 +207,8 @@ describe("Artist Studio", () => {
   });
 
   it("creates a contract-agnostic ERC-1155 edition and its experience", async () => {
-    const { instance, repo } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
+    const { instance, repo, db } = service({ rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
+    db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions WHERE id=") ? { rows: [] } : { rows: [{ id: "release-1", artist_id: "artist-1", slug: "the-record" }] });
     const edition = await instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", chainId: 43113, contractAddress: contract, tokenId: "7", quantity: "100", priceWei: "1000000000000000000" } });
     expect(edition).toMatchObject({ id: "edition-1", status: "DRAFT" });
     expect(repo.saveContract).toHaveBeenCalledWith(expect.objectContaining({ address: certifiedFujiRelease, contractType: "ERC1155", chainId: 43113 }));
@@ -225,6 +226,22 @@ describe("Artist Studio", () => {
     expect(experience).toMatchObject({ id: "experience-1", edition_id: "edition-1", status: "DRAFT" });
     expect(experienceService.repo.saveExperience).toHaveBeenCalledWith(expect.objectContaining({ mediaConfig: expect.objectContaining({ protectedMedia: [expect.objectContaining({ assetId: "asset-1" })] }) }));
     expect(JSON.stringify(experienceService.repo.saveExperience.mock.calls[0][0].mediaConfig)).not.toMatch(/storageKey|records\/full-record/);
+  });
+
+  it("never lets createEdition reuse an id to reopen a published edition or move one from another release", async () => {
+    const release = { id: "release-1", artist_id: "artist-1", slug: "the-record", title: "The Record" };
+    for (const existing of [{ release_id: "release-1", status: "PUBLISHED" }, { release_id: "release-1", status: "ARCHIVED" }, { release_id: "release-2", status: "DRAFT" }]) {
+      const { instance, repo, db } = service({ rows: [release] });
+      db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions WHERE id=") ? { rows: [existing] } : { rows: [release] });
+      await expect(instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", quantity: "10" } })).rejects.toMatchObject({ status: 409, code: "EDITION_ALREADY_EXISTS" });
+      expect(repo.saveEdition).not.toHaveBeenCalled();
+      expect(repo.saveToken).not.toHaveBeenCalled();
+    }
+
+    const { instance, repo, db } = service({ rows: [release] });
+    db.query.mockImplementation(async (sql) => String(sql).includes("FROM editions WHERE id=") ? { rows: [{ release_id: "release-1", status: "DRAFT" }] } : { rows: [release] });
+    await expect(instance.createEdition({ request, releaseId: "release-1", input: { id: "edition-1", name: "Chapter I", quantity: "10" } })).resolves.toMatchObject({ id: "edition-1", status: "DRAFT" });
+    expect(repo.saveEdition).toHaveBeenCalledOnce();
   });
 
   it("derives the internal compatibility title from the release without editionName", async () => {

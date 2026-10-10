@@ -72,6 +72,19 @@ describe("catalog source", () => {
     expect(catalog.artists[0].verified).toBe(false);
   });
 
+  it("keeps a Studio release's persisted ALBUM type and leaves legacy rows as EP", () => {
+    const catalog = mapPublishedCatalog({
+      releases: [
+        { id: "album", artist_id: "a1", title: "Album", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } },
+        { id: "ep", artist_id: "a1", title: "EP", status: "DRAFT", release_metadata: { releaseType: "EP" } },
+        { id: "legacy-null", artist_id: "a1", title: "Legacy", status: "PUBLISHED", release_metadata: { releaseType: null } },
+        { id: "legacy-absent", artist_id: "a1", title: "Older", status: "PUBLISHED", release_metadata: {} },
+        { id: "no-metadata", artist_id: "a1", title: "None", status: "PUBLISHED", release_metadata: null },
+      ],
+    });
+    expect(Object.fromEntries(catalog.releases.map((release) => [release.id, release.releaseType]))).toEqual({ album: "ALBUM", ep: "EP", "legacy-null": "EP", "legacy-absent": "EP", "no-metadata": "EP" });
+  });
+
   it("does not infer Fuji identity for published rows missing chain and contract fields", () => {
     const catalog = mapPublishedCatalog({
       artists: [{ id: "a1", display_name: "Forge" }],

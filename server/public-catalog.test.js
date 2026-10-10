@@ -37,6 +37,26 @@ describe("public catalog reads", () => {
     expect(sql).toContain("factory.address AS factory_address");
   });
 
+  it("exposes chain-indexed album single and mint deadline only on album track editions", async () => {
+    const base = { id: "edition-track", release_id: "release-album", title: "Track", status: "PUBLISHED", chain_id: "43113", contract_address: "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", token_id: "5" };
+    const single = service({ ...base, album_is_single: true, album_mint_end: "1900000000", album_closed: false });
+    const edition = await single.instance.getEdition({ id: "edition-track" });
+    expect(edition).toMatchObject({ id: "edition-track", token_id: "5", isAlbumSingle: true, mintEnd: "1900000000", albumClosed: false });
+    expect(edition).not.toHaveProperty("album_is_single");
+    const sql = String(single.db.query.mock.calls[0][0]);
+    expect(sql).toContain("LEFT JOIN release_album_tracks album_track ON album_track.chain_id=c.chain_id AND album_track.contract_address=lower(c.address) AND album_track.token_id=t.token_id");
+    expect(sql).toContain("LEFT JOIN release_albums album ON album.chain_id=c.chain_id");
+
+    const track = service({ ...base, album_is_single: false, album_mint_end: "0", album_closed: true });
+    await expect(track.instance.listEditions({})).resolves.toEqual([expect.objectContaining({ isAlbumSingle: false, mintEnd: "0", albumClosed: true })]);
+    expect(String(track.db.query.mock.calls[0][0])).toContain("LEFT JOIN release_album_tracks album_track");
+
+    // A LEFT JOIN miss leaves the non-album edition response exactly as before.
+    const plain = service({ ...base, album_is_single: null, album_mint_end: null, album_closed: false });
+    const plainEdition = await plain.instance.getEdition({ id: "edition-track" });
+    expect(plainEdition).toEqual({ id: "edition-track", release_id: "release-album", title: "Track", status: "PUBLISHED", chain_id: "43113", contract_address: "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", token_id: "5" });
+  });
+
   it("does not return media_config, requirement internals, or storage keys", async () => {
     const poison = {
       id: "exp-1",

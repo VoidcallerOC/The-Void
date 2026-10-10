@@ -111,6 +111,12 @@ function toPublicEdition(row) {
   if (!edition) return edition;
   const tokenMetadata = publicTokenMetadata(row);
   if (tokenMetadata) edition.token_metadata = tokenMetadata;
+  // Only album tracks carry these keys; mintEnd is the on-chain uint64 seconds ("0" = no deadline).
+  if (typeof row.album_is_single === "boolean") {
+    edition.isAlbumSingle = row.album_is_single;
+    edition.mintEnd = String(row.album_mint_end);
+    edition.albumClosed = row.album_closed === true;
+  }
   return edition;
 }
 
@@ -119,7 +125,9 @@ const RELEASE_PUBLIC_FIELDS = ["id", "artist_id", "slug", "title", "description"
 const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description", "supply", "status", "application_metadata", "created_at", "updated_at", "release_title", "artist_id", "chain_id", "contract_address", "release_contract_address", "factory_address", "primary_sale_address", "token_id"];
 const EXPERIENCE_PUBLIC_SELECT = `id, artist_id, release_id, edition_id, title, description, experience_type, version, status, created_at, updated_at, (jsonb_typeof(requirements) = 'array' AND jsonb_array_length(requirements) > 0) AS gated, (COALESCE(media_config->>'protected', '') = 'true' OR (jsonb_typeof(media_config->'protectedMedia') = 'array' AND jsonb_array_length(media_config->'protectedMedia') > 0)) AS protected`;
 const RELEASE_PUBLIC_SELECT = `r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata, r.published_at, r.created_at, r.updated_at, a.slug AS artist_slug, a.display_name AS artist_name`;
-const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address, c.address AS release_contract_address, factory.address AS factory_address, sale.address AS primary_sale_address, t.token_id::text AS token_id, t.metadata_uri AS token_metadata_uri, t.metadata AS token_metadata`;
+const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address, c.address AS release_contract_address, factory.address AS factory_address, sale.address AS primary_sale_address, t.token_id::text AS token_id, t.metadata_uri AS token_metadata_uri, t.metadata AS token_metadata, album_track.is_single AS album_is_single, album_track.mint_end::text AS album_mint_end, (album.closed_block_number IS NOT NULL) AS album_closed`;
+// Chain-indexed VoidRelease1155V4 album state; editions without an AlbumTrackCreated row are unaffected.
+const EDITION_ALBUM_JOIN = `LEFT JOIN release_album_tracks album_track ON album_track.chain_id=c.chain_id AND album_track.contract_address=lower(c.address) AND album_track.token_id=t.token_id LEFT JOIN release_albums album ON album.chain_id=c.chain_id AND album.contract_address=lower(c.address)`;
 
 export class ApiService {
   constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {
@@ -222,14 +230,14 @@ export class ApiService {
   async getEdition({ id }) {
     const key = requiredText(id, "edition");
     const [canonicalContract, canonicalChain] = certifiedContractParams();
-    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$3 AND chain_id=$4) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key, canonicalContract, canonicalChain]);
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$3 AND chain_id=$4) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) ${EDITION_ALBUM_JOIN} WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key, canonicalContract, canonicalChain]);
     if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
     return toPublicEdition(rows[0]);
   }
 
   async listEditions({ releaseId = null, limit, offset }) {
     const [canonicalContract, canonicalChain] = certifiedContractParams();
-    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$2 AND chain_id=$3) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) WHERE e.status=$1 AND ($4::text IS NULL OR e.release_id=$4) ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`, [PUBLIC_STATUS, canonicalContract, canonicalChain, releaseId, limitValue(limit), offsetValue(offset)]);
+    const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$2 AND chain_id=$3) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) ${EDITION_ALBUM_JOIN} WHERE e.status=$1 AND ($4::text IS NULL OR e.release_id=$4) ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`, [PUBLIC_STATUS, canonicalContract, canonicalChain, releaseId, limitValue(limit), offsetValue(offset)]);
     return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicEdition(row));
   }
 

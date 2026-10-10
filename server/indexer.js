@@ -47,6 +47,28 @@ export function decodeTransferLog(log, { chainId, blockTimestamp, eventTopics = 
   return [];
 }
 
+function bytes32Topic(value) { const hex = cleanHex(value).toLowerCase(); if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error("Indexed bytes32 is malformed."); return `0x${hex}`; }
+function boolTopic(value) { const hex = cleanHex(value); if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error("Indexed bool is malformed."); const parsed = BigInt(`0x${hex}`); if (parsed > 1n) throw new Error("Indexed bool is not 0 or 1."); return parsed === 1n; }
+
+/** VoidRelease1155V4 album lifecycle: AlbumCreated, AlbumTrackCreated, AlbumClosed, ExpandedReleaseApproved. */
+export function decodeAlbumLog(log, { chainId, blockTimestamp = null, eventTopics = {} }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  const eventType = ["AlbumCreated", "AlbumTrackCreated", "AlbumClosed", "ExpandedReleaseApproved"].find((name) => eventTopics[name] && String(eventTopics[name]).toLowerCase() === topic);
+  if (!eventType) return null;
+  const common = { chainId, eventType, contractAddress: String(log.address || "").toLowerCase(), transactionHash: String(log.transactionHash || "").toLowerCase(), blockNumber: Number(log.blockNumber), blockHash: String(log.blockHash || "").toLowerCase(), logIndex: Number(log.logIndex), blockTimestamp };
+  if (eventType === "AlbumCreated" || eventType === "AlbumClosed") {
+    if (log.topics.length < 2) throw new Error(`${eventType} requires the release key topic.`);
+    return { ...common, releaseKey: bytes32Topic(log.topics[1]) };
+  }
+  if (eventType === "AlbumTrackCreated") {
+    if (log.topics.length < 3) throw new Error("AlbumTrackCreated requires tokenId and single topics.");
+    const mintEnd = BigInt(`0x${word(log.data, 0)}`);
+    if (mintEnd >= 1n << 64n) throw new Error("AlbumTrackCreated mintEnd exceeds uint64.");
+    return { ...common, tokenId: BigInt(log.topics[1]).toString(), single: boolTopic(log.topics[2]), mintEnd: mintEnd.toString() };
+  }
+  return { ...common, maxTracks: uintWord(word(log.data, 0)), maxSingles: uintWord(word(log.data, 1)) };
+}
+
 export function decodePurchasedLog(log, { chainId, blockTimestamp, tokenAddress, eventTopic }) {
   const topic = String(log?.topics?.[0] || "").toLowerCase();
   const expected = String(eventTopic || "").toLowerCase();
@@ -179,6 +201,7 @@ export class BlockchainIndexer {
   // Factories sync first so a collection created in this range is indexed from its
   // creation block in the same cycle; collections found earlier are reloaded once.
   async syncAll() {
+    if (!this.marketplacesRegistered) await this.registerConfiguredMarketplaces();
     if (!this.collectionsLoaded) await this.loadRegisteredCollections();
     if (!this.releasesLoaded) await this.loadRegisteredReleases();
     const results = [];
@@ -213,6 +236,17 @@ export class BlockchainIndexer {
     this.configs.push(primarySaleIndexerConfig({ chainId, address: normalized, startBlock, tokenAddress }));
     this.logger.info?.("indexer.primary-sale.added", { chainId: Number(chainId), address: normalized, tokenAddress: String(tokenAddress).toLowerCase(), startBlock: Number(startBlock) });
     return true;
+  }
+
+  // Marketplace projection requires a MARKETPLACE contracts row. Ensure one exists for
+  // every configured marketplace before its logs are processed; existing rows are kept.
+  async registerConfiguredMarketplaces() {
+    if (!this.store.registerMarketplaceContract) { this.marketplacesRegistered = true; return; }
+    for (const config of this.configs.filter((item) => item.contractType === "MARKETPLACE")) {
+      const inserted = await this.store.registerMarketplaceContract({ chainId: Number(config.chainId), address: config.address });
+      if (inserted) this.logger.info?.("indexer.marketplace.registered", { chainId: Number(config.chainId), address: String(config.address).toLowerCase() });
+    }
+    this.marketplacesRegistered = true;
   }
 
   async loadRegisteredCollections() {
@@ -480,12 +514,26 @@ export class BlockchainIndexer {
       }
     }
     let transferItems;
+    let albumEvent = null;
     try {
-      transferItems = config.contractType === "ERC1155" ? decodeTransferLog(log, { ...base, eventTopics: config.eventTopics || {} }) : [];
+      // Album events are matched first: ExpandedReleaseApproved has no indexed topics for the transfer decoder.
+      if (config.contractType === "ERC1155") albumEvent = decodeAlbumLog({ ...log, address: base.contractAddress, blockHash: base.blockHash }, { chainId, blockTimestamp: base.blockTimestamp, eventTopics: config.eventTopics || {} });
+      transferItems = config.contractType === "ERC1155" && !albumEvent ? decodeTransferLog(log, { ...base, eventTopics: config.eventTopics || {} }) : [];
     } catch (error) {
       await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
       await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_EVENT", message: error.message, payload: log });
       return { duplicate: false, malformed: true };
+    }
+    if (albumEvent) {
+      const inserted = await this.store.recordEvent({ ...base, eventType: albumEvent.eventType, eventData: albumEvent, isMalformed: false });
+      if (!this.store.applyAlbumEvent) throw new Error("Indexer store cannot persist album events.");
+      try {
+        const projection = await this.store.applyAlbumEvent(albumEvent);
+        return { duplicate: !inserted, eventType: albumEvent.eventType, projection };
+      } catch (error) {
+        await this.store.recordIndexerError({ ...base, errorType: "ALBUM_PROJECTION_FAILED", message: error.message, payload: albumEvent });
+        throw error;
+      }
     }
     const eventType = transferItems.length ? transferItems[0].eventType : "UNKNOWN";
     const inserted = await this.store.recordEvent({ ...base, eventType, eventData: { transferCount: transferItems.length }, isMalformed: false });

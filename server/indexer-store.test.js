@@ -171,3 +171,57 @@ describe("release registry", () => {
     expect(params.slice(0, 3)).toEqual([43113, "43113", release.toLowerCase()]);
   });
 });
+
+describe("configured marketplace registration", () => {
+  // In-memory contracts table honouring UNIQUE (chain_id, address) and the
+  // ON CONFLICT DO NOTHING insert, plus the reads applyMarketplaceEvent performs.
+  function contractsDb(seed = []) {
+    const contracts = seed.map((row) => ({ ...row }));
+    const query = vi.fn(async (sql, params = []) => {
+      if (sql.startsWith("INSERT INTO contracts")) {
+        if (!sql.includes("ON CONFLICT (chain_id, address) DO NOTHING")) throw new Error("unexpected contracts upsert");
+        const [chainId, chainKey, address, name, metadata] = params;
+        if (contracts.some((row) => row.chain_id === chainId && row.address === address)) return { rows: [] };
+        const row = { id: `contract-${contracts.length + 1}`, chain_id: chainId, chain_key: chainKey, address, contract_type: "MARKETPLACE", name, metadata };
+        contracts.push(row);
+        return { rows: [row] };
+      }
+      const typed = /^SELECT id FROM contracts .*contract_type='(\w+)'/.exec(sql);
+      if (typed) return { rows: contracts.filter((row) => row.chain_id === params[0] && row.address === params[1] && row.contract_type === typed[1]) };
+      if (sql.includes("INSERT INTO marketplace_event_projections")) return { rows: [{ id: "projection" }] };
+      if (sql.includes("INSERT INTO listings")) return { rows: [{ id: "listing-uuid", status: "ACTIVE" }] };
+      return { rows: [] };
+    });
+    const client = { query, release: vi.fn() };
+    return { contracts, pool: { query, connect: vi.fn().mockResolvedValue(client) } };
+  }
+  const tokenRow = { id: "token-contract", chain_id: 43114, chain_key: "43114", address: token, contract_type: "ERC1155", name: "Release", metadata: {} };
+
+  it("inserts a MARKETPLACE row once and is idempotent across restarts", async () => {
+    const { pool, contracts } = contractsDb();
+    const store = new IndexerStore(pool);
+    await expect(store.registerMarketplaceContract({ chainId: 43114, address: marketplace.toUpperCase().replace("0X", "0x") })).resolves.toMatchObject({ chain_id: 43114, chain_key: "43114", address: marketplace, contract_type: "MARKETPLACE", name: "ReleaseMarketplaceV3", metadata: { source: "INDEXER_CONFIG" } });
+    await expect(store.registerMarketplaceContract({ chainId: 43114, address: marketplace })).resolves.toBeNull();
+    expect(contracts).toHaveLength(1);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain("'MARKETPLACE'");
+    expect(sql).not.toContain("DO UPDATE");
+    await expect(store.registerMarketplaceContract({ chainId: 43114, address: "nope" })).rejects.toThrow(/marketplaceAddress/);
+  });
+
+  it("does not modify an existing contracts row for the configured address", async () => {
+    const existing = { id: "manual-marketplace", chain_id: 43114, chain_key: "fuji", address: marketplace, contract_type: "MARKETPLACE", name: "MusicMarketplace", metadata: { verified: true } };
+    const { pool, contracts } = contractsDb([existing]);
+    await expect(new IndexerStore(pool).registerMarketplaceContract({ chainId: 43114, address: marketplace })).resolves.toBeNull();
+    expect(contracts).toEqual([existing]);
+  });
+
+  it("projects ListingCreated for a newly configured marketplace only after registration", async () => {
+    const { pool } = contractsDb([tokenRow]);
+    const store = new IndexerStore(pool);
+    await expect(store.applyMarketplaceEvent(created())).rejects.toThrow(/Marketplace contract is not registered/);
+    const registered = await store.registerMarketplaceContract({ chainId: 43114, address: marketplace });
+    await expect(store.applyMarketplaceEvent(created({ logIndex: 5 }))).resolves.toMatchObject({ duplicate: false, state: "ACTIVE", listing: { id: "listing-uuid" } });
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO listings"), expect.arrayContaining([43114, registered.id, "7", seller, "token-contract"]));
+  });
+});
