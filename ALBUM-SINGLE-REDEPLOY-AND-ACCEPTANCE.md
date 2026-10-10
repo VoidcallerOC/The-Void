@@ -1,7 +1,7 @@
 # Album / Single Redeploy Package and Acceptance Matrix — 2026-10-09
 
 Builds on [`RELEASE-ARCHITECTURE-RECOVERY.md`](./RELEASE-ARCHITECTURE-RECOVERY.md). Evidence rules: [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md).
-**Nothing in this document has been broadcast.** Every on-chain step below needs the owner's explicit authorization.
+**Update 2026-10-10:** the redeploy in §3 **has been broadcast** (owner-authorized run [38054831224](https://github.com/VoidcallerOC/The-Void/actions/runs/38054831224); record `deployments/release-per-contract-fuji-0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8.json`). See §6 for the independent re-verification. The album paths (B, C) are still unproven on-chain. Every further on-chain step needs the owner's explicit authorization.
 
 ## 1. Why a redeploy is needed
 
@@ -61,10 +61,10 @@ Status for every row is **NOT STARTED** unless noted. A row passes only with the
 
 | ID | Check | Required evidence | Status |
 |---|---|---|---|
-| S1 | The new implementation can create albums | Probe: `albumCapable = true` (tier 2) | NOT STARTED |
-| S2 | V3 `registry` equals the new factory, fee is 250 bps to `0xb65C…1ce4`, chain is 43113 | Probe: `v3ParityOnChain = true` (tier 2) | NOT STARTED for the new pair. **VERIFIED for the current pair** `0xa5Cb…3505` / `0x42B7…a744` (probe run 37905878502). |
-| S3 | Frontend, API, indexer and chain all agree on factory and marketplace | Vercel env value, JSON config, `/api/indexer/health` contract list, probe | **VERIFIED for the current pair**: Vercel `VITE_MARKETPLACE_ADDRESS`, `config/fuji-release-per-contract-v2.json`, indexer health and on-chain `registry()` all agree. Redo this after the redeploy. |
-| S4 | The indexer picks up new factory releases and their sales | `factory_releases` row and health entry within 2 minutes of `ReleaseCreated` | NOT STARTED |
+| S1 | The new implementation can create albums | Probe: `albumCapable = true` (tier 2) | **VERIFIED** (§6): implementation `0x45c3…E452` has all 6 album selectors. |
+| S2 | V3 `registry` equals the new factory, fee is 250 bps to `0xb65C…1ce4`, chain is 43113 | Probe: `v3ParityOnChain = true` (tier 2) | **VERIFIED for the new pair** `0x3e4E…3aC8` / `0xa464…C898` (§6). Also verified for the historical pair `0xa5Cb…3505` / `0x42B7…a744` (probe run 37905878502). |
+| S3 | Frontend, API, indexer and chain all agree on factory and marketplace | Vercel env value, JSON config, `/api/indexer/health` contract list, probe | **VERIFIED for the new pair** (§6): the config lists it as active, indexer health lists the new factory and marketplace, on-chain `registry()` agrees, and Vercel production runs `fc83364`, which includes the per-factory marketplace routing from `078ffd6`. The Vercel env value itself was not re-read in this pass. |
+| S4 | The indexer picks up new factory releases and their sales | `factory_releases` row and health entry within 2 minutes of `ReleaseCreated` | **PARTIAL.** Health lists both new-factory clones (`0xBf75…4CB9`, `0x4b27…9bB0`) and their sales. The `factory_releases` rows and the 2-minute latency were not measured. |
 | S5 | API and indexer run the merged code | Render deploy record SHA and `/api/health/ready` returns 200 | **COMPLETE.** API `dep-db4aape0tbcc73dnak2g` and indexer `dep-db4a8vqvcj2c73d0kgkg` are both on `ffe9c52`; health returned 200 at 2026-10-09T08:28:18Z. |
 
 ### Path A — standalone release (EP)
@@ -124,3 +124,22 @@ Status for every row is **NOT STARTED** unless noted. A row passes only with the
 | RLS and grants (live) | Migrations 001–036 are recorded in production (API startup log 2026-10-09T08:27:42Z). Live `check-rls.sql` has not been run: no database access from this session. | UNVERIFIED |
 | Pinata credential | Not tested | UNVERIFIED |
 | Reviewer DMs | API startup logs `X_DM_CONFIG_MISSING`, so reviewer alerts are not delivered | OPEN (owner sets the X_* secrets, or accepts it) |
+
+## 6. Post-broadcast re-verification — 2026-10-10T22:50Z
+
+Read-only. `node scripts/fuji-release-capability-probe.mjs` (tier 2, public Fuji RPC, tip block `59283203`), plus production API and Vercel reads. No transaction was sent.
+
+| Check | Result |
+|---|---|
+| Factory `0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8` `implementation()` | `0x45c3FFBb3C0Db3a8C87453d4612c9B3b6392E452`. Matches config. |
+| Implementation album selectors | 6 of 6 present (14,652 bytes). `albumCapable = true` |
+| ReleaseMarketplaceV3 `0xa464edb22C4959943334DB07001e3ba63989C898` | `registry` = new factory, `platformFeeBps` = 250, `feeRecipient` = `0xb65C…1ce4`, `deploymentChainId` = 43113. `v3ParityOnChain = true` |
+| New factory `releaseCount` | 2: `0xBf753E65…4CB9` and `0x4b279079…9bB0`. `isRelease = true` and `albumCreated() = false` on both. Neither clone has emitted `AlbumCreated` or `AlbumTrackCreated` (`eth_getLogs` from block 59269207). |
+| Production API `/api/health/ready` | `ok: true`; the indexer covers both factories, both marketplaces, both new clones and their sales. Lag is 15 blocks. |
+| Vercel production | `dpl_994HePxZcJ3ZQiYvT4RBWfEeyRGu` is READY on `fc83364` (main HEAD). |
+
+**What this certifies:** contract capability and wiring (S1–S3).
+**What it does not certify:** any album workflow. Paths B and C are **NOT STARTED** on-chain. No album has been created on any clone. Path A has not been re-run end to end on the new pair.
+
+**Deployed source is behind main.** `1e95f5b` added `VoidRelease1155V5` and `VoidReleaseFactoryV3` (provenance root at edition creation). These are **not deployed**. The album-capable factory on Fuji is V2/V4 and has no atomic provenance anchoring. Decide whether to certify albums on V2/V4 now, or to deploy V3/V5 first and certify there. Certifying both means doing the work twice.
+
