@@ -1,5 +1,6 @@
 import { Interface } from "ethers";
 import { isValidAddress, switchChain, waitForReceipt } from "./web3.js";
+import { releaseDeploymentForFactory, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
 export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", OBSERVED: "OBSERVED", CONFIRMED: "CONFIRMED", FINALIZED: "FINALIZED", FAILED: "FAILED", REJECTED: "REJECTED", REVERTED: "REVERTED", REPLACED: "REPLACED", STALE: "STALE", RECONCILIATION_REQUIRED: "RECONCILIATION_REQUIRED", EXPIRED: "EXPIRED" });
@@ -16,6 +17,16 @@ export const MARKETPLACE_CONFIG = Object.freeze({
   apiBaseUrl: String(env.VITE_MARKETPLACE_API_BASE_URL || "/api").replace(/\/$/, ""),
   enabled: isValidAddress(configuredAddress) && Number.isInteger(configuredChainId) && configuredChainId > 0,
 });
+
+// A release-per-contract edition trades on the ReleaseMarketplaceV3 of the factory that created
+// it (each marketplace's registry is immutable). The configured marketplace only switches the
+// surface on: when it is one of the recorded release marketplaces on the same chain, the edition
+// gets its own factory's marketplace. Anything else keeps the configured marketplace.
+export function marketplaceConfigForEdition(edition, base = MARKETPLACE_CONFIG) {
+  const deployment = releaseDeploymentForFactory(edition?.factoryAddress);
+  if (!deployment || !base?.enabled || Number(base.chainId) !== Number(deployment.chainId) || !releaseDeploymentForMarketplace(base.address)) return base;
+  return Object.freeze({ ...base, address: deployment.marketplaceAddress });
+}
 
 const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
 const MAX_UINT256 = (1n << 256n) - 1n;

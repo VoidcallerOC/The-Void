@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Btn } from "./Atoms.jsx";
 import { useWallet } from "../lib/wallet-context.js";
-import { LISTING_STATUS, MARKETPLACE_CONFIG, PURCHASE_STATE, assertCanonicalMarketplaceTarget, requiredPayment, submitPurchase } from "../lib/marketplace.js";
+import { LISTING_STATUS, MARKETPLACE_CONFIG, PURCHASE_STATE, assertCanonicalMarketplaceTarget, marketplaceConfigForEdition, requiredPayment, submitPurchase } from "../lib/marketplace.js";
 import {
   classifyAuthoritativePurchaseTransaction,
   createAuthoritativePurchaseIntent,
@@ -40,13 +40,14 @@ export function PurchasePanel({ edition }) {
   const [pendingPurchase, setPendingPurchase] = useState(null);
   const secondary = resolveSecondaryStatus({ infrastructure, listingsState });
   const editionKey = `${edition.id}:${edition.contractAddress}:${edition.chainId}:${(edition.tokenIds || []).join(",")}`;
+  const marketplace = useMemo(() => marketplaceConfigForEdition(edition, MARKETPLACE_CONFIG), [edition]);
 
   useEffect(() => {
     if (!live || !chain) return undefined;
     const controller = new AbortController();
     fetchIndexedListings({
       chainId: chain.id,
-      marketplaceAddress: MARKETPLACE_CONFIG.address,
+      marketplaceAddress: marketplace.address,
       tokenContractAddress: edition.contractAddress,
       status: "ACTIVE",
       signal: controller.signal,
@@ -66,7 +67,7 @@ export function PurchasePanel({ edition }) {
         setMessage(error?.message || "The marketplace index is unavailable.");
       });
     return () => controller.abort();
-  }, [live, chain, edition, editionKey]);
+  }, [live, chain, edition, editionKey, marketplace]);
 
   const collect = async () => {
     if (!wallet.connected || !wallet.account) { setMessage("Connect your wallet before collecting."); return; }
@@ -75,7 +76,7 @@ export function PurchasePanel({ edition }) {
     const selectedListing = { ...listing };
     let marketplaceTarget;
     try {
-      marketplaceTarget = assertCanonicalMarketplaceTarget({ marketplace: selectedListing.marketplace || MARKETPLACE_CONFIG.address, chainId: chain?.id, config: MARKETPLACE_CONFIG });
+      marketplaceTarget = assertCanonicalMarketplaceTarget({ marketplace: selectedListing.marketplace || marketplace.address, chainId: chain?.id, config: marketplace });
     } catch (error) {
       setState(PURCHASE_STATE.FAILED);
       setMessage(error.message);
@@ -96,7 +97,7 @@ export function PurchasePanel({ edition }) {
         quantity: selectedQuantity,
         chain,
         chainId: wallet.chainId,
-        canonical: MARKETPLACE_CONFIG,
+        canonical: marketplace,
         onState: (nextState) => {
           // A wallet receipt is only observed locally. Only the authoritative
           // marketplace transaction endpoint may move PENDING to CONFIRMED.

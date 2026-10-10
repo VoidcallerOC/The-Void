@@ -14,6 +14,25 @@ export const FUJI_RELEASE_PER_CONTRACT = Object.freeze(fujiPerContract);
 // disabled until a future, separately authorized deployment is configured.
 export const FUJI_RELEASE_PER_CONTRACT_V2 = Object.freeze(fujiPerContractV2);
 
+// Every V2 release-per-contract deployment on Fuji: the active (album-capable) factory first,
+// then historical ones. Factory clones are immutable and each ReleaseMarketplaceV3 accepts only
+// its own factory's releases, so a release always trades on the marketplace of the factory that
+// created it. Historical deployments stay fully supported for the releases they already hold.
+export const FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS = Object.freeze([
+  { factoryAddress: fujiPerContractV2.factoryAddress, implementationAddress: fujiPerContractV2.implementationAddress, marketplaceAddress: fujiPerContractV2.marketplaceAddress, factoryDeploymentBlock: fujiPerContractV2.factoryDeploymentBlock, marketplaceDeploymentBlock: fujiPerContractV2.marketplaceDeploymentBlock, releaseVersion: fujiPerContractV2.releaseVersion, albumCapable: fujiPerContractV2.albumCapable === true, active: true },
+  ...(fujiPerContractV2.historicalDeployments || []).map((deployment) => ({ ...deployment, albumCapable: deployment.albumCapable === true, active: false })),
+].map((deployment) => Object.freeze({ ...deployment, chainId: Number(fujiPerContractV2.chainId) })));
+
+const sameAddress = (a, b) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase() && a.trim() !== "";
+
+export function releaseDeploymentForFactory(factoryAddress) {
+  return FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS.find((deployment) => sameAddress(deployment.factoryAddress, factoryAddress)) || null;
+}
+
+export function releaseDeploymentForMarketplace(marketplaceAddress) {
+  return FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS.find((deployment) => sameAddress(deployment.marketplaceAddress, marketplaceAddress)) || null;
+}
+
 function requestedNetwork() {
   const web = typeof import.meta !== "undefined" ? import.meta.env?.VITE_RELEASE_NETWORK : undefined;
   const node = globalThis.process?.env?.RELEASE_NETWORK;

@@ -78,12 +78,26 @@ const baseInput = {
 
 describe("FactoryV2 → ReleaseMarketplaceV3 secondary listing verification", () => {
   it("pins the Studio FactoryV2 and ReleaseMarketplaceV3 Fuji addresses at 250 bps", () => {
-    expect(factoryAddress).toBe("0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505");
-    expect(marketplaceAddress).toBe("0x42B740aA92A6F48380F6D97AD91e332a7921a744");
+    // Active: the album-capable deployment (run 38054831224). Historical: the 2026-10-05 pre-album pair.
+    expect(factoryAddress).toBe("0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8");
+    expect(marketplaceAddress).toBe("0xa464edb22C4959943334DB07001e3ba63989C898");
+    expect(FUJI_RELEASE_PER_CONTRACT_V2.historicalDeployments).toEqual([expect.objectContaining({ factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505", marketplaceAddress: "0x42B740aA92A6F48380F6D97AD91e332a7921a744", albumCapable: false })]);
     expect(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceFeeBps).toBe(250);
     expect(FUJI_RELEASE_PER_CONTRACT_V2.source).toBe("VoidReleaseFactoryV2");
     expect(factoryAddress.toLowerCase()).not.toBe(legacyFactoryAddress.toLowerCase());
     expect(marketplaceAddress.toLowerCase()).not.toBe(legacyMarketplaceAddress.toLowerCase());
+  });
+
+  it("verifies a historical clone against its own factory when it lists on the historical marketplace", async () => {
+    const [historical] = FUJI_RELEASE_PER_CONTRACT_V2.historicalDeployments;
+    const provider = providerFor({ registry: historical.factoryAddress, marketTarget: historical.marketplaceAddress, factoryTarget: historical.factoryAddress });
+    const result = await readReleaseListingContext({ ...baseInput, marketplaceAddress: historical.marketplaceAddress, provider });
+    expect(result).toMatchObject({ factoryAddress: getAddress(historical.factoryAddress), marketplaceAddress: getAddress(historical.marketplaceAddress) });
+    expect(provider.calls).toContain(historical.factoryAddress.toLowerCase());
+    expect(provider.calls).not.toContain(factoryAddress.toLowerCase());
+    // A marketplace whose registry is the other deployment's factory is refused.
+    const crossed = providerFor({ registry: factoryAddress, marketTarget: historical.marketplaceAddress, factoryTarget: historical.factoryAddress });
+    await expect(readReleaseListingContext({ ...baseInput, marketplaceAddress: historical.marketplaceAddress, provider: crossed })).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
   });
 
   it("accepts a FactoryV2-registered V4 clone and returns on-chain ownership, approval, fee and royalty", async () => {

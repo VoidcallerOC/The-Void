@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
@@ -6,6 +6,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import {
   LISTING_STATUS,
   MARKETPLACE_CONFIG,
+  marketplaceConfigForEdition,
   submitApproval,
   submitCancel,
   submitListing,
@@ -22,7 +23,7 @@ import {
   recordAuthoritativeTransactionSubmission,
 } from "../lib/marketplace-api.js";
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
-import { FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
 import { switchChain } from "../lib/web3.js";
 
@@ -78,12 +79,16 @@ function statusCopy(stage, message) {
 export function ListingPanel({ edition }) {
   const wallet = useWallet();
   const infrastructure = resolveInfrastructureStatus();
-  const canonicalMarketplace = FUJI_RELEASE_PER_CONTRACT_V2.marketplaceAddress;
+  // The edition's own factory decides its marketplace (historical clones keep trading on theirs);
+  // an edition without a recorded factory keeps the configured release marketplace.
+  const marketplace = useMemo(() => marketplaceConfigForEdition(edition, MARKETPLACE_CONFIG), [edition]);
+  const deployment = releaseDeploymentForMarketplace(marketplace.address);
+  const canonicalMarketplace = deployment?.marketplaceAddress || FUJI_RELEASE_PER_CONTRACT_V2.marketplaceAddress;
   const canonicalChainId = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
   const candidate = isReleasePerContractCandidate(edition);
   const marketplaceConfigured = infrastructure === MARKETPLACE_STATE.LIVE
-    && Number(MARKETPLACE_CONFIG.chainId) === canonicalChainId
-    && sameAddress(MARKETPLACE_CONFIG.address, canonicalMarketplace);
+    && Number(marketplace.chainId) === canonicalChainId
+    && sameAddress(marketplace.address, canonicalMarketplace);
   const tokenId = String(edition?.tokenIds?.[0] ?? "");
   const contract = String(edition?.contractAddress || "");
   const provider = wallet.provider;
@@ -131,8 +136,8 @@ export function ListingPanel({ edition }) {
       try {
         const verified = await readReleaseListingContext({
           provider,
-          marketplaceAddress: MARKETPLACE_CONFIG.address,
-          marketplaceChainId: MARKETPLACE_CONFIG.chainId,
+          marketplaceAddress: marketplace.address,
+          marketplaceChainId: marketplace.chainId,
           releaseContractAddress: contract,
           tokenId,
           seller: wallet.account,
@@ -171,7 +176,7 @@ export function ListingPanel({ edition }) {
       }
     });
     return () => { active = false; controller.abort(); };
-  }, [candidate, marketplaceConfigured, verificationKey, wallet.connected, wallet.account, wrongNetwork, contract, tokenId, retry, canonicalChainId, canonicalMarketplace, provider]);
+  }, [candidate, marketplaceConfigured, verificationKey, wallet.connected, wallet.account, wrongNetwork, contract, tokenId, retry, canonicalChainId, canonicalMarketplace, marketplace.address, marketplace.chainId, provider]);
 
   useEffect(() => {
     if (!pending) return undefined;
@@ -287,8 +292,8 @@ export function ListingPanel({ edition }) {
       setSession({ key: verificationKey, stage: "checking", context, message: "Rechecking the factory, exact token balance, approval and indexed duplicate status before any transaction…" });
       const latest = await readReleaseListingContext({
         provider,
-        marketplaceAddress: MARKETPLACE_CONFIG.address,
-        marketplaceChainId: MARKETPLACE_CONFIG.chainId,
+        marketplaceAddress: marketplace.address,
+        marketplaceChainId: marketplace.chainId,
         releaseContractAddress: contract,
         tokenId,
         seller: wallet.account,
@@ -301,14 +306,14 @@ export function ListingPanel({ edition }) {
 
       if (!latest.approved) {
         setSession({ key: verificationKey, stage: "approval", context: latest, message: "Confirm marketplace approval in your wallet. This gives the configured marketplace operator access to this release contract’s ERC-1155 tokens." });
-        const approvalReceipt = await submitApproval({ provider, owner: wallet.account, tokenContract: contract, marketplace: MARKETPLACE_CONFIG.address, chain: { key: "fuji", id: canonicalChainId }, chainId: wallet.chainId });
+        const approvalReceipt = await submitApproval({ provider, owner: wallet.account, tokenContract: contract, marketplace: marketplace.address, chain: { key: "fuji", id: canonicalChainId }, chainId: wallet.chainId });
         if (BigInt(approvalReceipt?.status ?? 0) !== 1n) throw Object.assign(new Error("Marketplace approval transaction did not succeed."), { code: "APPROVAL_REVERTED" });
       }
 
       const afterApproval = await readReleaseListingContext({
         provider,
-        marketplaceAddress: MARKETPLACE_CONFIG.address,
-        marketplaceChainId: MARKETPLACE_CONFIG.chainId,
+        marketplaceAddress: marketplace.address,
+        marketplaceChainId: marketplace.chainId,
         releaseContractAddress: contract,
         tokenId,
         seller: wallet.account,
@@ -323,7 +328,7 @@ export function ListingPanel({ edition }) {
         provider,
         owner: wallet.account,
         edition,
-        marketplace: MARKETPLACE_CONFIG.address,
+        marketplace: marketplace.address,
         chain: { key: "fuji", id: canonicalChainId },
         chainId: wallet.chainId,
         tokenId,
@@ -335,7 +340,7 @@ export function ListingPanel({ edition }) {
       observedTransactionHash = String(receipt?.transactionHash || "");
       const verified = verifyListingReceipt(receipt, {
         seller: wallet.account,
-        marketplace: MARKETPLACE_CONFIG.address,
+        marketplace: marketplace.address,
         contract,
         tokenId,
         amount,
@@ -348,7 +353,7 @@ export function ListingPanel({ edition }) {
         chainId: canonicalChainId,
         transactionHash,
         transactionType: "LISTING_CREATE",
-        marketplaceAddress: MARKETPLACE_CONFIG.address,
+        marketplaceAddress: marketplace.address,
         seller: wallet.account,
         listingId: verified.listingId,
         contract,
@@ -359,7 +364,7 @@ export function ListingPanel({ edition }) {
       setPending({ kind: "create", transactionHash, expected, assetKey, verificationKey, context: afterApproval, listing: null, message: "Wallet receipt verified. Waiting for the authoritative marketplace index." });
       setSession({ key: verificationKey, stage: "pending", context: afterApproval, message: "Wallet receipt verified. The edition is not marked listed until the authoritative index confirms it." });
       try {
-        await recordAuthoritativeTransactionSubmission({ transactionHash, chainId: canonicalChainId, wallet: wallet.account, marketplaceAddress: MARKETPLACE_CONFIG.address, type: "LISTING", authHeaders: wallet.authHeaders });
+        await recordAuthoritativeTransactionSubmission({ transactionHash, chainId: canonicalChainId, wallet: wallet.account, marketplaceAddress: marketplace.address, type: "LISTING", authHeaders: wallet.authHeaders });
       } catch {
         setPending((prior) => prior?.transactionHash === transactionHash ? { ...prior, message: "Wallet receipt verified, but transaction registration was unavailable. Do not submit again; waiting for index reconciliation." } : prior);
         setSession({ key: verificationKey, stage: "reconciliation-required", context: afterApproval, message: "Wallet receipt verified, but transaction registration was unavailable. Do not submit again; waiting for index reconciliation." });
@@ -469,7 +474,7 @@ export function ListingPanel({ edition }) {
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
         <div style={{ marginTop: 10, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.8, overflowWrap: "anywhere" }}>
           <div>NETWORK · AVALANCHE FUJI · CHAIN {canonicalChainId}</div>
-          <div>RELEASE FACTORY · {FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress}</div>
+          <div>RELEASE FACTORY · {deployment?.factoryAddress || FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress}</div>
           <div>MARKETPLACE · {canonicalMarketplace}</div>
           <div>RELEASE CONTRACT · {contract || "UNAVAILABLE"}</div>
           <div>CONTRACT · checks clone registration, balance, approval, price, expiry and settlement rules.</div>

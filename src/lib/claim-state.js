@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG } from "./fuji-release.js";
+import { releaseDeploymentForFactory } from "../../config/release-network.js";
 
 export const CLAIM_STATES = Object.freeze({
   WALLET_DISCONNECTED: "wallet-disconnected",
@@ -33,8 +34,8 @@ export function releaseBindingFor(edition) {
   const tokenLooksValid = tokenId !== undefined && tokenId !== null && /^\d+$/.test(String(tokenId));
   const isLegacySingleton = releaseContractAddress.toLowerCase() === LEGACY_FUJI_SINGLETON;
   const factoryAddress = String(edition?.factoryAddress || "").trim();
-  const factoryMatches = factoryAddress.length > 0
-    && factoryAddress.toLowerCase() === String(FUJI_RELEASE_FACTORY_V2_CONFIG.factoryAddress || "").toLowerCase();
+  // Active or historical release factory: clones from either stay claimable.
+  const factoryMatches = factoryAddress.length > 0 && releaseDeploymentForFactory(factoryAddress) !== null;
   const valid = architecture === "release-per-contract"
     && chainId === FUJI_RELEASE_FACTORY_V2_CONFIG.chainId
     && addressLooksValid

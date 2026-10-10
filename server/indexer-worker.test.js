@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadIndexerConfig } from "./config.js";
+import { loadIndexerConfig, withManifestReleaseDeployments } from "./config.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
 import { createProductionIndexerWorker, IndexerLeaseError, ProductionIndexerWorker } from "./indexer-worker.js";
 
@@ -121,7 +121,7 @@ describe("indexer worker configuration", () => {
   });
 
   it("validates explicit Fuji contract configuration without inventing deployment data", () => {
-    const result = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]) });
+    const result = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]) });
     expect(result).toMatchObject({ chainId: 43113, contracts: [{ address: contract, contractType: "ERC1155", startBlock: 123 }] });
     expect(result.contracts[0].eventTopics.TransferSingle).toMatch(/^0x[0-9a-f]{64}$/);
     expect(result.contracts[0].skipMintOperators).toEqual([]);
@@ -157,7 +157,7 @@ describe("configured marketplace bootstrap", () => {
   const sale = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
   it("registers only configured MARKETPLACE contracts once before the first sync", async () => {
-    const indexerConfig = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([
+    const indexerConfig = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([
       { chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 10 },
       { chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: contract, startBlock: 10 },
       { chainId: 43113, address: marketplace.toUpperCase().replace("0X", "0x"), contractType: "MARKETPLACE", startBlock: 10 },
@@ -179,3 +179,36 @@ describe("configured marketplace bootstrap", () => {
     expect(order.filter((step) => step.startsWith("sync:"))).toHaveLength(6);
   });
 });
+
+describe("release deployment manifest", () => {
+  const env = (contracts) => ({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify(contracts) });
+  const ACTIVE_FACTORY = "0x3e4e0d9187f6fd11bd6d792a7088d0c2de8e3ac8";
+  const ACTIVE_MARKET = "0xa464edb22c4959943334db07001e3ba63989c898";
+  const OLD_FACTORY = "0xa5cba0f91cb0a81e0a9ce89a6722cbe4eec93505";
+  const OLD_MARKET = "0x42b740aa92a6f48380f6d97ad91e332a7921a744";
+
+  it("indexes every manifest factory and marketplace from its recorded deployment block when the env omits them", () => {
+    const result = loadIndexerConfig(env([{ chainId: 43113, address: "0xcccccccccccccccccccccccccccccccccccccccc", contractType: "ERC1155", startBlock: 5 }]));
+    const byAddress = Object.fromEntries(result.contracts.map((item) => [item.address, item]));
+    expect(byAddress[ACTIVE_FACTORY]).toMatchObject({ contractType: "RELEASE_FACTORY", startBlock: 59269207 });
+    expect(byAddress[ACTIVE_FACTORY].eventTopics.ReleaseCreated).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(byAddress[ACTIVE_MARKET]).toMatchObject({ contractType: "MARKETPLACE", startBlock: 59269210, platformFeeBps: 250 });
+    expect(byAddress[OLD_FACTORY]).toMatchObject({ contractType: "RELEASE_FACTORY", startBlock: 59082607 });
+    expect(byAddress[OLD_MARKET]).toMatchObject({ contractType: "MARKETPLACE", startBlock: 59082610 });
+    expect(result.contracts[0].address).toBe("0xcccccccccccccccccccccccccccccccccccccccc");
+  });
+
+  it("keeps the env entry for an address the env already lists and never duplicates it", () => {
+    const result = loadIndexerConfig(env([{ chainId: 43113, address: OLD_MARKET, contractType: "MARKETPLACE", startBlock: 1, platformFeeBps: 250 }, { chainId: 43113, address: OLD_FACTORY, contractType: "RELEASE_FACTORY", startBlock: 2 }]));
+    expect(result.contracts.filter((item) => item.address === OLD_MARKET)).toEqual([expect.objectContaining({ startBlock: 1 })]);
+    expect(result.contracts.filter((item) => item.address === OLD_FACTORY)).toEqual([expect.objectContaining({ startBlock: 2 })]);
+    expect(new Set(result.contracts.map((item) => item.address)).size).toBe(result.contracts.length);
+  });
+
+  it("adds nothing on another chain or when opted out", () => {
+    const contracts = [{ chainId: 43113, address: "0xcccccccccccccccccccccccccccccccccccccccc", contractType: "ERC1155", startBlock: 5 }];
+    expect(loadIndexerConfig({ ...env(contracts), INDEXER_INCLUDE_RELEASE_MANIFEST: "false" }).contracts).toHaveLength(1);
+    expect(withManifestReleaseDeployments([], { chainId: 43114 })).toEqual([]);
+  });
+});
+

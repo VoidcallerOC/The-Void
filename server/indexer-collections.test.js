@@ -58,7 +58,7 @@ function storeDouble(registered = []) {
 
 function configs() {
   return loadIndexerConfig({
-    INDEXER_RPC_URL: "https://rpc.example", INDEXER_CHAIN_ID: "43113",
+    INDEXER_RPC_URL: "https://rpc.example", INDEXER_CHAIN_ID: "43113", INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
     INDEXER_CONTRACTS_JSON: JSON.stringify([
       { address: SALE_V2, contractType: "PRIMARY_SALE_V2", startBlock: 1 },
       { address: FACTORY, contractType: "COLLECTION_FACTORY", startBlock: 1 },

@@ -1,5 +1,5 @@
 import { Interface, getAddress, isAddress } from "ethers";
-import { FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -52,14 +52,16 @@ export async function readReleaseListingContext({
   seller,
 }) {
   const expectedChainId = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
-  const factoryAddress = getAddress(FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress);
-  const canonicalMarketplace = getAddress(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceAddress);
+  // Each recorded deployment pairs one factory with the one marketplace whose registry it is.
+  const deployment = validContractAddress(marketplaceAddress) ? releaseDeploymentForMarketplace(marketplaceAddress) : null;
   const expectedFeeBps = BigInt(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceFeeBps);
 
   if (!provider?.request) fail("Connect a browser wallet to verify this release on chain.", "WALLET_REQUIRED");
-  if (!validContractAddress(marketplaceAddress) || getAddress(marketplaceAddress) !== canonicalMarketplace) {
+  if (!deployment) {
     fail("The configured marketplace does not match the canonical Fuji release marketplace.", "MARKETPLACE_UNAVAILABLE");
   }
+  const factoryAddress = getAddress(deployment.factoryAddress);
+  const canonicalMarketplace = getAddress(deployment.marketplaceAddress);
   if (Number(marketplaceChainId) !== expectedChainId) {
     fail("The configured marketplace is not on the supported Fuji release network.", "MARKETPLACE_UNAVAILABLE");
   }

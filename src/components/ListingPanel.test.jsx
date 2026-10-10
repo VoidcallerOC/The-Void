@@ -56,6 +56,8 @@ const edition = {
   chainId: 43113,
   contractAddress: mocks.contract,
   primarySaleAddress: mocks.sale,
+  // A clone of the historical (pre-album) factory, which trades on its own ReleaseMarketplaceV3.
+  factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505",
   tokenIds: ["987654321012345678901234567890123456789"],
 };
 const tokenId = edition.tokenIds[0];
