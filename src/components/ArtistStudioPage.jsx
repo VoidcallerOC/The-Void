@@ -7,7 +7,7 @@ import { EXPERIENCE_CATEGORIES, experienceCategory, experienceCategoryLabel } fr
 import { mapPublishedCatalog } from "../lib/catalog-source.js";
 import { studioCatalogForConnectedWallet } from "../lib/studio-wallet-catalog.js";
 import { ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseAlbumState, readReleaseEdition, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
+import { FUJI_RELEASE_CONFIG, FUJI_RELEASE_FACTORY_V2_CONFIG, encodeCreateReleaseAlbum, encodeCreateReleaseAlbumTrack, encodeCreateReleaseEdition, fujiExplorerUrl, readReleaseAlbumState, readReleaseEdition, sendReleaseProvenanceAnchor, sendReleaseTransaction, simulateReleaseCall, submitArtistReleaseCreation, verifyArtistReleaseCreation, verifyReleaseEditionCreation } from "../lib/fuji-release.js";
 import { getAddress } from "ethers";
 import { createFujiPublicProvider, encodeConfigureSale, explainConfigureSaleError, avaxToWei, formatAvax, weiToAvax, readReleasePrimarySale, simulateReleaseSaleConfigure } from "../lib/primary-sale.js";
 import { SALE_DURATION_PRESETS, SALE_STATUS_LABELS, applyDurationPreset, buildSaleChange, describeSaleWindow, formatSaleInstant, nowSeconds, saleFormFromChain, saleStatus, saleWindowWarning } from "../lib/sale-editor.js";
@@ -20,6 +20,8 @@ import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
+import { mapReleaseBindings } from "../lib/sale-earnings.js";
+import { StudioEarnings } from "./StudioEarnings.jsx";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -383,6 +385,9 @@ export function ArtistStudioPage() {
   const albumActivated = albumSupported && albumState.created;
   const [editionId, setEditionId] = useState("");
   const [publishedTokenId, setPublishedTokenId] = useState("");
+  // null: unknown. "AT_PUBLICATION": recorded by the publishing transaction (Factory V3).
+  // "ANCHORED": recorded by the separate anchor contract. "NOT_ANCHORED": a one-time anchor is offered.
+  const [onChainProvenance, setOnChainProvenance] = useState(null);
   const [notice, setNotice] = useState("");
   // On a failed Fuji transaction, hold the hash + explorer link so the user can
   // recover and inspect the exact transaction instead of losing it.
@@ -420,6 +425,7 @@ export function ArtistStudioPage() {
     setReleaseId(resumed.releaseId);
     setEditionId(resumed.editionId || "");
     setPublishedTokenId(resumed.tokenId);
+    setOnChainProvenance(null);
     const boundEdition = (catalog?.editions || []).find((item) => item.id === resumed.editionId);
     setActiveReleaseAsset(boundEdition?.contractAddress && boundEdition?.primarySaleAddress ? { chainId: Number(boundEdition.chainId), releaseContractAddress: boundEdition.contractAddress, primarySaleAddress: boundEdition.primarySaleAddress, tokenId: resumed.tokenId } : null);
     setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined).map(([key, value]) => [key, key === "priceWei" ? weiToAvax(value) : value])) }));
@@ -435,7 +441,7 @@ export function ArtistStudioPage() {
     studioFetch("/studio/catalog", { headers })
       .then((payload) => {
         if (cancelled) return;
-        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [] }, wallet.account);
+        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [], releaseBindings: mapReleaseBindings(payload?.releaseBindings) }, wallet.account);
         setOwnedStudioCatalog(catalog);
         if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
       })
@@ -701,22 +707,57 @@ export function ArtistStudioPage() {
       if (form.releaseType === "ALBUM" && !albumActivated) throw new Error("Activate the Album Contract before creating album tracks.");
       if (form.releaseType === "ALBUM" && albumState.closed) throw new Error("This Album Contract is closed. No more tracks can be added.");
       const mintEnd = form.mintEnd ? Math.floor(new Date(form.mintEnd).getTime() / 1000) : 0;
+      // Factory V3 releases record the server-computed provenance root in this same transaction:
+      // one artist signature publishes the edition and anchors its provenance.
+      if (metadata.provenanceAtCreation === true && !metadata.provenanceRootBytes32) throw new Error("This release records provenance at publication, but the server did not return the provenance root. Nothing was sent.");
+      const provenanceRoot = metadata.provenanceAtCreation === true ? metadata.provenanceRootBytes32 : null;
       const encoded = form.releaseType === "ALBUM"
-        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, single: form.albumSingle, mintEnd })
-        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0 });
+        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, single: form.albumSingle, mintEnd, provenanceRoot })
+        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, provenanceRoot });
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
       await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
       const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data });
-      await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId });
+      await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId, provenanceRoot });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);
       if (!result.fullyPublished) return;
+      setOnChainProvenance(confirmed.provenanceAtCreation === true && confirmed.onChainProvenance ? "AT_PUBLICATION" : null);
       setPublishedTokenId(encoded.tokenId.toString());
       if (releaseScoped) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: encoded.tokenId.toString() });
       setStep("sale");
+    } catch (error) {
+      setNotice(error.message);
+      setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Releases on pre-V3 factories keep the separate VoidProvenanceAnchor. A published edition whose root
+  // that contract has not recorded gets a one-time anchor: one more artist transaction, verified server-side.
+  const anchorPublishedProvenance = async () => {
+    setBusy("provenance"); setNotice(""); setTxEvidence(null);
+    try {
+      if (!releaseId || !editionId || !activeReleaseAsset?.releaseContractAddress) throw new Error("Load a published release edition first.");
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const path = studioPublicationPath(releaseId, "provenance/anchor/prepare");
+      let prepared;
+      try {
+        prepared = await studioFetch(path, { method: "POST", payload: { editionId }, headers });
+      } catch (error) {
+        if (error?.code === "PROVENANCE_ANCHORED_AT_PUBLICATION") { setOnChainProvenance("AT_PUBLICATION"); setNotice("This release recorded its provenance root when the edition was published. No separate anchor is needed."); return; }
+        throw error;
+      }
+      if (prepared.alreadyAnchored) { setOnChainProvenance("ANCHORED"); setNotice("This edition's provenance root is already recorded on-chain."); return; }
+      setOnChainProvenance("NOT_ANCHORED");
+      const transaction = await sendReleaseProvenanceAnchor({ provider: wallet.getProvider?.(), from: wallet.account, prepared, releaseContractAddress: activeReleaseAsset.releaseContractAddress });
+      const confirmed = await studioFetch(studioPublicationPath(releaseId, "provenance/anchor/confirm"), { method: "POST", payload: { editionId, transactionHash: transaction.hash }, headers });
+      if (confirmed.anchorStatus !== "ANCHORED") throw Object.assign(new Error("The anchor transaction was sent but is not verified yet. Try again shortly."), { transactionHash: transaction.hash });
+      setOnChainProvenance("ANCHORED");
+      setNotice(`Provenance root recorded on-chain. Transaction confirmed: ${transaction.hash}`);
     } catch (error) {
       setNotice(error.message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
@@ -883,6 +924,11 @@ export function ArtistStudioPage() {
           <h2>Add tracks</h2>
           <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Add another song. Each song is either limited or open, and you pick that when you publish it.</p>
         </button>
+        <button type="button" className={`vc-studio-action${workflow === "earnings" ? " is-primary" : ""}`} onClick={() => { setWorkflow("earnings"); setStep("earnings"); setNotice(""); }}>
+          <Eyebrow>03</Eyebrow>
+          <h2>Earnings</h2>
+          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>See what each release has earned and withdraw it.</p>
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 28 }}>
@@ -917,6 +963,10 @@ export function ArtistStudioPage() {
           <div style={{ marginTop: 6 }}>Contract {txEvidence.contractAddress} · chain {txEvidence.chainId}</div>
         </div>
       )}
+
+      {workflow === "earnings" && (canUseStudio
+        ? (ownedStudioCatalog ? <StudioEarnings catalog={ownedStudioCatalog} wallet={wallet} /> : <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Loading your catalog…</p>)
+        : <p style={{ color: "var(--vc-crimson)" }}>Connect and authenticate the artist wallet to see earnings.</p>)}
 
       {workflow === "mint" && step === "mint" && (
         <section style={card} aria-label="Add a track">
@@ -1240,6 +1290,20 @@ export function ArtistStudioPage() {
                 This is the public sale. Set the price, when it starts, and when it stops. Buyers pay AVAX and get the song.
               </p>
               <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", wordBreak: "break-all" }}>Published token · {publishedTokenId}</p>
+              {onChainProvenance === "AT_PUBLICATION" || onChainProvenance === "ANCHORED" ? (
+                <p role="status" style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
+                  {onChainProvenance === "AT_PUBLICATION" ? "Provenance root recorded on-chain in the publishing transaction." : "Provenance root recorded on-chain by this release's anchor contract."}
+                </p>
+              ) : (
+                <div style={{ border: "1px solid var(--vc-bone-dim)", padding: 16, marginTop: 18 }}>
+                  <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginTop: 0 }}>
+                    Releases published before provenance was recorded at publication can record this edition's provenance root on-chain once. It is one more transaction from your wallet. It does not register copyright.
+                  </p>
+                  <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio || !publishedTokenId || !editionId} onClick={anchorPublishedProvenance}>
+                    {busy === "provenance" ? "Recording…" : "Record provenance on-chain"}
+                  </button>
+                </div>
+              )}
               <StudioSalePanel
                 key={`${activeReleaseAsset.primarySaleAddress}:${publishedTokenId}`}
                 releaseAsset={activeReleaseAsset}

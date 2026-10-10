@@ -169,6 +169,15 @@ describe("release registry", () => {
     const [sql, params] = client.query.mock.calls.find(([statement]) => String(statement).includes("INSERT INTO contracts"));
     expect(sql).toContain("VALUES ($1, $2::text, $3");
     expect(params.slice(0, 3)).toEqual([43113, "43113", release.toLowerCase()]);
+    expect(params[6]).toBe("VoidRelease1155V4");
+  });
+
+  it("names Factory V3 clones VoidRelease1155V5 and marks them as their own provenance anchor", async () => {
+    const { pool, client } = poolWith([{}, { rows: [{ id: "contract" }] }, { rows: [{ id: "release" }] }, {}]);
+    await new IndexerStore(pool).registerRelease({ chainId: 43113, factoryAddress: factory, releaseContractAddress: release, releaseKey: key, artistWallet: artist, primarySaleAddress: sale, provenanceAnchorAddress: release, implementationAddress: implementation, releaseIndex: "0", implementationVersion: 3, blockNumber: 59083459, transactionHash: tx });
+    const [, params] = client.query.mock.calls.find(([statement]) => String(statement).includes("INSERT INTO contracts"));
+    expect(params[6]).toBe("VoidRelease1155V5");
+    expect(params[5]).toMatchObject({ provenanceAtCreation: true, implementationVersion: 3 });
   });
 });
 
