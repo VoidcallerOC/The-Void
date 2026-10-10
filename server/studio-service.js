@@ -458,9 +458,10 @@ export class ArtistStudioService {
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish metadata for this release.");
     await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
-    if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
-    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    // Published editions keep immutable metadata; a published release may still add new draft editions (tracks).
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
+    if (!edition && release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
     const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
     const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
@@ -493,12 +494,13 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
     await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
-    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY CASE WHEN e.status IN ('DRAFT','REVIEW') THEN 0 ELSE 1 END, e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
     const provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
     const currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
-    if (release.status === "PUBLISHED" && publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }).fullyPublished) {
+    const editionOpen = edition.status === "DRAFT" || edition.status === "REVIEW";
+    if (!editionOpen && release.status === "PUBLISHED" && publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }).fullyPublished) {
       throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release is already published and its provenance is verified.");
     }
     try {
@@ -663,6 +665,11 @@ export class ArtistStudioService {
     const tokenId = binding ? releaseCloneTokenId(editionSlug) : certifiedTokenId(release.slug, editionSlug);
     await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: address, chainId: selectedChainId, tokenId });
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
+    if (input.id) {
+      // saveEdition upserts by id; never let a re-post reopen a published edition or move one across releases.
+      const existing = (await this.db.query("SELECT release_id, status FROM editions WHERE id=$1 LIMIT 1", [id])).rows[0];
+      if (existing && (existing.release_id !== release.id || !["DRAFT", "REVIEW"].includes(existing.status))) throw new ApiError(409, "EDITION_ALREADY_EXISTS", "This edition already exists and can no longer be replaced.");
+    }
     const edition = await this.repository.inTransaction(async (repository) => {
       const contract = binding
         ? { id: binding.release_contract_id }
