@@ -82,6 +82,11 @@ export class IndexerStore {
       await client.query("UPDATE purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("UPDATE primary_purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("UPDATE transactions SET status='REORGED', updated_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
+      await client.query("DELETE FROM release_album_tracks WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
+      await client.query("DELETE FROM release_albums WHERE chain_id=$1 AND created_block_number >= $2", [chainId, fromBlock]);
+      await client.query("UPDATE release_albums SET closed_transaction_hash=NULL, closed_block_number=NULL, closed_block_hash=NULL, closed_log_index=NULL, updated_at=now() WHERE chain_id=$1 AND closed_block_number >= $2", [chainId, fromBlock]);
+      // Approval can repeat: fall back to the latest canonical approval below the reorg (or none).
+      await client.query(`UPDATE release_albums a SET expanded_max_tracks=prev.max_tracks, expanded_max_singles=prev.max_singles, expanded_transaction_hash=prev.transaction_hash, expanded_block_number=prev.block_number, expanded_block_hash=prev.block_hash, expanded_log_index=prev.log_index, updated_at=now() FROM (SELECT ra.chain_id, ra.contract_address, p.* FROM release_albums ra LEFT JOIN LATERAL (SELECT (e.event_data->>'maxTracks')::numeric AS max_tracks, (e.event_data->>'maxSingles')::numeric AS max_singles, e.transaction_hash, e.block_number, e.block_hash, e.log_index FROM blockchain_events e WHERE e.chain_id=ra.chain_id AND e.contract_address=ra.contract_address AND e.event_type='ExpandedReleaseApproved' AND e.is_canonical=true AND e.is_malformed=false AND e.block_number < $2 ORDER BY e.block_number DESC, e.log_index DESC LIMIT 1) p ON true WHERE ra.chain_id=$1 AND ra.expanded_block_number >= $2) prev WHERE a.chain_id=prev.chain_id AND a.contract_address=prev.contract_address`, [chainId, fromBlock]);
       await client.query(`INSERT INTO indexer_rebuild_jobs (chain_id, from_block, state, updated_at) VALUES ($1,$2,'PENDING',now()) ON CONFLICT (chain_id) DO UPDATE SET from_block=LEAST(indexer_rebuild_jobs.from_block, EXCLUDED.from_block), state='PENDING', last_error=NULL, started_at=NULL, completed_at=NULL, updated_at=now()`, [chainId, fromBlock]);
       return { chainId, fromBlock, replacementHash };
     });
@@ -160,6 +165,41 @@ export class IndexerStore {
       const purchase = await client.query("INSERT INTO primary_purchases (chain_id, sale_contract_address, token_contract_address, transaction_hash, log_index, buyer_wallet, token_id, quantity, paid_wei, artist_cut_wei, platform_cut_wei, block_number, block_hash, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CONFIRMED') ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET status=CASE WHEN primary_purchases.status IN ('FINALIZED','RECONCILED') THEN primary_purchases.status ELSE 'CONFIRMED' END RETURNING *", [event.chainId, saleAddress, tokenAddress, lower(event.transactionHash), event.logIndex, buyer, tokenId, quantity, paidWei, artistCutWei, platformCutWei, event.blockNumber, lower(event.blockHash)]);
       return { duplicate: false, purchase: purchase.rows[0], transaction: transaction.rows[0], ownershipCredited: creditOwnership };
     });
+  }
+
+  // VoidRelease1155V4 album lifecycle projection. Every write is an idempotent upsert
+  // keyed by (chain_id, contract_address[, token_id]) so replays converge. handleReorg
+  // removes rows at or above the reorg block; the rewound checkpoint re-applies them.
+  async applyAlbumEvent(event) {
+    const contractAddress = address(event.contractAddress, "contractAddress");
+    const transactionHash = lower(event.transactionHash);
+    if (!/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new Error("transactionHash is invalid.");
+    const blockNumber = Number(event.blockNumber);
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) throw new Error("blockNumber is invalid.");
+    const logIndex = Number(event.logIndex);
+    if (!Number.isInteger(logIndex) || logIndex < 0) throw new Error("logIndex is invalid.");
+    const blockHash = lower(event.blockHash);
+    const location = [transactionHash, blockNumber, blockHash, logIndex];
+    if (event.eventType === "AlbumTrackCreated") {
+      if (typeof event.single !== "boolean") throw new Error("single is invalid.");
+      const mintEnd = numeric(event.mintEnd, "mintEnd");
+      if (BigInt(mintEnd) >= 1n << 64n) throw new Error("mintEnd is invalid.");
+      const { rows } = await this.db.query("INSERT INTO release_album_tracks (chain_id, contract_address, token_id, is_single, mint_end, transaction_hash, block_number, block_hash, log_index) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (chain_id, contract_address, token_id) DO UPDATE SET is_single=EXCLUDED.is_single, mint_end=EXCLUDED.mint_end, transaction_hash=EXCLUDED.transaction_hash, block_number=EXCLUDED.block_number, block_hash=EXCLUDED.block_hash, log_index=EXCLUDED.log_index, updated_at=now() RETURNING *", [event.chainId, contractAddress, numeric(event.tokenId, "tokenId"), event.single, mintEnd, ...location]);
+      return rows[0];
+    }
+    if (event.eventType === "AlbumCreated" || event.eventType === "AlbumClosed") {
+      const releaseKey = lower(event.releaseKey);
+      if (!/^0x[0-9a-f]{64}$/.test(releaseKey)) throw new Error("releaseKey is invalid.");
+      const prefix = event.eventType === "AlbumCreated" ? "created" : "closed";
+      const { rows } = await this.db.query(`INSERT INTO release_albums (chain_id, contract_address, release_key, ${prefix}_transaction_hash, ${prefix}_block_number, ${prefix}_block_hash, ${prefix}_log_index) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (chain_id, contract_address) DO UPDATE SET release_key=EXCLUDED.release_key, ${prefix}_transaction_hash=EXCLUDED.${prefix}_transaction_hash, ${prefix}_block_number=EXCLUDED.${prefix}_block_number, ${prefix}_block_hash=EXCLUDED.${prefix}_block_hash, ${prefix}_log_index=EXCLUDED.${prefix}_log_index, updated_at=now() RETURNING *`, [event.chainId, contractAddress, releaseKey, ...location]);
+      return rows[0];
+    }
+    if (event.eventType === "ExpandedReleaseApproved") {
+      // Approval may be repeated; the latest log position wins regardless of replay order.
+      const { rows } = await this.db.query("INSERT INTO release_albums (chain_id, contract_address, expanded_max_tracks, expanded_max_singles, expanded_transaction_hash, expanded_block_number, expanded_block_hash, expanded_log_index) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (chain_id, contract_address) DO UPDATE SET expanded_max_tracks=EXCLUDED.expanded_max_tracks, expanded_max_singles=EXCLUDED.expanded_max_singles, expanded_transaction_hash=EXCLUDED.expanded_transaction_hash, expanded_block_number=EXCLUDED.expanded_block_number, expanded_block_hash=EXCLUDED.expanded_block_hash, expanded_log_index=EXCLUDED.expanded_log_index, updated_at=now() WHERE release_albums.expanded_block_number IS NULL OR (release_albums.expanded_block_number, release_albums.expanded_log_index) <= (EXCLUDED.expanded_block_number, EXCLUDED.expanded_log_index) RETURNING *", [event.chainId, contractAddress, numeric(event.maxTracks, "maxTracks"), numeric(event.maxSingles, "maxSingles"), ...location]);
+      return rows[0] || null;
+    }
+    throw new Error(`Unsupported album event type ${event.eventType}.`);
   }
 
   // A collection discovered from VoidCollectionFactory.CollectionCreated. It is an
