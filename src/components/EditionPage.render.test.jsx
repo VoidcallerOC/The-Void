@@ -152,6 +152,21 @@ describe("production EditionPage route render", () => {
     expect(markup).toContain("This edition is unsupported; no transaction can be submitted.");
   });
 
+  it("renders a factory open edition (supply 0) with a live sale as collectable, never as zero supply", () => {
+    const end = Math.floor(Date.now() / 1000) + 30 * 86400;
+    catalogState.current = {
+      ...catalogState.current,
+      editions: catalogState.current.editions.map((item) => item.id === editionId
+        ? { ...item, supply: "0", saleAvailability: "open", primarySale: { configured: true, paused: false, priceWei: "10000000000000000", maxSupply: "0", sold: "1", perWalletLimit: "1", startTime: "0", endTime: String(end) } }
+        : item),
+    };
+
+    const markup = renderEdition();
+    expect(markup).toContain("Open edition · until");
+    expect(markup).toContain("Collect · 0.01 AVAX");
+    expect(markup).not.toMatch(/No pressings remain|Supply is zero|Not yet available/i);
+  });
+
   it("keeps an experience route in loading state until the published catalog settles", () => {
     catalogState.current = { ...catalogState.current, experiences: [], publishedLoading: true };
     expect(renderExperience()).toContain("Loading experience");

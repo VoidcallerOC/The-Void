@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
-import { editionPriceLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
+import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 
 export function SectionHead({ id, eyebrow, title, children, action }) {
@@ -51,12 +51,6 @@ function objectClass(edition, chain) {
   return { label: "Pressing", tone: "", note: chain?.name || edition.chain || "Avalanche" };
 }
 
-function pressingsRemain(edition) {
-  if (edition.supply === undefined || edition.supply === null || edition.supply === "") return true;
-  const supply = Number(edition.supply);
-  return !Number.isFinite(supply) || supply > 0;
-}
-
 export function EditionCard({ item, owned = false }) {
   const { edition, artist, release, primary, chain } = item;
   const image = artworkFor(edition, release);
@@ -64,7 +58,8 @@ export function EditionCard({ item, owned = false }) {
   const chainId = chain?.id || edition.chainId;
   const price = editionPriceLabel(edition);
   const object = objectClass(edition, chain);
-  const collectable = primary.availability === "available" && pressingsRemain(edition);
+  const collectable = editionIsCollectable(edition, primary);
+  const supplyLabel = editionSupplyLabel(edition, primary);
   const action = owned ? experienceAction(item) : collectable
     ? <Link to={primary.href} style={primaryBtn}>Collect</Link>
     : <Link to={`/edition/${edition.id}`} style={ghostBtn}>View edition</Link>;
@@ -80,9 +75,9 @@ export function EditionCard({ item, owned = false }) {
           <p className="vc-card-kicker">{artist?.name || "The Void"}</p>
           <h3 className="vc-card-title">{edition.title}</h3>
           <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
-          <p className="vc-card-meta">{object.note} · {editionTypeLabel(edition)} · {pressingsRemain(edition) ? (edition.supply || "Open supply") : "No pressings remain"}</p>
+          <p className="vc-card-meta">{object.note} · {editionTypeLabel(edition)} · {supplyLabel}</p>
           <p className="vc-card-meta">
-            {collectable ? "Available to collect" : primary.availability === "minted" ? "Primary mint complete" : pressingsRemain(edition) ? "View edition details" : "Not available to collect"}
+            {collectable ? "Available to collect" : primary.availability === "minted" ? "Primary mint complete" : primary.saleState || primary.availability === "available" ? "Not available to collect" : "View edition details"}
             {price ? ` · ${price}` : ""}
           </p>
           <Includes items={edition.includes} />

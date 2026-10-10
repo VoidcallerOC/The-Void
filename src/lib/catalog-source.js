@@ -16,6 +16,7 @@ import { ipfsToHttp } from "./web3.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
 import { isLegacyMainnetEdition } from "./legacy-genesis.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
+import { isSaleAvailabilityState } from "./primary-sale-availability.js";
 
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
@@ -125,6 +126,32 @@ export function withPublishedArtistProfiles(catalog, published) {
   });
 }
 
+function wholeText(value) {
+  return /^\d+$/.test(String(value ?? "")) ? String(value) : "0";
+}
+
+// Live sale state the API attaches to release-per-contract editions
+// (server/primary-sale-state.js). Absent when the API could not read the sale.
+function publishedSaleOf(row) {
+  const sale = row.primary_sale && typeof row.primary_sale === "object" && !Array.isArray(row.primary_sale) ? row.primary_sale : null;
+  const state = isSaleAvailabilityState(row.primary_availability) ? row.primary_availability : null;
+  return {
+    ...(state ? { saleAvailability: state } : {}),
+    ...(sale ? {
+      primarySale: {
+        configured: sale.configured === true,
+        paused: sale.paused === true,
+        priceWei: wholeText(sale.price_wei),
+        maxSupply: wholeText(sale.max_supply),
+        sold: wholeText(sale.sold),
+        perWalletLimit: wholeText(sale.per_wallet_limit),
+        startTime: wholeText(sale.start_time),
+        endTime: wholeText(sale.end_time),
+      },
+    } : {}),
+  };
+}
+
 export function mapPublishedCatalog({ artists = [], releases = [], editions = [], experiences = [] } = {}) {
   const mappedArtists = asArray(artists).filter((row) => row?.id).map((row) => {
     const meta = metadataOf(row, "profile_metadata", "application_metadata", "metadata");
@@ -173,6 +200,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
     // out: never "available" for primary collect, and they list every token.
     const legacy = isLegacyMainnetEdition({ chainId, contractAddress });
     const legacyTokenIds = legacy ? asArray(meta.tokenIds).map(String) : [];
+    const sale = publishedSaleOf(row);
+    const salePriceWei = sale.primarySale?.configured && sale.primarySale.priceWei !== "0" ? sale.primarySale.priceWei : null;
     return createEdition({
       id: row.id,
       releaseId: row.release_id || row.releaseId,
@@ -196,7 +225,9 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       tier: row.tier || "standard",
       artwork: ipfsToHttp(meta.artwork) || ipfsToHttp(row.token_metadata?.image || ""),
       tokenMetadata: row.token_metadata && typeof row.token_metadata === "object" ? row.token_metadata : null,
-      priceWei: meta.priceWei ?? meta.primaryPriceWei ?? meta.marketplace?.priceWei ?? null,
+      // The on-chain sale price is authoritative when the API read it.
+      priceWei: salePriceWei ?? meta.priceWei ?? meta.primaryPriceWei ?? meta.marketplace?.priceWei ?? null,
+      ...sale,
       ...(row.buyable_sale === true || row.buyableSale === true ? { buyableSale: true } : {}),
     });
   });

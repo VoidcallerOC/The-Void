@@ -18,6 +18,7 @@ import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import {
   collectEdition,
   collectReleaseEdition,
+  createFujiPublicProvider,
   ensureFujiNetwork,
   explainCollectError,
   formatAvax,
@@ -30,13 +31,42 @@ import {
 import { readReleaseBalance, readReleasePaused } from "../lib/release-asset.js";
 import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
 import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
+import { SALE_AVAILABILITY, formatSaleTime, primarySaleAvailability, saleAvailabilityLabel } from "../lib/primary-sale-availability.js";
+
+// The API's live sale tuple (decimal strings) in the shape readReleasePrimarySale returns.
+function saleFromCatalog(value) {
+  if (!value || value.configured !== true) return null;
+  try {
+    const maxSupply = BigInt(value.maxSupply);
+    const sold = BigInt(value.sold);
+    return {
+      priceWei: BigInt(value.priceWei),
+      maxSupply,
+      sold,
+      perWalletLimit: BigInt(value.perWalletLimit),
+      startTime: BigInt(value.startTime),
+      endTime: BigInt(value.endTime),
+      paused: value.paused === true,
+      configured: true,
+      purchased: 0n,
+      unlimited: maxSupply === 0n,
+      remaining: maxSupply === 0n ? null : (maxSupply > sold ? maxSupply - sold : 0n),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const CLOSED_WINDOW = new Set([SALE_AVAILABILITY.NOT_STARTED, SALE_AVAILABILITY.ENDED]);
 
 function saleFacts(sale, saleAddress) {
   if (!saleAddress) return "Primary sale is not configured for this release yet.";
   if (!sale?.configured) return "This release does not have a primary sale yet.";
   const facts = [
     `Price ${formatAvax(sale.priceWei)}`,
-    sale.maxSupply === 0n ? "Unlimited until the sale ends" : `${sale.remaining.toString()} left of ${sale.maxSupply.toString()}`,
+    sale.maxSupply === 0n
+      ? (sale.endTime > 0n ? `Open edition · until ${formatSaleTime(sale.endTime)}` : "Open edition")
+      : `${sale.remaining.toString()} left of ${sale.maxSupply.toString()}`,
     sale.perWalletLimit === 0n ? "No per-wallet cap" : `${sale.perWalletLimit.toString()} per wallet`,
   ];
   if (sale.purchased > 0n) facts.push(`${sale.purchased.toString()} already collected by this wallet`);
@@ -44,11 +74,12 @@ function saleFacts(sale, saleAddress) {
   return facts.join(" · ");
 }
 
-function collectLabel(sale, busy) {
+function collectLabel(sale, busy, availability) {
   if (busy) return "Confirming…";
   if (!sale?.configured) return "Collect";
   if (saleIsSoldOut(sale)) return "Sold out";
   if (sale.paused) return "Sale paused";
+  if (CLOSED_WINDOW.has(availability?.state)) return saleAvailabilityLabel(availability);
   if (walletLimitReached(sale)) return "Wallet limit reached";
   return `Collect · ${formatAvax(sale.priceWei)}`;
 }
@@ -68,7 +99,10 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const collectorEnabled = certified || releaseScoped;
   const saleAddress = releaseScoped ? releaseAsset.primarySaleAddress : fujiPrimarySaleAddress();
   const [balance, setBalance] = useState(null);
-  const [sale, setSale] = useState(null);
+  const [liveSale, setSale] = useState(null);
+  // Until the chain is read, a release-scoped edition shows the API's sale state.
+  const catalogSale = useMemo(() => (releaseScoped ? saleFromCatalog(edition?.primarySale) : null), [releaseScoped, edition?.primarySale]);
+  const sale = liveSale || catalogSale;
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [noticeState, setNoticeState] = useState("");
@@ -80,7 +114,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const onChainOwned = balance !== null && balance > 0n;
   const owned = collectorEnabled ? onChainOwned : catalogOwned || primary.availability === "minted" && catalogOwned;
   const resaleCandidate = isReleasePerContractCandidate(edition);
-  const blocked = Boolean(sale?.configured && (saleIsSoldOut(sale) || sale.paused || walletLimitReached(sale)));
+  const availability = sale?.configured ? primarySaleAvailability(sale, { editionSupply: edition?.supply }) : null;
+  const blocked = Boolean(sale?.configured && (saleIsSoldOut(sale) || sale.paused || walletLimitReached(sale) || CLOSED_WINDOW.has(availability?.state)));
 
   const storedEvidence = useMemo(() => loadPrimaryPurchaseEvidence({ editionId: edition?.id, tokenId, purchaser: wallet.account }), [edition?.id, tokenId, wallet.account]);
   const purchaseEvidence = sessionEvidence?.editionId === edition?.id
@@ -88,6 +123,17 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     && sessionEvidence?.purchaser === String(wallet.account || "").toLowerCase()
     ? sessionEvidence
     : storedEvidence;
+
+  // Without a wallet, a release-scoped Fuji edition still reads its own sale
+  // through the public RPC, so an open edition is never shown as unavailable.
+  useEffect(() => {
+    let live = true;
+    if (!releaseScoped || wallet.connected || Number(releaseAsset?.chainId) !== FUJI_RELEASE_CONFIG.chainId) return undefined;
+    readReleasePrimarySale(createFujiPublicProvider(), releaseAsset, null)
+      .then((onChainSale) => { if (live && onChainSale) setSale(onChainSale); })
+      .catch((error) => console.error("Release sale read failed", error));
+    return () => { live = false; };
+  }, [releaseScoped, releaseAsset, wallet.connected]);
 
   useEffect(() => {
     let live = true;
@@ -166,6 +212,8 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       if (!onChainSale?.configured) throw Object.assign(new Error("This release does not have a primary sale yet."), { state: "unconfigured" });
       if (saleIsSoldOut(onChainSale)) throw Object.assign(new Error("This release is sold out."), { state: "sold-out" });
       if (onChainSale.paused) throw Object.assign(new Error("This sale is paused."), { state: "paused" });
+      const saleWindow = primarySaleAvailability(onChainSale, { editionSupply: edition?.supply });
+      if (CLOSED_WINDOW.has(saleWindow.state)) throw Object.assign(new Error(`This sale is not open right now. ${saleAvailabilityLabel(saleWindow)}.`), { state: "closed" });
       if (walletLimitReached(onChainSale)) throw Object.assign(new Error("This wallet has reached the collector limit for this release."), { state: "wallet-limit" });
       const result = certified
         ? await collectEdition({ provider, from: wallet.account, tokenId, qty: 1, priceWei: onChainSale.priceWei })
@@ -212,15 +260,20 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const experienceLabel = linkedExperience ? "Open experience" : "Open reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);
   const primaryOpensExperience = !owned && !notCreated && !collectorEnabled && primary.availability === "minted";
-  const primaryCollectReady = collectorEnabled && primary.availability === "available" && tokenId !== undefined && tokenId !== null;
+  // A release-scoped edition follows its own sale (supply 0 is an open edition);
+  // the certified shared contract keeps its catalog availability.
+  const primaryCollectReady = collectorEnabled && tokenId !== undefined && tokenId !== null
+    && (releaseScoped ? Boolean(sale?.configured) || primary.availability === "available" : primary.availability === "available");
   const action = owned ? (
     <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
   ) : notCreated ? (
     <span style={ghostBtn}>Not yet available</span>
   ) : primaryCollectReady ? (
     <button type="button" style={primaryBtn} disabled={busy !== "" || !wallet.connected || blocked || !saleAddress} onClick={collect}>
-      {collectLabel(sale, busy === "collect")}
+      {collectLabel(sale, busy === "collect", availability)}
     </button>
+  ) : releaseScoped && !sale ? (
+    <span style={ghostBtn}>{primary.saleLabel || "Checking sale…"}</span>
   ) : collectorEnabled ? (
     <span style={ghostBtn}>Not yet available</span>
   ) : primary.availability === "minted" ? (
