@@ -19,6 +19,7 @@ import {
   marketplaceSecondaryAvailability,
   marketplaceCopy,
   resolveInfrastructureStatus,
+  releaseScopedFirst,
   resolveSecondaryStatus,
 } from "../lib/marketplace-surface.js";
 
@@ -118,7 +119,7 @@ export function MarketplacePage() {
     .filter((entry) => entry.listings.length > 0), [editions, liveListings]);
   const listedEditionIds = useMemo(() => new Set(listedEditions.map(({ item }) => item.edition.id)), [listedEditions]);
   const officialEditions = useMemo(
-    () => editions.filter((item) => item.primary.availability === "available" && !listedEditionIds.has(item.edition.id)),
+    () => releaseScopedFirst(editions.filter((item) => item.primary.availability === "available" && !listedEditionIds.has(item.edition.id))),
     [editions, listedEditionIds],
   );
   const heroImage = marketplaceHeroImage(presentation);
@@ -159,7 +160,7 @@ export function MarketplacePage() {
         </section>
         <section aria-labelledby="official-editions-heading">
           <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
-            Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out or zero-supply object is not offered as collectable.
+            Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out, ended or not-yet-started pressing is not offered as collectable. An open edition stays collectable until its sale ends.
           </SectionHead>
           {officialEditions.length > 0 ? (
             <div className="vc-market-grid">

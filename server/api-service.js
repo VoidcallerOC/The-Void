@@ -8,6 +8,7 @@ import { reportIndexedContracts } from "./indexer-contracts.js";
 import { chainId, nonNegativeBigInt, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { isHiddenPublicArtist, isWithdrawnPublicListing } from "../src/lib/summit-demo.js";
 import { isPublicLegacyArtwork } from "../src/lib/legacy-genesis.js";
+import { publicSaleFields } from "./primary-sale-state.js";
 
 const PUBLIC_STATUS = "PUBLISHED";
 const ACTIVE_LISTING = "ACTIVE";
@@ -130,7 +131,7 @@ const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.descriptio
 const EDITION_ALBUM_JOIN = `LEFT JOIN release_album_tracks album_track ON album_track.chain_id=c.chain_id AND album_track.contract_address=lower(c.address) AND album_track.token_id=t.token_id LEFT JOIN release_albums album ON album.chain_id=c.chain_id AND album.contract_address=lower(c.address)`;
 
 export class ApiService {
-  constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, logger = console } = {}) {
+  constructor({ db, repository, authenticator = null, ownershipVerifier = null, blockchainVerifier = null, indexerStore = null, indexerConfig = null, rateLimiter = null, saleStateReader = null, now = Date.now, logger = console } = {}) {
     if (!db?.query || !repository) throw new TypeError("ApiService requires a database executor and persistence repository.");
     this.db = db;
     this.repository = repository;
@@ -140,7 +141,23 @@ export class ApiService {
     this.indexerStore = indexerStore;
     this.indexerConfig = indexerConfig;
     this.rateLimiter = rateLimiter;
+    this.saleStateReader = saleStateReader;
+    this.now = now;
     this.logger = logger;
+  }
+
+  // Release-per-contract editions carry their own sale. Attach its live state so
+  // an open edition (supply 0) with an open sale is served as collectable rather
+  // than empty. Shared-contract editions have no primary_sale_address here.
+  async withPrimarySale(row, edition) {
+    if (!edition || !this.saleStateReader || !row?.primary_sale_address || row.token_id === null || row.token_id === undefined) return edition;
+    try {
+      const sale = await this.saleStateReader.readSale({ chainId: row.chain_id, saleAddress: row.primary_sale_address, tokenId: row.token_id });
+      return Object.assign(edition, publicSaleFields(sale, { editionSupply: row.supply, now: this.now() }));
+    } catch (error) {
+      this.logger.warn?.("api.edition.sale_state_unavailable", { editionId: row.id, error: error.code || error.message });
+      return edition;
+    }
   }
 
   async run(request, operation) {
@@ -243,13 +260,13 @@ export class ApiService {
     const [canonicalContract, canonicalChain] = certifiedContractParams();
     const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$3 AND chain_id=$4) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) ${EDITION_ALBUM_JOIN} WHERE e.status=$1 AND e.id=$2 LIMIT 1`, [PUBLIC_STATUS, key, canonicalContract, canonicalChain]);
     if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "EDITION_NOT_FOUND", "Edition was not found.");
-    return toPublicEdition(rows[0]);
+    return this.withPrimarySale(rows[0], toPublicEdition(rows[0]));
   }
 
   async listEditions({ releaseId = null, limit, offset }) {
     const [canonicalContract, canonicalChain] = certifiedContractParams();
     const { rows } = await this.db.query(`SELECT ${EDITION_PUBLIC_SELECT} FROM editions e JOIN releases r ON r.id=e.release_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id LEFT JOIN tokens t ON t.edition_id=e.id AND (t.contract_id IN (SELECT id FROM contracts WHERE lower(address)=$2 AND chain_id=$3) OR t.contract_id IN (SELECT release_contract_id FROM release_contracts WHERE release_id=e.release_id AND status IN ('DEPLOYED','VERIFIED'))) ${EDITION_ALBUM_JOIN} WHERE e.status=$1 AND ($4::text IS NULL OR e.release_id=$4) ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`, [PUBLIC_STATUS, canonicalContract, canonicalChain, releaseId, limitValue(limit), offsetValue(offset)]);
-    return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicEdition(row));
+    return Promise.all(rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => this.withPrimarySale(row, toPublicEdition(row))));
   }
 
   async getExperience({ id }) {

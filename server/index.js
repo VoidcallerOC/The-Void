@@ -26,6 +26,7 @@ import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./pro
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
+import { primarySaleStateReaderFromEnv } from "./primary-sale-state.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
   const pool = db || createDatabasePool(config);
@@ -39,7 +40,8 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const resolvedOwnershipVerifier = ownershipVerifier || createIndexedOwnershipVerifier({ db: pool, config });
   const rateLimiter = createRateLimiter();
   const indexerConfig = config.indexer || loadIndexerConfig(process.env, { requireConfiguration: false });
-  const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, indexerConfig, rateLimiter, logger });
+  const saleStateReader = primarySaleStateReaderFromEnv({ indexerConfig });
+  const service = new ApiService({ db: pool, repository, authenticator: resolvedAuthenticator, ownershipVerifier: resolvedOwnershipVerifier, blockchainVerifier, indexerStore, indexerConfig, rateLimiter, saleStateReader, logger });
   let resolvedMediaGateway = mediaGateway;
   let mediaUploader = null;
   let directMediaUploads = null;

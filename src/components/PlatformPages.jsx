@@ -10,7 +10,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
-import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionTypeLabel, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionSupplyLabel, editionTypeLabel, primaryCollectForEdition, releaseScopedFirst, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { CollectionMarketplaceCallout } from "./MarketplaceRails.jsx";
 import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
@@ -168,7 +168,8 @@ export function ReleasePage({ children = null } = {}) {
   }
   if (!result) return <Navigate to="/discover" replace />;
   const { release, artist } = result;
-  const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => item.release?.id === release.id);
+  // A release's own (factory) edition leads; a shared-contract edition never takes its place.
+  const editionItems = releaseScopedFirst(flattenMarketplaceEditions([catalog]).filter((item) => item.release?.id === release.id));
   return (
     <section style={shell}>
       {children}
@@ -254,7 +255,10 @@ export function EditionPage() {
   const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
   const chainId = String(edition.chainId || "");
   const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
-  const supplyClosed = edition.supply !== undefined && edition.supply !== null && edition.supply !== "" && Number(edition.supply) === 0;
+  // Release-scoped editions follow their own sale: supply 0 is an open edition.
+  const primary = primaryCollectForEdition(edition);
+  const supplyLabel = editionSupplyLabel(edition, primary);
+  const supplyClosed = !primary.releaseScoped && supplyLabel === "No pressings remain";
   return (
     <section style={shell}>
       <Eyebrow red>† {objectLabel}</Eyebrow>
@@ -265,7 +269,7 @@ export function EditionPage() {
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(48px, 8vw, 88px)", lineHeight: 0.9, textTransform: "uppercase", margin: "8px 0 12px" }}>{release.title}</h1>
           <p className="vc-card-release"><Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{edition.title}</Link></p>
           {edition.description && <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>{edition.description}</p>}
-          <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyClosed ? "No pressings remain" : `Supply ${edition.supply || "Open"}`}{price ? ` · ${price}` : ""}</p>
+          <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyLabel}{price ? ` · ${price}` : ""}</p>
           <div style={{ margin: "18px 0" }}>
             <Eyebrow>Listen</Eyebrow>
             {previewTrack ? (
@@ -276,7 +280,7 @@ export function EditionPage() {
           <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 1.8 }}>
             {(edition.includes || []).map((item) => <li key={item}>{item}</li>)}
           </ul>
-          {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>This object cannot be collected. Supply is zero.</p>}
+          {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>No pressings remain. This object cannot be collected.</p>}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
             <div style={{ marginTop: 12 }}>

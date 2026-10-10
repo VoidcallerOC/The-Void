@@ -3,6 +3,7 @@ import { MARKETPLACE_CONFIG } from "./marketplace.js";
 import { CHAINS, isValidAddress } from "./web3.js";
 import { VOIDCALLER_CATALOG } from "../data.js";
 import { isLegacyMainnetEdition } from "./legacy-genesis.js";
+import { SALE_AVAILABILITY, isOpenEditionSupply, isSaleAvailabilityState, primarySaleAvailability, saleAvailabilityLabel } from "./primary-sale-availability.js";
 
 export const MARKETPLACE_STATE = Object.freeze({
   LIVE: "LIVE",
@@ -118,7 +119,47 @@ export function editionTypeLabel(edition) {
   return "Collectible release";
 }
 
-export function primaryCollectForEdition(edition) {
+/**
+ * A release-per-contract (factory) edition: its own release contract and its own
+ * primary sale. Never the certified shared Fuji contract.
+ */
+export function isReleaseScopedEdition(edition) {
+  const tokenId = edition?.tokenIds?.[0];
+  return Boolean(edition)
+    && !isCertifiedFujiEdition(edition)
+    && isValidAddress(String(edition.contractAddress || ""))
+    && isValidAddress(String(edition.primarySaleAddress || ""))
+    && /^\d+$/.test(String(tokenId ?? ""));
+}
+
+/** Sale availability for a release-scoped edition: live sale tuple first, then the API's state. */
+export function editionSaleAvailability(edition, now = Date.now()) {
+  if (edition?.primarySale) return primarySaleAvailability(edition.primarySale, { editionSupply: edition.supply, now });
+  if (isSaleAvailabilityState(edition?.saleAvailability)) return { state: edition.saleAvailability, openEdition: false, startTime: 0, endTime: 0 };
+  return null;
+}
+
+function releaseScopedCollect(edition, now) {
+  const sale = editionSaleAvailability(edition, now);
+  const open = sale?.state === SALE_AVAILABILITY.OPEN;
+  return {
+    availability: open ? "available" : "unavailable",
+    status: MARKETPLACE_STATE.LIVE,
+    label: open ? "Collect" : "View edition",
+    href: `/edition/${edition.id}`,
+    saleState: sale?.state || null,
+    saleLabel: sale ? saleAvailabilityLabel(sale) : "",
+    note: open
+      ? "Primary collect from this release's own sale contract."
+      : sale
+        ? `${saleAvailabilityLabel(sale)}.`
+        : "Sale status is read from this release's own sale contract.",
+    certified: false,
+    releaseScoped: true,
+  };
+}
+
+export function primaryCollectForEdition(edition, { now = Date.now() } = {}) {
   if (!edition) {
     return { availability: "unavailable", status: MARKETPLACE_STATE.UNAVAILABLE, label: "Unavailable", href: "/marketplace", note: "This collect path is not available.", certified: false };
   }
@@ -150,6 +191,7 @@ export function primaryCollectForEdition(edition) {
       certified: false,
     };
   }
+  if (isReleaseScopedEdition(edition)) return releaseScopedCollect(edition, now);
   if (String(edition.status).toLowerCase() === "available") {
     return {
       availability: "unavailable",
@@ -168,6 +210,38 @@ export function primaryCollectForEdition(edition) {
     note: "This edition is not currently collectible on the primary path.",
     certified: false,
   };
+}
+
+// Shared-contract (certified V1) editions cannot be created with supply 0, so a
+// catalog supply of 0 there still means nothing is left to press.
+function sharedContractPressingsRemain(edition) {
+  if (edition?.supply === undefined || edition?.supply === null || edition?.supply === "") return true;
+  const supply = Number(edition.supply);
+  return !Number.isFinite(supply) || supply > 0;
+}
+
+/**
+ * Whether the card or page may offer this edition as collectable. A
+ * release-scoped edition follows its sale; supply 0 there is an open edition.
+ */
+export function editionIsCollectable(edition, primary = primaryCollectForEdition(edition)) {
+  if (primary?.availability !== "available") return false;
+  return primary.releaseScoped ? true : sharedContractPressingsRemain(edition);
+}
+
+/** Supply / availability line for an edition card or page. */
+export function editionSupplyLabel(edition, primary = primaryCollectForEdition(edition)) {
+  if (primary?.releaseScoped) {
+    if (primary.saleLabel) return primary.saleLabel;
+    return isOpenEditionSupply(edition?.supply) ? "Open edition" : `Supply ${edition.supply}`;
+  }
+  if (!sharedContractPressingsRemain(edition)) return "No pressings remain";
+  return edition?.supply ? `Supply ${edition.supply}` : "Open supply";
+}
+
+/** Factory (release-per-contract) editions lead; shared-contract editions follow. */
+export function releaseScopedFirst(items = []) {
+  return [...items].sort((a, b) => Number(Boolean(b.primary?.releaseScoped)) - Number(Boolean(a.primary?.releaseScoped)));
 }
 
 export function listingMatchesEdition(listing, edition) {

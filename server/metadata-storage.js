@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { ApiError } from "./api-errors.js";
+import { isOpenEditionSupply } from "../src/lib/primary-sale-availability.js";
 
 const MAX_METADATA_BYTES = 64 * 1024;
 
@@ -62,7 +63,8 @@ export function canonicalMetadata(input) {
     collectorBenefits: Array.isArray(input.includes) ? input.includes.map((item) => text(item, 512)).filter(Boolean) : [],
     experiences: Array.isArray(input.experiences) ? input.experiences.map((experience) => ({ name: text(experience.title, 256), description: text(experience.description, 20000), type: text(experience.experience_type || experience.type, 64) })).filter((item) => item.name || item.description || item.type) : [],
     attributes: [
-      { trait_type: "Supply", value: String(edition.supply ?? "") },
+      // New publications only: already-published metadata is immutable and keeps its value.
+      { trait_type: "Supply", value: isOpenEditionSupply(edition.supply) ? "Open edition" : String(edition.supply) },
       ...(text(input.tier, 128) ? [{ trait_type: "Tier", value: text(input.tier, 128) }] : []),
     ],
   };
