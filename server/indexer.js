@@ -179,6 +179,7 @@ export class BlockchainIndexer {
   // Factories sync first so a collection created in this range is indexed from its
   // creation block in the same cycle; collections found earlier are reloaded once.
   async syncAll() {
+    if (!this.marketplacesRegistered) await this.registerConfiguredMarketplaces();
     if (!this.collectionsLoaded) await this.loadRegisteredCollections();
     if (!this.releasesLoaded) await this.loadRegisteredReleases();
     const results = [];
@@ -213,6 +214,17 @@ export class BlockchainIndexer {
     this.configs.push(primarySaleIndexerConfig({ chainId, address: normalized, startBlock, tokenAddress }));
     this.logger.info?.("indexer.primary-sale.added", { chainId: Number(chainId), address: normalized, tokenAddress: String(tokenAddress).toLowerCase(), startBlock: Number(startBlock) });
     return true;
+  }
+
+  // Marketplace projection requires a MARKETPLACE contracts row. Ensure one exists for
+  // every configured marketplace before its logs are processed; existing rows are kept.
+  async registerConfiguredMarketplaces() {
+    if (!this.store.registerMarketplaceContract) { this.marketplacesRegistered = true; return; }
+    for (const config of this.configs.filter((item) => item.contractType === "MARKETPLACE")) {
+      const inserted = await this.store.registerMarketplaceContract({ chainId: Number(config.chainId), address: config.address });
+      if (inserted) this.logger.info?.("indexer.marketplace.registered", { chainId: Number(config.chainId), address: String(config.address).toLowerCase() });
+    }
+    this.marketplacesRegistered = true;
   }
 
   async loadRegisteredCollections() {
