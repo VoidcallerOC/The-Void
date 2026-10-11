@@ -183,6 +183,20 @@ describe("Genesis claim vouchers", () => {
     await expect(instance.issueVoucher(WALLET)).resolves.toMatchObject({ voucher: { claimant: getAddress(WALLET) } });
   });
 
+  it("issues distinct 256-bit random nonces by default", async () => {
+    const instance = createGenesisClaimService({
+      config: loadGenesisClaimConfig(ENV), signer: { signTypedData: vi.fn().mockResolvedValue(TEST_SIGNATURE), address: SIGNER },
+      eligibilityReader: vi.fn().mockResolvedValue(["0"]), bindingReader: vi.fn().mockResolvedValue(undefined),
+      claimStateReader: vi.fn().mockResolvedValue({ alreadyClaimed: false, claimedSupply: 0n }), clock: () => NOW,
+    });
+    const [first, second] = await Promise.all([instance.issueVoucher(WALLET), instance.issueVoucher(WALLET)]);
+    for (const { voucher } of [first, second]) {
+      expect(voucher.nonce).toMatch(/^[0-9]+$/);
+      expect(BigInt(voucher.nonce) < 2n ** 256n).toBe(true);
+    }
+    expect(first.voucher.nonce).not.toBe(second.voucher.nonce);
+  });
+
   it("never issues a voucher that outlives the claim window", async () => {
     const { instance } = service({ eligible: [2], clock: CLAIM_END - 10 });
     const issued = await instance.issueVoucher(WALLET);
@@ -216,6 +230,7 @@ const claimIface = new Interface([
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
   "function allocation() view returns (uint256)", "function publicAllocation() view returns (uint256)", "function destinationChainId() view returns (uint256)",
   "function claimStart() view returns (uint256)", "function claimEnd() view returns (uint256)", "function publicSaleEnd() view returns (uint256)",
+  "function claimWindow() view returns (uint256)", "function publicWindow() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)", "function GENESIS_CONTRACT() view returns (address)", "function GENESIS_CHAIN_ID() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)", "function signer() view returns (address)", "function claimedSupply() view returns (uint256)",
 ]);
@@ -232,6 +247,7 @@ function fujiChain(drift = {}) {
   const claimValues = {
     releaseContract: RELEASE, primarySale: SALE, tokenId: 987654321n, allocation: 0n, publicAllocation: 0n, destinationChainId: 43113n,
     claimStart: BigInt(CLAIM_START), claimEnd: BigInt(CLAIM_END), publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE,
+    claimWindow: 86_400n, publicWindow: 604_800n,
     GENESIS_CONTRACT, GENESIS_CHAIN_ID: 43114n,
     ELIGIBILITY_RULE: genesisEligibilityRule({ snapshotBlock: SNAPSHOT_BLOCK, snapshotBlockHash: SNAPSHOT_HASH }).rule,
     signer: SIGNER, claimedSupply: 3n, ...drift.claim,
@@ -273,6 +289,7 @@ describe("live claim binding verification", () => {
     ["an unconfigured sale", { sale: { configured: false } }],
     ["supply accounting drift", { minted: 8n }],
     ["a different claim start", { claim: { claimStart: BigInt(CLAIM_START + 1) } }],
+    ["a claim deployed with a different window", { claim: { claimWindow: 300n } }],
     ["a different snapshot rule", { claim: { ELIGIBILITY_RULE: `0x${"99".repeat(32)}` } }],
     ["a different signer", { claim: { signer: WALLET } }],
     ["a different release", { claim: { releaseContract: SALE } }],
@@ -301,6 +318,35 @@ describe("GET /api/claims/config with the real claim service", () => {
     await handlerFor(fujiChain({ sale: { priceWei: 1n } }))(requestDouble(), response);
     expect(response.status).toBe(503);
     expect(JSON.parse(response.body).error.code).toBe("CLAIM_BINDING_MISMATCH");
+  });
+});
+
+describe("environment schedule and price", () => {
+  const MAINNET = { ...ENV, RELEASE_NETWORK: "mainnet", GENESIS_DESTINATION_RPC_URL: "https://api.avax.network/ext/bc/C/rpc" };
+
+  it("lets Fuji run an accelerated 5-minute claim and 10-minute public sale at 0.01 AVAX", () => {
+    const loaded = loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" });
+    expect(loaded).toMatchObject({ destinationChainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleEnd: BigInt(CLAIM_START + 899), publicPriceWei: 10_000_000_000_000_000n });
+  });
+
+  it("defaults to the production 24 hours and 7 days when no windows are set", () => {
+    expect(loadGenesisClaimConfig(ENV)).toMatchObject({ claimWindow: 86_400n, publicWindow: 604_800n });
+  });
+
+  it("refuses Fuji windows under one minute", () => {
+    expect(() => loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "59" })).toThrow(/at least 60 seconds/);
+  });
+
+  it("loads mainnet only with the production schedule and 0.25 AVAX", () => {
+    expect(loadGenesisClaimConfig(MAINNET)).toMatchObject({ destinationChainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicPriceWei: PRICE });
+  });
+
+  it.each([
+    ["an accelerated claim window", { GENESIS_CLAIM_WINDOW_SECONDS: "300" }, /24-hour/],
+    ["an accelerated public window", { GENESIS_PUBLIC_WINDOW_SECONDS: "600" }, /7-day/],
+    ["the Fuji test price", { GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" }, /0.25 AVAX/],
+  ])("refuses mainnet with %s", (_label, override, message) => {
+    expect(() => loadGenesisClaimConfig({ ...MAINNET, ...override })).toThrow(message);
   });
 });
 

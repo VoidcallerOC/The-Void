@@ -1,8 +1,9 @@
 name: Deploy Genesis holder claim to Fuji
 
-# GenesisHolderClaim for one existing release token: free Genesis claims for 24 hours from
-# claim_start, then the token's own primary sale (already configured as the public phase) runs for
-# 7 days. The default path is a read-only dry run that verifies the release, sale, schedule and
+# GenesisHolderClaim for one existing Fuji release token: free Genesis claims for claim_window_seconds
+# from claim_start, then the token's own primary sale (already configured as the public phase) runs for
+# public_window_seconds. Fuji may use accelerated test windows (minimum 60 s); mainnet production
+# windows (24 h / 7 days at 0.25 AVAX) are enforced by the contract and script, not by this workflow. The default path is a read-only dry run that verifies the release, sale, schedule and
 # C-Chain snapshot and simulates the constructor. No run grants roles, edits config/ or enables the
 # API claim; those follow-ups are printed for the owner.
 
@@ -22,14 +23,24 @@ on:
         required: true
         type: string
       claim_start:
-        description: Unix seconds when the 24-hour Genesis claim opens. The sale must open exactly 24 hours later.
+        description: Unix seconds when the Genesis claim opens. The sale must open exactly claim_window_seconds later.
         required: true
         type: string
+      claim_window_seconds:
+        description: Genesis claim window in seconds (86400 production; Fuji test minimum 60, e.g. 300).
+        required: true
+        type: string
+        default: "86400"
+      public_window_seconds:
+        description: Public sale window in seconds (604800 production; Fuji test minimum 60, e.g. 600).
+        required: true
+        type: string
+        default: "604800"
       public_price_wei:
-        description: Public mint price in wei (0.25 AVAX = 250000000000000000).
+        description: Public mint price in wei (Fuji test price 0.01 AVAX = 10000000000000000).
         required: true
         type: string
-        default: "250000000000000000"
+        default: "10000000000000000"
       snapshot_block:
         description: C-Chain block number for Genesis eligibility.
         required: true
@@ -86,6 +97,8 @@ env:
   GENESIS_PUBLIC_MINT_ALLOCATION: "0"
   GENESIS_EXPECT_OPEN_EDITION: "yes"
   GENESIS_CLAIM_START: ${{ inputs.claim_start }}
+  GENESIS_CLAIM_WINDOW_SECONDS: ${{ inputs.claim_window_seconds }}
+  GENESIS_PUBLIC_WINDOW_SECONDS: ${{ inputs.public_window_seconds }}
   GENESIS_PUBLIC_PRICE_WEI: ${{ inputs.public_price_wei }}
   GENESIS_SNAPSHOT_BLOCK: ${{ inputs.snapshot_block }}
   GENESIS_SNAPSHOT_BLOCK_HASH: ${{ inputs.snapshot_block_hash }}

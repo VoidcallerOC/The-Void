@@ -168,3 +168,75 @@ Every step below is a transaction or a production change. **None is authorized b
 - `admin`: may pause, rotate the signer, and transfer admin.
 - `signer`: the public address of a server-only key that must be generated and stored on Render.
 - Claim allocation `0` and public allocation `0`, meaning uncapped.
+
+## 6. Fuji test schedule vs. mainnet production schedule
+
+| | Fuji (accelerated test, release ‑28) | Mainnet (production) |
+|---|---|---|
+| Genesis claim | `claimWindow` configurable, minimum 60 s; test plan 300 s (5 min) | exactly 86,400 s (24 h) |
+| Public mint | `publicWindow` configurable, minimum 60 s; test plan 600 s (10 min) | exactly 604,800 s (7 days) |
+| Price | 0.01 AVAX, ‑28's existing price, unchanged | exactly 0.25 AVAX |
+| Supply | uncapped (`maxSupply 0`, allocations 0) | uncapped |
+
+**Where each rule is enforced:**
+- **Contract** (`GenesisHolderClaim` constructor): on chain 43114 it reverts unless the windows are exactly 1 day and 7 days. On Fuji each window must be at least 60 seconds.
+- **API** (`claimSchedule` in `server/genesis-claim.js`): with `RELEASE_NETWORK=mainnet` it refuses to load unless the windows are 86,400 s and 604,800 s and the price is 0.25 AVAX. It also checks the deployed claim's `claimWindow` and `publicWindow`.
+- **Deploy script** (`DEPLOY_NETWORK=fuji|mainnet`): applies the same rules. A mainnet broadcast needs `CONFIRM_MAINNET_DEPLOY`.
+
+None of these rules disables a timing, price, signature, snapshot, role or replay check.
+
+**Fuji ‑28 test parameters** for a chosen start `T`:
+- sale: `configureSale(2567…3312, 10000000000000000, 0, 0, T + 300, T + 899, false)`;
+- claim constructor: windows `300` and `600`, price `10000000000000000`;
+- API: `GENESIS_CLAIM_WINDOW_SECONDS=300`, `GENESIS_PUBLIC_WINDOW_SECONDS=600`.
+
+**Local fork simulation (2026-10-11 19:30–19:45 UTC).** Not live: everything ran on anvil forks of Fuji (block ~59314100) and C-Chain (block ~97304200). It used the real ‑28 contracts, the real Genesis balances, the real claim service and HTTP handler, and the real deploy preflight. 24 of 24 checks passed:
+- **Deployment:**
+  - preflight passed, including the constructor simulation;
+  - the claim was mined at the predicted address;
+  - `/api/claims/config` returned 503 before the `ISSUER_ROLE` grant and 200 after it.
+- **Genesis window:**
+  - no voucher was issued before `T`;
+  - snapshot holder `0x6a86…` claimed for free (receipt status 1, +1 token);
+  - wallet `0x284C…`, with no Genesis token, got 403;
+  - a second voucher was refused with 409, and the replayed voucher was refused on-chain;
+  - a wallet that received a Genesis token on C-Chain after the snapshot got 403.
+- **Public window:**
+  - minting was refused before `claimEnd`;
+  - 0.25 AVAX and 0.01 AVAX − 1 wei were rejected with no funds kept and no mint;
+  - an ungated mint at 0.01 AVAX succeeded at `claimEnd`;
+  - a mint succeeded on the last second (`publicEnd`);
+  - a mint at `publicEnd + 1` was mined and reverted.
+- **Accounting:** minted 4 = sold 3 + claimed 1. Sold includes the pre-existing A4 purchase.
+
+The UI and the indexer were not part of the simulation.
+
+**Defect found by the simulation and fixed.** The server's default voucher nonce was `BigInt(randomBytes(32).toString("hex"))`. ethers' `randomBytes` returns a `Uint8Array`, which ignores `"hex"` and produces comma-separated decimals, so `BigInt` threw. Every real voucher request would have returned 503. The unit tests injected a nonce and missed it. Fixed with `hexlify`, and a regression test that fails on the old code was added.
+
+## 7. Mainnet readiness: none of these exist on chain 43114 as of block 97304353
+
+Read-only facts:
+- No factory, release, sale or claim on C-Chain.
+- `config/mainnet-release.json` is `deployed: false` and describes the legacy shared design, not release-per-contract.
+- Deployer `0xaBd3…` has 0 AVAX and nonce 0; artist `0x284C…` has 0 AVAX.
+- Production API, indexer and frontend are Fuji-only: `RELEASE_NETWORK` defaults to `fuji`, the Render services index 43113, and the claim UI binding requires chain 43113 (`src/lib/claim-state.js`).
+- A mainnet release is the first one on that chain, so it is not a duplicate of ‑28, but it is a new on-chain release and token that needs explicit authorization.
+
+**Order on mainnet, each step a separate authorization:**
+1. A reviewed factory on 43114: Factory V2 source `3861d74` (live-proven on Fuji), or V3 after its audit and independent-review gates.
+2. Artist creates the release.
+3. Artist creates the open edition: `maxSupply 0`, royalty 250 bps to the artist, `mintEnd = T + 8d − 1` optional.
+4. `configureSale(token, 250000000000000000, 0, 0, T + 86400, T + 691199, false)`.
+5. Dry run, then broadcast of the claim with windows 86,400 and 604,800.
+6. `grantRole(ISSUER_ROLE, claim)` before `T`.
+7. Mainnet API, indexer and frontend deployment and configuration.
+8. Enable the claim.
+
+**Stop conditions:**
+- any preflight refusal;
+- a predicted-address or nonce mismatch;
+- `/api/claims/config` not returning 200 after the grant;
+- any acceptance check failing.
+
+**Rollback:** the claim admin can `pause()` the claim. The artist can pause the sale (`configureSale(..., paused = true)`). Mints cannot be undone.
+

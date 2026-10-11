@@ -95,7 +95,7 @@ contract GenesisHolderClaimOpenEditionTest {
         vm.prank(ARTIST);
         sale.configureSale(capped, PRICE, 10, 10, uint64(CLAIM_END), uint64(PUBLIC_END), false);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), capped, 0, 10, CLAIM_START, PRICE, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), capped, 0, 10, CLAIM_START, 1 days, 7 days, PRICE, RULE, ADMIN, signer);
     }
 
     // ---- Genesis phase: free, exactly 24 hours ----
@@ -226,7 +226,7 @@ contract GenesisHolderClaimOpenEditionTest {
         vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
         _deploy(CLAIM_START + 1);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, PRICE, bytes32(0), ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 1 days, 7 days, PRICE, bytes32(0), ADMIN, signer);
     }
 
     function testMixedClaimAndPublicSaleAccountingRemainsExact() public {
@@ -241,7 +241,7 @@ contract GenesisHolderClaimOpenEditionTest {
     }
 
     function _deploy(uint256 claimStart) internal returns (GenesisHolderClaim) {
-        return new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, claimStart, PRICE, RULE, ADMIN, signer);
+        return new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, claimStart, 1 days, 7 days, PRICE, RULE, ADMIN, signer);
     }
 
     function _claim(address claimant, uint256 nonce) internal {

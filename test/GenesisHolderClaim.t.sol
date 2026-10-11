@@ -285,7 +285,7 @@ contract GenesisHolderClaimTest {
 
     function _deploy(uint256 claimStart) internal returns (GenesisHolderClaim) {
         return new GenesisHolderClaim(
-            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, claimStart, PRICE, RULE, ADMIN, signer
+            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, claimStart, 1 days, 7 days, PRICE, RULE, ADMIN, signer
         );
     }
 

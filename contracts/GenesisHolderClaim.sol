@@ -35,8 +35,10 @@ interface IGenesisClaimSale {
 /// @title GenesisHolderClaim
 /// @notice One release-specific voucher redemption gate. Minting is delegated to the
 /// release's existing ISSUER_ROLE path; this contract can mint only its immutable token.
-/// @dev Fixed schedule: free Genesis claims for exactly CLAIM_WINDOW from claimStart, then the
-/// token's own primary sale must open at claimEnd and close PUBLIC_WINDOW later at publicPriceWei.
+/// @dev Fixed schedule: free Genesis claims for exactly claimWindow from claimStart, then the
+/// token's own primary sale must open at claimEnd and close publicWindow later at publicPriceWei.
+/// On C-Chain (43114) the windows must be the production 24 hours and 7 days; only Fuji may use
+/// shorter test windows, and never below MINIMUM_TEST_WINDOW.
 /// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
 /// claim and fails closed if it drifts. Eligibility is fixed at a C-Chain snapshot block that the
 /// immutable ELIGIBILITY_RULE commits to; the server signs vouchers only for snapshot holders.
@@ -44,8 +46,9 @@ contract GenesisHolderClaim {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     uint256 public constant GENESIS_CHAIN_ID = 43114;
     address public constant LEGACY_FUJI_SINGLETON = 0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6;
-    uint256 public constant CLAIM_WINDOW = 1 days;
-    uint256 public constant PUBLIC_WINDOW = 7 days;
+    uint256 public constant PRODUCTION_CLAIM_WINDOW = 1 days;
+    uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
+    uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant NAME_HASH = keccak256("The Void Genesis Holder Claim");
@@ -80,9 +83,11 @@ contract GenesisHolderClaim {
     uint256 public immutable publicAllocation;
     /// @notice Claims are accepted while claimStart <= block.timestamp < claimEnd.
     uint256 public immutable claimStart;
+    uint256 public immutable claimWindow;
+    uint256 public immutable publicWindow;
     uint256 public immutable claimEnd;
     /// @notice The sale's endTime. VoidPrimarySale accepts purchases while startTime <= now <= endTime,
-    /// so endTime = claimEnd + PUBLIC_WINDOW - 1 gives a public window of exactly PUBLIC_WINDOW.
+    /// so endTime = claimEnd + publicWindow - 1 gives a public window of exactly publicWindow.
     uint256 public immutable publicSaleEnd;
     uint256 public immutable publicPriceWei;
     /// @notice Commitment to the snapshot eligibility rule (chain, collection, block, block hash, token IDs).
@@ -138,6 +143,8 @@ contract GenesisHolderClaim {
         uint256 allocation_,
         uint256 publicAllocation_,
         uint256 claimStart_,
+        uint256 claimWindow_,
+        uint256 publicWindow_,
         uint256 publicPriceWei_,
         bytes32 eligibilityRule_,
         address admin_,
@@ -149,6 +156,12 @@ contract GenesisHolderClaim {
                 || eligibilityRule_ == bytes32(0) || publicPriceWei_ == 0 || claimStart_ < block.timestamp
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
+        if (block.chainid == GENESIS_CHAIN_ID) {
+            // Production: exactly 24 hours of Genesis claims, then exactly 7 days of public sale.
+            if (claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW) revert InvalidConfiguration();
+        } else if (claimWindow_ < MINIMUM_TEST_WINDOW || publicWindow_ < MINIMUM_TEST_WINDOW) {
+            revert InvalidConfiguration();
+        }
         uint256 releaseMaxSupply = IGenesisClaimRelease(releaseContract_).maxSupplyOf(tokenId_);
         if (releaseMaxSupply != 0) {
             // A capped edition needs finite, non-overlapping claim and public allocations.
@@ -165,8 +178,10 @@ contract GenesisHolderClaim {
         allocation = allocation_;
         publicAllocation = publicAllocation_;
         claimStart = claimStart_;
-        claimEnd = claimStart_ + CLAIM_WINDOW;
-        publicSaleEnd = claimStart_ + CLAIM_WINDOW + PUBLIC_WINDOW - 1;
+        claimWindow = claimWindow_;
+        publicWindow = publicWindow_;
+        claimEnd = claimStart_ + claimWindow_;
+        publicSaleEnd = claimStart_ + claimWindow_ + publicWindow_ - 1;
         publicPriceWei = publicPriceWei_;
         ELIGIBILITY_RULE = eligibilityRule_;
         admin = admin_;
@@ -240,7 +255,7 @@ contract GenesisHolderClaim {
     }
 
     /// @dev The public sale must be exactly the scheduled phase: it opens when claims close, stays open
-    /// for PUBLIC_WINDOW at publicPriceWei, and its cap is publicAllocation (0 = uncapped).
+    /// for publicWindow at publicPriceWei, and its cap is publicAllocation (0 = uncapped).
     function _assertPublicAllocation() private view {
         (uint256 salePrice, uint256 saleMaxSupply, uint256 saleSold,, uint64 saleStart, uint64 saleEnd,, bool configured) =
             IGenesisClaimSale(primarySale).sales(tokenId);

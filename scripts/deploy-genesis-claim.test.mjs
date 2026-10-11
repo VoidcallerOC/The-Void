@@ -22,7 +22,7 @@ const SNAPSHOT_BLOCK = 97_000_000;
 const SNAPSHOT_HASH = `0x${"5a".repeat(32)}`;
 const NONCE = 61;
 const PREDICTED = getCreateAddress({ from: DEPLOYER, nonce: NONCE });
-const ARTIFACT = { abi: [{ type: "constructor", inputs: new Array(10).fill({ type: "uint256" }) }], bytecode: { object: "0x6080" } };
+const ARTIFACT = { abi: [{ type: "constructor", inputs: new Array(12).fill({ type: "uint256" }) }], bytecode: { object: "0x6080" } };
 
 const ENV = Object.freeze({
   DEPLOY_NETWORK: "fuji",
@@ -99,7 +99,8 @@ describe("Genesis claim deployment: environment", () => {
   });
 
   it.each([
-    [{ DEPLOY_NETWORK: "mainnet" }, /exactly "fuji"/],
+    [{ DEPLOY_NETWORK: "devnet" }, /exactly "fuji" or "mainnet"/],
+    [{ GENESIS_CLAIM_WINDOW_SECONDS: "30" }, /at least 60 seconds/],
     [{ GENESIS_CLAIM_RELEASE_CONTRACT: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6" }, /legacy Fuji V2 singleton/],
     [{ GENESIS_CLAIM_PRIMARY_SALE: RELEASE }, /must differ/],
     [{ GENESIS_PUBLIC_PRICE_WEI: "0" }, /GENESIS_PUBLIC_PRICE_WEI must be a positive/],
@@ -119,6 +120,35 @@ describe("Genesis claim deployment: environment", () => {
   });
 });
 
+describe("Genesis claim deployment: environment schedule", () => {
+  const FUJI_TEST = { ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" };
+  const MAINNET = { ...ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc" };
+
+  it("accepts an accelerated Fuji schedule at the Fuji price", () => {
+    expect(validateClaimDeploymentEnv(FUJI_TEST)).toMatchObject({ network: "fuji", chainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleEnd: BigInt(CLAIM_START + 899), publicPriceWei: 10_000_000_000_000_000n });
+  });
+
+  it("accepts mainnet only with 24 hours, 7 days and 0.25 AVAX", () => {
+    expect(validateClaimDeploymentEnv(MAINNET)).toMatchObject({ network: "mainnet", chainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicPriceWei: PRICE });
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_WINDOW_SECONDS: "300" })).toThrow(/24-hour/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_WINDOW_SECONDS: "600" })).toThrow(/7-day/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" })).toThrow(/0.25 AVAX/);
+  });
+
+  it("needs the mainnet confirmation, not the Fuji one, to broadcast on mainnet", () => {
+    const broadcast = { ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0" };
+    expect(() => validateClaimDeploymentEnv(broadcast)).toThrow(/CONFIRM_MAINNET_DEPLOY=yes/);
+    expect(validateClaimDeploymentEnv({ ...broadcast, CONFIRM_MAINNET_DEPLOY: "yes" })).toMatchObject({ broadcast: true });
+  });
+
+  it("checks the accelerated sale schedule against the chain", async () => {
+    const provider = fuji({ saleState: { priceWei: 10_000_000_000_000_000n, startTime: BigInt(CLAIM_START + 300), endTime: BigInt(CLAIM_START + 899) }, mintEnd: 0n });
+    const facts = await preflight(FUJI_TEST, provider);
+    expect(buildPlan(validateClaimDeploymentEnv(FUJI_TEST), facts).schedule).toMatchObject({ claimWindowSeconds: "300", publicWindowSeconds: "600", publicSaleOpens: String(CLAIM_START + 300), publicSaleEnd: String(CLAIM_START + 899), publicPriceWei: "10000000000000000" });
+    await expect(preflight(FUJI_TEST, fuji({ mintEnd: 0n }))).rejects.toThrow(/priceWei/);
+  });
+});
+
 describe("Genesis claim deployment: read-only preflight", () => {
   it("verifies the target and simulates the constructor from the deployer", async () => {
     const provider = fuji();
@@ -127,7 +157,7 @@ describe("Genesis claim deployment: read-only preflight", () => {
     const simulation = provider.calls.find((call) => !call.to);
     expect(simulation.from).toBe(DEPLOYER);
     const rule = genesisEligibilityRule({ snapshotBlock: SNAPSHOT_BLOCK, snapshotBlockHash: SNAPSHOT_HASH }).rule;
-    const encoded = AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "bytes32", "address", "address"], [RELEASE, SALE, TOKEN, 0n, 0n, BigInt(CLAIM_START), PRICE, rule, ADMIN, SIGNER]);
+    const encoded = AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "bytes32", "address", "address"], [RELEASE, SALE, TOKEN, 0n, 0n, BigInt(CLAIM_START), 86_400n, 604_800n, PRICE, rule, ADMIN, SIGNER]);
     expect(simulation.data).toBe(`0x6080${encoded.slice(2)}`);
   });
 
@@ -196,11 +226,11 @@ describe("Genesis claim deployment: broadcast guards", () => {
 
 describe("compiled GenesisHolderClaim artifact", () => {
   const path = resolve(process.cwd(), CLAIM_ARTIFACT_PATH);
-  it.skipIf(!existsSync(path))("has the scheduled ten-argument constructor and the phase getters", () => {
+  it.skipIf(!existsSync(path))("has the scheduled twelve-argument constructor and the phase getters", () => {
     const artifact = JSON.parse(readFileSync(path, "utf8"));
     const constructor = artifact.abi.find((item) => item.type === "constructor");
-    expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "publicPriceWei_", "eligibilityRule_", "admin_", "signer_"]);
+    expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "eligibilityRule_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
-    for (const name of ["claimStart", "claimEnd", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "CLAIM_WINDOW", "PUBLIC_WINDOW"]) expect(names.has(name)).toBe(true);
+    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });
 });

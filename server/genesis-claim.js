@@ -1,5 +1,5 @@
 import process from "node:process";
-import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, id, isAddress, randomBytes } from "ethers";
+import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
 
@@ -7,8 +7,26 @@ export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_CHAIN_ID = 43114;
 export const GENESIS_TOKEN_IDS = Object.freeze([0n, 1n, 2n, 3n]);
 export const LEGACY_FUJI_SINGLETON = "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6";
+// Production schedule. C-Chain (43114) must use exactly these and the production price; only Fuji
+// may configure shorter test windows (never below one minute), as the claim contract also enforces.
 export const CLAIM_WINDOW_SECONDS = 86_400n;
 export const PUBLIC_WINDOW_SECONDS = 7n * 86_400n;
+export const MINIMUM_TEST_WINDOW_SECONDS = 60n;
+export const MAINNET_PUBLIC_PRICE_WEI = 250_000_000_000_000_000n; // 0.25 AVAX
+
+/**
+ * Validates the schedule and price for the destination chain. Mainnet always gets the production
+ * 24 hours / 7 days at 0.25 AVAX; anything else fails closed. Fuji windows default to production.
+ */
+export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_SECONDS, publicWindow = PUBLIC_WINDOW_SECONDS, publicPriceWei }) {
+  if (destinationChainId === GENESIS_CHAIN_ID) {
+    if (claimWindow !== CLAIM_WINDOW_SECONDS || publicWindow !== PUBLIC_WINDOW_SECONDS) throw new GenesisClaimConfigurationError("Mainnet requires a 24-hour Genesis claim window and a 7-day public window.");
+    if (publicPriceWei !== MAINNET_PUBLIC_PRICE_WEI) throw new GenesisClaimConfigurationError("Mainnet requires a public price of exactly 0.25 AVAX (250000000000000000 wei).");
+  } else if (claimWindow < MINIMUM_TEST_WINDOW_SECONDS || publicWindow < MINIMUM_TEST_WINDOW_SECONDS) {
+    throw new GenesisClaimConfigurationError("Claim and public windows must each be at least 60 seconds.");
+  }
+  return Object.freeze({ claimWindow, publicWindow });
+}
 
 /**
  * Eligibility is fixed at one C-Chain block: a wallet qualifies only if it held token 0, 1, 2 or 3
@@ -34,6 +52,8 @@ const CLAIM_ABI = [
   "function destinationChainId() view returns (uint256)",
   "function claimStart() view returns (uint256)",
   "function claimEnd() view returns (uint256)",
+  "function claimWindow() view returns (uint256)",
+  "function publicWindow() view returns (uint256)",
   "function publicSaleEnd() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)",
   "function GENESIS_CONTRACT() view returns (address)",
@@ -133,6 +153,12 @@ export function loadGenesisClaimConfig(env = process.env) {
   const publicPriceWei = positiveBigInt(env.GENESIS_PUBLIC_PRICE_WEI, "GENESIS_PUBLIC_PRICE_WEI");
   const snapshotBlock = positiveBigInt(env.GENESIS_SNAPSHOT_BLOCK, "GENESIS_SNAPSHOT_BLOCK");
   const snapshotBlockHash = blockHash(env.GENESIS_SNAPSHOT_BLOCK_HASH, "GENESIS_SNAPSHOT_BLOCK_HASH");
+  const { claimWindow, publicWindow } = claimSchedule({
+    destinationChainId,
+    claimWindow: env.GENESIS_CLAIM_WINDOW_SECONDS === undefined || env.GENESIS_CLAIM_WINDOW_SECONDS === "" ? CLAIM_WINDOW_SECONDS : positiveBigInt(env.GENESIS_CLAIM_WINDOW_SECONDS, "GENESIS_CLAIM_WINDOW_SECONDS"),
+    publicWindow: env.GENESIS_PUBLIC_WINDOW_SECONDS === undefined || env.GENESIS_PUBLIC_WINDOW_SECONDS === "" ? PUBLIC_WINDOW_SECONDS : positiveBigInt(env.GENESIS_PUBLIC_WINDOW_SECONDS, "GENESIS_PUBLIC_WINDOW_SECONDS"),
+    publicPriceWei,
+  });
   const privateKey = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY || "").trim();
   if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY must be a server-side 32-byte hex secret.");
   return Object.freeze({
@@ -146,8 +172,10 @@ export function loadGenesisClaimConfig(env = process.env) {
     allocation,
     publicAllocation,
     claimStart,
-    claimEnd: claimStart + CLAIM_WINDOW_SECONDS,
-    publicSaleEnd: claimStart + CLAIM_WINDOW_SECONDS + PUBLIC_WINDOW_SECONDS - 1n,
+    claimWindow,
+    publicWindow,
+    claimEnd: claimStart + claimWindow,
+    publicSaleEnd: claimStart + claimWindow + publicWindow - 1n,
     publicPriceWei,
     snapshotBlock,
     snapshotBlockHash,
@@ -175,6 +203,8 @@ function toPublicConfig(config) {
     publicAllocation: config.publicAllocation.toString(),
     claimStart: config.claimStart.toString(),
     claimEnd: config.claimEnd.toString(),
+    claimWindow: config.claimWindow.toString(),
+    publicWindow: config.publicWindow.toString(),
     publicSaleEnd: config.publicSaleEnd.toString(),
     publicPriceWei: config.publicPriceWei.toString(),
   });
@@ -189,7 +219,8 @@ export function createGenesisClaimService({
   bindingReader = null,
   claimStateReader = null,
   clock = () => Math.floor(Date.now() / 1000),
-  nonce = () => BigInt(randomBytes(32).toString("hex")),
+  // 256 random bits. ethers' randomBytes returns a Uint8Array, so it must be hex-encoded explicitly.
+  nonce = () => BigInt(hexlify(randomBytes(32))),
 } = {}) {
   if (!config) return null;
   const sourceProvider = genesisProvider || new JsonRpcProvider(config.genesisRpcUrl);
@@ -201,9 +232,10 @@ export function createGenesisClaimService({
 
   async function verifyContractBindings() {
     const [network, claimRelease, claimSale, claimToken, claimAllocation, claimPublicAllocation, claimChain, claimStartAt, claimEndAt,
-      claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await Promise.all([
+      claimWindowAt, publicWindowAt, claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await Promise.all([
       targetProvider.getNetwork(), claim.releaseContract(), claim.primarySale(), claim.tokenId(), claim.allocation(),
-      claim.publicAllocation(), claim.destinationChainId(), claim.claimStart(), claim.claimEnd(), claim.publicSaleEnd(), claim.publicPriceWei(),
+      claim.publicAllocation(), claim.destinationChainId(), claim.claimStart(), claim.claimEnd(), claim.claimWindow(), claim.publicWindow(),
+      claim.publicSaleEnd(), claim.publicPriceWei(),
       claim.GENESIS_CONTRACT(), claim.GENESIS_CHAIN_ID(), claim.ELIGIBILITY_RULE(), claim.signer(), claim.claimedSupply(),
       release.maxSupplyOf(config.tokenId), release.edition(config.tokenId), sale.sales(config.tokenId),
     ]);
@@ -221,6 +253,8 @@ export function createGenesisClaimService({
       || BigInt(claimChain) !== BigInt(config.destinationChainId)
       || BigInt(claimStartAt) !== config.claimStart
       || BigInt(claimEndAt) !== config.claimEnd
+      || BigInt(claimWindowAt) !== config.claimWindow
+      || BigInt(publicWindowAt) !== config.publicWindow
       || BigInt(claimPublicEnd) !== config.publicSaleEnd
       || BigInt(claimPrice) !== config.publicPriceWei
       || getAddress(claimGenesis) !== GENESIS_CONTRACT
@@ -282,7 +316,7 @@ export function createGenesisClaimService({
     if (!eligibility.eligible) throw new ApiError(403, "ACCESS_DENIED", "This wallet did not hold Genesis token 0, 1, 2, or 3 at the snapshot block.");
     const now = BigInt(clock());
     if (now < config.claimStart) throw new ApiError(409, "CLAIM_NOT_OPEN", "The Genesis claim window has not opened yet.");
-    if (now >= config.claimEnd) throw new ApiError(409, "CLAIM_WINDOW_CLOSED", "The 24-hour Genesis claim window has closed.");
+    if (now >= config.claimEnd) throw new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
     try {
       if (bindingReader) await bindingReader();
       else await verifyContractBindings();
