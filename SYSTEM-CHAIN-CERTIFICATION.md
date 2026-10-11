@@ -77,6 +77,26 @@ The §6 findings on capability and wiring (S1–S3) stand. So does "Paths B and 
 
 ---
 
+## 4b. V3/V5 (provenance at creation): source only, not deployed
+
+`VoidReleaseFactoryV3` + `VoidRelease1155V5` (commit `1e95f5b`) commit the edition's provenance root in the edition-creating transaction. The clone emits the `VoidProvenanceAnchor`-compatible `ProvenanceAnchored` event and exposes `isAnchored`. Root-less creation reverts with `ProvenanceRootRequired`.
+
+| Claim | Status | Evidence |
+|---|---|---|
+| Atomic provenance anchoring exists in source | **VERIFIED** (source only) | `contracts/VoidRelease1155V5.sol`, `config/release-network.js` (`PROVENANCE_AT_CREATION_RELEASE_VERSION = 3`) |
+| Foundry/unit tests pass | Not counted | Tests are not chain evidence (see evidence rules) and were not re-run for this entry. |
+| V3/V5 deployed on Fuji | **NOT STARTED** | No V3/V5 address in `config/fuji-release-per-contract-v2.json`, `config/` or `deployments/`. The active factory is `VoidReleaseFactoryV2` (`releaseVersion: 2`). This is a repository record. It does not prove that no undeclared V3 deployment exists on chain. |
+| V3/V5 integrated live (API, indexer, Studio) | **NOT STARTED** | Nothing to integrate against until there is a deployment. |
+| An anchored edition was created live | **NOT STARTED** | No V3 factory, so no `ProvenanceAnchored` event from a release clone. |
+
+**Rule.** Source code and passing tests move no row in §2 or §5. V3/V5 rows change only with a deployment record (tier 1 receipt + tier 2 code/state) and a live edition created on that deployment.
+
+### Album acceptance (Path B) on the deployed V2/V4 pair
+
+Probe of 2026-10-11T02:14Z, tip block 59288557: factory `0x3e4E…3aC8` `releaseCount = 2`. `albumCreated() = false` on clone `0xBf75…4CB9` and on clone `0x4b27…9bB0`. **No album has been created on the new V2/V4 factory.** Album acceptance has not begun. Path B: **NOT STARTED**.
+
+---
+
 ## 5. Open items blocking certification
 
 Ordered by severity. P0 means it blocks any claim that the chain is certified.
@@ -88,8 +108,8 @@ Ordered by severity. P0 means it blocks any claim that the chain is certified.
 | 3 | P1 | A5: ownership in the API for the current holder | Claude, with an authenticated read | UNVERIFIED |
 | 4 | P1 | A7 is a self-resale. It needs a third wallet (≠ artist, ≠ first collector) to buy on V3. | Operator | PARTIAL |
 | 5 | P1 | **D1 is still undecided.** The API labels this fixture `releaseType: "SINGLE"`, but on-chain it is a standalone edition, not an album track with `single = true`. Two meanings of "single" now coexist. | Owner decision | OPEN |
-| 6 | P1 | **Which contracts to certify albums on.** V2/V4 is deployed. V3/V5 (with provenance at creation) is on `main` but not deployed. Certifying both doubles the work. | Owner decision | OPEN |
-| 7 | P2 | Paths B (album) and C (single) | After items 5 and 6 | NOT STARTED |
+| 6 | P1 | **Which contracts to certify albums on.** V2/V4 is deployed. V3/V5 (with provenance at creation) is on `main` but **not deployed and not integrated live** (§4b). Certifying both doubles the work. If V3/V5 is chosen, deployment comes first. | Owner decision | OPEN |
+| 7 | P2 | Paths B (album) and C (single). No `albumCreated() = true` on any clone of the V2/V4 factory as of block 59288557. | After items 5 and 6 | NOT STARTED |
 | 8 | P2 | Indexer health reports `database_failures: 137` (cumulative counter, cause unknown). `last_error` is null. | Claude: read the Render logs | UNVERIFIED |
 
 ---
@@ -119,3 +139,4 @@ curl -sS https://the-void-api-fuji.onrender.com/api/indexer/health
 ```
 
 Probe of 2026-10-11T01:58Z: tip block 59288030. `albumCapable = true`, `v3ParityOnChain = true`, factory `releaseCount = 2`, `albumCreated() = false` on both clones.
+Probe of 2026-10-11T02:14Z: tip block 59288557. Same result: `releaseCount = 2`, `albumCreated() = false` on both clones, `implementationMatchesConfig = true`.
