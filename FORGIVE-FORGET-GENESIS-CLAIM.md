@@ -239,4 +239,3 @@ Read-only facts:
 - any acceptance check failing.
 
 **Rollback:** the claim admin can `pause()` the claim. The artist can pause the sale (`configureSale(..., paused = true)`). Mints cannot be undone.
-
