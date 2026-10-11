@@ -98,7 +98,8 @@ Verified by Claude, read-only:
 - Render returns `404 not found` for `crn-dat953e0tbcc73acrepg`, and the workspace lists only `the-void-api-fuji` and `the-void-indexer-fuji`.
 - The API's live deploy is still `dep-db5pmlflk1mc73aqq48g` (`2038366`), and the indexer's is still `dep-db5pqpmk1f9s73ek0d9g` (`48037a7`).
 - The deployer's nonce is still 61 with nothing pending (Fuji block 59308527), so the key sent nothing.
-- The cron's last recorded deploy was `dep-db59rn142hec73873m00` (2026-10-10, `service_resumed`); it was suspended again by 20:21:54 UTC that day.
+- Before deletion, the Render API showed the cron **suspended** (`suspenders: ["user"]`; last updated 2026-10-10 20:21:54 UTC). Its last recorded deploy was `dep-db59rn142hec73873m00` (2026-10-10 20:19 UTC, trigger `service_resumed`).
+- **Limit:** since deletion, Render returns 404 for the cron's logs and deploys, so its final logs cannot be read. The evidence that it sent nothing is its suspended state before deletion plus the unchanged deployer nonce, not its logs.
 
 The GitHub secret `DEPLOYER_PRIVATE_KEY` is unchanged, so dry run 38149347518 stays valid. The legacy-role rotation (P0) remains a separate, blocked track.
 
