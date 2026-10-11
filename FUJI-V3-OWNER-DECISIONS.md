@@ -2,7 +2,7 @@
 
 **Status:**
 - D2 is **DECIDED: Option A (keep as is)**, by the owner on 2026-10-11. No Solidity change.
-- D5 is **OPEN**: the owner acts.
+- D5 is **DONE**: the owner deleted the suspended Render cron `crn-dat953e0tbcc73acrepg` on 2026-10-11; verified through the Render API (§3).
 - The dry run is **COMPLETE**.
 - The broadcast is **NOT AUTHORIZED**.
 
@@ -92,7 +92,15 @@ Option A needs none of this. A two-party (artist and platform) approval is possi
 - **A fresh V3-only deployer key:** create a new EOA, fund it, replace the secret, and run a new dry run (the predicted addresses change). This gives a cleaner separation, but V3 holds no deployer authority anyway.
 - **Complete the P0 rotation first:** blocked on a Safe and a backup admin. That would hold V3 back for reasons unrelated to it.
 
-**Owner action needed:** remove the key from the cron (or delete the cron), then confirm it is done. Or choose a fresh deployer key instead.
+**Owner action taken (2026-10-11): the suspended cron was deleted** (the rotation plan's M1).
+
+Verified by Claude, read-only:
+- Render returns `404 not found` for `crn-dat953e0tbcc73acrepg`, and the workspace lists only `the-void-api-fuji` and `the-void-indexer-fuji`.
+- The API's live deploy is still `dep-db5pmlflk1mc73aqq48g` (`2038366`), and the indexer's is still `dep-db5pqpmk1f9s73ek0d9g` (`48037a7`).
+- The deployer's nonce is still 61 with nothing pending (Fuji block 59308527), so the key sent nothing.
+- The cron's last recorded deploy was `dep-db59rn142hec73873m00` (2026-10-10, `service_resumed`); it was suspended again by 20:21:54 UTC that day.
+
+The GitHub secret `DEPLOYER_PRIVATE_KEY` is unchanged, so dry run 38149347518 stays valid. The legacy-role rotation (P0) remains a separate, blocked track.
 
 ## 4. Still outstanding, separate from these decisions
 
