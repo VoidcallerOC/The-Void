@@ -446,10 +446,21 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     });
   }
 
+  it("refuses activation on a release contract from the pre-album factory even if the album read says supported", async () => {
+    mockConfirmedAlbumDraft({ releaseBindings: [{ ...binding, factory_address: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" }] });
+    readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+    readReleaseLifecycle.mockResolvedValue({ albumCapable: false, albumCreated: false, standaloneFlag: null, existingTokenIds: [], hasEditions: false });
+    await clickActivate();
+    expect(await screen.findByText(/can never become an Album Contract/)).toBeTruthy();
+    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [], expect: { albumCreated: false, hasStandaloneEditions: false } });
+    expect(simulateReleaseCall).not.toHaveBeenCalled();
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
   it("activates the album on a release contract with no editions", async () => {
     mockConfirmedAlbumDraft({ releaseBindings: [binding] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
-    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [], hasEditions: false });
+    readReleaseLifecycle.mockResolvedValue({ albumCapable: true, albumCreated: false, standaloneFlag: null, existingTokenIds: [], hasEditions: false });
     simulateReleaseCall.mockResolvedValue(undefined);
     sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}` });
     await clickActivate();

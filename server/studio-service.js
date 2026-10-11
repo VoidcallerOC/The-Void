@@ -5,7 +5,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../config/release-network.js";
-import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
+import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
@@ -756,6 +756,12 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT DISTINCT t.token_id::text AS token_id FROM tokens t JOIN editions e ON e.id=t.edition_id WHERE e.release_id=$1", [release.id]);
     const tokenIds = rows.map((row) => BigInt(row.token_id));
     const expect = lifecycleExpectations({ implementationVersion: binding.implementation_version, factoryAddress: binding.factory_address });
+    if (!expect) {
+      this.logger.error?.("studio.release.lifecycle_deployment_unrecognised", { releaseId: release.id, implementationVersion: binding.implementation_version ?? null });
+      throw new ApiError(503, "RELEASE_CHAIN_STATE_UNAVAILABLE", RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
+    }
+    // A pre-album clone has no album functions, so ALBUM could never be activated on it.
+    if (toType === "ALBUM" && !expect.albumCreated) throw new ApiError(409, "ALBUM_NOT_SUPPORTED", ALBUM_NOT_SUPPORTED_MESSAGE);
     let lifecycle;
     try {
       lifecycle = await readReleaseLifecycle(this.releaseChainRequest(binding), binding.release_contract_address, { tokenIds, expect });

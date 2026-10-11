@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ethers } from "ethers";
-import { ALBUM_TYPE_LOCKED_MESSAGE, STANDALONE_EDITIONS_EXIST_MESSAGE, editionSlugFromTitle, lifecycleExpectations, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "./release-lifecycle.js";
+// One recorded Factory V3 (version 3, V5 clones), as an activated manifest would list it.
+const V3_FACTORY = "0x00000000000000000000000000000000000000f3";
+vi.mock("../../config/release-network.js", async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === V3_FACTORY ? { factoryAddress: V3_FACTORY, releaseVersion: 3, albumCapable: true } : original.releaseDeploymentForFactory(address)) };
+});
+import { ALBUM_NOT_SUPPORTED_MESSAGE, ALBUM_TYPE_LOCKED_MESSAGE, STANDALONE_EDITIONS_EXIST_MESSAGE, editionSlugFromTitle, lifecycleExpectations, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "./release-lifecycle.js";
 
 const CLONE = "0x4b2790791e2ac123cb012d33cc8f1ecbdc9b9bb0";
 const iface = new ethers.Interface(["function albumCreated() view returns (bool)", "function hasStandaloneEditions() view returns (bool)", "function maxSupplyOf(uint256) view returns (uint256)", "error EditionNotFound(uint256 tokenId)"]);
@@ -34,7 +40,13 @@ describe("release lifecycle (D3)", () => {
   });
 
   it("takes the expected getters from trusted deployment metadata, never from errors", () => {
-    expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: "0x00000000000000000000000000000000000000f3" })).toEqual(V5);
+    expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: V3_FACTORY })).toEqual(V5);
+    expect(lifecycleExpectationsForFactory(V3_FACTORY)).toEqual(V5);
+    // A version number never vouches for a contract: version 3 from an unrecorded factory, or from a
+    // recorded factory of another version, is not recognised.
+    expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: "0x00000000000000000000000000000000000000aa" })).toBeNull();
+    expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8" })).toBeNull();
+    expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: V3_FACTORY })).toBeNull();
     expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8" })).toEqual(V4);
     expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" })).toEqual(PRE_ALBUM);
     expect(lifecycleExpectationsForFactory("0x3e4e0d9187f6fd11bd6d792a7088d0c2de8e3ac8")).toEqual(V4);
@@ -49,7 +61,7 @@ describe("release lifecycle (D3)", () => {
     const minted = releaseEditionTokenId("forgive-forget");
     const request = chain({ minted: [minted] });
     const state = await readReleaseLifecycle(request, CLONE, { tokenIds: [minted, releaseEditionTokenId("never-made")], expect: V4 });
-    expect(state).toEqual({ albumCreated: false, standaloneFlag: null, existingTokenIds: [minted], hasEditions: true });
+    expect(state).toEqual({ albumCapable: true, albumCreated: false, standaloneFlag: null, existingTokenIds: [minted], hasEditions: true });
     expect(request.mock.calls.map(([payload]) => payload.params[0].data)).not.toContain(iface.encodeFunctionData("hasStandaloneEditions"));
   });
 
@@ -60,7 +72,7 @@ describe("release lifecycle (D3)", () => {
 
   it("does not call album getters on a pre-album clone", async () => {
     const request = chain();
-    await expect(readReleaseLifecycle(request, CLONE, { expect: PRE_ALBUM })).resolves.toMatchObject({ albumCreated: false, standaloneFlag: null, hasEditions: false });
+    await expect(readReleaseLifecycle(request, CLONE, { expect: PRE_ALBUM })).resolves.toMatchObject({ albumCapable: false, albumCreated: false, standaloneFlag: null, hasEditions: false });
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -85,6 +97,9 @@ describe("release lifecycle (D3)", () => {
   it("refuses ALBUM after standalone editions and locks an active album", () => {
     expect(releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle: { albumCreated: false, hasEditions: true } })).toEqual({ code: "STANDALONE_EDITIONS_EXIST", message: STANDALONE_EDITIONS_EXIST_MESSAGE });
     expect(releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle: { albumCreated: false, hasEditions: false } })).toBeNull();
+    // A pre-album clone can never become an album, even with no editions.
+    expect(releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle: { albumCapable: false, albumCreated: false, hasEditions: false } })).toEqual({ code: "ALBUM_NOT_SUPPORTED", message: ALBUM_NOT_SUPPORTED_MESSAGE });
+    expect(releaseTypeChangeBlocker({ toType: "EP", lifecycle: { albumCapable: false, albumCreated: false, hasEditions: true } })).toBeNull();
     expect(releaseTypeChangeBlocker({ toType: "EP", lifecycle: { albumCreated: false, hasEditions: true } })).toBeNull();
     expect(releaseTypeChangeBlocker({ toType: "SINGLE", lifecycle: { albumCreated: true, hasEditions: true } })).toEqual({ code: "ALBUM_TYPE_LOCKED", message: ALBUM_TYPE_LOCKED_MESSAGE });
     // An album already active on-chain may still be labelled ALBUM.

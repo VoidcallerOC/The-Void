@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { ethers } from "ethers";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
+
+// One recorded Factory V3 (version 3, V5 clones), as an activated manifest would list it.
+const V3_FACTORY = "0x00000000000000000000000000000000000000f3";
+vi.mock("../config/release-network.js", async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === V3_FACTORY ? { factoryAddress: V3_FACTORY, releaseVersion: 3, albumCapable: true, chainId: 43113 } : original.releaseDeploymentForFactory(address)) };
+});
 import { ArtistStudioService } from "./studio-service.js";
 
 const owner = "0x1111111111111111111111111111111111111111";
@@ -152,7 +159,8 @@ describe("standalone single on an album", () => {
     const clone = "0x4b2790791e2ac123cb012d33cc8f1ecbdc9b9bb0";
     const V4_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8"; // album-capable V2 factory (V4 clones)
     const v4Binding = { release_contract_id: "contract-1", release_contract_address: clone, chain_id: "43113", release_key: `0x${"ab".repeat(32)}`, implementation_version: 2, factory_address: V4_FACTORY };
-    const v5Binding = { ...v4Binding, implementation_version: 3, factory_address: "0x00000000000000000000000000000000000000f3" };
+    const v5Binding = { ...v4Binding, implementation_version: 3, factory_address: V3_FACTORY };
+    const PRE_ALBUM_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505"; // historical V2 factory, pre-album clones
     const lifecycle = new ethers.Interface(["function albumCreated() view returns (bool)", "function hasStandaloneEditions() view returns (bool)", "function maxSupplyOf(uint256) view returns (uint256)", "error EditionNotFound(uint256 tokenId)"]);
     const coder = ethers.AbiCoder.defaultAbiCoder();
     const reverted = (data) => Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION", data });
@@ -233,6 +241,31 @@ describe("standalone single on an album", () => {
       await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
       expect(repo.saveRelease).not.toHaveBeenCalled();
       expect(chain.request).not.toHaveBeenCalled();
+    });
+
+    it("refuses a version 3 binding whose factory is not a recorded Factory V3, without reading the chain", async () => {
+      for (const factory_address of ["0x00000000000000000000000000000000000000aa", V4_FACTORY]) {
+        const chain = clonedChain({ standaloneFlag: false });
+        const { instance, repo } = service(routed("EP", { binding: { ...v5Binding, factory_address } }), { publicationChain: chain });
+        await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+        expect(repo.saveRelease).not.toHaveBeenCalled();
+        expect(chain.request).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses ALBUM on a pre-album clone even with no editions, without reading the chain", async () => {
+      const chain = clonedChain();
+      const { instance, repo } = service(routed("EP", { binding: { ...v4Binding, factory_address: PRE_ALBUM_FACTORY } }), { publicationChain: chain });
+      await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 409, code: "ALBUM_NOT_SUPPORTED" });
+      expect(repo.saveRelease).not.toHaveBeenCalled();
+      expect(chain.request).not.toHaveBeenCalled();
+    });
+
+    it("still lets a pre-album clone change between SINGLE and EP", async () => {
+      const chain = clonedChain();
+      const { instance, repo } = service(routed("EP", { binding: { ...v4Binding, factory_address: PRE_ALBUM_FACTORY } }), { publicationChain: chain });
+      await instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "SINGLE" } });
+      expect(repo.saveRelease.mock.calls[0][0].metadata.releaseType).toBe("SINGLE");
     });
 
     it("does not read the chain when the type is unchanged or the release has no contract yet", async () => {

@@ -12,6 +12,7 @@ import { anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../../
 
 export const STANDALONE_EDITIONS_EXIST_MESSAGE = "This release contract already has standalone editions, so it cannot become an Album Contract. Those editions stay exactly as released. To put this music on an album, create a new Album release and add the single to it.";
 export const ALBUM_TYPE_LOCKED_MESSAGE = "This release's Album Contract is already active on-chain, so the release type stays Album. Create a new release for a single or EP.";
+export const ALBUM_NOT_SUPPORTED_MESSAGE = "This release contract was deployed from the pre-album implementation and can never become an Album Contract. Create a new Album release instead.";
 export const RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE = "The release contract's on-chain state could not be read, so nothing was changed. Try again.";
 
 const lifecycleIface = new ethers.Interface([
@@ -43,17 +44,19 @@ function revertDataOf(error) {
 
 /**
  * Which lifecycle getters a release clone must answer, from trusted deployment metadata, never from
- * an error: a failed or rate-limited eth_call is not evidence that a getter is missing. Version 3+
- * clones are VoidRelease1155V5 and have both getters. Version 2 clones take album support from the
- * recorded factory (V4 album-capable, or the pre-album implementation); V4 has no
- * hasStandaloneEditions(). Returns null when the deployment is not recognised, so callers fail closed.
+ * an error: a failed or rate-limited eth_call is not evidence that a getter is missing. The factory
+ * must be a recorded release deployment whose version matches the binding's, for every version:
+ * a version number alone never vouches for a contract. Version 3+ clones are VoidRelease1155V5 and
+ * have both getters. Version 2 clones take album support from the recorded factory (V4 album-capable,
+ * or the pre-album implementation); V4 has no hasStandaloneEditions(). Returns null when the
+ * deployment is not recognised, so callers fail closed.
  */
 export function lifecycleExpectations({ implementationVersion, factoryAddress }) {
   const version = Number(implementationVersion);
   if (!Number.isSafeInteger(version) || version < 1) return null;
-  if (anchorsProvenanceAtCreation(version)) return Object.freeze({ albumCreated: true, hasStandaloneEditions: true });
   const deployment = releaseDeploymentForFactory(factoryAddress);
   if (!deployment || Number(deployment.releaseVersion) !== version) return null;
+  if (anchorsProvenanceAtCreation(version)) return Object.freeze({ albumCreated: true, hasStandaloneEditions: true });
   return Object.freeze({ albumCreated: deployment.albumCapable === true, hasStandaloneEditions: false });
 }
 
@@ -94,12 +97,14 @@ export async function readReleaseLifecycle(request, releaseContractAddress, { to
       throw error;
     }
   }
-  return { albumCreated: albumCreated === true, standaloneFlag, existingTokenIds, hasEditions: standaloneFlag === true || existingTokenIds.length > 0 };
+  return { albumCapable: expect.albumCreated, albumCreated: albumCreated === true, standaloneFlag, existingTokenIds, hasEditions: standaloneFlag === true || existingTokenIds.length > 0 };
 }
 
 /** The D3 rule for a release-type change. Returns null when allowed. */
 export function releaseTypeChangeBlocker({ toType, lifecycle }) {
   if (lifecycle.albumCreated && toType !== "ALBUM") return { code: "ALBUM_TYPE_LOCKED", message: ALBUM_TYPE_LOCKED_MESSAGE };
+  // A clone without album functions can never become an album, whatever its editions.
+  if (toType === "ALBUM" && lifecycle.albumCapable === false) return { code: "ALBUM_NOT_SUPPORTED", message: ALBUM_NOT_SUPPORTED_MESSAGE };
   if (toType === "ALBUM" && !lifecycle.albumCreated && lifecycle.hasEditions) return { code: "STANDALONE_EDITIONS_EXIST", message: STANDALONE_EDITIONS_EXIST_MESSAGE };
   return null;
 }
