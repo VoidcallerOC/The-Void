@@ -33,3 +33,11 @@ describe("release types", () => {
     expect(nextAlbumTrackPosition({ ...catalog, albumSingles: [...catalog.albumSingles, { album_release_id: "album", single_release_id: "s3", track_position: 1 }] }, "album")).toBe(3);
   });
 });
+
+describe("album limits wording (D2 Option A)", () => {
+  it("describes 13 tracks / 4 singles as defaults, not hard maximums", async () => {
+    const { RELEASE_TYPE_LABELS } = await import("./release-types.js");
+    expect(RELEASE_TYPE_LABELS.ALBUM).toMatch(/13 tracks \/ 4 singles by default/);
+    expect(RELEASE_TYPE_LABELS.ALBUM).not.toMatch(/up to 13|maximum|max\b/i);
+  });
+});

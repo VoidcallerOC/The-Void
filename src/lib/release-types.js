@@ -6,7 +6,9 @@ export const RELEASE_TYPES = Object.freeze(["SINGLE", "EP", "ALBUM"]);
 export const RELEASE_TYPE_LABELS = Object.freeze({
   SINGLE: "Single · one standalone track on its own contract",
   EP: "EP / multi-track release",
-  ALBUM: "Album Contract · up to 13 tracks / 4 singles",
+  // D2 Option A: 13 / 4 are the contract's defaults. The release admin (the artist) can approve
+  // higher limits on-chain with approveExpandedRelease until the album is closed.
+  ALBUM: "Album Contract · 13 tracks / 4 singles by default",
 });
 
 export function releaseTypeOf(value) {

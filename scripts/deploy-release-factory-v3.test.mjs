@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { Wallet, getAddress, id } from "ethers";
+import { Wallet, getAddress, getCreateAddress, id } from "ethers";
 import { FACTORY_ARTIFACT_PATH, IMPLEMENTATION_ARTIFACT_PATH, V5_REQUIRED_ERRORS, V5_SIGNATURES, assertRpcChainId, assertV5Artifact, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, missingV5Selectors, run, validateDeploymentEnv } from "./deploy-release-factory-v3.mjs";
 
 const KEY = `0x${"11".repeat(32)}`;
@@ -11,19 +11,23 @@ const FUJI = { DEPLOY_NETWORK: "fuji", AVALANCHE_FUJI_RPC_URL: "https://api.avax
 const MAINNET = { DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", DEPLOYER_PRIVATE_KEY: KEY, RELEASE_PLATFORM_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", BROADCAST_DEPLOYMENT: "no" };
 const v5Runtime = `0x${V5_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
 // getNetwork() always claims Fuji, like a staticNetwork provider; only eth_chainId reflects the node.
-const provider = (chainId = 43113n, code = v5Runtime) => ({ getNetwork: async () => ({ chainId: 43113n }), send: async (method) => { if (method !== "eth_chainId") throw new Error(`unexpected ${method}`); return `0x${chainId.toString(16)}`; }, getCode: async () => code });
+const NONCE = 61;
+const provider = (chainId = 43113n, code = v5Runtime, { nonce = NONCE, pending = nonce } = {}) => ({ getNetwork: async () => ({ chainId: 43113n }), send: async (method) => { if (method !== "eth_chainId") throw new Error(`unexpected ${method}`); return `0x${chainId.toString(16)}`; }, getCode: async () => code, getTransactionCount: async (_address, tag) => (tag === "pending" ? pending : nonce) });
+// A broadcast config: the reviewed dry run printed deployer nonce 61.
+const BROADCAST_FUJI = { ...FUJI, EXPECTED_DEPLOYER_NONCE: String(NONCE) };
 const replying = (reply) => ({ send: async () => reply });
 const signer = (address = DEPLOYER) => ({ getAddress: async () => address });
-const FACTORY = getAddress("0x00000000000000000000000000000000000000f1");
-const MARKET = getAddress("0x00000000000000000000000000000000000000f2");
+// CREATE addresses for the deployer's next two nonces, as a real deployment would produce.
+const FACTORY = getCreateAddress({ from: DEPLOYER, nonce: NONCE });
+const MARKET = getCreateAddress({ from: DEPLOYER, nonce: NONCE + 1 });
 const IMPL = getAddress("0x00000000000000000000000000000000000000f3");
 const V5_ABI = [{ type: "error", name: "StandaloneEditionsExist", inputs: [] }];
 const loadArtifacts = (runtime = v5Runtime, abi = V5_ABI) => async (path) => (path === IMPLEMENTATION_ARTIFACT_PATH ? { name: "implementation", abi, deployedBytecode: { object: runtime } } : { name: path === FACTORY_ARTIFACT_PATH ? "factory" : "marketplace" });
-function fakeDeploy({ releaseVersion = 3n, from = DEPLOYER } = {}) {
+function fakeDeploy({ releaseVersion = 3n, from = DEPLOYER, factoryAddress = FACTORY } = {}) {
   const calls = [];
-  const deploy = async (artifact, args) => {
-    calls.push({ artifact: artifact.name, args });
-    if (artifact.name === "factory") return { address: FACTORY, receipt: { hash: "0xf1", blockNumber: 1, from }, contract: { implementation: async () => IMPL, RELEASE_VERSION: async () => releaseVersion, PLATFORM_FEE_BPS: async () => 250n } };
+  const deploy = async (artifact, args, _wallet, overrides) => {
+    calls.push({ artifact: artifact.name, args, overrides });
+    if (artifact.name === "factory") return { address: factoryAddress, receipt: { hash: "0xf1", blockNumber: 1, from }, contract: { implementation: async () => IMPL, RELEASE_VERSION: async () => releaseVersion, PLATFORM_FEE_BPS: async () => 250n } };
     return { address: MARKET, receipt: { hash: "0xf2", blockNumber: 2, from }, contract: { registry: async () => FACTORY } };
   };
   return { calls, deploy };
@@ -44,7 +48,7 @@ describe("Factory V3 deployment preflight", () => {
     expect(() => validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes" })).toThrow(/CONFIRM_FUJI_DEPLOY/);
     expect(() => validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes" })).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
     expect(() => validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: TREASURY })).toThrow(/does not belong/);
-    expect(validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER }).broadcast).toBe(true);
+    expect(validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "61" }).broadcast).toBe(true);
     expect(() => validateDeploymentEnv({ ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER })).toThrow(/CONFIRM_MAINNET_DEPLOY/);
   });
 
@@ -82,7 +86,7 @@ describe("Factory V3 deployment preflight", () => {
   it("checks eth_chainId inside the broadcast path before any transaction", async () => {
     for (const bad of [provider(43114n), replying("0x"), { send: async () => { throw new Error("down"); } }]) {
       const { calls, deploy } = fakeDeploy();
-      await expect(broadcastDeployment(validateDeploymentEnv(FUJI), bad, { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/eth_chainId|Refusing chain/);
+      await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), bad, { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/eth_chainId|Refusing chain/);
       expect(calls).toEqual([]);
     }
   });
@@ -91,7 +95,7 @@ describe("Factory V3 deployment preflight", () => {
     const { deploy } = fakeDeploy();
     const writeRecord = vi.fn();
     const logs = [];
-    const record = await broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: (value) => logs.push(value), wallet: signer() });
+    const record = await broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: (value) => logs.push(value), wallet: signer() });
     expect(record.deployer).toBe(DEPLOYER);
     expect(record.factory.deployer).toBe(DEPLOYER);
     expect(writeRecord.mock.calls[0][1].deployer).toBe(DEPLOYER);
@@ -102,14 +106,14 @@ describe("Factory V3 deployment preflight", () => {
 
   it("refuses a signer that is not the validated key's address before deploying", async () => {
     const { calls, deploy } = fakeDeploy();
-    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer(TREASURY) })).rejects.toThrow(/does not match the validated DEPLOYER_PRIVATE_KEY/);
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer(TREASURY) })).rejects.toThrow(/does not match the validated DEPLOYER_PRIVATE_KEY/);
     expect(calls).toEqual([]);
   });
 
   it("stops before the marketplace when the factory receipt was sent by another address", async () => {
     const { calls, deploy } = fakeDeploy({ from: TREASURY });
     const writeRecord = vi.fn();
-    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: () => {}, wallet: signer() })).rejects.toThrow(/not sent by the validated deployer/);
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: () => {}, wallet: signer() })).rejects.toThrow(/not sent by the validated deployer/);
     expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
     expect(writeRecord).not.toHaveBeenCalled();
   });
@@ -123,7 +127,7 @@ describe("Factory V3 deployment preflight", () => {
     await expect(assertV5Artifact(loadArtifacts(v5Runtime, []))).rejects.toThrow(/lacks error StandaloneEditionsExist\(\)/);
     await expect(assertV5Artifact(loadArtifacts())).resolves.toBeUndefined();
     const { calls, deploy } = fakeDeploy();
-    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(43113n, withoutGuard), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(43113n, withoutGuard), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
     expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
   });
 
@@ -138,7 +142,7 @@ describe("Factory V3 deployment preflight", () => {
     const { calls, deploy } = fakeDeploy();
     const writeRecord = vi.fn();
     const logs = [];
-    const record = await broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: (value) => logs.push(value), wallet: signer() });
+    const record = await broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord, log: (value) => logs.push(value), wallet: signer() });
     expect(calls.map((call) => call.artifact)).toEqual(["factory", "marketplace"]);
     expect(calls[0].args).toEqual([TREASURY]);
     expect(calls[1].args).toEqual([TREASURY, 250, FACTORY]);
@@ -149,7 +153,51 @@ describe("Factory V3 deployment preflight", () => {
 
   it("stops before the marketplace when the mined factory is not V3", async () => {
     const { calls, deploy } = fakeDeploy({ releaseVersion: 2n });
-    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
+    expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
+  });
+
+  it("requires the reviewed dry-run nonce for every broadcast and rejects a malformed one", () => {
+    const confirmed = { ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
+    expect(() => validateDeploymentEnv(confirmed)).toThrow(/EXPECTED_DEPLOYER_NONCE/);
+    expect(() => validateDeploymentEnv({ ...confirmed, EXPECTED_DEPLOYER_NONCE: "-1" })).toThrow(/non-negative whole number/);
+    expect(() => validateDeploymentEnv({ ...confirmed, EXPECTED_DEPLOYER_NONCE: "6.1" })).toThrow(/non-negative whole number/);
+    expect(validateDeploymentEnv({ ...confirmed, EXPECTED_DEPLOYER_NONCE: "61" })).toMatchObject({ broadcast: true, expectedDeployerNonce: 61 });
+    // A dry run does not need it.
+    expect(validateDeploymentEnv(FUJI).expectedDeployerNonce).toBeNull();
+  });
+
+  it("refuses to sign when the deployer nonce moved since the reviewed dry run (stale predicted addresses)", async () => {
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(43113n, v5Runtime, { nonce: 62 }), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/nonce is 62, not the reviewed 61: the predicted addresses are stale/);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses to sign while the deployer has pending transactions", async () => {
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(43113n, v5Runtime, { nonce: 61, pending: 62 }), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/pending transactions/);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a broadcast config that carries no reviewed nonce, even if a caller skips validation", async () => {
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/reviewed \(missing\)/);
+    expect(calls).toEqual([]);
+  });
+
+  it("pins both deployments to the verified nonces and logs the predicted addresses before signing", async () => {
+    const { calls, deploy } = fakeDeploy();
+    const logs = [];
+    const record = await broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: (value) => logs.push(value), wallet: signer() });
+    expect(calls.map((call) => call.overrides)).toEqual([{ nonce: 61 }, { nonce: 62 }]);
+    expect(logs[0]).toEqual({ step: "BROADCAST_PREFLIGHT_PASSED", deployerNonce: 61, predictedFactoryAddress: FACTORY, predictedMarketplaceAddress: MARKET });
+    expect(record.factory.address).toBe(FACTORY);
+    expect(record.marketplace.address).toBe(MARKET);
+  });
+
+  it("stops before the marketplace when the factory was mined at an address other than the prediction", async () => {
+    const { calls, deploy } = fakeDeploy({ factoryAddress: getAddress("0x00000000000000000000000000000000000000f9") });
+    await expect(broadcastDeployment(validateDeploymentEnv(BROADCAST_FUJI), provider(), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the predicted/);
     expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
   });
 

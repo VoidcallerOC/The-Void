@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: ""
+      expected_deployer_nonce:
+        description: deployer_nonce printed by the reviewed dry run. Required for a broadcast; a different nonce (stale predicted addresses) is refused.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -39,6 +44,7 @@ env:
   CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_RELEASE_FACTORY_V3_DEPLOY' && 'yes' || 'no' }}
   BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
+  EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
 
 jobs:
   preflight:
@@ -86,6 +92,9 @@ jobs:
           if (expected && !(isAddress(expected) && getAddress(expected) === wallet.address)) throw new Error("DEPLOYER_PRIVATE_KEY does not belong to expected_deployer_address.");
           if (process.env.BROADCAST_DEPLOYMENT === "yes" && !expected) throw new Error("A broadcast requires expected_deployer_address.");
           if (process.env.BROADCAST_DEPLOYMENT === "yes" && pendingNonce !== nonce) throw new Error("The deployer has pending transactions; refusing to broadcast.");
+          const expectedNonce = String(process.env.EXPECTED_DEPLOYER_NONCE || "").trim();
+          if (process.env.BROADCAST_DEPLOYMENT === "yes" && !expectedNonce) throw new Error("A broadcast requires expected_deployer_nonce from the reviewed dry run.");
+          if (expectedNonce && (!/^(0|[1-9][0-9]*)$/.test(expectedNonce) || Number(expectedNonce) !== nonce)) throw new Error(`The deployer nonce is ${nonce}, not the reviewed ${expectedNonce}: the predicted addresses are stale. Run a new dry run.`);
           console.log("broadcasted=false");
           JS
 

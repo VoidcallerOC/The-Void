@@ -56,3 +56,56 @@ describe("VoidRelease1155V5 ProvenanceAnchored indexing", () => {
     await expect(indexer.processLog(config, anchoredLog({ loggedRelease: OTHER }), block)).resolves.toEqual({ duplicate: false, malformed: true });
   });
 });
+
+// CONCERN-01: Factory V2 (V4 clones, separate VoidProvenanceAnchor) and Factory V3 (V5 clones that
+// are their own anchor) coexist on one indexer. Each event must stay attributed to its real emitter.
+describe("concurrent Factory V2 and Factory V3 releases", () => {
+  const V2_RELEASE = `0x${"c2".repeat(20)}`;
+  const V2_ANCHOR = `0x${"d2".repeat(20)}`;
+  const V2_FACTORY = `0x${"f2".repeat(20)}`;
+  const v2Config = releaseIndexerConfig({ chainId: 43113, address: V2_RELEASE, startBlock: 1, factoryAddress: V2_FACTORY });
+  const transferIface = new Interface(["event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)"]);
+
+  function concurrentStore() {
+    const events = [];
+    const transfers = [];
+    const seen = new Set();
+    return {
+      events,
+      transfers,
+      // Same idempotency contract as the real store: a repeated (tx, logIndex) is not inserted again.
+      async recordEvent(value) { const id = `${value.transactionHash}:${value.logIndex}`; if (seen.has(id)) return null; seen.add(id); events.push(value); return value; },
+      async recordIndexerError() {},
+      async applyTransfer(value) { transfers.push(value); return value; },
+      async applyAlbumEvent() { throw new Error("not an album event"); },
+    };
+  }
+
+  it("records a V3 clone's ProvenanceAnchored under that clone while a V2 clone's transfers index normally", async () => {
+    const store = concurrentStore();
+    const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [v2Config, config] });
+    await expect(indexer.processLog(config, anchoredLog(), block)).resolves.toMatchObject({ duplicate: false, eventType: "ProvenanceAnchored", provenanceRoot: ROOT });
+    const transfer = transferIface.encodeEventLog("TransferSingle", [ARTIST, "0x0000000000000000000000000000000000000000", ARTIST, 9n, 1n]);
+    await indexer.processLog(v2Config, { address: V2_RELEASE, topics: transfer.topics, data: transfer.data, transactionHash: `0x${"e2".repeat(32)}`, blockNumber: 7, blockHash: "0xblock7", logIndex: 0 }, block);
+    expect(store.events.filter((event) => event.eventType === "ProvenanceAnchored")).toEqual([expect.objectContaining({ contractAddress: RELEASE, eventData: expect.objectContaining({ releaseContract: RELEASE }) })]);
+    expect(store.transfers.at(-1)).toMatchObject({ contractAddress: V2_RELEASE, tokenId: "9" });
+  });
+
+  it("never credits a V2 separate-anchor ProvenanceAnchored log to the V2 clone", async () => {
+    // V2 anchors are not indexer targets (their events are verified at confirmation, server-side).
+    // Even if such a log reached the clone's config, its real emitter is kept and it is refused.
+    const store = concurrentStore();
+    const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [v2Config, config] });
+    const result = await indexer.processLog(v2Config, anchoredLog({ emitter: V2_ANCHOR, loggedRelease: V2_RELEASE }), block);
+    expect(result).toEqual({ duplicate: false, malformed: true });
+    expect(store.events.filter((event) => event.eventType === "ProvenanceAnchored" && !event.isMalformed)).toEqual([]);
+  });
+
+  it("treats a replayed V3 ProvenanceAnchored log as a duplicate, not a second record", async () => {
+    const store = concurrentStore();
+    const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [v2Config, config] });
+    await indexer.processLog(config, anchoredLog(), block);
+    await expect(indexer.processLog(config, anchoredLog(), block)).resolves.toMatchObject({ duplicate: true, eventType: "ProvenanceAnchored" });
+    expect(store.events.filter((event) => event.eventType === "ProvenanceAnchored")).toHaveLength(1);
+  });
+});
