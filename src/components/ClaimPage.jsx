@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { formatEther } from "ethers";
 import { Eyebrow, Tag } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
-import { findMarketplaceEdition } from "../lib/marketplace-surface.js";
+import { findMarketplaceEdition, marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { FUJI_RELEASE_FACTORY_CONFIG } from "../lib/fuji-release.js";
 import { releaseBindingFor } from "../lib/claim-state.js";
-import { checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
-import { FUJI_REHEARSAL_CLAIM_TARGET } from "../lib/fuji-rehearsal-claim.js";
+import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
+import { formatSaleInstant } from "../lib/sale-editor.js";
 
 const CLAIM_PHASES = Object.freeze({
   DISCONNECTED: "disconnected",
@@ -76,47 +77,90 @@ function classifyError(error) {
   return CLAIM_PHASES.ERROR;
 }
 
-function FujiRehearsalClaimSurface() {
-  const target = FUJI_REHEARSAL_CLAIM_TARGET;
+function instant(seconds) {
+  const at = formatSaleInstant(seconds);
+  return at ? `${at.local} your time (${at.utc})` : "—";
+}
+
+function avax(wei) {
+  return `${formatEther(BigInt(wei ?? 0))} AVAX`;
+}
+
+function nowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
+/** The schedule as the server-verified target states it; the contracts enforce the same windows. */
+function ClaimSchedule({ target }) {
+  if (!target?.claimEnd) return null;
+  return (
+    <>
+      <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
+      <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.claimEnd)} → {instant(target.publicSaleEnd)}</InfoRow>
+      <InfoRow label="Eligibility">Held Genesis token 0, 1, 2 or 3 on Avalanche C-Chain at block {target.snapshotBlock}. Transfers after that block do not change eligibility.</InfoRow>
+      <InfoRow label="Supply">{String(target.publicAllocation) === "0" && String(target.allocation) === "0" ? "Open edition · uncapped" : `Claim ${target.allocation} · public ${target.publicAllocation}`}</InfoRow>
+    </>
+  );
+}
+
+function phaseMessage(phase, target) {
+  if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return `The free Genesis claim opens ${instant(target.claimStart)}.`;
+  if (phase === GENESIS_CLAIM_PHASES.PUBLIC) return `The Genesis claim has closed. The public mint is open to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}. No Genesis token or voucher is needed.`;
+  if (phase === GENESIS_CLAIM_PHASES.CLOSED) return "Minting is closed. The Genesis claim and the public mint have both ended.";
+  return "";
+}
+
+/** /claim without an edition: the server-verified target, or a plain closed notice. Never a historical address. */
+function GenesisClaimLanding({ catalog }) {
+  const [state, setState] = useState({ status: "loading" });
+  useEffect(() => {
+    let live = true;
+    fetchGenesisClaimConfig()
+      .then((target) => { if (live) setState({ status: "ready", target }); })
+      .catch((error) => { if (live) setState({ status: "unavailable", message: error?.message || "" }); });
+    return () => { live = false; };
+  }, []);
+  const target = state.target;
+  const match = useMemo(() => {
+    if (!target) return null;
+    for (const record of marketplaceCatalog([catalog])) {
+      const item = record.editions.find(({ edition }) => {
+        const binding = releaseBindingFor(edition);
+        return binding.valid && sameAddress(binding.releaseContractAddress, target.releaseContract) && String(binding.tokenId) === String(target.tokenId);
+      });
+      if (item) return item.edition;
+    }
+    return null;
+  }, [catalog, target]);
+  const phase = target ? genesisClaimPhase(target, nowSeconds()) : null;
   return (
     <section className="vc-claim-page" style={shell}>
       <header className="vc-claim-header">
         <div>
-          <Eyebrow red>† Claim · Fuji rehearsal</Eyebrow>
-          <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Fuji Rehearsal Release A</h1>
+          <Eyebrow red>† Claim · Genesis holders</Eyebrow>
+          <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Genesis claim</h1>
         </div>
-        <StateMark state={CLAIM_PHASES.CLAIM_UNAVAILABLE} />
+        <StateMark state={state.status === "ready" && phase === GENESIS_CLAIM_PHASES.GENESIS ? CLAIM_PHASES.ELIGIBLE : CLAIM_PHASES.CLAIM_UNAVAILABLE} />
       </header>
-      <div className="vc-claim-layout">
-        <figure className="vc-claim-artwork">
-          <img src="/assets/voidcaller_art_4.png" alt="Fuji Rehearsal Release A artwork" />
-          <figcaption><span>Voidcaller</span><span>Fuji test pressing</span></figcaption>
-        </figure>
-        <div className="vc-claim-copy">
-          <Eyebrow red>Collector-facing release identity</Eyebrow>
-          <p className="vc-claim-artist">Voidcaller</p>
-          <h2 className="vc-claim-title">Fuji Rehearsal Release A</h2>
-          <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>A Fuji-only public claim rehearsal. This surface verifies the existing Release A binding before collector claims are enabled.</p>
-          <div className="vc-claim-status" aria-live="polite">
-            <div className="vc-claim-status-head">
-              <Eyebrow red>Claim status</Eyebrow>
-              <StateMark state={CLAIM_PHASES.CLAIM_UNAVAILABLE} />
+      <div className="vc-claim-copy">
+        {state.status === "loading" && <p className="vc-body vc-body-muted">Checking the claim target.</p>}
+        {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
+        {state.status === "ready" && (
+          <>
+            <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phase === GENESIS_CLAIM_PHASES.GENESIS ? "Genesis holders can claim one copy for free." : phaseMessage(phase, target)}</p>
+            <div className="vc-claim-action">
+              {match ? <Link to={`/claim/${match.id}`} style={primaryBtn}>OPEN THE RELEASE CLAIM</Link> : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
             </div>
-            <p className="vc-claim-status-message">Claim execution is intentionally closed for this rehearsal. No claim authorization, wallet signature, or transaction is requested.</p>
-          </div>
-          <div className="vc-claim-action">
-            <button type="button" style={{ ...primaryBtn, opacity: 0.45, cursor: "not-allowed" }} disabled aria-disabled="true">CLAIM UNAVAILABLE</button>
-            <Link to="/marketplace" style={ghostBtn}>View marketplace</Link>
-          </div>
-          <div className="vc-claim-supporting">
-            <Eyebrow red>Verified Fuji target</Eyebrow>
-            <InfoRow label="Release" mono>{target.releaseContract}</InfoRow>
-            <InfoRow label="Primary sale" mono>{target.primarySale}</InfoRow>
-            <InfoRow label="Provenance anchor" mono>{target.provenanceAnchor}</InfoRow>
-            <InfoRow label="Network">{target.network} · {target.chainId}</InfoRow>
-            <InfoRow label="Collector receives">Full self-titled EP · Collector Reliquary access · Token-gated music experiences</InfoRow>
-          </div>
-        </div>
+            <div className="vc-claim-supporting">
+              <Eyebrow red>Verified claim target</Eyebrow>
+              <InfoRow label="Network">Avalanche Fuji · {target.destinationChainId}</InfoRow>
+              <InfoRow label="Release" mono>{target.releaseContract}</InfoRow>
+              <InfoRow label="Token" mono>{target.tokenId}</InfoRow>
+              <InfoRow label="Claim contract" mono>{target.claimContract}</InfoRow>
+              <ClaimSchedule target={target} />
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
@@ -145,6 +189,16 @@ export function ClaimPage() {
   const account = wallet.account || "";
   const connected = Boolean(wallet.connected && account);
   const provider = wallet.getProvider?.();
+  // The schedule is public: it is read without a wallet so every visitor sees the current phase.
+  const [schedule, setSchedule] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetchGenesisClaimConfig().then((loaded) => { if (live) setSchedule(loaded); }).catch(() => { if (live) setSchedule(null); });
+    return () => { live = false; };
+  }, []);
+  const schedulePhase = schedule ? genesisClaimPhase(schedule, nowSeconds()) : null;
+  const scheduleMatches = Boolean(schedule && binding.valid && sameAddress(schedule.releaseContract, binding.releaseContractAddress) && String(schedule.tokenId) === String(binding.tokenId));
+  const outsideGenesisWindow = scheduleMatches && schedulePhase !== GENESIS_CLAIM_PHASES.GENESIS;
 
   useEffect(() => {
     let live = true;
@@ -156,6 +210,11 @@ export function ClaimPage() {
       setEligibleTokenIds([]);
       setTarget(null);
       if (!edition) return;
+      if (outsideGenesisWindow) {
+        setPhase(CLAIM_PHASES.CLAIM_UNAVAILABLE);
+        setMessage(phaseMessage(schedulePhase, schedule));
+        return;
+      }
       if (!connected) {
         setPhase(CLAIM_PHASES.DISCONNECTED);
         setMessage("Connect a wallet to verify Genesis ownership.");
@@ -203,11 +262,11 @@ export function ClaimPage() {
         setEligibleTokenIds(result.eligibleTokenIds || []);
         if (!result.eligible) {
           setPhase(CLAIM_PHASES.ACCESS_DENIED);
-          setMessage("Access denied. This wallet holds none of Genesis token IDs 0, 1, 2, or 3.");
+          setMessage("Access denied. This wallet did not hold Genesis token 0, 1, 2 or 3 at the snapshot block. Nothing was claimed.");
           return;
         }
         setPhase(CLAIM_PHASES.ELIGIBLE);
-        setMessage(`Genesis ownership verified for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one claim.`);
+        setMessage(`Genesis ownership at the snapshot block verified for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one free claim.`);
       } catch (error) {
         if (!live) return;
         setPhase(classifyError(error));
@@ -216,7 +275,7 @@ export function ClaimPage() {
     }
     void synchronizeClaimState();
     return () => { live = false; };
-  }, [account, binding, connected, edition, provider, wallet.chainId]);
+  }, [account, binding, connected, edition, provider, wallet.chainId, outsideGenesisWindow, schedulePhase, schedule]);
 
   async function onClaimAction() {
     if (phase === CLAIM_PHASES.ELIGIBLE && !voucher) {
@@ -273,7 +332,7 @@ export function ClaimPage() {
             ? "ALREADY CLAIMED"
             : "CLAIM UNAVAILABLE";
 
-  if (!editionId) return <FujiRehearsalClaimSurface />;
+  if (!editionId) return <GenesisClaimLanding catalog={catalog} />;
 
   if (!edition) {
     return (
@@ -324,9 +383,13 @@ export function ClaimPage() {
           </div>
 
           <div className="vc-claim-action">
-            <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
-              {actionText}
-            </button>
+            {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.PUBLIC
+              ? <Link to={`/edition/${edition.id}`} style={primaryBtn}>MINT · {avax(schedule.publicPriceWei)}</Link>
+              : (
+                <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
+                  {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.CLOSED ? "MINTING CLOSED" : actionText}
+                </button>
+              )}
             <Link to={`/edition/${edition.id}`} style={ghostBtn}>View release</Link>
           </div>
 
@@ -338,7 +401,7 @@ export function ClaimPage() {
             <InfoRow label="Release contract" mono>{binding.valid ? binding.releaseContractAddress : "UNVERIFIED · CLOSED"}</InfoRow>
             <InfoRow label="Token identity" mono>{binding.valid ? `${binding.chainId}:${binding.releaseContractAddress}:${binding.tokenId}` : "UNVERIFIED"}</InfoRow>
             <InfoRow label="Network">{binding.chainId === 43113 ? "Avalanche Fuji · 43113" : `Chain ${binding.chainId || "—"}`}</InfoRow>
-            {target && <InfoRow label="Genesis reserved allocation">{target.allocation}</InfoRow>}
+            {scheduleMatches && <ClaimSchedule target={schedule} />}
           </div>
         </div>
       </div>

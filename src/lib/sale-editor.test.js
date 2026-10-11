@@ -38,12 +38,17 @@ describe("sale editor", () => {
   });
 
   it("enforces Genesis claim invariants only while they apply", () => {
-    const claim = { state: "active", publicAllocation: 20n, minimumStart: BigInt(NOW + 86_400), live: true };
-    const values = { maxSupply: 20n, startTime: BigInt(NOW + 86_400) };
+    const claimEnd = BigInt(NOW + 86_400);
+    const publicSaleEnd = claimEnd + 7n * 86_400n - 1n;
+    const claim = { state: "active", publicAllocation: 0n, claimEnd, publicSaleEnd, publicPriceWei: 25n * 10n ** 16n, live: true };
+    const values = { maxSupply: 0n, startTime: claimEnd, endTime: publicSaleEnd, priceWei: 25n * 10n ** 16n };
     expect(claimGuardErrors(values, claim)).toEqual([]);
-    expect(claimGuardErrors({ ...values, maxSupply: 0n }, claim)[0]).toMatch(/sale cap must stay 20/);
-    expect(claimGuardErrors({ ...values, startTime: 0n }, claim)[0]).toMatch(/Genesis holder claims are still open/);
-    expect(claimGuardErrors({ ...values, startTime: 0n }, { ...claim, live: false })).toEqual([]);
+    expect(claimGuardErrors({ ...values, maxSupply: 50n }, claim)[0]).toMatch(/must stay uncapped/);
+    expect(claimGuardErrors({ ...values, maxSupply: 0n }, { ...claim, publicAllocation: 20n })[0]).toMatch(/sale cap must stay 20/);
+    expect(claimGuardErrors({ ...values, startTime: 0n }, claim)[0]).toMatch(/must open exactly when they close/);
+    expect(claimGuardErrors({ ...values, endTime: publicSaleEnd + 1n }, claim)[0]).toMatch(/must open exactly when they close/);
+    expect(claimGuardErrors({ ...values, priceWei: 1n }, claim)[0]).toMatch(/public price can't change/);
+    expect(claimGuardErrors({ ...values, startTime: 0n, priceWei: 1n }, { ...claim, live: false })).toEqual([]);
     expect(claimGuardErrors(values, { state: "unknown", message: "offline" })[0]).toMatch(/could not be checked: offline/);
     expect(claimGuardErrors(values, { state: "none" })).toEqual([]);
   });
