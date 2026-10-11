@@ -416,4 +416,95 @@ contract VoidRelease1155V5Test {
         require(uint8(market.listingStatus(listingId)) == uint8(ReleaseMarketplaceV3.Status.ACTIVE), "listed");
         require(release.isAnchored(key, EDITION, ROOT), "still anchored");
     }
+
+    // ---- D3: a standalone release never becomes an album ----
+
+    function testCreateAlbumRefusedAfterStandaloneEdition() public {
+        require(!release.hasStandaloneEditions(), "fresh release has no standalone editions");
+        uint256 tokenId = _create(EDITION, 3, ROOT);
+        require(release.hasStandaloneEditions(), "standalone edition recorded");
+
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.StandaloneEditionsExist.selector);
+        release.createAlbum(key);
+        require(!release.albumCreated(), "album not created");
+
+        // The refused call changed nothing: the edition still sells, mints and stays anchored,
+        // and the release still accepts further standalone editions.
+        vm.prank(ARTIST);
+        VoidPrimarySale(sale).configureSale(tokenId, 1 ether, 2, 2, 0, 0, false);
+        vm.deal(HOLDER, 1 ether);
+        vm.prank(HOLDER);
+        VoidPrimarySale(sale).purchase{value: 1 ether}(tokenId, 1);
+        require(release.balanceOf(HOLDER, tokenId) == 1, "standalone edition still purchasable");
+        require(release.isAnchored(key, EDITION, ROOT), "still anchored");
+        uint256 second = _create(bytes32("b-side"), 0, bytes32("b-side-root"));
+        require(release.provenanceRootOf(second) == bytes32("b-side-root"), "further standalone edition");
+    }
+
+    function testCreateAlbumRefusedAfterStandaloneEditionWithMintEnd() public {
+        uint64 end = uint64(block.timestamp + 100);
+        vm.prank(ARTIST);
+        uint256 tokenId = release.createEditionWithMintEnd(key, EDITION, 0, "ipfs://e", ARTIST, 0, end, ROOT);
+        require(release.hasStandaloneEditions(), "standalone edition recorded");
+
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.StandaloneEditionsExist.selector);
+        release.createAlbum(key);
+
+        vm.prank(sale);
+        release.mint(HOLDER, tokenId, 2, "");
+        require(release.balanceOf(HOLDER, tokenId) == 2, "standalone edition still mintable");
+        require(release.mintEndOf(tokenId) == end, "deadline unchanged");
+    }
+
+    function testAlbumFirstReleaseIsUnaffectedByStandaloneGuard() public {
+        vm.prank(ARTIST);
+        release.createAlbum(key);
+        vm.prank(ARTIST);
+        release.createAlbumTrack(key, bytes32("track-1"), 0, "ipfs://t1", ARTIST, 0, true, 0, bytes32("root-1"));
+        vm.prank(ARTIST);
+        release.createAlbumTrack(key, bytes32("track-2"), 0, "ipfs://t2", ARTIST, 0, false, 0, bytes32("root-2"));
+        require(release.albumTrackCount() == 2 && release.albumSingleCount() == 1, "tracks counted");
+        require(!release.hasStandaloneEditions(), "album tracks are not standalone editions");
+
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.AlbumTrackPathRequired.selector);
+        release.createEdition(key, EDITION, 10, "ipfs://e", ARTIST, 0, ROOT);
+        require(!release.hasStandaloneEditions(), "refused standalone call leaves the flag unset");
+    }
+
+    function testRootLessOverloadsDoNotMarkStandaloneEditions() public {
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.ProvenanceRootRequired.selector);
+        release.createEdition(key, EDITION, 10, "ipfs://e", ARTIST, uint96(0));
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.ProvenanceRootRequired.selector);
+        release.createEdition(key, EDITION, 10, "ipfs://e");
+        require(!release.hasStandaloneEditions(), "no edition created");
+
+        vm.prank(ARTIST);
+        release.createAlbum(key);
+        require(release.albumCreated(), "album still available");
+    }
+
+    function testNewAlbumReleaseCanReuseEarlierMusic() public {
+        // The single stays exactly as released on its own release contract.
+        uint256 singleToken = _create(EDITION, 10, ROOT);
+        vm.prank(ARTIST);
+        vm.expectRevert(VoidRelease1155V5.StandaloneEditionsExist.selector);
+        release.createAlbum(key);
+
+        // A separate album release from the same artist through Factory V3 can carry the same
+        // recording as a track: roots are per release contract, so the earlier anchor is untouched.
+        (VoidRelease1155V5 album,,, bytes32 albumKey) = _newRelease(keccak256("later-album"), ARTIST);
+        vm.prank(ARTIST);
+        album.createAlbum(albumKey);
+        vm.prank(ARTIST);
+        uint256 track = album.createAlbumTrack(albumKey, EDITION, 0, "ipfs://album-track", ARTIST, 500, true, 0, ROOT);
+        require(album.albumCreated() && album.isAlbumSingle(track), "album track on the new release");
+        require(album.isAnchored(albumKey, EDITION, ROOT), "album track anchored");
+        require(release.isAnchored(key, EDITION, ROOT) && release.provenanceRootOf(singleToken) == ROOT, "single untouched");
+        require(!release.albumCreated() && release.hasStandaloneEditions(), "single release unchanged");
+    }
 }

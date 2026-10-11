@@ -289,6 +289,14 @@ describe("createEdition revert decoding", () => {
       .toMatchObject({ code: "ACTION_REJECTED", message: expect.stringMatching(/rejected in the wallet/i) });
   });
 
+  it("explains the album lifecycle reverts (D3) with guidance toward a new album release", () => {
+    const lifecycle = new ethers.Interface(["error StandaloneEditionsExist()", "error AlbumTrackPathRequired()"]);
+    expect(explainFujiEditionError({ data: lifecycle.encodeErrorResult("StandaloneEditionsExist", []) }))
+      .toMatchObject({ code: "StandaloneEditionsExist", message: expect.stringMatching(/cannot become an Album Contract.*new Album release/s) });
+    expect(explainFujiEditionError({ data: lifecycle.encodeErrorResult("AlbumTrackPathRequired", []) }))
+      .toMatchObject({ code: "AlbumTrackPathRequired", message: expect.stringMatching(/added as album tracks/) });
+  });
+
   it("returns a null message for an unknown revert so callers keep their fallback", () => {
     expect(explainFujiEditionError({ message: "execution reverted" }).message).toBeNull();
   });

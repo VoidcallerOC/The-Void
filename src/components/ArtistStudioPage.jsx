@@ -16,6 +16,7 @@ import { readGenesisClaimSaleGuard } from "../lib/genesis-claim.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
+import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readCurrentReleaseEditions, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
@@ -594,6 +595,19 @@ export function ArtistStudioPage() {
       if (!activeReleaseAsset?.releaseContractAddress || !provisioning?.releaseKey) throw new Error("Confirm the Factory V2 release before activating its Album Contract.");
       if (!albumSupported) throw new Error(ALBUM_UNSUPPORTED_MESSAGE);
       if (albumActivated) throw new Error("This Album Contract is already active on-chain.");
+      // D3: a release contract with standalone editions never becomes an album. Read the chain, not
+      // the catalog status: a mined edition can still be a draft here. V5 clones also refuse this
+      // on-chain; V4 clones rely on this check, which a direct wallet call can bypass. The editions
+      // are re-read now from the release-scoped, uncapped server read (never the page-load catalog,
+      // which is capped owner-wide), and checked by the token IDs the server stored when each was
+      // prepared, never re-derived from titles.
+      const currentEditions = await readCurrentReleaseEditions({ fetchEditions: () => studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/lifecycle-editions`, { headers }), releaseId, releaseContractAddress: activeReleaseAsset.releaseContractAddress });
+      const expect = lifecycleExpectationsForFactory(currentEditions.factoryAddress);
+      if (!expect) throw new Error(RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
+      const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+      const lifecycle = await readReleaseLifecycle((payload) => publicProvider.request(payload), activeReleaseAsset.releaseContractAddress, { tokenIds: currentEditions.tokenIds, expect });
+      const blocker = releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle });
+      if (blocker) throw new Error(blocker.message);
       const provider = wallet.getProvider?.();
       const encoded = encodeCreateReleaseAlbum({ releaseKey: provisioning.releaseKey });
       await simulateReleaseCall(provider, { from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data, chainId: activeReleaseAsset.chainId });

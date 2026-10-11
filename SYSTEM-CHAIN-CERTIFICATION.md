@@ -83,6 +83,7 @@ The §6 findings on capability and wiring (S1–S3) stand. So does "Paths B and 
 
 | Claim | Status | Evidence |
 |---|---|---|
+| D3 lifecycle guard in V5 source (`createAlbum` refused after a standalone edition) | **PARTIAL** (PR pending review, not merged) | `contracts/VoidRelease1155V5.sol`; [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4a. V5 changed after the source audit, so a delta review is required before broadcast. |
 | Atomic provenance anchoring exists in source | **VERIFIED** (source only) | `contracts/VoidRelease1155V5.sol`, `config/release-network.js` (`PROVENANCE_AT_CREATION_RELEASE_VERSION = 3`) |
 | Foundry/unit tests pass | Not counted | Tests are not chain evidence (see evidence rules) and were not re-run for this entry. |
 | V3/V5 deployed on Fuji | **NOT STARTED** | No V3/V5 address in `config/fuji-release-per-contract-v2.json`, `config/` or `deployments/`. The active factory is `VoidReleaseFactoryV2` (`releaseVersion: 2`). This is a repository record. It does not prove that no undeclared V3 deployment exists on chain. |

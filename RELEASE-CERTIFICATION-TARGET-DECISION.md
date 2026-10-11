@@ -77,7 +77,35 @@ There are **three** meanings of "single" in the code, not two:
 - C: SINGLE means S1 only, and S2 is shown as a "featured track". The on-chain cap is still named "singles", so the labels conflict.
 - D: merge S2 and S3 in the UI. This needs a combined cap policy and an ordering source for S2.
 
-Separate hardening, decided independently: D3 (block `createAlbum` after standalone editions; contract change, so V5+ only) and D2 (the artist alone can lift the caps through `approveExpandedRelease`).
+D2 (the artist alone can lift the caps through `approveExpandedRelease`) is still an open owner decision.
+
+## 4a. D3: a standalone release contract never becomes an album
+
+**Status:** the owner authorized Option A for implementation on 2026-10-11. The change is in a PR pending review. It is not merged and not deployed.
+
+**Invariant.** A release contract is standalone (editions created with `createEdition`) or an album (tracks created with `createAlbumTrack`) for its whole life. Album-first was already enforced: `createEdition` reverts `AlbumTrackPathRequired` once the album exists. D3 closes the other direction.
+
+Three things must never be confused:
+
+| Case | Allowed? | How |
+|---|---|---|
+| 1. Converting an existing single or EP release contract into an album | **No** | V5 `createAlbum` reverts `StandaloneEditionsExist`. The earlier editions stay standalone and mintable, unchanged. |
+| 2. Creating a new album that includes previously released music | **Yes** | A new release contract (`createRelease`, then `createAlbum`). An already published single can also be linked to the album off-chain (`release_album_singles`). |
+| 3. Reusing the same recording across independent releases | **Yes** | Each release contract stores its own provenance roots, and the roots commit to `releaseId` and `editionId`. Each release mints its own collectible editions. |
+
+**Enforcement by version:**
+
+| Version | Enforcement | Strength |
+|---|---|---|
+| V5 (Factory V3, not deployed) | `bool public hasStandaloneEditions` is set by both standalone entry points. `createAlbum` reverts `StandaloneEditionsExist` when it is true. A refused call changes no state. The deploy script refuses a compiled artifact without the `hasStandaloneEditions()` selector or the `StandaloneEditionsExist` error, and a mined implementation without the selector. Those checks prove only that the **interface is present**, not that `createAlbum` behaves correctly. The optimizer does not keep that error's selector as a literal in runtime bytecode, so the error is checked in the artifact ABI only. The behavioural proof is acceptance row **B4b** on-chain. | On-chain, for every caller |
+| V4 and older (deployed, immutable) | The server refuses a type change to ALBUM when the bound contract has an edition on-chain, even while the database says DRAFT. It locks a release whose album is active on-chain. Immediately before `createAlbum`, Studio re-reads the release's editions from an owner-only server read scoped to that one release (`GET /studio/releases/:id/lifecycle-editions`), and then the chain. It never uses the page-load catalog, which is capped at the owner's newest 500 editions and can leave out an older edition. The read has no row cap: it returns every stored token ID of the release and its factory bindings, marked `complete`. Studio refuses before any wallet prompt if that read fails, times out, is refused, is for another release, is not marked complete, or lacks exactly one recorded factory binding for the contract. A complete read with no token IDs means the release has no stored editions. Both look up editions by the **token IDs stored when each edition was prepared**, never by IDs re-derived from an editable title. Both take the getters a contract must have from trusted deployment metadata. For every version, V5 included, the binding's factory must be a recorded release deployment whose version matches the binding's factory-event version. A version number alone never vouches for a contract, so a Factory V3 release is recognised only once activation records that factory in the manifest. The lifecycle getters come from a **closed list of reviewed implementations**, kept separate from provenance-at-creation:
+  - version 2 on an album-capable factory: V4, `albumCreated()` only;
+  - version 2 on the pre-album factory: no album getters;
+  - version 3 on an album-capable factory: V5, `albumCreated()` and `hasStandaloneEditions()`.
+
+  Any other version, including a recorded future factory, is refused before any chain read until its implementation is reviewed and added. A release contract from the pre-album factory can never switch to ALBUM: the server refuses with `ALBUM_NOT_SUPPORTED` before reading the chain, and Studio refuses activation. A failed, rate-limited or empty read is therefore never taken as a missing getter. Both refuse (the server with a 503) when the chain cannot be read or the deployment is not recognised. | **Application-level only.** V4 does not enforce the standalone-edition rule on-chain. Studio reads the release's stored token IDs immediately before its lifecycle checks and the wallet prompt, but an edition created and mined after that read and before `createAlbum` is submitted may not be detected on a V4 clone. V5's on-chain `StandaloneEditionsExist` guard closes that race for V5 contracts only. Separately, the artist holds `DEFAULT_ADMIN_ROLE` and can still call `createAlbum` directly from a wallet; Studio's check does not prevent that. |
+
+**Before broadcast:** V5 changed after the V3/V5 source audit, so a focused delta review of `VoidRelease1155V5.sol` is required. Acceptance row B4b below covers the on-chain check.
 
 ## 5. Recommendation: **B. Deploy V3/V5 first, then certify on it.**
 
@@ -112,6 +140,7 @@ A deployed contract or a green test run moves **none** of these rows.
 | B2 | Tracks created | `AlbumTrackCreated` receipt per track (`tokenId`, `single`, `mintEnd`) | NOT STARTED |
 | B3 | Track cap (13) and single cap (4) | 14th track / 5th single reverts (`eth_call`) | NOT STARTED |
 | B4 | Standalone path blocked on an album | `createEdition` reverts `AlbumTrackPathRequired` | NOT STARTED |
+| B4b | A standalone release never becomes an album (D3) | On a V5 release with a standalone edition, `createAlbum` reverts `StandaloneEditionsExist` (`eth_call`). `hasStandaloneEditions() = true`. The edition still sells afterwards. | NOT STARTED |
 | B5 | Mint deadline | Purchase after `mintEnd` reverts `MintingEnded`; purchase before succeeds | NOT STARTED |
 | B6 | Album closing | `AlbumClosed` receipt; further `createAlbumTrack` reverts | NOT STARTED |
 | B7 | Purchase and collector ownership | `Purchased` + `TransferSingle` to collector A (≠ artist); API ownership read | NOT STARTED |

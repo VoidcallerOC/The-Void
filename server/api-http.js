@@ -90,6 +90,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
         data = await studioService.listCatalog({ request: apiRequest });
       }
+      else if (method === "GET" && base[0] === "studio" && base[1] === "releases" && base[3] === "lifecycle-editions" && base.length === 4) {
+        if (!studioService) throw new ApiError(503, "ARTIST_STUDIO_UNAVAILABLE", "Artist Studio is unavailable.");
+        data = await studioService.releaseLifecycleEditions({ request: apiRequest, releaseId: base[2] });
+      }
       else if (method === "GET" && base[0] === "artists" && base.length === 1) data = await service.listArtists({ ...Object.fromEntries(url.searchParams), requestId });
       else if (method === "GET" && base[0] === "indexer" && base[1] === "health" && base.length === 2) data = await service.getIndexerHealth({ chainId: url.searchParams.get("chainId") });
       else if (method === "GET" && base[0] === "artists" && base.length === 3 && base[2] === "verification") {

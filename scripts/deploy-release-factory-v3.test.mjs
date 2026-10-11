@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Wallet, getAddress, id } from "ethers";
-import { FACTORY_ARTIFACT_PATH, IMPLEMENTATION_ARTIFACT_PATH, V5_SIGNATURES, assertRpcChainId, assertV5Artifact, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, missingV5Selectors, run, validateDeploymentEnv } from "./deploy-release-factory-v3.mjs";
+import { FACTORY_ARTIFACT_PATH, IMPLEMENTATION_ARTIFACT_PATH, V5_REQUIRED_ERRORS, V5_SIGNATURES, assertRpcChainId, assertV5Artifact, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, missingV5Selectors, run, validateDeploymentEnv } from "./deploy-release-factory-v3.mjs";
 
 const KEY = `0x${"11".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
@@ -17,7 +17,8 @@ const signer = (address = DEPLOYER) => ({ getAddress: async () => address });
 const FACTORY = getAddress("0x00000000000000000000000000000000000000f1");
 const MARKET = getAddress("0x00000000000000000000000000000000000000f2");
 const IMPL = getAddress("0x00000000000000000000000000000000000000f3");
-const loadArtifacts = (runtime = v5Runtime) => async (path) => (path === IMPLEMENTATION_ARTIFACT_PATH ? { name: "implementation", deployedBytecode: { object: runtime } } : { name: path === FACTORY_ARTIFACT_PATH ? "factory" : "marketplace" });
+const V5_ABI = [{ type: "error", name: "StandaloneEditionsExist", inputs: [] }];
+const loadArtifacts = (runtime = v5Runtime, abi = V5_ABI) => async (path) => (path === IMPLEMENTATION_ARTIFACT_PATH ? { name: "implementation", abi, deployedBytecode: { object: runtime } } : { name: path === FACTORY_ARTIFACT_PATH ? "factory" : "marketplace" });
 function fakeDeploy({ releaseVersion = 3n, from = DEPLOYER } = {}) {
   const calls = [];
   const deploy = async (artifact, args) => {
@@ -113,6 +114,19 @@ describe("Factory V3 deployment preflight", () => {
     expect(writeRecord).not.toHaveBeenCalled();
   });
 
+  it("refuses a V5 build without the D3 standalone-edition guard", async () => {
+    expect(V5_SIGNATURES).toContain("hasStandaloneEditions()");
+    const withoutGuard = `0x${V5_SIGNATURES.filter((signature) => signature !== "hasStandaloneEditions()").map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
+    expect(missingV5Selectors(withoutGuard)).toEqual(["hasStandaloneEditions()"]);
+    await expect(assertV5Artifact(loadArtifacts(withoutGuard))).rejects.toThrow(/lacks hasStandaloneEditions\(\)/);
+    // The compiled artifact must also declare the StandaloneEditionsExist error.
+    await expect(assertV5Artifact(loadArtifacts(v5Runtime, []))).rejects.toThrow(/lacks error StandaloneEditionsExist\(\)/);
+    await expect(assertV5Artifact(loadArtifacts())).resolves.toBeUndefined();
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(43113n, withoutGuard), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
+    expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
+  });
+
   it("refuses an implementation that does not take provenance roots", async () => {
     expect(missingV5Selectors(v5Runtime)).toEqual([]);
     const v4Like = `0x63${id("createEdition(bytes32,bytes32,uint256,string,address,uint96)").slice(2, 10)}`;
@@ -142,6 +156,8 @@ describe("Factory V3 deployment preflight", () => {
   it("matches the compiled V5 artifact when Foundry output is present", () => {
     const path = resolve(import.meta.dirname, "..", IMPLEMENTATION_ARTIFACT_PATH);
     if (!existsSync(path)) return;
-    expect(missingV5Selectors(JSON.parse(readFileSync(path, "utf8")).deployedBytecode.object)).toEqual([]);
+    const artifact = JSON.parse(readFileSync(path, "utf8"));
+    expect(missingV5Selectors(artifact.deployedBytecode.object)).toEqual([]);
+    expect(artifact.abi.filter((item) => item.type === "error").map((item) => item.name)).toEqual(expect.arrayContaining(V5_REQUIRED_ERRORS));
   });
 });
