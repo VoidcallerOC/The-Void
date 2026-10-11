@@ -74,10 +74,21 @@ function publishedCatalog(releaseMetadata) {
 }
 
 // A bound (provisioning CONFIRMED) but unpublished ALBUM draft.
-function mockConfirmedAlbumDraft({ editions = [], releaseBindings = undefined } = {}) {
-  const catalog = { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [], ...(releaseBindings ? { releaseBindings } : {}) };
+function albumDraftCatalog({ editions = [], releaseBindings = undefined } = {}) {
+  return { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [], ...(releaseBindings ? { releaseBindings } : {}) };
+}
+
+// refresh: what /studio/catalog returns after the page-load request (a catalog object, or a function
+// that returns one or throws); by default the same catalog.
+function mockConfirmedAlbumDraft({ editions = [], releaseBindings = undefined, refresh = undefined } = {}) {
+  const catalog = albumDraftCatalog({ editions, releaseBindings });
+  let catalogRequests = 0;
   studioFetch.mockImplementation(async (path) => {
-    if (path === "/studio/catalog") return catalog;
+    if (path === "/studio/catalog") {
+      catalogRequests += 1;
+      if (catalogRequests === 1 || refresh === undefined) return catalog;
+      return typeof refresh === "function" ? refresh() : refresh;
+    }
     if (path.endsWith("/provisioning/prepare")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account };
     if (path.endsWith("/provisioning/status")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseContractAddress: CLONE, primarySaleAddress: SALE, provenanceAnchorAddress: ANCHOR };
     throw new Error(`unexpected ${path}`);
@@ -473,5 +484,79 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     await clickActivate();
     await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledWith(expect.objectContaining({ to: CLONE, data: new Interface(["function createAlbum(bytes32)"]).encodeFunctionData("createAlbum", [`0x${"ab".repeat(32)}`]) })));
     expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [], expect: V4_EXPECT });
+  });
+
+  describe("refreshes the release's editions from the server before deciding", () => {
+    const NEW_TOKEN = "11111111111111111111111111111111111111111111111111111111111111111111";
+    const catalogCalls = () => studioFetch.mock.calls.filter(([path]) => path === "/studio/catalog").length;
+    // A fake chain: an edition exists on-chain only if its token ID was minted.
+    function chainWithMinted(...minted) {
+      readReleaseLifecycle.mockImplementation(async (_request, _address, { tokenIds }) => {
+        const existing = tokenIds.filter((tokenId) => minted.includes(String(tokenId)));
+        return { albumCapable: true, albumCreated: false, standaloneFlag: null, existingTokenIds: existing, hasEditions: existing.length > 0 };
+      });
+    }
+
+    it("refuses when an edition was created and mined after the page loaded", async () => {
+      // Page load: no editions. Later: an edition is created, prepared (token stored) and mined.
+      const later = albumDraftCatalog({ editions: [{ id: "ed-new", release_id: "rel-draft", title: "Late Single", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [NEW_TOKEN] }], releaseBindings: [binding] });
+      mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh: later });
+      readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+      chainWithMinted(NEW_TOKEN);
+      await clickActivate();
+      expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
+      expect(catalogCalls()).toBe(2);
+      expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(NEW_TOKEN)], expect: V4_EXPECT });
+      expect(simulateReleaseCall).not.toHaveBeenCalled();
+      expect(sendReleaseTransaction).not.toHaveBeenCalled();
+    });
+
+    it("checks the token stored for a draft renamed and published after the page loaded", async () => {
+      // Page load: one draft under its first title. Later: renamed, prepared again under the new title
+      // (a new token stored) and published; that new token is the one on-chain.
+      const initial = { id: "ed-1", release_id: "rel-draft", title: "First Title", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [MINED_TOKEN] };
+      const later = albumDraftCatalog({ editions: [{ ...initial, title: "Second Title", status: "PUBLISHED", stored_token_ids: [MINED_TOKEN, NEW_TOKEN] }], releaseBindings: [binding] });
+      mockConfirmedAlbumDraft({ editions: [initial], releaseBindings: [binding], refresh: later });
+      readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+      chainWithMinted(NEW_TOKEN);
+      await clickActivate();
+      expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
+      expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(MINED_TOKEN), BigInt(NEW_TOKEN)], expect: V4_EXPECT });
+      expect(sendReleaseTransaction).not.toHaveBeenCalled();
+    });
+
+    for (const [label, refresh] of [
+      ["the refresh request fails", () => { throw Object.assign(new Error("Artist Studio request failed (502)."), { status: 502 }); }],
+      ["the refresh returns no catalog", null],
+      ["the refreshed catalog omits the release", { ...albumDraftCatalog({ releaseBindings: [binding] }), releases: [] }],
+      ["the refreshed catalog has no binding for this contract", albumDraftCatalog({ releaseBindings: [{ ...binding, release_contract_address: SALE }] })],
+      ["the refreshed catalog binds this contract to two factories", albumDraftCatalog({ releaseBindings: [binding, { ...binding, factory_address: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" }] })],
+      ["an edition in the refreshed catalog has no stored token IDs", albumDraftCatalog({ editions: [{ id: "ed-x", release_id: "rel-draft", title: "X", status: "DRAFT", supply: "1", application_metadata: {} }], releaseBindings: [binding] })],
+      ["an edition in the refreshed catalog has an unusable token ID", albumDraftCatalog({ editions: [{ id: "ed-x", release_id: "rel-draft", title: "X", status: "DRAFT", supply: "1", application_metadata: {}, stored_token_ids: ["0xabc"] }], releaseBindings: [binding] })],
+    ]) {
+      it(`refuses before any chain read or wallet prompt when ${label}`, async () => {
+        mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh });
+        readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+        chainWithMinted();
+        await clickActivate();
+        expect(await screen.findByText(/current editions could not be read, so nothing was changed/)).toBeTruthy();
+        expect(readReleaseLifecycle).not.toHaveBeenCalled();
+        expect(simulateReleaseCall).not.toHaveBeenCalled();
+        expect(sendReleaseTransaction).not.toHaveBeenCalled();
+      });
+    }
+
+    it("activates when the fresh catalog shows no editions on-chain", async () => {
+      const later = albumDraftCatalog({ editions: [{ id: "ed-draft-only", release_id: "rel-draft", title: "Never Sent", status: "DRAFT", supply: "1", application_metadata: {}, stored_token_ids: [NEW_TOKEN] }], releaseBindings: [binding] });
+      mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh: later });
+      readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+      chainWithMinted();
+      simulateReleaseCall.mockResolvedValue(undefined);
+      sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}` });
+      await clickActivate();
+      await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledTimes(1));
+      expect(catalogCalls()).toBe(2);
+      expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(NEW_TOKEN)], expect: V4_EXPECT });
+    });
   });
 });

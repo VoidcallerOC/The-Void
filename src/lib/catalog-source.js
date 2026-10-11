@@ -209,8 +209,6 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       description: row.description || "",
       includes: asArray(meta.includes),
       tokenIds: legacyTokenIds.length ? legacyTokenIds : tokenId !== undefined && tokenId !== null && tokenId !== "" ? [String(tokenId)] : [],
-      // Owner-only Studio catalog: every token ID prepared for the edition, published or not.
-      ...(Array.isArray(row.stored_token_ids) ? { storedTokenIds: row.stored_token_ids.map(String) } : {}),
       contractAddress,
       chainId,
       primarySaleAddress: row.primary_sale_address || fuji.primarySaleAddress || "",

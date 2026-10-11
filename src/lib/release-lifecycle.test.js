@@ -8,7 +8,7 @@ vi.mock("../../config/release-network.js", async (importOriginal) => {
   const extra = { [V3_FACTORY]: { releaseVersion: 3, albumCapable: true }, [FUTURE_FACTORY]: { releaseVersion: 4, albumCapable: true }, [V3_NOT_ALBUM_FACTORY]: { releaseVersion: 3, albumCapable: false } };
   return { ...original, releaseDeploymentForFactory: (address) => { const entry = extra[String(address).toLowerCase()]; return entry ? { factoryAddress: String(address).toLowerCase(), ...entry } : original.releaseDeploymentForFactory(address); } };
 });
-import { ALBUM_NOT_SUPPORTED_MESSAGE, ALBUM_TYPE_LOCKED_MESSAGE, STANDALONE_EDITIONS_EXIST_MESSAGE, editionSlugFromTitle, lifecycleExpectations, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "./release-lifecycle.js";
+import { ALBUM_NOT_SUPPORTED_MESSAGE, ALBUM_TYPE_LOCKED_MESSAGE, CURRENT_EDITIONS_UNAVAILABLE_MESSAGE, readCurrentReleaseEditions, STANDALONE_EDITIONS_EXIST_MESSAGE, editionSlugFromTitle, lifecycleExpectations, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "./release-lifecycle.js";
 
 const CLONE = "0x4b2790791e2ac123cb012d33cc8f1ecbdc9b9bb0";
 const iface = new ethers.Interface(["function albumCreated() view returns (bool)", "function hasStandaloneEditions() view returns (bool)", "function maxSupplyOf(uint256) view returns (uint256)", "error EditionNotFound(uint256 tokenId)"]);
@@ -113,5 +113,30 @@ describe("release lifecycle (D3)", () => {
     expect(releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle: { albumCreated: true, hasEditions: true } })).toBeNull();
     // The guidance points to a new album release; earlier music is never blocked from it.
     expect(STANDALONE_EDITIONS_EXIST_MESSAGE).toMatch(/new Album release/);
+  });
+
+  describe("readCurrentReleaseEditions", () => {
+    const FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
+    const catalog = (editions, extra = {}) => ({ releases: [{ id: "rel-1" }], editions, releaseBindings: [{ release_id: "rel-1", release_contract_address: CLONE, factory_address: FACTORY }], ...extra });
+    const read = (payload, options = {}) => readCurrentReleaseEditions({ fetchCatalog: async () => payload, releaseId: "rel-1", releaseContractAddress: CLONE, ...options });
+
+    it("returns every stored token ID of the release once, with its recorded factory", async () => {
+      const result = await read(catalog([{ release_id: "rel-1", stored_token_ids: ["5", "7"] }, { release_id: "rel-1", stored_token_ids: ["7"] }, { release_id: "other", stored_token_ids: ["9"] }]));
+      expect(result).toEqual({ tokenIds: [5n, 7n], factoryAddress: FACTORY });
+    });
+
+    it("fails closed when the refresh never answers within the timeout", async () => {
+      const fetchCatalog = vi.fn(() => new Promise(() => {}));
+      await expect(readCurrentReleaseEditions({ fetchCatalog, releaseId: "rel-1", releaseContractAddress: CLONE, timeoutMs: 20 })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed on out-of-range token IDs and a missing release identity", async () => {
+      for (const value of ["0", (1n << 256n).toString(), "-1", "1.5", 12]) {
+        await expect(read(catalog([{ release_id: "rel-1", stored_token_ids: [value] }]))).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      }
+      await expect(readCurrentReleaseEditions({ fetchCatalog: async () => catalog([]), releaseId: "", releaseContractAddress: CLONE })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      await expect(read(catalog([]), { releaseContractAddress: "not-an-address" })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+    });
   });
 });

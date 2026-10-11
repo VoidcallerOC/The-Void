@@ -13,6 +13,8 @@ import { releaseDeploymentForFactory } from "../../config/release-network.js";
 export const STANDALONE_EDITIONS_EXIST_MESSAGE = "This release contract already has standalone editions, so it cannot become an Album Contract. Those editions stay exactly as released. To put this music on an album, create a new Album release and add the single to it.";
 export const ALBUM_TYPE_LOCKED_MESSAGE = "This release's Album Contract is already active on-chain, so the release type stays Album. Create a new release for a single or EP.";
 export const ALBUM_NOT_SUPPORTED_MESSAGE = "This release contract was deployed from the pre-album implementation and can never become an Album Contract. Create a new Album release instead.";
+export const CURRENT_EDITIONS_UNAVAILABLE_MESSAGE = "The release's current editions could not be read, so nothing was changed. Try again.";
+export const CATALOG_REFRESH_TIMEOUT_MS = 15_000;
 export const RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE = "The release contract's on-chain state could not be read, so nothing was changed. Try again.";
 
 const lifecycleIface = new ethers.Interface([
@@ -112,6 +114,50 @@ export async function readReleaseLifecycle(request, releaseContractAddress, { to
     }
   }
   return { albumCapable: expect.albumCreated, albumCreated: albumCreated === true, standaloneFlag, existingTokenIds, hasEditions: standaloneFlag === true || existingTokenIds.length > 0 };
+}
+
+const MAX_UINT256 = (1n << 256n) - 1n;
+
+/**
+ * Fetches the owner's Studio catalog now (never a page-load snapshot) and returns the current
+ * canonical token IDs and recorded factory of one bound release. Every token ID the server stored for
+ * the release's editions is returned, so an edition created, mined, renamed or republished after the
+ * page loaded is still checked by its stored ID. Throws CURRENT_EDITIONS_UNAVAILABLE_MESSAGE when the
+ * fetch fails or times out, or when the response cannot establish the release, its single binding to
+ * this contract, or every edition's stored token IDs.
+ */
+export async function readCurrentReleaseEditions({ fetchCatalog, releaseId, releaseContractAddress, timeoutMs = CATALOG_REFRESH_TIMEOUT_MS }) {
+  const unavailable = () => new Error(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+  if (!releaseId || !ethers.isAddress(releaseContractAddress || "")) throw unavailable();
+  let timer;
+  let payload;
+  try {
+    payload = await Promise.race([
+      Promise.resolve().then(fetchCatalog),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(unavailable()), timeoutMs); }),
+    ]);
+  } catch {
+    throw unavailable();
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!payload || !Array.isArray(payload.releases) || !Array.isArray(payload.editions) || !Array.isArray(payload.releaseBindings)) throw unavailable();
+  if (!payload.releases.some((row) => row?.id === releaseId)) throw unavailable();
+  const contract = ethers.getAddress(releaseContractAddress);
+  const bindings = payload.releaseBindings.filter((row) => row?.release_id === releaseId && ethers.isAddress(row?.release_contract_address || "") && ethers.getAddress(row.release_contract_address) === contract);
+  const factories = new Set(bindings.map((row) => (ethers.isAddress(row?.factory_address || "") ? ethers.getAddress(row.factory_address) : "")));
+  if (bindings.length === 0 || factories.size !== 1 || factories.has("")) throw unavailable();
+  const tokenIds = new Set();
+  for (const edition of payload.editions.filter((row) => row?.release_id === releaseId)) {
+    if (!Array.isArray(edition.stored_token_ids)) throw unavailable();
+    for (const value of edition.stored_token_ids) {
+      if (typeof value !== "string" || !/^[0-9]{1,78}$/.test(value)) throw unavailable();
+      const tokenId = BigInt(value);
+      if (tokenId === 0n || tokenId > MAX_UINT256) throw unavailable();
+      tokenIds.add(tokenId);
+    }
+  }
+  return { tokenIds: [...tokenIds], factoryAddress: [...factories][0] };
 }
 
 /** The D3 rule for a release-type change. Returns null when allowed. */
