@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
-import { FUJI_RELEASE_PER_CONTRACT, FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
+import { FUJI_RELEASE_PER_CONTRACT, FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForFactory } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 import { STANDALONE_EDITIONS_EXIST_MESSAGE } from "./release-lifecycle.js";
 
@@ -82,6 +82,22 @@ function assertReleaseFactoryV2Configured() {
   return { ...config, factoryAddress: ethers.getAddress(config.factoryAddress) };
 }
 
+/**
+ * The factory a prepared release is created and verified on: the one the server recorded in the
+ * prepared payload, never simply the active config. The server keeps a release with an existing
+ * provisioning request on that request's factory, so a request prepared before a new factory is
+ * activated still finishes on its original factory. The factory must be a recorded release
+ * deployment on the active chain; anything else fails closed before any wallet prompt.
+ */
+export function releaseFactoryForPrepared(prepared) {
+  const active = assertReleaseFactoryV2Configured();
+  const recorded = releaseDeploymentForFactory(prepared?.factoryAddress);
+  if (!recorded || Number(prepared?.chainId) !== Number(active.chainId) || Number(recorded.chainId) !== Number(active.chainId)) {
+    throw new Error("The prepared release targets a chain or Factory that is not a recorded release deployment, so nothing was sent.");
+  }
+  return { ...active, factoryAddress: ethers.getAddress(recorded.factoryAddress), releaseVersion: recorded.releaseVersion, albumCapable: recorded.albumCapable === true };
+}
+
 export function encodeArtistReleaseCreation({ applicationReleaseId, releaseKey, name, symbol, contractURI = "" }) {
   if (!/^0x[0-9a-f]{64}$/i.test(String(applicationReleaseId || "")) || /^0x0{64}$/i.test(String(applicationReleaseId))) throw new Error("A non-zero application release digest is required.");
   if (!/^0x[0-9a-f]{64}$/i.test(String(releaseKey || "")) || /^0x0{64}$/i.test(String(releaseKey))) throw new Error("A non-zero deterministic release key is required.");
@@ -94,7 +110,7 @@ export function encodeArtistReleaseCreation({ applicationReleaseId, releaseKey, 
 
 /** Broadcasts from the artist's connected wallet. No backend or platform signer is involved. */
 export async function submitArtistReleaseCreation({ provider, from, payload }) {
-  const config = assertReleaseFactoryV2Configured();
+  const config = releaseFactoryForPrepared(payload);
   await assertFujiProvider(provider);
   if (!ethers.isAddress(from) || ethers.getAddress(from) === ethers.ZeroAddress) throw new Error("Connect the canonical artist OWNER wallet before creating this release.");
   const encoded = encodeArtistReleaseCreation(payload);
@@ -112,11 +128,10 @@ async function readReleaseCloneValue(provider, address, fragment) {
   return releaseCloneInitIface.decodeFunctionResult(fragment, result)[0];
 }
 
-/** Waits for a mined receipt and verifies the emitting V2 Factory, event, registry and clone initialization. */
+/** Waits for a mined receipt and verifies the emitting Factory (the prepared one), event, registry and clone initialization. */
 export async function verifyArtistReleaseCreation(provider, { transactionHash, expected }) {
-  const config = assertReleaseFactoryV2Configured();
+  const config = releaseFactoryForPrepared(expected);
   await assertFujiProvider(provider);
-  if (Number(expected.chainId) !== Number(config.chainId) || String(expected.factoryAddress).toLowerCase() !== config.factoryAddress.toLowerCase()) throw new Error("The prepared release authorization targets a different chain or Factory.");
   const expectedKey = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "uint256", "address", "bytes32", "address"], ["the-void:studio-release:v2", BigInt(config.chainId), config.factoryAddress, expected.applicationReleaseId, expected.artistWallet]));
   if (expectedKey.toLowerCase() !== String(expected.releaseKey).toLowerCase()) throw new Error("The prepared release key does not commit to the application ID, artist, chain, and Factory.");
   const receipt = await waitForReceipt(provider, transactionHash);
