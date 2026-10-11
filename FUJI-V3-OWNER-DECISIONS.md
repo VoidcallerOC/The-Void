@@ -1,7 +1,7 @@
 # Fuji Factory V3: owner decisions D2 and D5, and dry-run evidence
 
 **Status:**
-- D2 is **OPEN**: the owner decides.
+- D2 is **DECIDED: Option A (keep as is)**, by the owner on 2026-10-11. No Solidity change.
 - D5 is **OPEN**: the owner acts.
 - The dry run is **COMPLETE**.
 - The broadcast is **NOT AUTHORIZED**.
@@ -58,7 +58,10 @@ So in practice the caps are a **default the artist may lift at any time**, not a
 
 Option A needs none of this. A two-party (artist and platform) approval is possible but is the most complex choice and is not proposed.
 
-**Owner decision needed:** choose A, B, C or D. If B, C or D, also choose the parameters: the platform approver address for B, the ceiling for D.
+**Owner decision (2026-10-11): Option A, keep as is.**
+- Artists keep the ability to lift the album caps, with no upper limit, through `approveExpandedRelease` on their own release clone. This keeps the existing artist-controlled authorization model: the platform holds no role.
+- **13 tracks and 4 singles are defaults, not hard maximums.** Studio, docs and metadata must describe them that way.
+- No Solidity change is made for D2. V5 and Factory V3 stay as written in the review packet. Dry run 38149347518 stays valid for D2.
 
 ## 3. D5: deployer key before broadcast
 

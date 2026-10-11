@@ -2,7 +2,7 @@
 
 **Status: NOT STARTED.** No independent review has taken place. This packet only prepares one. A review is recorded in §8 only after it actually happens, using the reviewer's own words and references.
 
-**Gate:** a Factory V3 broadcast on Fuji needs this review, the D2 and D5 decisions, and an explicit owner authorization ([`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md)). A dry run already passed: [run 38149347518](https://github.com/VoidcallerOC/The-Void/actions/runs/38149347518).
+**Gate:** a Factory V3 broadcast on Fuji needs this review, the D5 action (D2 is decided: Option A), and an explicit owner authorization ([`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md)). A dry run already passed: [run 38149347518](https://github.com/VoidcallerOC/The-Void/actions/runs/38149347518).
 
 ## 1. Why the reviewer must be independent
 
@@ -81,7 +81,7 @@ Links point at the review head:
 6. Mint-end: `_assertValidMintEnd` rejects past deadlines. Is there any path that sets a deadline without that check?
 
 **C. Lifting the caps (D2)**
-7. `approveExpandedRelease` (L167–180) is `DEFAULT_ADMIN_ROLE`, which the **artist** holds. It has no upper bound and can be called more than once until `closeAlbum`. Please state plainly what this lets the artist do, and whether you see any risk beyond "the caps are the artist's choice". The owner's D2 decision depends on this answer.
+7. `approveExpandedRelease` (L167–180) is `DEFAULT_ADMIN_ROLE`, which the **artist** holds. It has no upper bound and can be called more than once until `closeAlbum`. The owner decided D2 = Option A (2026-10-11): this is intended, and 13 / 4 are defaults, not hard maximums. Please confirm the behaviour matches that intent, and report any risk beyond "the caps are the artist's choice".
 
 **D. Provenance**
 8. Is the root recorded in the same transaction as the edition, with no path that creates an edition without a root?

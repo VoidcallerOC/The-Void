@@ -20,12 +20,12 @@ A redeploy creates a new **immutable** implementation, so these choices become p
 | # | Decision | Current source behaviour | Recommendation |
 |---|---|---|---|
 | D1 | What a **single** is | A single is an album track flagged `single = true` (`isAlbumSingle`). There is no standalone SINGLE release type. The README lists Single/EP/Album. | Confirm one of two options: (a) keep "single = album track", or (b) add a standalone single release. If you pick (b), the clone needs a type-specific rule, such as exactly one edition. **Superseded 2026-10-11:** `be130b2` added a standalone SINGLE type; see [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4. |
-| D2 | Who may lift the 13-track / 4-single caps | `approveExpandedRelease` is gated by `DEFAULT_ADMIN_ROLE`, which the **artist** holds. The caps are therefore advisory. | If the caps are a platform rule, move approval to a platform-held role. |
+| D2 | Who may lift the 13-track / 4-single caps | `approveExpandedRelease` is gated by `DEFAULT_ADMIN_ROLE`, which the **artist** holds. The caps are therefore advisory. | **Decided 2026-10-11: Option A, keep as is.** Artists may lift the caps with no upper limit; 13 / 4 are defaults, not hard maximums. No Solidity change ([`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md) §2). |
 | D3 | Standalone editions created before `createAlbum` | Allowed. They do not count toward the caps, so the caps can be bypassed. | Make `createAlbum` revert when standalone editions already exist. **Owner authorized Option A for implementation, 2026-10-11:** V5 source now refuses `createAlbum` with `StandaloneEditionsExist`. That change is pending review, not deployed. Deployed V4 clones are unchanged: Studio and the server refuse the transition, but a direct wallet call can still make it. See [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4a. |
 | D4 | When a clone becomes an album | Only through a separate `createAlbum` transaction after `createRelease`. | Optional: pass the release type into `createRelease` so album mode is set atomically. |
 | D5 | The deployer key | The workflow signs with the GitHub secret `DEPLOYER_PRIVATE_KEY`. The suspended cron's 3 Fuji deploys were all sent `from` **`0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`** (probe, tier 1). | If the dry-run `deployer_address` equals `0xaBd3…c174`, the same key also sits in the Render cron env. Rotate it, or delete it from the cron env, before broadcast. |
 
-D2–D4 change Solidity. If you choose to change it, I will put it in a separate PR with forge tests before any broadcast.
+D3 and D4 change Solidity (D2 was decided without a change). If you choose to change one, I will put it in a separate PR with forge tests before any broadcast.
 
 ## 3. Manual authorization flow
 
