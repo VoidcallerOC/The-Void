@@ -1,0 +1,157 @@
+name: Deploy Genesis holder claim to Fuji
+
+# GenesisHolderClaim for one existing Fuji release token: free Genesis claims for claim_window_seconds
+# from claim_start, then the token's own primary sale (already configured as the public phase) runs for
+# public_window_seconds. Fuji may use accelerated test windows (minimum 60 s); mainnet production
+# windows (24 h / 7 days at 0.25 AVAX) are enforced by the contract and script, not by this workflow. The default path is a read-only dry run that verifies the release, sale, schedule and
+# C-Chain snapshot and simulates the constructor. No run grants roles, edits config/ or enables the
+# API claim; those follow-ups are printed for the owner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_contract:
+        description: Release contract (0x...) holding the claim token.
+        required: true
+        type: string
+      primary_sale:
+        description: That release's VoidPrimarySale (0x...).
+        required: true
+        type: string
+      token_id:
+        description: On-chain token ID of the edition.
+        required: true
+        type: string
+      claim_start:
+        description: Unix seconds when the Genesis claim opens. The sale must open exactly claim_window_seconds later.
+        required: true
+        type: string
+      claim_window_seconds:
+        description: Genesis claim window in seconds (86400 production; Fuji test minimum 60, e.g. 300).
+        required: true
+        type: string
+        default: "86400"
+      public_window_seconds:
+        description: Public sale window in seconds (604800 production; Fuji test minimum 60, e.g. 600).
+        required: true
+        type: string
+        default: "604800"
+      public_price_wei:
+        description: Public mint price in wei (Fuji test price 0.01 AVAX = 10000000000000000).
+        required: true
+        type: string
+        default: "10000000000000000"
+      snapshot_block:
+        description: C-Chain block number for Genesis eligibility.
+        required: true
+        type: string
+      snapshot_block_hash:
+        description: Hash of that C-Chain block.
+        required: true
+        type: string
+      claim_admin:
+        description: Claim admin (pause, signer rotation).
+        required: true
+        type: string
+      claim_signer_address:
+        description: Public address of the server voucher signer.
+        required: true
+        type: string
+      broadcast_deployment:
+        description: Set true only for an owner-approved Fuji broadcast.
+        required: true
+        type: boolean
+        default: false
+      confirm_fuji_deploy:
+        description: Type I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY only for an approved broadcast.
+        required: false
+        type: string
+        default: ""
+      expected_deployer_address:
+        description: Deployer address the owner reviewed. Required for a broadcast.
+        required: false
+        type: string
+        default: ""
+      expected_deployer_nonce:
+        description: deployerNonce printed by the reviewed dry run. Required for a broadcast.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: void-genesis-claim-fuji-deployment
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: fuji
+  AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+  GENESIS_RPC_URL: https://api.avax.network/ext/bc/C/rpc
+  DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+  GENESIS_CLAIM_RELEASE_CONTRACT: ${{ inputs.release_contract }}
+  GENESIS_CLAIM_PRIMARY_SALE: ${{ inputs.primary_sale }}
+  GENESIS_CLAIM_TOKEN_ID: ${{ inputs.token_id }}
+  GENESIS_CLAIM_ALLOCATION: "0"
+  GENESIS_PUBLIC_MINT_ALLOCATION: "0"
+  GENESIS_EXPECT_OPEN_EDITION: "yes"
+  GENESIS_CLAIM_START: ${{ inputs.claim_start }}
+  GENESIS_CLAIM_WINDOW_SECONDS: ${{ inputs.claim_window_seconds }}
+  GENESIS_PUBLIC_WINDOW_SECONDS: ${{ inputs.public_window_seconds }}
+  GENESIS_PUBLIC_PRICE_WEI: ${{ inputs.public_price_wei }}
+  GENESIS_SNAPSHOT_BLOCK: ${{ inputs.snapshot_block }}
+  GENESIS_SNAPSHOT_BLOCK_HASH: ${{ inputs.snapshot_block_hash }}
+  GENESIS_CLAIM_ADMIN: ${{ inputs.claim_admin }}
+  GENESIS_CLAIM_SIGNER_ADDRESS: ${{ inputs.claim_signer_address }}
+  CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY' && 'yes' || 'no' }}
+  BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
+  EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
+  EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
+
+jobs:
+  preflight:
+    name: Validate and prepare the Genesis claim deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build and test the claim contract
+        run: |
+          forge build
+          forge test --match-contract GenesisHolderClaim
+
+      - name: Run claim service and deployment script tests
+        run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js
+
+      - name: Run Genesis claim deployment preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
+            npm run deploy:genesis-claim | tee deployment-output.log
+          else
+            npm run deploy:genesis-claim -- --dry-run | tee deployment-output.log
+          fi
+
+      - name: Preserve deployment output and record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-claim-fuji-${{ github.run_id }}
+          path: |
+            deployment-output.log
+            deployments/genesis-claim-fuji-*.json
+          if-no-files-found: ignore

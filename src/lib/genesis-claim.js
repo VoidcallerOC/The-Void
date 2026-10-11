@@ -40,6 +40,22 @@ function validateTarget(target) {
   return { ...target, destinationChainId: chainId, tokenId };
 }
 
+export const GENESIS_CLAIM_PHASES = Object.freeze({ UPCOMING: "upcoming", GENESIS: "genesis", PUBLIC: "public", CLOSED: "closed" });
+
+/**
+ * Which phase the schedule is in at nowSec (unix seconds): Genesis claims while
+ * claimStart <= now < claimEnd, the ungated public mint while claimEnd <= now <= publicSaleEnd
+ * (VoidPrimarySale accepts its endTime), then closed. The contracts enforce the same boundaries;
+ * this only decides what the page offers.
+ */
+export function genesisClaimPhase(target, nowSec) {
+  const now = BigInt(nowSec);
+  if (now < BigInt(target.claimStart)) return GENESIS_CLAIM_PHASES.UPCOMING;
+  if (now < BigInt(target.claimEnd)) return GENESIS_CLAIM_PHASES.GENESIS;
+  if (now <= BigInt(target.publicSaleEnd)) return GENESIS_CLAIM_PHASES.PUBLIC;
+  return GENESIS_CLAIM_PHASES.CLOSED;
+}
+
 export function fetchGenesisClaimConfig(options = {}) {
   return apiRequest("config", options).then(validateTarget);
 }
@@ -50,11 +66,12 @@ const CLAIM_GUARD_INTERFACE = new Interface([
   "function tokenId() view returns (uint256)",
   "function allocation() view returns (uint256)",
   "function publicAllocation() view returns (uint256)",
-  "function claimsOpenedAt() view returns (uint256)",
+  "function claimStart() view returns (uint256)",
+  "function claimEnd() view returns (uint256)",
+  "function publicSaleEnd() view returns (uint256)",
+  "function publicPriceWei() view returns (uint256)",
   "function claimedSupply() view returns (uint256)",
 ]);
-
-const CLAIM_GUARD_WINDOW_SECONDS = 86_400n;
 
 /**
  * Whether a Genesis holder claim is bound to this release token and sale, and
@@ -63,7 +80,7 @@ const CLAIM_GUARD_WINDOW_SECONDS = 86_400n;
  * { state: "active", ... } when it targets this sale, and throws when the
  * binding cannot be checked (callers should then block sale edits).
  */
-export async function readGenesisClaimSaleGuard(provider, { chainId, releaseContractAddress, primarySaleAddress, tokenId }, { fetchConfig = fetchGenesisClaimConfig } = {}) {
+export async function readGenesisClaimSaleGuard(provider, { chainId, releaseContractAddress, primarySaleAddress, tokenId }, { fetchConfig = fetchGenesisClaimConfig, nowSec = Math.floor(Date.now() / 1000) } = {}) {
   let target;
   try {
     target = await fetchConfig();
@@ -77,8 +94,8 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
     const result = await provider.request({ method: "eth_call", params: [{ to: getAddress(target.claimContract), data: CLAIM_GUARD_INTERFACE.encodeFunctionData(name, []) }, "latest"] });
     return CLAIM_GUARD_INTERFACE.decodeFunctionResult(name, result)[0];
   };
-  const [claimRelease, claimSale, claimToken, allocation, publicAllocation, claimsOpenedAt, claimedSupply] = await Promise.all(
-    ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimsOpenedAt", "claimedSupply"].map(read),
+  const [claimRelease, claimSale, claimToken, allocation, publicAllocation, claimStart, claimEnd, publicSaleEnd, publicPriceWei, claimedSupply] = await Promise.all(
+    ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimStart", "claimEnd", "publicSaleEnd", "publicPriceWei", "claimedSupply"].map(read),
   );
   if (getAddress(claimRelease) !== getAddress(releaseContractAddress) || BigInt(claimToken) !== BigInt(tokenId)) return { state: "none" };
   if (getAddress(claimSale) !== getAddress(primarySaleAddress)) return { state: "none" };
@@ -87,10 +104,13 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
     claimContract: getAddress(target.claimContract),
     allocation: BigInt(allocation),
     publicAllocation: BigInt(publicAllocation),
-    claimsOpenedAt: BigInt(claimsOpenedAt),
+    claimStart: BigInt(claimStart),
+    claimEnd: BigInt(claimEnd),
+    publicSaleEnd: BigInt(publicSaleEnd),
+    publicPriceWei: BigInt(publicPriceWei),
     claimedSupply: BigInt(claimedSupply),
-    minimumStart: BigInt(claimsOpenedAt) + CLAIM_GUARD_WINDOW_SECONDS,
-    live: BigInt(claimedSupply) < BigInt(allocation),
+    // The claim checks the sale on every redemption until its window closes. Allocation 0 is uncapped.
+    live: BigInt(nowSec) < BigInt(claimEnd) && (BigInt(allocation) === 0n || BigInt(claimedSupply) < BigInt(allocation)),
   };
 }
 

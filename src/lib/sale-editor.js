@@ -105,20 +105,27 @@ function wholeNumber(text, message) {
 }
 
 /**
- * Genesis holder claim invariants (GenesisHolderClaim._assertPublicAllocation):
- * the sale cap must equal publicAllocation, and while claims are live the sale
- * may not start before claimsOpenedAt + 24 hours.
+ * Genesis holder claim invariants (GenesisHolderClaim._assertPublicAllocation): while claims are
+ * live, the sale must stay exactly the scheduled public phase (open at claimEnd, close at
+ * publicSaleEnd, at publicPriceWei) and its cap must equal publicAllocation (0 = uncapped).
+ * Any other edit would make every remaining Genesis claim revert.
  */
 export function claimGuardErrors(values, claim) {
   if (!claim || claim.state === "none" || claim.state === "loading") return [];
   if (claim.state !== "active") return [`The Genesis holder claim for this token could not be checked${claim.message ? `: ${claim.message}` : ""}. Edits are blocked until it can be checked.`];
   const errors = [];
   if (values.maxSupply !== claim.publicAllocation) {
-    errors.push(`A Genesis holder claim is configured for this token. The sale cap must stay ${claim.publicAllocation.toString()} (the public allocation); a different cap breaks holder claims.`);
+    errors.push(claim.publicAllocation === 0n
+      ? "A Genesis holder claim is configured for this open edition. The sale must stay uncapped (cap 0); a cap breaks holder claims."
+      : `A Genesis holder claim is configured for this token. The sale cap must stay ${claim.publicAllocation.toString()} (the public allocation); a different cap breaks holder claims.`);
   }
-  if (claim.live && values.startTime < claim.minimumStart) {
-    const at = formatSaleInstant(claim.minimumStart);
-    errors.push(`Genesis holder claims are still open. The sale cannot start before ${at.local} your time (${at.utc}), 24 hours after claims opened.`);
+  if (claim.live) {
+    if (values.startTime !== claim.claimEnd || values.endTime !== claim.publicSaleEnd) {
+      const opens = formatSaleInstant(claim.claimEnd);
+      const closes = formatSaleInstant(claim.publicSaleEnd);
+      errors.push(`Genesis holder claims are still open. The public sale must open exactly when they close, ${opens.local} your time (${opens.utc}), and end at ${closes.local} (${closes.utc}).`);
+    }
+    if (values.priceWei !== claim.publicPriceWei) errors.push("Genesis holder claims are still open. The public price can't change until they close.");
   }
   return errors;
 }

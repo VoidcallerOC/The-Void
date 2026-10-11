@@ -37,6 +37,8 @@ contract GenesisHolderClaimTest {
     uint256 internal constant PUBLIC_ALLOCATION = 7;
     bytes32 internal constant RELEASE_KEY = keccak256("genesis-holder-claim-test-release");
     bytes32 internal constant EDITION_ID = keccak256("genesis-holder-claim-test-edition");
+    uint256 internal constant PRICE = 1;
+    bytes32 internal constant RULE = keccak256("test:genesis-snapshot-rule");
 
     VoidRelease1155V4 internal release;
     VoidPrimarySale internal sale;
@@ -59,10 +61,8 @@ contract GenesisHolderClaimTest {
         tokenId = actualTokenId;
         uint64 saleStart = uint64(block.timestamp + 1 days);
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, 1, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, saleStart, saleStart + 1 days, false);
-        claimContract = new GenesisHolderClaim(
-            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, ADMIN, signer
-        );
+        sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, saleStart, saleStart + 7 days - 1, false);
+        claimContract = _deploy(block.timestamp);
         bytes32 issuerRole = release.ISSUER_ROLE();
         vm.prank(ARTIST);
         release.grantRole(issuerRole, address(claimContract));
@@ -74,9 +74,7 @@ contract GenesisHolderClaimTest {
         vm.chainId(43114);
         require(claimContract.DOMAIN_SEPARATOR() != initialDomain, "domain did not separate chain id");
         vm.chainId(43113);
-        GenesisHolderClaim second = new GenesisHolderClaim(
-            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, ADMIN, signer
-        );
+        GenesisHolderClaim second = _deploy(block.timestamp);
         require(
             second.DOMAIN_SEPARATOR() != claimContract.DOMAIN_SEPARATOR(), "domain did not separate verifying contract"
         );
@@ -268,14 +266,12 @@ contract GenesisHolderClaimTest {
         );
     }
 
-    function testPublicSaleMustStartAtLeastOneDayAfterClaimDeployment() public {
+    function testPublicSaleMustOpenExactlyWhenClaimsClose() public {
         uint64 tooSoon = uint64(block.timestamp + 1 hours);
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, 1, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, tooSoon, tooSoon + 1 days, false);
-        vm.expectPartialRevert(GenesisHolderClaim.PublicSaleWindow.selector);
-        new GenesisHolderClaim(
-            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, ADMIN, signer
-        );
+        sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, tooSoon, tooSoon + 7 days - 1, false);
+        vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
+        _deploy(block.timestamp);
     }
 
     function testClaimRedemptionClosesWhenPublicSaleOpens() public {
@@ -283,7 +279,13 @@ contract GenesisHolderClaimTest {
         vm.warp(saleStart);
         GenesisHolderClaim.ClaimVoucher memory voucher = _voucher(CLAIMANT, 33, 1, block.timestamp + 300);
         _expectClaimRevert(
-            CLAIMANT, voucher, _sign(claimContract, voucher, signerKey), GenesisHolderClaim.PublicSaleWindow.selector
+            CLAIMANT, voucher, _sign(claimContract, voucher, signerKey), GenesisHolderClaim.ClaimWindowClosed.selector
+        );
+    }
+
+    function _deploy(uint256 claimStart) internal returns (GenesisHolderClaim) {
+        return new GenesisHolderClaim(
+            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, claimStart, 1 days, 7 days, PRICE, RULE, ADMIN, signer
         );
     }
 

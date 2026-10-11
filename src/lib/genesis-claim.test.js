@@ -6,6 +6,7 @@ import {
   fetchGenesisClaimConfig,
   readGenesisClaimSaleGuard,
   requestGenesisVoucher,
+  genesisClaimPhase,
 } from "./genesis-claim.js";
 import { Interface } from "ethers";
 
@@ -119,10 +120,13 @@ describe("Genesis claim sale guard", () => {
     "function tokenId() view returns (uint256)",
     "function allocation() view returns (uint256)",
     "function publicAllocation() view returns (uint256)",
-    "function claimsOpenedAt() view returns (uint256)",
+    "function claimStart() view returns (uint256)",
+    "function claimEnd() view returns (uint256)",
+    "function publicSaleEnd() view returns (uint256)",
+    "function publicPriceWei() view returns (uint256)",
     "function claimedSupply() view returns (uint256)",
   ]);
-  const onchain = { releaseContract: RELEASE, primarySale: SALE, tokenId: 55n, allocation: 20n, publicAllocation: 100n, claimsOpenedAt: 1_791_000_000n, claimedSupply: 4n };
+  const onchain = { releaseContract: RELEASE, primarySale: SALE, tokenId: 55n, allocation: 0n, publicAllocation: 0n, claimStart: 1_791_000_000n, claimEnd: 1_791_086_400n, publicSaleEnd: 1_791_691_199n, publicPriceWei: 250_000_000_000_000_000n, claimedSupply: 4n };
   const provider = {
     request: vi.fn(async ({ method, params }) => {
       if (method === "eth_chainId") return "0xa869";
@@ -133,9 +137,11 @@ describe("Genesis claim sale guard", () => {
   };
 
   it("reads the claim invariants when the claim targets this sale", async () => {
-    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target })).resolves.toMatchObject({
-      state: "active", claimContract: CLAIM, publicAllocation: 100n, minimumStart: 1_791_086_400n, live: true,
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target, nowSec: 1_791_086_399 })).resolves.toMatchObject({
+      state: "active", claimContract: CLAIM, allocation: 0n, publicAllocation: 0n, claimEnd: 1_791_086_400n, publicSaleEnd: 1_791_691_199n, publicPriceWei: 250_000_000_000_000_000n, live: true,
     });
+    // Once the claim window closes, the sale is the artist's again.
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target, nowSec: 1_791_086_400 })).resolves.toMatchObject({ state: "active", live: false });
   });
 
   it("reports no claim when none is configured or it targets another token", async () => {
@@ -145,5 +151,15 @@ describe("Genesis claim sale guard", () => {
 
   it("throws when the claim binding cannot be checked", async () => {
     await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => { throw Object.assign(new Error("mismatch"), { code: "CLAIM_BINDING_MISMATCH", status: 503 }); } })).rejects.toThrow("mismatch");
+  });
+});
+
+describe("Genesis claim phases", () => {
+  const schedule = { claimStart: "1000", claimEnd: "87400", publicSaleEnd: String(87_400 + 7 * 86_400 - 1) };
+  it.each([
+    [999, "upcoming"], [1000, "genesis"], [87_399, "genesis"], [87_400, "public"],
+    [87_400 + 7 * 86_400 - 1, "public"], [87_400 + 7 * 86_400, "closed"],
+  ])("at %i the phase is %s", (now, phase) => {
+    expect(genesisClaimPhase(schedule, now)).toBe(phase);
   });
 });
