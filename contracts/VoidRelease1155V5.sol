@@ -22,6 +22,9 @@ contract VoidRelease1155V5 is VoidCollection1155 {
     bool public albumCreated;
     bool public albumClosed;
     bool public expandedReleaseApproved;
+    /// @notice True once a standalone edition exists. A standalone release never becomes an album;
+    /// an album that reuses earlier music is a new release contract.
+    bool public hasStandaloneEditions;
     uint256 public approvedMaxTracks;
     uint256 public approvedMaxSingles;
     uint256 public albumTrackCount;
@@ -44,6 +47,7 @@ contract VoidRelease1155V5 is VoidCollection1155 {
     error AlbumTrackLimitReached(uint256 limit);
     error AlbumSingleLimitReached(uint256 limit);
     error AlbumTrackPathRequired();
+    error StandaloneEditionsExist();
     error InvalidExpandedLimits();
     error InvalidMintEnd();
     error ProvenanceRootRequired();
@@ -127,6 +131,7 @@ contract VoidRelease1155V5 is VoidCollection1155 {
         _assertReleaseKey(releaseId);
         if (albumCreated) revert AlbumTrackPathRequired();
         tokenId = _createAnchoredEdition(releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps, provenanceRoot);
+        hasStandaloneEditions = true;
     }
 
     /// @notice Creates a standalone edition with an optional mint deadline and records its root.
@@ -145,12 +150,15 @@ contract VoidRelease1155V5 is VoidCollection1155 {
         _assertValidMintEnd(mintEnd);
         tokenId = _createAnchoredEdition(releaseId, editionId, maxSupply, metadataUri, payout, royaltyBps, provenanceRoot);
         _setMintEnd(tokenId, mintEnd);
+        hasStandaloneEditions = true;
     }
 
-    /// @notice Explicitly opts this release contract into album semantics.
+    /// @notice Explicitly opts this release contract into album semantics. Refused once a standalone
+    /// edition exists; those editions stay standalone and mintable.
     function createAlbum(bytes32 releaseId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _assertReleaseKey(releaseId);
         if (albumCreated) revert AlbumAlreadyCreated();
+        if (hasStandaloneEditions) revert StandaloneEditionsExist();
         albumCreated = true;
         emit AlbumCreated(releaseId);
     }

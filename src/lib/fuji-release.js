@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
 import { FUJI_RELEASE_PER_CONTRACT, FUJI_RELEASE_PER_CONTRACT_V2 } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
+import { STANDALONE_EDITIONS_EXIST_MESSAGE } from "./release-lifecycle.js";
 
 export const FUJI_RELEASE_CONFIG = Object.freeze({ ...deployment, network: deployment.networkName });
 export const FUJI_RELEASE_FACTORY_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT, network: FUJI_RELEASE_PER_CONTRACT.networkName });
@@ -233,6 +234,8 @@ const fujiErrorIface = new ethers.Interface([
   "error ProvenanceRootRequired()",
   "error InvalidRoot()",
   "error AlreadyAnchored(bytes32 provenanceRoot)",
+  "error StandaloneEditionsExist()",
+  "error AlbumTrackPathRequired()",
 ]);
 
 function extractFujiRevertData(error) {
@@ -294,6 +297,10 @@ export function explainFujiEditionError(error) {
       return { ...base, message: "This release records provenance when the edition is created, but no provenance root was supplied. Nothing was published." };
     case "AlreadyAnchored":
       return { ...base, message: "This provenance root is already recorded for another edition of this release. Nothing was published." };
+    case "StandaloneEditionsExist":
+      return { ...base, message: STANDALONE_EDITIONS_EXIST_MESSAGE };
+    case "AlbumTrackPathRequired":
+      return { ...base, message: "This release is an Album Contract, so new music is added as album tracks, not standalone editions. Nothing was sent." };
     default: {
       const code = error?.code ?? error?.info?.error?.code ?? error?.cause?.code;
       const message = String(error?.shortMessage || error?.message || "");

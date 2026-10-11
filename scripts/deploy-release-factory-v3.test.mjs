@@ -113,6 +113,16 @@ describe("Factory V3 deployment preflight", () => {
     expect(writeRecord).not.toHaveBeenCalled();
   });
 
+  it("refuses a V5 build without the D3 standalone-edition guard", async () => {
+    expect(V5_SIGNATURES).toContain("hasStandaloneEditions()");
+    const withoutGuard = `0x${V5_SIGNATURES.filter((signature) => signature !== "hasStandaloneEditions()").map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
+    expect(missingV5Selectors(withoutGuard)).toEqual(["hasStandaloneEditions()"]);
+    await expect(assertV5Artifact(loadArtifacts(withoutGuard))).rejects.toThrow(/lacks hasStandaloneEditions\(\)/);
+    const { calls, deploy } = fakeDeploy();
+    await expect(broadcastDeployment(validateDeploymentEnv(FUJI), provider(43113n, withoutGuard), { load: loadArtifacts(), deploy, writeRecord: vi.fn(), log: () => {}, wallet: signer() })).rejects.toThrow(/not the reviewed Factory V3/);
+    expect(calls.map((call) => call.artifact)).toEqual(["factory"]);
+  });
+
   it("refuses an implementation that does not take provenance roots", async () => {
     expect(missingV5Selectors(v5Runtime)).toEqual([]);
     const v4Like = `0x63${id("createEdition(bytes32,bytes32,uint256,string,address,uint96)").slice(2, 10)}`;

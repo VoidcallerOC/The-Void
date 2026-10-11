@@ -13,13 +13,23 @@ const sendReleaseTransaction = vi.fn();
 const readReleasePrimarySale = vi.fn(async () => null);
 const simulateReleaseSaleConfigure = vi.fn();
 const readGenesisClaimSaleGuard = vi.fn(async () => ({ state: "none" }));
+const readReleaseLifecycle = vi.fn();
+const real = vi.hoisted(() => ({ simulateReleaseCall: null }));
+// Passes through to the real simulation except where a test overrides it.
+const simulateReleaseCall = vi.fn((...args) => real.simulateReleaseCall(...args));
 vi.mock("../lib/studio-api.js", async (importOriginal) => ({ ...(await importOriginal()), studioFetch: (...args) => studioFetch(...args) }));
-vi.mock("../lib/fuji-release.js", async (importOriginal) => ({
-  ...(await importOriginal()),
+vi.mock("../lib/fuji-release.js", async (importOriginal) => {
+  const original = await importOriginal();
+  real.simulateReleaseCall = original.simulateReleaseCall;
+  return {
+  ...original,
+  simulateReleaseCall: (...args) => simulateReleaseCall(...args),
   readReleaseAlbumState: (...args) => readReleaseAlbumState(...args),
   readReleaseEdition: (...args) => readReleaseEdition(...args),
   sendReleaseTransaction: (...args) => sendReleaseTransaction(...args),
-}));
+  };
+});
+vi.mock("../lib/release-lifecycle.js", async (importOriginal) => ({ ...(await importOriginal()), readReleaseLifecycle: (...args) => readReleaseLifecycle(...args) }));
 vi.mock("../lib/primary-sale.js", async (importOriginal) => ({
   ...(await importOriginal()),
   createFujiPublicProvider: () => ({ request: vi.fn() }),
@@ -58,8 +68,8 @@ function publishedCatalog(releaseMetadata) {
 }
 
 // A bound (provisioning CONFIRMED) but unpublished ALBUM draft.
-function mockConfirmedAlbumDraft() {
-  const catalog = { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions: [], experiences: [] };
+function mockConfirmedAlbumDraft({ editions = [] } = {}) {
+  const catalog = { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [] };
   studioFetch.mockImplementation(async (path) => {
     if (path === "/studio/catalog") return catalog;
     if (path.endsWith("/provisioning/prepare")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account };
@@ -74,6 +84,8 @@ afterEach(() => {
   for (const mock of [studioFetch, readReleaseAlbumState, readReleaseEdition, sendReleaseTransaction, simulateReleaseSaleConfigure]) mock.mockReset();
   readReleasePrimarySale.mockReset().mockImplementation(async () => null);
   readGenesisClaimSaleGuard.mockReset().mockImplementation(async () => ({ state: "none" }));
+  readReleaseLifecycle.mockReset();
+  simulateReleaseCall.mockReset();
 });
 
 describe("Artist Studio release type after reload", () => {
@@ -376,5 +388,42 @@ describe("Artist Studio live primary sale", () => {
     expect(screen.queryByRole("dialog", { name: "Confirm sale change" })).toBeNull();
     expect(simulateReleaseSaleConfigure).not.toHaveBeenCalled();
     expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("Artist Studio album activation lifecycle (D3)", () => {
+  const ALBUM_READY = { supported: true, created: false, closed: false, trackCount: 0n, singleCount: 0n };
+  const draftEdition = { id: "ed-draft", release_id: "rel-draft", title: "Track One", status: "DRAFT", supply: "10", application_metadata: {} };
+
+  async function clickActivate() {
+    renderStudio("rel-draft");
+    await waitFor(() => expect(readReleaseAlbumState).toHaveBeenCalledWith(expect.anything(), CLONE));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Catalog editor workflow" })).getByRole("button", { name: /Your release/ }));
+    const activate = await screen.findByRole("button", { name: "Activate Album Contract" });
+    await waitFor(() => expect(activate.disabled).toBe(false));
+    fireEvent.click(activate);
+  }
+
+  it("refuses to activate an album on a release contract that already has a mined edition, before any wallet prompt", async () => {
+    mockConfirmedAlbumDraft({ editions: [draftEdition] });
+    readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [1n], hasEditions: true });
+    await clickActivate();
+    expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
+    const { releaseEditionTokenId } = await import("../lib/release-lifecycle.js");
+    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [releaseEditionTokenId("track-one")] });
+    expect(simulateReleaseCall).not.toHaveBeenCalled();
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
+  it("activates the album on a release contract with no editions", async () => {
+    mockConfirmedAlbumDraft();
+    readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: false, existingTokenIds: [], hasEditions: false });
+    simulateReleaseCall.mockResolvedValue(undefined);
+    sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}` });
+    await clickActivate();
+    await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledWith(expect.objectContaining({ to: CLONE, data: new Interface(["function createAlbum(bytes32)"]).encodeFunctionData("createAlbum", [`0x${"ab".repeat(32)}`]) })));
+    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [] });
   });
 });

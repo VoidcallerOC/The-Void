@@ -33,6 +33,8 @@ export const V5_SIGNATURES = Object.freeze([
   "closeAlbum(bytes32)",
   "albumCreated()",
   "approveExpandedRelease(bytes32,uint256,uint256)",
+  // D3: createAlbum is refused once a standalone edition exists; this view exposes the guard state.
+  "hasStandaloneEditions()",
 ]);
 
 /** V5 selectors missing from runtime bytecode (Solidity dispatch uses PUSH4 = 0x63). */

@@ -5,6 +5,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../config/release-network.js";
+import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
@@ -732,13 +733,41 @@ export class ArtistStudioService {
     if (requestedType !== undefined) metadata.releaseType = releaseType(requestedType);
     else if (release.release_metadata?.releaseType !== undefined) metadata.releaseType = release.release_metadata.releaseType;
     // Published metadata embeds the release type, so it is fixed once any edition is published.
-    if (releaseType(metadata.releaseType) !== storedReleaseType(release) && await this.hasPublishedEdition(release.id)) {
-      throw new ApiError(409, "RELEASE_TYPE_LOCKED", "The release type cannot change after an edition has been published.");
+    if (releaseType(metadata.releaseType) !== storedReleaseType(release)) {
+      if (await this.hasPublishedEdition(release.id)) throw new ApiError(409, "RELEASE_TYPE_LOCKED", "The release type cannot change after an edition has been published.");
+      await this.assertReleaseTypeMatchesChain(release, releaseType(metadata.releaseType));
     }
     const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata, publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
     return saved;
+  }
+
+  // D3: a release contract never moves between standalone and album mode. The database can lag the
+  // chain (a mined edition whose confirmation never completed stays DRAFT), so the bound contract is
+  // read directly and any read failure refuses the change. On V5 clones createAlbum also enforces
+  // this on-chain; V4 and older clones are immutable, so this check cannot stop a direct wallet call.
+  async assertReleaseTypeMatchesChain(release, toType) {
+    const binding = await this.releaseContractBinding(release.id);
+    if (!binding) return;
+    const { rows } = await this.db.query("SELECT id, title FROM editions WHERE release_id=$1", [release.id]);
+    const tokenIds = rows.map((row) => { try { return releaseCloneTokenId(generatedSlug(row.title, "edition name")); } catch { return null; } }).filter((tokenId) => tokenId !== null);
+    let lifecycle;
+    try {
+      lifecycle = await readReleaseLifecycle(this.releaseChainRequest(binding), binding.release_contract_address, { tokenIds });
+    } catch (error) {
+      this.logger.error?.("studio.release.lifecycle_read_failed", { releaseId: release.id, code: error?.code || null });
+      throw new ApiError(503, "RELEASE_CHAIN_STATE_UNAVAILABLE", RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
+    }
+    const blocker = releaseTypeChangeBlocker({ toType, lifecycle });
+    if (blocker) throw new ApiError(409, blocker.code, blocker.message);
+  }
+
+  releaseChainRequest(binding) {
+    if (typeof this.publicationChain?.request === "function") return (payload) => this.publicationChain.request(payload);
+    if (Number(binding.chain_id) !== Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId)) throw new ApiError(503, "RELEASE_CHAIN_STATE_UNAVAILABLE", RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
+    const provider = new ethers.JsonRpcProvider(FUJI_RELEASE_PER_CONTRACT_V2.rpcUrl, Number(binding.chain_id), { staticNetwork: true });
+    return ({ method, params }) => provider.send(method, params);
   }
 
   async hasPublishedEdition(releaseId, exceptEditionId = null) {
