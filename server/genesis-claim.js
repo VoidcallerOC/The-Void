@@ -42,6 +42,8 @@ const CLAIM_ABI = [
 ];
 const RELEASE_ABI = [
   "function maxSupplyOf(uint256 tokenId) view returns (uint256)",
+  "function ISSUER_ROLE() view returns (bytes32)",
+  "function hasRole(bytes32 role,address account) view returns (bool)",
   "function edition(uint256 tokenId) view returns ((bytes32 releaseId,bytes32 editionId,address artist,uint256 maxSupply,uint256 mintedSupply,string metadataUri,bool exists))",
 ];
 const SALE_ABI = ["function sales(uint256 tokenId) view returns (uint256 priceWei,uint256 maxSupply,uint256 sold,uint256 perWalletLimit,uint64 startTime,uint64 endTime,bool paused,bool configured)"];
@@ -205,6 +207,8 @@ export function createGenesisClaimService({
       claim.GENESIS_CONTRACT(), claim.GENESIS_CHAIN_ID(), claim.ELIGIBILITY_RULE(), claim.signer(), claim.claimedSupply(),
       release.maxSupplyOf(config.tokenId), release.edition(config.tokenId), sale.sales(config.tokenId),
     ]);
+    // The claim mints through the release's issuer path; without the grant every claim would revert.
+    const claimIsIssuer = await release.hasRole(await release.ISSUER_ROLE(), config.claimContract);
     const total = config.allocation + config.publicAllocation;
     // An open edition (maxSupply 0) has no cap to compare against.
     const editionCapTooSmall = BigInt(maxSupply) !== 0n && (config.allocation === 0n || BigInt(maxSupply) < total);
@@ -224,6 +228,7 @@ export function createGenesisClaimService({
       || String(claimRule).toLowerCase() !== config.eligibilityRule.toLowerCase()
       || getAddress(claimSignerAddress) !== getAddress(claimSigner.address)
       || editionCapTooSmall
+      || !claimIsIssuer
       || BigInt(editionData.mintedSupply ?? editionData[0]?.mintedSupply ?? editionData[0]?.[4] ?? editionData[4]) !== BigInt(saleData.sold ?? saleData[2]) + BigInt(claimedSupply)
       || BigInt(saleData.priceWei ?? saleData[0]) !== config.publicPriceWei
       || BigInt(saleData.maxSupply ?? saleData[1]) !== config.publicAllocation

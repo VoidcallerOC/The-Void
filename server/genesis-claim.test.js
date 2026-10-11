@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Interface, getAddress } from "ethers";
+import { Interface, getAddress, id } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { createApiHandler } from "./api-http.js";
 import {
@@ -22,6 +22,7 @@ const CLAIM_START = NOW - 60;
 const CLAIM_END = CLAIM_START + 86_400;
 const PUBLIC_END = CLAIM_END + 7 * 86_400 - 1;
 const PRICE = 250_000_000_000_000_000n; // 0.25 AVAX
+const ISSUER_ROLE = id("ISSUER_ROLE");
 const SNAPSHOT_BLOCK = 97_000_000;
 const SNAPSHOT_HASH = `0x${"5a".repeat(32)}`;
 
@@ -220,6 +221,8 @@ const claimIface = new Interface([
 ]);
 const releaseIface = new Interface([
   "function maxSupplyOf(uint256 tokenId) view returns (uint256)",
+  "function ISSUER_ROLE() view returns (bytes32)",
+  "function hasRole(bytes32 role,address account) view returns (bool)",
   "function edition(uint256 tokenId) view returns ((bytes32 releaseId,bytes32 editionId,address artist,uint256 maxSupply,uint256 mintedSupply,string metadataUri,bool exists))",
 ]);
 const saleIface = new Interface(["function sales(uint256 tokenId) view returns (uint256 priceWei,uint256 maxSupply,uint256 sold,uint256 perWalletLimit,uint64 startTime,uint64 endTime,bool paused,bool configured)"]);
@@ -242,6 +245,11 @@ function fujiChain(drift = {}) {
       if (getAddress(to) === getAddress(RELEASE)) {
         const fn = releaseIface.parseTransaction({ data }).name;
         if (fn === "maxSupplyOf") return releaseIface.encodeFunctionResult(fn, [drift.maxSupply ?? 0n]);
+        if (fn === "ISSUER_ROLE") return releaseIface.encodeFunctionResult(fn, [ISSUER_ROLE]);
+        if (fn === "hasRole") {
+          const [role, account] = releaseIface.decodeFunctionData(fn, data);
+          return releaseIface.encodeFunctionResult(fn, [role === ISSUER_ROLE && getAddress(account) === getAddress(CLAIM) && drift.claimIsIssuer !== false]);
+        }
         return releaseIface.encodeFunctionResult(fn, [[`0x${"01".repeat(32)}`, `0x${"02".repeat(32)}`, WALLET, drift.maxSupply ?? 0n, minted, "ipfs://x", true]]);
       }
       if (getAddress(to) === getAddress(SALE)) return saleIface.encodeFunctionResult("sales", Object.values(sale));
@@ -268,6 +276,7 @@ describe("live claim binding verification", () => {
     ["a different snapshot rule", { claim: { ELIGIBILITY_RULE: `0x${"99".repeat(32)}` } }],
     ["a different signer", { claim: { signer: WALLET } }],
     ["a different release", { claim: { releaseContract: SALE } }],
+    ["a claim contract the artist has not granted ISSUER_ROLE", { claimIsIssuer: false }],
   ])("fails closed on %s", async (_label, drift) => {
     await expect(bindings(fujiChain(drift)).verifyContractBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
   });

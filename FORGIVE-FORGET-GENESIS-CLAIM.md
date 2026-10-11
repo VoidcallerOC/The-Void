@@ -35,9 +35,10 @@ Nothing here was signed, broadcast or changed in production. The evidence was ga
 
 **Live tooling check:** `scripts/deploy-genesis-claim.mjs --dry-run` against this target refused with "Token 1 does not exist on release 0x12Ff…". It ran with a throwaway key and broadcast nothing, after passing the live chain-ID and C-Chain snapshot-hash checks.
 
-**Verdict.** The recorded target cannot carry an uncapped open edition. The smallest correction is an owner decision between option A0 (reuse ‑28, §1b) and option A below.
+**Verdict.** The recorded target cannot carry an uncapped open edition, and none of ‑23, ‑25 or ‑26 can either (§1b). With ‑28 excluded by the owner, a new release is necessary.
 
-- **A. One new Forgive & Forget release from artist `0x284C…` on the album-capable Factory V2 `0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8`.** Its implementation (`0x45c3…E452`, source `3861d74`) supports `maxSupply 0`, as the live ‑28 edition shows. Create one open edition via `createEditionWithMintEnd(…, 0, …, mintEnd = publicSaleEnd)`. Draft `forgive-forget-26` and its empty clone stay unused.
+- **A. One new Forgive & Forget release from artist `0x284C…` on the album-capable Factory V2 `0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8`.** Its implementation (`0x45c3…E452`, source `3861d74`) supports `maxSupply 0`, as the live ‑28 edition shows. Create exactly one open edition (`maxSupply 0`, royalty 250 bps as Studio's default, payout the artist). Draft `forgive-forget-26` and its empty clone stay unused.
+  - **Mint deadline.** Studio's standalone-edition path (`encodeCreateReleaseEdition`) sets no `mintEnd`. The contract's `createEditionWithMintEnd(…, mintEnd = T + 8d − 1)` would also stop any direct issuer mint after the public window, but Studio only exposes `mintEnd` for album tracks. Without it, closure rests on the sale's end time and the claim window: only the sale and the claim hold `ISSUER_ROLE`, though the artist, as admin, could grant it to another address later. Using `createEditionWithMintEnd` needs a direct artist-wallet call or a small Studio change; the owner decides.
 - **B.** Wait for Factory V3. It is source-only, behind its audit and review gates.
 - **Not acceptable:** a huge finite cap on `0x12Ff`. That would invent a supply cap.
 
@@ -47,17 +48,22 @@ Read on 2026-10-11 19:10 UTC, Fuji block 59313592. Sources: the database, `GET /
 
 | Record | Status in database / public API | Contract, token | On-chain edition | Sale | Holders |
 |---|---|---|---|---|---|
-| `forgive-forget-23` | PUBLISHED / **not served** | legacy shared `0x7Bba…95B6`, token `5539…2836` | open edition (`maxSupply 0`), created block 59022633 (`0x6a9d4564…`), 0 minted | 0.01 AVAX, ended 2026-10-04 03:15 UTC, 0 sold | none |
-| `forgive-forget-25` | PUBLISHED / **served** | legacy shared `0x7Bba…95B6`, token `6829…6023` | open edition, created block 59037682 (`0x5002a7a8…`), 1 minted | 0.01 AVAX, ended 2026-10-04 15:00 UTC, 1 sold | `0x6a86…d2fb` holds 1; its protected DEMO experience is PUBLISHED |
+| `forgive-forget-23` | PUBLISHED / **not served** | legacy shared `0x7Bba…95B6`, token `5539…2836` | open edition (`maxSupply 0`), created block 59022633 (`0x6a9d4564…`), 0 minted | legacy sale `0x51cC…1aBA` (fee 500 bps): `SaleConfigured` `0x2102efa7…`, 0.01 AVAX, per-wallet 2, 03:00–03:15 UTC 2026-10-04, ended, 0 `Purchased` | none |
+| `forgive-forget-25` | PUBLISHED / **served** | legacy shared `0x7Bba…95B6`, token `6829…6023` | open edition, created block 59037682 (`0x5002a7a8…`), 1 minted | `0x51cC…1aBA`: `SaleConfigured` `0x058ae67a…`, 0.01 AVAX, 14:45–15:00 UTC 2026-10-04, ended; 1 `Purchased` (`0x1b4a07ec…`, buyer `0x6a86…`, 0.01 AVAX) | `0x6a86…d2fb` holds 1; its protected DEMO experience is PUBLISHED |
 | `forgive-forget-28` | PUBLISHED / **served** | Factory V2 clone `0x4b27…bB0`, token `2567…3312`, sale `0xfb13…7Cc3` | open edition, created block 59276831 (`0x0b62e365…`), 1 minted, `mintEnd` 0 | 0.01 AVAX, ended 2026-10-10 19:30 UTC, 1 sold | `0x284C…` (artist) holds 1, after the A4 purchase and the A7 resale back |
 | `forgive-forget-26` | DRAFT | clone `0x12Ff…` | no edition (§1) | not configured | none |
 | `forgive-forget-27` | DRAFT, different artist account (`voidcaller-10`, wallet `0x40cd…`) | none: provisioning request PENDING, never sent | — | — | — |
 
 So the public catalog currently shows **two** "Forgive & Forget" editions: ‑28 and ‑25.
 
-**‑23 and ‑25 cannot be the claim target.** They live on the legacy shared contract, which `GenesisHolderClaim` refuses by construction (`LEGACY_FUJI_SINGLETON`).
+**Identity.**
+- ‑23 and ‑25 are historical attempts on the legacy shared contract `0x7Bba…`. The deployer created that contract directly (`0x14dd51d9…`, block 59015108); it did not come from a factory. ‑23 is owner-designated as archived and not to be reused.
+- ‑26 is an abandoned draft attempt on the pre-album factory.
+- ‑28 is the current published Forgive & Forget on Factory V2. It is excluded by the owner.
 
-**‑28 can, under this PR's contract.** It was excluded only because its sale had already started. That rule belonged to the old claim contract, which closed claims as soon as the sale's start time passed. In the new contract the claim window is fixed from `claimStart`, and the sale only has to be configured as the future public phase.
+**‑23 and ‑25 cannot be the claim target.** They live on the legacy shared contract, which `GenesisHolderClaim` refuses by construction (`LEGACY_FUJI_SINGLETON`). Both sales have ended.
+
+**‑28 is excluded by the owner's instruction (2026-10-11), and that stands.** For the record, it would work under this PR's contract. It was excluded only because its sale had already started. That rule belonged to the old claim contract, which closed claims as soon as the sale's start time passed. In the new contract the claim window is fixed from `claimStart`, and the sale only has to be configured as the future public phase.
 
 **Local fork proof.** I ran a forge test against a local fork of Fuji at block ~59313592; nothing was sent to the chain, and the test file was deleted. On the real ‑28 contracts:
 1. the artist reconfigured the sale (0.25 AVAX, uncapped, opening at `claimEnd`, closing 7 days later);
@@ -73,8 +79,8 @@ Supply accounting holds: minted 1 = sold 1.
 - Its metadata lists "A Demo Preview".
 
 **Options for the owner. Each is a decision, and its transactions need separate authorization:**
-- **A0. Reuse ‑28.** No new release or token. The artist reconfigures the ‑28 sale, then the claim is deployed against `0x4b27…`, token `2567…3312`. This overrides the earlier "do not select ‑28" instruction, whose stated reason no longer applies.
-- **A. One new release on Factory V2** (§1 verdict). This gives a clean token with a token-level `mintEnd`, at the cost of a second live Forgive & Forget contract.
+- **A. One new release on Factory V2** (§1 verdict). This is the path while ‑28 stays excluded.
+- **A0. Reuse ‑28.** Not selected. It would need the owner to lift the exclusion.
 - **Record cleanup, either way.** Not done; these are production database changes that need authorization:
   - archive ‑23;
   - decide on ‑25: archiving it hides its protected experience from its one holder;
@@ -118,13 +124,11 @@ Any drift reverts every claim (`PublicSaleSchedule`, `PublicPriceChanged`, `Publ
 
 Every step below is a transaction or a production change. **None is authorized by this PR.**
 
-1. **Owner:** choose option A0 or A, and choose the snapshot block (C-Chain number and hash) and `T`.
-2. **Artist wallet, Studio:**
-   - **Option A0:** on ‑28, call `configureSale(2567…3312, 0.25 AVAX, 0, 0, T + 24h, T + 8d − 1, false)`.
-   - **Option A:**
-     1. create the release on Factory V2;
-     2. create the open edition with `mintEnd = T + 8d − 1`;
-     3. `configureSale(tokenId, 0.25 AVAX, 0, 0, T + 24h, T + 8d − 1, false)`.
+1. **Owner:** approve the new release (option A) and choose the snapshot block and `T` (§5).
+2. **Artist wallet:**
+   1. create the release on Factory V2;
+   2. create the open edition (`maxSupply 0`, with or without `mintEnd = T + 8d − 1`, §1);
+   3. `configureSale(tokenId, 0.25 AVAX, 0, 0, T + 24h, T + 8d − 1, false)`.
 3. **Dry run:** run `Deploy Genesis holder claim to Fuji` with `broadcast_deployment=false`. Review its plan: predicted address, schedule, snapshot, constructor simulation, follow-ups.
 4. **Owner:** authorize the broadcast with `I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY`, the reviewed deployer and the reviewed nonce.
 5. **Artist wallet:** send the printed `grantRole(ISSUER_ROLE, claim)` before `T`.
@@ -135,3 +139,32 @@ Every step below is a transaction or a production change. **None is authorized b
    - an ineligible wallet gets 403;
    - after `T + 24h`, a non-holder mints at 0.25 AVAX;
    - after `T + 8d`, the mint is refused.
+
+## 5. Snapshot block and claim start: constraints
+
+**Genesis collection.** `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` on Avalanche C-Chain (43114). It is an EIP-1167 proxy (45 bytes of code) with an ERC-1155 interface, and its first activity was at block ~41,322,659.
+
+**Snapshot block.**
+- It must already exist when the claim is deployed, because the preflight and the API both check its hash.
+- It is set once, in the claim contract's `ELIGIBILITY_RULE`, and cannot be changed after deployment.
+- Choose it by rule, not by convenience: the last C-Chain block at or before a published snapshot time. That time should come before, or at, the moment the claim is announced, so nobody can buy into eligibility after learning of it.
+- Record both the number and the hash.
+
+**Verifying eligibility.** For each wallet, check `balanceOf(wallet, 0..3)` with an `eth_call` at that block. `api.avax.network` serves historical state; this was checked 1,000,000 blocks back. A full holder list for an announcement can be derived from the collection's `TransferSingle` and `TransferBatch` logs up to the snapshot, then cross-checked with those calls. No list is needed for the claim itself.
+
+**Claim start `T`.**
+- Claims are accepted while `T ≤ now < T + 86,400`.
+- The sale must be configured with `startTime = T + 86,400` and `endTime = T + 8 × 86,400 − 1`, at exactly 250000000000000000 wei.
+- `VoidPrimarySale` accepts purchases up to and including `endTime`, so the public window is exactly 604,800 seconds.
+
+**Ordering, before `T`:**
+1. If the edition uses `mintEnd`, `T` must be fixed before the edition is created, because `mintEnd` is set at creation.
+2. The sale is configured.
+3. The claim is deployed. The constructor requires `T ≥ block.timestamp`, and the preflight requires `T` to be at least 600 seconds after the latest Fuji block.
+4. The artist grants `ISSUER_ROLE`. The API now refuses with 503 until this grant exists.
+5. The Render values are set and enabled.
+
+**Other constructor values (owner decisions; none is a supply cap):**
+- `admin`: may pause, rotate the signer, and transfer admin.
+- `signer`: the public address of a server-only key that must be generated and stored on Render.
+- Claim allocation `0` and public allocation `0`, meaning uncapped.
