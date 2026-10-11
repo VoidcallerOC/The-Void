@@ -37,6 +37,11 @@ export const V5_SIGNATURES = Object.freeze([
   "hasStandaloneEditions()",
 ]);
 
+// Custom errors the reviewed V5 must declare. The optimizer does not keep every error selector as a
+// literal in runtime bytecode, so these are checked in the compiled artifact's ABI only. Selector and
+// ABI checks prove the interface is present; createAlbum's behaviour is proven on-chain (acceptance B4b).
+export const V5_REQUIRED_ERRORS = Object.freeze(["StandaloneEditionsExist"]);
+
 /** V5 selectors missing from runtime bytecode (Solidity dispatch uses PUSH4 = 0x63). */
 export function missingV5Selectors(runtimeBytecode) {
   const code = String(runtimeBytecode || "").toLowerCase();
@@ -134,7 +139,8 @@ async function loadArtifact(relativePath) {
 
 export async function assertV5Artifact(load = loadArtifact) {
   const implementation = await load(IMPLEMENTATION_ARTIFACT_PATH);
-  const missing = missingV5Selectors(implementation.deployedBytecode?.object);
+  const declaredErrors = new Set((Array.isArray(implementation.abi) ? implementation.abi : []).filter((item) => item?.type === "error").map((item) => item.name));
+  const missing = [...missingV5Selectors(implementation.deployedBytecode?.object), ...V5_REQUIRED_ERRORS.filter((name) => !declaredErrors.has(name)).map((name) => `error ${name}()`)];
   if (missing.length) throw new DeploymentError(`Refusing to deploy: compiled VoidRelease1155V5 lacks ${missing.join(", ")}.`);
 }
 

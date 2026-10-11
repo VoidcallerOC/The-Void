@@ -68,8 +68,8 @@ function publishedCatalog(releaseMetadata) {
 }
 
 // A bound (provisioning CONFIRMED) but unpublished ALBUM draft.
-function mockConfirmedAlbumDraft({ editions = [] } = {}) {
-  const catalog = { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [] };
+function mockConfirmedAlbumDraft({ editions = [], releaseBindings = undefined } = {}) {
+  const catalog = { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [], ...(releaseBindings ? { releaseBindings } : {}) };
   studioFetch.mockImplementation(async (path) => {
     if (path === "/studio/catalog") return catalog;
     if (path.endsWith("/provisioning/prepare")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account };
@@ -393,7 +393,12 @@ describe("Artist Studio live primary sale", () => {
 
 describe("Artist Studio album activation lifecycle (D3)", () => {
   const ALBUM_READY = { supported: true, created: false, closed: false, trackCount: 0n, singleCount: 0n };
-  const draftEdition = { id: "ed-draft", release_id: "rel-draft", title: "Track One", status: "DRAFT", supply: "10", application_metadata: {} };
+  const V4_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
+  const V4_EXPECT = { albumCreated: true, hasStandaloneEditions: false };
+  const binding = { release_id: "rel-draft", chain_id: CHAIN_ID, release_contract_address: CLONE, primary_sale_address: SALE, factory_address: V4_FACTORY, artist_wallet: wallet.account };
+  const MINED_TOKEN = "25679935302133066722236771263728427871936411831072189551573738559199048803312";
+  // Prepared and mined under its first title, confirmation never completed, then renamed as a draft.
+  const renamedDraft = { id: "ed-draft", release_id: "rel-draft", title: "Renamed Draft", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [MINED_TOKEN] };
 
   async function clickActivate() {
     renderStudio("rel-draft");
@@ -404,26 +409,51 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     fireEvent.click(activate);
   }
 
-  it("refuses to activate an album on a release contract that already has a mined edition, before any wallet prompt", async () => {
-    mockConfirmedAlbumDraft({ editions: [draftEdition] });
+  it("refuses to activate an album when the stored token of a renamed draft is mined, before any wallet prompt", async () => {
+    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
-    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [1n], hasEditions: true });
+    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [BigInt(MINED_TOKEN)], hasEditions: true });
     await clickActivate();
     expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
-    const { releaseEditionTokenId } = await import("../lib/release-lifecycle.js");
-    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [releaseEditionTokenId("track-one")] });
+    // The canonical stored token ID is checked, not an ID re-derived from the new title.
+    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(MINED_TOKEN)], expect: V4_EXPECT });
     expect(simulateReleaseCall).not.toHaveBeenCalled();
     expect(sendReleaseTransaction).not.toHaveBeenCalled();
   });
 
-  it("activates the album on a release contract with no editions", async () => {
-    mockConfirmedAlbumDraft();
+  it("refuses activation without a wallet prompt when the chain read fails", async () => {
+    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
-    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: false, existingTokenIds: [], hasEditions: false });
+    readReleaseLifecycle.mockRejectedValue(new Error("Fuji RPC unavailable"));
+    await clickActivate();
+    expect(await screen.findByText(/Fuji RPC unavailable/)).toBeTruthy();
+    expect(simulateReleaseCall).not.toHaveBeenCalled();
+    expect(sendReleaseTransaction).not.toHaveBeenCalled();
+  });
+
+  for (const [label, setup] of [
+    ["an edition has no stored token IDs", () => ({ editions: [{ ...renamedDraft, stored_token_ids: undefined }], releaseBindings: [binding] })],
+    ["the binding's factory is not a recorded deployment", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: "0x00000000000000000000000000000000000000aa" }] })],
+    ["the release has no binding in the catalog", () => ({ editions: [renamedDraft] })],
+  ]) {
+    it(`refuses activation before reading the chain when ${label}`, async () => {
+      mockConfirmedAlbumDraft(setup());
+      readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+      await clickActivate();
+      expect(await screen.findByText(/could not be read, so nothing was changed/)).toBeTruthy();
+      expect(readReleaseLifecycle).not.toHaveBeenCalled();
+      expect(sendReleaseTransaction).not.toHaveBeenCalled();
+    });
+  }
+
+  it("activates the album on a release contract with no editions", async () => {
+    mockConfirmedAlbumDraft({ releaseBindings: [binding] });
+    readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+    readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [], hasEditions: false });
     simulateReleaseCall.mockResolvedValue(undefined);
     sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}` });
     await clickActivate();
     await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledWith(expect.objectContaining({ to: CLONE, data: new Interface(["function createAlbum(bytes32)"]).encodeFunctionData("createAlbum", [`0x${"ab".repeat(32)}`]) })));
-    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [] });
+    expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [], expect: V4_EXPECT });
   });
 });

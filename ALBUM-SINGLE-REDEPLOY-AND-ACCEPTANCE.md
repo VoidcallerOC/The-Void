@@ -88,7 +88,7 @@ Status for every row is **NOT STARTED** unless noted. A row passes only with the
 | B3 | Add 3 tracks (one with `single = true`, one with `mintEnd`) | 3 `AlbumTrackCreated` receipts; `albumTrackCount = 3`, `albumSingleCount = 1` |
 | B4 | Cap enforcement | Tracks 14+ revert `AlbumTrackLimitReached` and singles 5+ revert `AlbumSingleLimitReached`. Proven on a disposable clone, or by forge tests plus simulation of a live `eth_call`. |
 | B5 | Standalone path is blocked | `createEdition` on the album reverts `AlbumTrackPathRequired` (`eth_call` simulation) |
-| B5b | A standalone release never becomes an album (D3, V5 only) | On a V5 release with a standalone edition, `createAlbum` reverts `StandaloneEditionsExist` (`eth_call`). `hasStandaloneEditions() = true`. The edition still sells. |
+| B4b | A standalone release never becomes an album (D3, V5 only). Same ID as in [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §6. | On a V5 release with a standalone edition, `createAlbum` reverts `StandaloneEditionsExist` (`eth_call`). `hasStandaloneEditions() = true`. The edition still sells. |
 | B6 | Mint deadline | Purchase after `mintEnd` reverts; purchase before it succeeds |
 | B7 | `closeAlbum` | `AlbumClosed` receipt; a further `createAlbumTrack` reverts `AlbumAlreadyClosed` |
 | B8 | Buy, own, unlock and resell a track | A4–A7 on an album track |

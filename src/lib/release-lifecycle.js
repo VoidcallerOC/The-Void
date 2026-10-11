@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../../config/release-network.js";
 
 // D3 lifecycle: one release contract is either standalone (editions via createEdition) or an album
 // (tracks via createAlbumTrack) for its whole life. An album that reuses earlier music is a new
@@ -40,33 +41,48 @@ function revertDataOf(error) {
   return null;
 }
 
-function isRevert(error) {
-  return error?.code === "CALL_EXCEPTION" || revertDataOf(error) !== null || /execution reverted|revert/i.test(String(error?.message || error?.error?.message || ""));
+/**
+ * Which lifecycle getters a release clone must answer, from trusted deployment metadata, never from
+ * an error: a failed or rate-limited eth_call is not evidence that a getter is missing. Version 3+
+ * clones are VoidRelease1155V5 and have both getters. Version 2 clones take album support from the
+ * recorded factory (V4 album-capable, or the pre-album implementation); V4 has no
+ * hasStandaloneEditions(). Returns null when the deployment is not recognised, so callers fail closed.
+ */
+export function lifecycleExpectations({ implementationVersion, factoryAddress }) {
+  const version = Number(implementationVersion);
+  if (!Number.isSafeInteger(version) || version < 1) return null;
+  if (anchorsProvenanceAtCreation(version)) return Object.freeze({ albumCreated: true, hasStandaloneEditions: true });
+  const deployment = releaseDeploymentForFactory(factoryAddress);
+  if (!deployment || Number(deployment.releaseVersion) !== version) return null;
+  return Object.freeze({ albumCreated: deployment.albumCapable === true, hasStandaloneEditions: false });
+}
+
+/** Expectations for a release clone known only by its factory (Studio): the recorded factory's version. */
+export function lifecycleExpectationsForFactory(factoryAddress) {
+  return lifecycleExpectations({ factoryAddress, implementationVersion: releaseDeploymentForFactory(factoryAddress)?.releaseVersion });
 }
 
 /**
  * Reads the lifecycle state of a release clone with EIP-1193 style eth_call requests.
- * `request` is `async ({ method, params }) => result`. A revert or empty result on the album or
- * guard getters means the implementation lacks them; any transport failure throws, so callers
- * fail closed. `tokenIds` are the release's known editions, checked for on-chain existence because
- * a mined edition can still be DRAFT in the database.
+ * `request` is `async ({ method, params }) => result`. `expect` (from lifecycleExpectations) says
+ * which getters the clone has; an expected getter that errors or returns no data throws, so callers
+ * fail closed. `tokenIds` are the canonical token IDs stored for the release's editions, checked for
+ * on-chain existence because a mined edition can still be DRAFT in the database.
  */
-export async function readReleaseLifecycle(request, releaseContractAddress, { tokenIds = [] } = {}) {
+export async function readReleaseLifecycle(request, releaseContractAddress, { tokenIds = [], expect } = {}) {
   if (!ethers.isAddress(releaseContractAddress) || ethers.getAddress(releaseContractAddress) === ethers.ZeroAddress) throw new Error("The release contract address is invalid.");
+  if (!expect || typeof expect.albumCreated !== "boolean" || typeof expect.hasStandaloneEditions !== "boolean") throw new Error("The release contract's implementation is not recognised.");
   const to = ethers.getAddress(releaseContractAddress);
   const call = (data) => request({ method: "eth_call", params: [{ to, data }, "latest"] });
-  const optionalBool = async (name) => {
-    let result;
-    try {
-      result = await call(lifecycleIface.encodeFunctionData(name));
-    } catch (error) {
-      if (isRevert(error)) return null;
-      throw error;
-    }
-    if (typeof result !== "string" || result === "0x") return null;
+  const requiredBool = async (name) => {
+    const result = await call(lifecycleIface.encodeFunctionData(name));
+    if (typeof result !== "string" || result === "0x") throw new Error(`The release contract returned no data for ${name}().`);
     return Boolean(lifecycleIface.decodeFunctionResult(name, result)[0]);
   };
-  const [albumCreated, standaloneFlag] = await Promise.all([optionalBool("albumCreated"), optionalBool("hasStandaloneEditions")]);
+  const [albumCreated, standaloneFlag] = await Promise.all([
+    expect.albumCreated ? requiredBool("albumCreated") : false,
+    expect.hasStandaloneEditions ? requiredBool("hasStandaloneEditions") : null,
+  ]);
   const existingTokenIds = [];
   for (const tokenId of tokenIds) {
     try {

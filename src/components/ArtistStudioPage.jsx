@@ -16,7 +16,7 @@ import { readGenesisClaimSaleGuard } from "../lib/genesis-claim.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
-import { editionSlugFromTitle, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
+import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
@@ -597,10 +597,14 @@ export function ArtistStudioPage() {
       if (albumActivated) throw new Error("This Album Contract is already active on-chain.");
       // D3: a release contract with standalone editions never becomes an album. Read the chain, not
       // the catalog status: a mined edition can still be a draft here. V5 clones also refuse this
-      // on-chain; V4 clones rely on this check, which a direct wallet call can bypass.
-      const editionTokenIds = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === releaseId).map((edition) => editionSlugFromTitle(edition.title)).filter(Boolean).map(releaseEditionTokenId);
+      // on-chain; V4 clones rely on this check, which a direct wallet call can bypass. The token IDs
+      // are the ones the server stored when each edition was prepared, never re-derived from titles.
+      const releaseEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === releaseId);
+      const binding = (ownedStudioCatalog?.releaseBindings || []).find((item) => item.releaseId === releaseId && item.releaseContractAddress.toLowerCase() === String(activeReleaseAsset.releaseContractAddress).toLowerCase());
+      const expect = binding ? lifecycleExpectationsForFactory(binding.factoryAddress) : null;
+      if (!expect || releaseEditions.some((edition) => !Array.isArray(edition.storedTokenIds))) throw new Error(RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
       const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
-      const lifecycle = await readReleaseLifecycle((payload) => publicProvider.request(payload), activeReleaseAsset.releaseContractAddress, { tokenIds: editionTokenIds });
+      const lifecycle = await readReleaseLifecycle((payload) => publicProvider.request(payload), activeReleaseAsset.releaseContractAddress, { tokenIds: releaseEditions.flatMap((edition) => edition.storedTokenIds.map(BigInt)), expect });
       const blocker = releaseTypeChangeBlocker({ toType: "ALBUM", lifecycle });
       if (blocker) throw new Error(blocker.message);
       const provider = wallet.getProvider?.();

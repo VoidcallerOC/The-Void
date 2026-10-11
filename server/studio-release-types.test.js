@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
 import { ethers } from "ethers";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 import { ArtistStudioService } from "./studio-service.js";
@@ -149,54 +150,70 @@ describe("standalone single on an album", () => {
 
   describe("D3: on-chain lifecycle guard for release type changes", () => {
     const clone = "0x4b2790791e2ac123cb012d33cc8f1ecbdc9b9bb0";
-    const binding = { release_contract_id: "contract-1", release_contract_address: clone, chain_id: "43113", release_key: `0x${"ab".repeat(32)}` };
+    const V4_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8"; // album-capable V2 factory (V4 clones)
+    const v4Binding = { release_contract_id: "contract-1", release_contract_address: clone, chain_id: "43113", release_key: `0x${"ab".repeat(32)}`, implementation_version: 2, factory_address: V4_FACTORY };
+    const v5Binding = { ...v4Binding, implementation_version: 3, factory_address: "0x00000000000000000000000000000000000000f3" };
     const lifecycle = new ethers.Interface(["function albumCreated() view returns (bool)", "function hasStandaloneEditions() view returns (bool)", "function maxSupplyOf(uint256) view returns (uint256)", "error EditionNotFound(uint256 tokenId)"]);
     const coder = ethers.AbiCoder.defaultAbiCoder();
     const reverted = (data) => Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION", data });
-    // A fake Fuji clone: V4 has no hasStandaloneEditions(); minted lists the editions that exist on-chain.
+    // A fake Fuji clone. hasStandaloneEditions is V5-only: calling it on a V4 clone fails the test.
     function clonedChain({ albumCreated = false, standaloneFlag = null, minted = [], fail = false } = {}) {
       const request = vi.fn(async ({ params }) => {
         if (fail) throw Object.assign(new Error("connect ECONNREFUSED https://rpc.example/?key=secret"), { code: "SERVER_ERROR" });
         const data = params[0].data;
         if (data === lifecycle.encodeFunctionData("albumCreated")) return coder.encode(["bool"], [albumCreated]);
-        if (data === lifecycle.encodeFunctionData("hasStandaloneEditions")) { if (standaloneFlag === null) throw reverted("0x"); return coder.encode(["bool"], [standaloneFlag]); }
+        if (data === lifecycle.encodeFunctionData("hasStandaloneEditions")) { if (standaloneFlag === null) throw new Error("hasStandaloneEditions() must not be called on a V4 clone"); return coder.encode(["bool"], [standaloneFlag]); }
         const [tokenId] = lifecycle.decodeFunctionData("maxSupplyOf", data);
         if (minted.includes(tokenId)) return coder.encode(["uint256"], [0]);
         throw reverted(lifecycle.encodeErrorResult("EditionNotFound", [tokenId]));
       });
       return { request };
     }
-    const tokenFor = (title) => BigInt(ethers.keccak256(coder.encode(["string", "bytes32"], ["the-void:release-edition:v1", ethers.encodeBytes32String(title)])));
-    const routed = (stored, { editions = [], bound = true } = {}) => (sql) => (
+    const tokenFor = (slug) => BigInt(ethers.keccak256(coder.encode(["string", "bytes32"], ["the-void:release-edition:v1", ethers.encodeBytes32String(slug)])));
+    // tokens: the token IDs stored for the release's editions (rows of the tokens table).
+    const routed = (stored, { tokens = [], binding = v4Binding } = {}) => (sql) => (
       sql.includes("FROM releases r JOIN artist_owners") ? [release("release-1", stored)]
-        : sql.includes("FROM release_contracts rc") ? (bound ? [binding] : [])
-          : sql.includes("SELECT id, title FROM editions") ? editions
+        : sql.includes("FROM release_contracts rc") ? (binding ? [binding] : [])
+          : sql.includes("FROM tokens t JOIN editions e") ? tokens.map((tokenId) => ({ token_id: String(tokenId) }))
             : []);
+    const toAlbum = { releaseType: "ALBUM" };
 
     it("refuses EP to ALBUM when an edition is mined on-chain but still DRAFT in the database", async () => {
-      const chain = clonedChain({ minted: [tokenFor("forgive-forget")] });
-      const { instance, repo } = service(routed("EP", { editions: [{ id: "edition-1", title: "Forgive & Forget" }] }), { publicationChain: chain });
-      await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "ALBUM" } })).rejects.toMatchObject({ status: 409, code: "STANDALONE_EDITIONS_EXIST" });
+      const mined = tokenFor("forgive-forget");
+      const chain = clonedChain({ minted: [mined] });
+      const { instance, repo } = service(routed("EP", { tokens: [mined] }), { publicationChain: chain });
+      await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 409, code: "STANDALONE_EDITIONS_EXIST" });
       expect(repo.saveRelease).not.toHaveBeenCalled();
     });
 
-    it("refuses ALBUM on a V5 clone whose guard flag is set even with no edition rows", async () => {
-      const { instance, repo } = service(routed("SINGLE"), { publicationChain: clonedChain({ standaloneFlag: true }) });
-      await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "ALBUM" } })).rejects.toMatchObject({ code: "STANDALONE_EDITIONS_EXIST" });
+    it("finds the mined edition by its stored token ID after the draft edition was renamed", async () => {
+      // Prepared and mined as "Forgive & Forget"; confirmation never completed; the draft was then renamed.
+      // Only the tokens row still carries the mined ID; re-deriving it from the new title would miss it.
+      const mined = tokenFor("forgive-forget");
+      const chain = clonedChain({ minted: [mined] });
+      const { instance, repo, db } = service((sql) => (sql.includes("SELECT id, title FROM editions") ? [{ id: "edition-1", title: "Renamed Draft" }] : routed("EP", { tokens: [mined] })(sql)), { publicationChain: chain });
+      await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ code: "STANDALONE_EDITIONS_EXIST" });
+      expect(repo.saveRelease).not.toHaveBeenCalled();
+      expect(db.query.mock.calls.some(([sql]) => String(sql).includes("FROM tokens t JOIN editions e"))).toBe(true);
+    });
+
+    it("refuses ALBUM on a V5 clone whose guard flag is set even with no stored tokens", async () => {
+      const { instance, repo } = service(routed("SINGLE", { binding: v5Binding }), { publicationChain: clonedChain({ standaloneFlag: true }) });
+      await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ code: "STANDALONE_EDITIONS_EXIST" });
       expect(repo.saveRelease).not.toHaveBeenCalled();
     });
 
-    it("allows EP to ALBUM on a bound clone with no editions on-chain", async () => {
-      const chain = clonedChain({ standaloneFlag: false });
-      const { instance, repo } = service(routed("EP", { editions: [{ id: "edition-1", title: "Draft Only" }] }), { publicationChain: chain });
-      await instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "ALBUM" } });
+    it("allows EP to ALBUM on a V4 clone with no editions on-chain without calling the V5-only getter", async () => {
+      const chain = clonedChain();
+      const { instance, repo } = service(routed("EP", { tokens: [tokenFor("draft-only")] }), { publicationChain: chain });
+      await instance.updateRelease({ request, releaseId: "release-1", input: toAlbum });
       expect(repo.saveRelease.mock.calls[0][0].metadata.releaseType).toBe("ALBUM");
-      expect(chain.request).toHaveBeenCalled();
+      expect(chain.request.mock.calls.map(([payload]) => payload.params[0].data)).not.toContain(lifecycle.encodeFunctionData("hasStandaloneEditions"));
     });
 
     it("locks an album that is active on-chain against a change to SINGLE or EP", async () => {
       for (const target of ["SINGLE", "EP"]) {
-        const { instance, repo } = service(routed("ALBUM"), { publicationChain: clonedChain({ albumCreated: true, standaloneFlag: false }) });
+        const { instance, repo } = service(routed("ALBUM"), { publicationChain: clonedChain({ albumCreated: true }) });
         await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: target } })).rejects.toMatchObject({ status: 409, code: "ALBUM_TYPE_LOCKED" });
         expect(repo.saveRelease).not.toHaveBeenCalled();
       }
@@ -204,20 +221,82 @@ describe("standalone single on an album", () => {
 
     it("fails closed without echoing RPC details when the chain cannot be read", async () => {
       const { instance, repo } = service(routed("EP"), { publicationChain: clonedChain({ fail: true }) });
-      const error = await instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "ALBUM" } }).catch((caught) => caught);
+      const error = await instance.updateRelease({ request, releaseId: "release-1", input: toAlbum }).catch((caught) => caught);
       expect(error).toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
       expect(error.message).not.toMatch(/secret|rpc\.example|ECONNREFUSED/);
       expect(repo.saveRelease).not.toHaveBeenCalled();
+    });
+
+    it("fails closed for a version 2 binding whose factory is not a recorded deployment", async () => {
+      const chain = clonedChain();
+      const { instance, repo } = service(routed("EP", { binding: { ...v4Binding, factory_address: "0x00000000000000000000000000000000000000aa" } }), { publicationChain: chain });
+      await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+      expect(repo.saveRelease).not.toHaveBeenCalled();
+      expect(chain.request).not.toHaveBeenCalled();
     });
 
     it("does not read the chain when the type is unchanged or the release has no contract yet", async () => {
       const chain = clonedChain();
       const unchanged = service(routed("EP"), { publicationChain: chain });
       await unchanged.instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "EP", title: "Renamed" } });
-      const unbound = service(routed("EP", { bound: false }), { publicationChain: chain });
-      await unbound.instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "ALBUM" } });
+      const unbound = service(routed("EP", { binding: null }), { publicationChain: chain });
+      await unbound.instance.updateRelease({ request, releaseId: "release-1", input: toAlbum });
       expect(unbound.repo.saveRelease.mock.calls[0][0].metadata.releaseType).toBe("ALBUM");
       expect(chain.request).not.toHaveBeenCalled();
+    });
+
+    describe("through a real ethers JsonRpcProvider against a controlled JSON-RPC endpoint", () => {
+      // ethers 6 turns every eth_call JSON-RPC error into CALL_EXCEPTION, with null revert data when the
+      // node sent none (rate limits, missing state, internal errors). That must never read as "no getter".
+      async function withRpc(errorFor, run) {
+        const server = createServer((req, res) => {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", () => {
+            const payload = JSON.parse(body);
+            const answer = (call) => {
+              const error = errorFor(call);
+              return error ? { jsonrpc: "2.0", id: call.id, error } : { jsonrpc: "2.0", id: call.id, result: coder.encode(["bool"], [false]) };
+            };
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify(Array.isArray(payload) ? payload.map(answer) : answer(payload)));
+          });
+        });
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${server.address().port}/`, 43113, { staticNetwork: true });
+        try {
+          return await run({ request: ({ method, params }) => provider.send(method, params) });
+        } finally {
+          provider.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+
+      it("confirms the ethers classification this guard must not trust", async () => {
+        await withRpc(() => ({ code: -32000, message: "header not found" }), async ({ request: send }) => {
+          const error = await send({ method: "eth_call", params: [{ to: clone, data: lifecycle.encodeFunctionData("albumCreated") }, "latest"] }).catch((caught) => caught);
+          expect(error).toMatchObject({ code: "CALL_EXCEPTION", data: null });
+        });
+      });
+
+      for (const [label, rpcError] of [["an RPC error with null revert data", { code: -32000, message: "header not found" }], ["a rate limit", { code: -32005, message: "rate limit exceeded" }]]) {
+        it(`keeps an active album locked when albumCreated() hits ${label}`, async () => {
+          await withRpc(() => rpcError, async (publicationChain) => {
+            const { instance, repo } = service(routed("ALBUM"), { publicationChain });
+            await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "EP" } })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+            expect(repo.saveRelease).not.toHaveBeenCalled();
+          });
+        });
+      }
+
+      it("fails closed on a V5 binding when hasStandaloneEditions() cannot be read", async () => {
+        const failing = (call) => (call.params?.[0]?.data === lifecycle.encodeFunctionData("hasStandaloneEditions") ? { code: -32005, message: "rate limit exceeded" } : null);
+        await withRpc(failing, async (publicationChain) => {
+          const { instance, repo } = service(routed("SINGLE", { binding: v5Binding }), { publicationChain });
+          await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+          expect(repo.saveRelease).not.toHaveBeenCalled();
+        });
+      });
     });
   });
 });
