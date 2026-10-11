@@ -614,7 +614,7 @@ export function ArtistStudioPage() {
       const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: activeReleaseAsset.releaseContractAddress, data: encoded.data });
       setAlbumState((current) => ({ ...current, created: true }));
       setTxEvidence({ status: "submitted", transactionHash: transaction.hash, explorerUrl: fujiExplorerUrl("tx", transaction.hash), contractAddress: activeReleaseAsset.releaseContractAddress, chainId: activeReleaseAsset.chainId });
-      setNotice(`Album Contract activated. Add up to 13 tracks and designate up to 4 as singles.`);
+      setNotice(`Album Contract activated. By default it holds 13 tracks, up to 4 of them singles; the release admin can approve higher limits on-chain until the album is closed.`);
     } catch (error) {
       setNotice(error.message);
       setTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));

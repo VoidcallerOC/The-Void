@@ -34,7 +34,15 @@ Nothing in this document makes a decision for the owner, and nothing here was si
 - No code at either address.
 - The deployer's nonce is still 61 with nothing pending.
 
-**The predicted addresses hold only while the deployer's next transaction is the factory deployment.** Any earlier transaction from that key shifts them. A broadcast run prints and verifies the addresses it actually mined.
+**The predicted addresses hold only while the deployer's next transaction is the factory deployment.** Any earlier transaction from that key shifts them.
+
+A broadcast must therefore pass `expected_deployer_nonce` = the dry run's `deployer_nonce` (61 for run 38149347518).
+- **Workflow preflight:** refuses if the input is missing or the live nonce differs.
+- **Script, immediately before signing:** re-checks that latest and pending nonces are equal and match the input.
+- **Pinning:** sends the factory at that nonce and the marketplace at the next.
+- **After mining:** refuses to continue if either contract was mined anywhere but its predicted address.
+
+If the nonce has moved, run a new dry run first.
 
 ## 2. D2: who may lift the album caps
 

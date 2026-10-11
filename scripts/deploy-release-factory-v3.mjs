@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { ContractFactory, JsonRpcProvider, Wallet, getAddress, id, isAddress } from "ethers";
+import { ContractFactory, JsonRpcProvider, Wallet, getAddress, getCreateAddress, id, isAddress } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 
 // VoidReleaseFactoryV3 + its ReleaseMarketplaceV3. Each V3 clone (VoidRelease1155V5) records the
@@ -106,7 +106,13 @@ export function validateDeploymentEnv(env = process.env) {
   const expectedText = String(env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
   if (broadcast && !expectedText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
   if (expectedText && address(expectedText, "EXPECTED_DEPLOYER_ADDRESS") !== deployerAddress) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
-  return Object.freeze({ network, chainId: target.chainId, rpcUrl, deployerPrivateKey, deployerAddress, platformRecipient, marketplaceFeeRecipient, platformFeeBps: PLATFORM_FEE_BPS, broadcast });
+  // The nonce the reviewed dry run printed. It fixes the predicted CREATE addresses, so a broadcast
+  // whose deployer nonce has moved since that review is refused instead of landing elsewhere.
+  const nonceText = String(env.EXPECTED_DEPLOYER_NONCE ?? "").trim();
+  if (nonceText && !/^(0|[1-9][0-9]{0,15})$/.test(nonceText)) throw new DeploymentError("EXPECTED_DEPLOYER_NONCE must be a non-negative whole number.");
+  if (broadcast && !nonceText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_NONCE, the deployer nonce printed by the reviewed dry run.");
+  const expectedDeployerNonce = nonceText ? Number(nonceText) : null;
+  return Object.freeze({ network, chainId: target.chainId, rpcUrl, deployerPrivateKey, deployerAddress, platformRecipient, marketplaceFeeRecipient, platformFeeBps: PLATFORM_FEE_BPS, broadcast, expectedDeployerNonce });
 }
 
 export function buildDryRunPlan(config) {
@@ -144,8 +150,8 @@ export async function assertV5Artifact(load = loadArtifact) {
   if (missing.length) throw new DeploymentError(`Refusing to deploy: compiled VoidRelease1155V5 lacks ${missing.join(", ")}.`);
 }
 
-async function deployContract(artifact, args, wallet) {
-  const contract = await new ContractFactory(artifact.abi, artifact.bytecode.object, wallet).deploy(...args);
+async function deployContract(artifact, args, wallet, overrides = {}) {
+  const contract = await new ContractFactory(artifact.abi, artifact.bytecode.object, wallet).deploy(...args, overrides);
   const receipt = await contract.deploymentTransaction().wait();
   return { contract, receipt, address: getAddress(await contract.getAddress()) };
 }
@@ -191,12 +197,24 @@ export async function broadcastDeployment(config, provider, {
   await assertV5Artifact(load);
   const factoryArtifact = await load(FACTORY_ARTIFACT_PATH);
   const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
+  // Immediately before signing: no pending transactions, and the nonce is the one the reviewed dry
+  // run printed. Both deployments are then pinned to that nonce and the next, so a transaction that
+  // slips in first makes these fail rather than deploy at addresses nobody reviewed.
+  const [deployerNonce, pendingNonce] = await Promise.all([provider.getTransactionCount(deployer, "latest"), provider.getTransactionCount(deployer, "pending")]);
+  if (pendingNonce !== deployerNonce) throw new DeploymentError(`The deployer has pending transactions (nonce ${deployerNonce}, pending ${pendingNonce}); nothing was broadcast.`);
+  if (config.expectedDeployerNonce === null || config.expectedDeployerNonce === undefined || deployerNonce !== config.expectedDeployerNonce) {
+    throw new DeploymentError(`The deployer nonce is ${deployerNonce}, not the reviewed ${config.expectedDeployerNonce ?? "(missing)"}: the predicted addresses are stale. Run a new dry run; nothing was broadcast.`);
+  }
+  const predictedFactory = getCreateAddress({ from: deployer, nonce: deployerNonce });
+  const predictedMarketplace = getCreateAddress({ from: deployer, nonce: deployerNonce + 1 });
+  log({ step: "BROADCAST_PREFLIGHT_PASSED", deployerNonce, predictedFactoryAddress: predictedFactory, predictedMarketplaceAddress: predictedMarketplace });
   // Each mined step is logged immediately: a later failure must not lose a deployed address.
-  const factory = await deploy(factoryArtifact, [config.platformRecipient], wallet);
+  const factory = await deploy(factoryArtifact, [config.platformRecipient], wallet, { nonce: deployerNonce });
   const factoryAddress = getAddress(factory.address);
   const implementationAddress = getAddress(await factory.contract.implementation());
   log({ step: "FACTORY_MINED", factoryAddress, implementationAddress, transaction: factory.receipt.hash, block: factory.receipt.blockNumber, from: factory.receipt.from });
   assertMinedBy(factory.receipt, deployer, "Factory V3");
+  if (factoryAddress !== predictedFactory) throw new DeploymentError(`Factory V3 was mined at ${factoryAddress}, not the predicted ${predictedFactory}; the marketplace was not deployed.`);
   const missingOnChain = missingV5Selectors(await provider.getCode(implementationAddress));
   const releaseVersion = Number(await factory.contract.RELEASE_VERSION());
   const feeBps = Number(await factory.contract.PLATFORM_FEE_BPS());
@@ -204,10 +222,11 @@ export async function broadcastDeployment(config, provider, {
     log({ step: "FACTORY_NOT_V3", factoryAddress, implementationAddress, missing: missingOnChain, releaseVersion, feeBps });
     throw new DeploymentError(`Deployed factory ${factoryAddress} is not the reviewed Factory V3; the marketplace was not deployed.`);
   }
-  const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress], wallet);
+  const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress], wallet, { nonce: deployerNonce + 1 });
   const marketplaceAddress = getAddress(marketplace.address);
   log({ step: "MARKETPLACE_MINED", marketplaceAddress, transaction: marketplace.receipt.hash, block: marketplace.receipt.blockNumber, from: marketplace.receipt.from });
   assertMinedBy(marketplace.receipt, deployer, "ReleaseMarketplaceV3");
+  if (marketplaceAddress !== predictedMarketplace) throw new DeploymentError(`ReleaseMarketplaceV3 was mined at ${marketplaceAddress}, not the predicted ${predictedMarketplace}.`);
   if (getAddress(await marketplace.contract.registry()) !== factoryAddress) throw new DeploymentError("ReleaseMarketplaceV3 registry does not match the deployed Factory V3.");
   const recordPath = deploymentRecordPath(config.network, factoryAddress);
   const record = {

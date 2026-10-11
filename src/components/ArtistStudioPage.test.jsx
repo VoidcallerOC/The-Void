@@ -488,6 +488,8 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledWith(expect.objectContaining({ to: CLONE, data: new Interface(["function createAlbum(bytes32)"]).encodeFunctionData("createAlbum", [`0x${"ab".repeat(32)}`]) })));
     expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [], expect: V4_EXPECT });
     expect(lifecycleCalls()).toBe(1);
+    // D2 Option A: 13 / 4 are defaults, not maximums.
+    expect(await screen.findByText(/By default it holds 13 tracks, up to 4 of them singles; the release admin can approve higher limits/)).toBeTruthy();
   });
 
   describe("re-reads the release's editions from the release-scoped server read before deciding", () => {

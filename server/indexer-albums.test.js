@@ -78,6 +78,19 @@ describe("VoidRelease1155V4 album event decoding", () => {
 });
 
 describe("album events in the ERC1155 indexer path", () => {
+  it("indexes every track of an album expanded beyond the 13 / 4 defaults without truncation (D2 Option A)", async () => {
+    const store = storeDouble();
+    const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [config] });
+    const logs = [albumLog("AlbumCreated", [KEY], { logIndex: 0 }), albumLog("ExpandedReleaseApproved", [20n, 6n], { logIndex: 1 })];
+    // 14 tracks, 5 of them singles: both above the defaults, within the approved 20 / 6.
+    for (let index = 0; index < 14; index += 1) logs.push(albumLog("AlbumTrackCreated", [BigInt(index + 1), index < 5, 0n], { logIndex: index + 2 }));
+    for (const log of logs) await indexer.processLog(config, log, block(7));
+    expect(store.calls.album.filter((event) => event.eventType === "AlbumTrackCreated")).toHaveLength(14);
+    expect(store.calls.album.filter((event) => event.eventType === "AlbumTrackCreated" && event.single)).toHaveLength(5);
+    expect(store.calls.album.find((event) => event.eventType === "ExpandedReleaseApproved")).toMatchObject({ maxTracks: "20", maxSingles: "6" });
+    expect(store.calls.errors).toHaveLength(0);
+  });
+
   it("records each album event and projects it through the store", async () => {
     const store = storeDouble();
     const indexer = new BlockchainIndexer({ rpc: {}, store, configs: [config] });
