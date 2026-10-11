@@ -63,8 +63,16 @@ jobs:
 
           const provider = new JsonRpcProvider(process.env.AVALANCHE_FUJI_RPC_URL, 43113, { staticNetwork: true });
           const wallet = new Wallet(process.env.DEPLOYER_PRIVATE_KEY);
-          const network = await provider.getNetwork();
-          if (network.chainId !== 43113n) throw new Error(`Unexpected chain ID: ${network.chainId}`);
+          // staticNetwork makes getNetwork() echo 43113 without asking the node; eth_chainId asks it.
+          let chainIdReply;
+          try {
+            chainIdReply = await provider.send("eth_chainId", []);
+          } catch (error) {
+            throw new Error(`eth_chainId failed on the configured RPC${error?.code ? ` (${error.code})` : ""}.`);
+          }
+          if (typeof chainIdReply !== "string" || !/^0x[0-9a-f]+$/i.test(chainIdReply)) throw new Error("Malformed eth_chainId reply from the configured RPC.");
+          if (BigInt(chainIdReply) !== 43113n) throw new Error(`Unexpected chain ID: ${BigInt(chainIdReply)}`);
+          console.log(`rpc_chain_id=${BigInt(chainIdReply)}`);
           const nonce = await provider.getTransactionCount(wallet.address, "latest");
           const pendingNonce = await provider.getTransactionCount(wallet.address, "pending");
           console.log(`deployer_address=${wallet.address}`);

@@ -47,6 +47,25 @@ export function deploymentRecordPath(network, factoryAddress) {
 
 export class DeploymentError extends Error {}
 
+/**
+ * Asks the connected RPC for its chain ID with a raw eth_chainId call. A provider built with
+ * staticNetwork answers getNetwork() from its constructor argument without contacting the node,
+ * so getNetwork() proves nothing about the endpoint. Fails closed on an RPC error, a malformed
+ * reply or a different chain. The RPC URL and the underlying error text are never echoed.
+ */
+export async function assertRpcChainId(provider, expectedChainId) {
+  let reply;
+  try {
+    reply = await provider.send("eth_chainId", []);
+  } catch (error) {
+    throw new DeploymentError(`Refusing to continue: eth_chainId failed on the configured RPC${error?.code ? ` (${error.code})` : ""}.`);
+  }
+  if (typeof reply !== "string" || !/^0x[0-9a-f]+$/i.test(reply)) throw new DeploymentError("Refusing to continue: the configured RPC returned a malformed eth_chainId reply.");
+  const chainId = BigInt(reply);
+  if (chainId !== BigInt(expectedChainId)) throw new DeploymentError(`Refusing chain ${chainId}: eth_chainId must be ${expectedChainId}.`);
+  return chainId;
+}
+
 function required(value, name) {
   const text = String(value ?? "").trim();
   if (!text) throw new DeploymentError(`${name} is required.`);
@@ -145,6 +164,10 @@ export function proposedManifestEntry(record) {
   };
 }
 
+function assertMinedBy(receipt, deployer, name) {
+  if (!isAddress(String(receipt?.from || "")) || getAddress(receipt.from) !== deployer) throw new DeploymentError(`The ${name} deployment receipt was not sent by the validated deployer ${deployer}.`);
+}
+
 export async function broadcastDeployment(config, provider, {
   load = loadArtifact,
   deploy = deployContract,
@@ -152,6 +175,11 @@ export async function broadcastDeployment(config, provider, {
   log = (value) => console.log(JSON.stringify(value)),
   wallet = new Wallet(config.deployerPrivateKey, provider),
 } = {}) {
+  // Re-checked here so no caller can reach a broadcast without a live chain ID check.
+  await assertRpcChainId(provider, config.chainId);
+  // The deployer is the address of the signer that actually sends the transactions.
+  const deployer = getAddress(await wallet.getAddress());
+  if (deployer !== getAddress(config.deployerAddress)) throw new DeploymentError("The deployment signer does not match the validated DEPLOYER_PRIVATE_KEY address; nothing was broadcast.");
   await assertV5Artifact(load);
   const factoryArtifact = await load(FACTORY_ARTIFACT_PATH);
   const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
@@ -159,7 +187,8 @@ export async function broadcastDeployment(config, provider, {
   const factory = await deploy(factoryArtifact, [config.platformRecipient], wallet);
   const factoryAddress = getAddress(factory.address);
   const implementationAddress = getAddress(await factory.contract.implementation());
-  log({ step: "FACTORY_MINED", factoryAddress, implementationAddress, transaction: factory.receipt.hash, block: factory.receipt.blockNumber });
+  log({ step: "FACTORY_MINED", factoryAddress, implementationAddress, transaction: factory.receipt.hash, block: factory.receipt.blockNumber, from: factory.receipt.from });
+  assertMinedBy(factory.receipt, deployer, "Factory V3");
   const missingOnChain = missingV5Selectors(await provider.getCode(implementationAddress));
   const releaseVersion = Number(await factory.contract.RELEASE_VERSION());
   const feeBps = Number(await factory.contract.PLATFORM_FEE_BPS());
@@ -169,7 +198,8 @@ export async function broadcastDeployment(config, provider, {
   }
   const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.platformFeeBps, factoryAddress], wallet);
   const marketplaceAddress = getAddress(marketplace.address);
-  log({ step: "MARKETPLACE_MINED", marketplaceAddress, transaction: marketplace.receipt.hash, block: marketplace.receipt.blockNumber });
+  log({ step: "MARKETPLACE_MINED", marketplaceAddress, transaction: marketplace.receipt.hash, block: marketplace.receipt.blockNumber, from: marketplace.receipt.from });
+  assertMinedBy(marketplace.receipt, deployer, "ReleaseMarketplaceV3");
   if (getAddress(await marketplace.contract.registry()) !== factoryAddress) throw new DeploymentError("ReleaseMarketplaceV3 registry does not match the deployed Factory V3.");
   const recordPath = deploymentRecordPath(config.network, factoryAddress);
   const record = {
@@ -178,6 +208,7 @@ export async function broadcastDeployment(config, provider, {
     architecture: "release-per-contract",
     provenanceAtCreation: true,
     recordPath,
+    deployer,
     factory: {
       name: "VoidReleaseFactoryV3",
       address: factoryAddress,
@@ -187,6 +218,7 @@ export async function broadcastDeployment(config, provider, {
       implementationAddress,
       implementationVersion: EXPECTED_IMPLEMENTATION_VERSION,
       releaseVersion,
+      deployer,
       sourceCommit: process.env.GITHUB_SHA || null,
       platformRecipient: config.platformRecipient,
       platformFeeBps: config.platformFeeBps,
@@ -214,8 +246,7 @@ export async function broadcastDeployment(config, provider, {
 export async function run(argv = process.argv.slice(2), env = process.env, dependencies = {}) {
   const config = validateDeploymentEnv(env);
   const provider = dependencies.provider || new JsonRpcProvider(config.rpcUrl, config.chainId, { staticNetwork: true });
-  const network = await provider.getNetwork();
-  if (network.chainId !== BigInt(config.chainId)) throw new DeploymentError(`Refusing chain ${network.chainId}: DEPLOY_NETWORK=${config.network} expects ${config.chainId}.`);
+  await assertRpcChainId(provider, config.chainId);
   await (dependencies.assertV5 || assertV5Artifact)();
   const plan = buildDryRunPlan(config);
   if (!config.broadcast) {
