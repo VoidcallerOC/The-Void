@@ -289,6 +289,22 @@ describe("standalone single on an album", () => {
         });
       }
 
+      it("keeps an active album locked when the RPC endpoint is unreachable", async () => {
+        // Take a free port, then close it so every request is refused.
+        const closed = createServer();
+        await new Promise((resolve) => closed.listen(0, "127.0.0.1", resolve));
+        const { port } = closed.address();
+        await new Promise((resolve) => closed.close(resolve));
+        const provider = new ethers.JsonRpcProvider(`http://127.0.0.1:${port}/`, 43113, { staticNetwork: true });
+        try {
+          const { instance, repo } = service(routed("ALBUM"), { publicationChain: { request: ({ method, params }) => provider.send(method, params) } });
+          await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "SINGLE" } })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+          expect(repo.saveRelease).not.toHaveBeenCalled();
+        } finally {
+          provider.destroy();
+        }
+      });
+
       it("fails closed on a V5 binding when hasStandaloneEditions() cannot be read", async () => {
         const failing = (call) => (call.params?.[0]?.data === lifecycle.encodeFunctionData("hasStandaloneEditions") ? { code: -32005, message: "rate limit exceeded" } : null);
         await withRpc(failing, async (publicationChain) => {
