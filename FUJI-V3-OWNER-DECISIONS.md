@@ -113,8 +113,9 @@ The GitHub secret `DEPLOYER_PRIVATE_KEY` is unchanged, so dry run 38149347518 st
 
 ## 4. Still outstanding, separate from these decisions
 
-- **Owner-authorized lifecycle-endpoint check:** an owner-authorized call to `GET /api/studio/releases/:id/lifecycle-editions` that returns `complete: true`. It needs the owner's wallet session. Non-owner refusal is already verified live.
+- **Owner-authorized lifecycle-endpoint check:** an owner-authorized call to `GET /api/studio/releases/:id/lifecycle-editions` that returns `complete: true`. It needs the owner's wallet session. Non-owner refusal is already verified live. A successful call leaves no log or audit record, so the owner must save the response ([`L5-PROTECTED-MEDIA-EVIDENCE.md`](./L5-PROTECTED-MEDIA-EVIDENCE.md) §5).
 - **L5 protected-media certification on per-release (factory) contracts:**
   - grants and an entitlement refusal exist only on legacy shared contracts (2026-10-03/04);
   - none exist on a Factory V2 or V3 release yet.
+  - Reconciled with the database and chain on 2026-10-11, including the smallest safe way to get the proof: [`L5-PROTECTED-MEDIA-EVIDENCE.md`](./L5-PROTECTED-MEDIA-EVIDENCE.md).
 - **Independent V5 delta review:** [`V5-DELTA-REVIEW-PACKET.md`](./V5-DELTA-REVIEW-PACKET.md), NOT STARTED.

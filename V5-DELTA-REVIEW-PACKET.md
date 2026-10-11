@@ -109,6 +109,8 @@ Links point at the review head:
     - a paused release;
     - `closeAlbum` called before any track.
 
+    Operator guidance for these states, without any contract change: [`RELEASE-ADMIN-SAFETY.md`](./RELEASE-ADMIN-SAFETY.md) (INFO-02 of the internal review, which is not this independent review).
+
 ## 5. Context the reviewer needs (operational, not contract scope)
 
 - **Provisioning (Studio fix 7a, merged in PR #164).** A release prepared on a factory is always created and verified on that factory. Two Factory V2 requests are PENDING. They were never sent and are not on-chain, so they will complete on V2 even after activation.
