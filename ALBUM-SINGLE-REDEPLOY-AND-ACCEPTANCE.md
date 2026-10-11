@@ -19,7 +19,7 @@ A redeploy creates a new **immutable** implementation, so these choices become p
 
 | # | Decision | Current source behaviour | Recommendation |
 |---|---|---|---|
-| D1 | What a **single** is | A single is an album track flagged `single = true` (`isAlbumSingle`). There is no standalone SINGLE release type. The README lists Single/EP/Album. | Confirm one of two options: (a) keep "single = album track", or (b) add a standalone single release. If you pick (b), the clone needs a type-specific rule, such as exactly one edition. |
+| D1 | What a **single** is | A single is an album track flagged `single = true` (`isAlbumSingle`). There is no standalone SINGLE release type. The README lists Single/EP/Album. | Confirm one of two options: (a) keep "single = album track", or (b) add a standalone single release. If you pick (b), the clone needs a type-specific rule, such as exactly one edition. **Superseded 2026-10-11:** `be130b2` added a standalone SINGLE type; see [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4. |
 | D2 | Who may lift the 13-track / 4-single caps | `approveExpandedRelease` is gated by `DEFAULT_ADMIN_ROLE`, which the **artist** holds. The caps are therefore advisory. | If the caps are a platform rule, move approval to a platform-held role. |
 | D3 | Standalone editions created before `createAlbum` | Allowed. They do not count toward the caps, so the caps can be bypassed. | Make `createAlbum` revert when standalone editions already exist. |
 | D4 | When a clone becomes an album | Only through a separate `createAlbum` transaction after `createRelease`. | Optional: pass the release type into `createRelease` so album mode is set atomically. |
@@ -96,7 +96,7 @@ Status for every row is **NOT STARTED** unless noted. A row passes only with the
 
 | ID | Step | Required evidence |
 |---|---|---|
-| C1 | The single is discoverable as a single | API or catalog shows `isAlbumSingle` from chain. **Not implemented:** the indexer does not decode `AlbumTrackCreated` yet. |
+| C1 | The single is discoverable as a single | API or catalog shows `isAlbumSingle` from chain. **Superseded 2026-10-11:** `7be7a4c` decodes `AlbumTrackCreated`; the gap is now the public UI, which does not render it ([`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4). |
 | C2 | Single-specific mint window | B6 on the single track |
 | C3 | Buy, own, unlock and resell | A4–A7 on the single |
 
