@@ -77,7 +77,7 @@ There are **three** meanings of "single" in the code, not two:
 - C: SINGLE means S1 only, and S2 is shown as a "featured track". The on-chain cap is still named "singles", so the labels conflict.
 - D: merge S2 and S3 in the UI. This needs a combined cap policy and an ordering source for S2.
 
-D2 (the artist alone can lift the caps through `approveExpandedRelease`) is still an open owner decision.
+D2 (the artist alone can lift the caps through `approveExpandedRelease`) is **decided: Option A, keep as is** (owner, 2026-10-11). Artists may lift the caps with no upper limit, 13 tracks and 4 singles are defaults rather than hard maximums, and no Solidity change is made. See [`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md) §2.
 
 ## 4a. D3: a standalone release contract never becomes an album
 
