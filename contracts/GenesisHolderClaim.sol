@@ -37,8 +37,9 @@ interface IGenesisClaimSale {
 /// release's existing ISSUER_ROLE path; this contract can mint only its immutable token.
 /// @dev Fixed schedule: free Genesis claims for exactly claimWindow from claimStart, then the
 /// token's own primary sale must open at claimEnd and close publicWindow later at publicPriceWei.
-/// On C-Chain (43114) the windows must be the production 24 hours and 7 days; only Fuji may use
-/// shorter test windows, and never below MINIMUM_TEST_WINDOW.
+/// On C-Chain (43114) the windows must be the production 24 hours and 7 days at the production
+/// 0.25 AVAX price; only Fuji may use shorter test windows (never below MINIMUM_TEST_WINDOW) and
+/// another price.
 /// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
 /// claim and fails closed if it drifts. Eligibility is fixed at a C-Chain snapshot block that the
 /// immutable ELIGIBILITY_RULE commits to; the server signs vouchers only for snapshot holders.
@@ -48,6 +49,7 @@ contract GenesisHolderClaim {
     address public constant LEGACY_FUJI_SINGLETON = 0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6;
     uint256 public constant PRODUCTION_CLAIM_WINDOW = 1 days;
     uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
+    uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -157,8 +159,11 @@ contract GenesisHolderClaim {
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         if (block.chainid == GENESIS_CHAIN_ID) {
-            // Production: exactly 24 hours of Genesis claims, then exactly 7 days of public sale.
-            if (claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW) revert InvalidConfiguration();
+            // Production: exactly 24 hours of Genesis claims, then exactly 7 days of public sale at 0.25 AVAX.
+            if (
+                claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW
+                    || publicPriceWei_ != PRODUCTION_PUBLIC_PRICE_WEI
+            ) revert InvalidConfiguration();
         } else if (claimWindow_ < MINIMUM_TEST_WINDOW || publicWindow_ < MINIMUM_TEST_WINDOW) {
             revert InvalidConfiguration();
         }

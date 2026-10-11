@@ -179,7 +179,7 @@ Every step below is a transaction or a production change. **None is authorized b
 | Supply | uncapped (`maxSupply 0`, allocations 0) | uncapped |
 
 **Where each rule is enforced:**
-- **Contract** (`GenesisHolderClaim` constructor): on chain 43114 it reverts unless the windows are exactly 1 day and 7 days. On Fuji each window must be at least 60 seconds.
+- **Contract** (`GenesisHolderClaim` constructor): on chain 43114 it reverts unless the windows are exactly 1 day and 7 days and the price is exactly 0.25 AVAX (`PRODUCTION_PUBLIC_PRICE_WEI`). On Fuji each window must be at least 60 seconds. On every claim the sale must still match the claim's price and schedule.
 - **API** (`claimSchedule` in `server/genesis-claim.js`): with `RELEASE_NETWORK=mainnet` it refuses to load unless the windows are 86,400 s and 604,800 s and the price is 0.25 AVAX. It also checks the deployed claim's `claimWindow` and `publicWindow`.
 - **Deploy script** (`DEPLOY_NETWORK=fuji|mainnet`): applies the same rules. A mainnet broadcast needs `CONFIRM_MAINNET_DEPLOY`.
 

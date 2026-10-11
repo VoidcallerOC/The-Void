@@ -127,11 +127,21 @@ contract GenesisHolderClaimScheduleTest {
         new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days + 1, 0.25 ether, RULE, ADMIN, signer);
     }
 
+    function testMainnetRefusesAnyPriceOtherThanProduction() public {
+        _setUpChain(43114);
+        _configure(0.01 ether, 1 days, 7 days);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.01 ether, RULE, ADMIN, signer);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.25 ether + 1, RULE, ADMIN, signer);
+    }
+
     function testMainnetAcceptsOnlyTheProductionSchedule() public {
         _setUpChain(43114);
         _configure(0.25 ether, 1 days, 7 days);
         GenesisHolderClaim claim = _deploy(0.25 ether, 1 days, 7 days);
         require(claim.claimWindow() == 1 days && claim.publicWindow() == 7 days, "windows");
+        require(claim.publicPriceWei() == claim.PRODUCTION_PUBLIC_PRICE_WEI(), "price");
         require(claim.publicSaleEnd() - claim.claimEnd() + 1 == 7 days, "public window");
     }
 }

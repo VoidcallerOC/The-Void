@@ -231,6 +231,6 @@ describe("compiled GenesisHolderClaim artifact", () => {
     const constructor = artifact.abi.find((item) => item.type === "constructor");
     expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "eligibilityRule_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
-    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
+    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });
 });
