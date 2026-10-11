@@ -138,6 +138,8 @@ Read-only. `node scripts/fuji-release-capability-probe.mjs` (tier 2, public Fuji
 | Production API `/api/health/ready` | `ok: true`; the indexer covers both factories, both marketplaces, both new clones and their sales. Lag is 15 blocks. |
 | Vercel production | `dpl_994HePxZcJ3ZQiYvT4RBWfEeyRGu` is READY on `fc83364` (main HEAD). |
 
+> **Correction 2026-10-11:** the statement below that Path A was not re-run on the new pair is contradicted by tier-1 receipts mined 2026-10-10 18:20Z–20:04Z on clone `0x4b27…9bB0`. See [`SYSTEM-CHAIN-CERTIFICATION.md`](./SYSTEM-CHAIN-CERTIFICATION.md) §2–§3.
+
 **What this certifies:** contract capability and wiring (S1–S3).
 **What it does not certify:** any album workflow. Paths B and C are **NOT STARTED** on-chain. No album has been created on any clone. Path A has not been re-run end to end on the new pair.
 
