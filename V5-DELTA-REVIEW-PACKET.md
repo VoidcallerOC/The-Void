@@ -2,7 +2,7 @@
 
 **Status: NOT STARTED.** No independent review has taken place. This packet only prepares one. A review is recorded in §8 only after it actually happens, using the reviewer's own words and references.
 
-**Gate:** a Factory V3 broadcast on Fuji needs this review, the D5 action (D2 is decided: Option A), and an explicit owner authorization ([`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md)). A dry run already passed: [run 38149347518](https://github.com/VoidcallerOC/The-Void/actions/runs/38149347518).
+**Gate:** a Factory V3 broadcast on Fuji needs this review and an explicit owner authorization (D2 is decided: Option A; D5 is done) ([`FUJI-V3-OWNER-DECISIONS.md`](./FUJI-V3-OWNER-DECISIONS.md)). A dry run already passed: [run 38149347518](https://github.com/VoidcallerOC/The-Void/actions/runs/38149347518).
 
 ## 1. Why the reviewer must be independent
 
