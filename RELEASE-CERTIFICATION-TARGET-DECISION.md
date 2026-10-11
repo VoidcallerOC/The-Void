@@ -151,7 +151,7 @@ A deployed contract or a green test run moves **none** of these rows.
 | B11 | Production Studio behaviour | Each tx linked to a UI session record (ledger A9 rule) | NOT STARTED |
 | C1 | Single discoverable as a single | Depends on D1. With Option A: the public UI shows the S1/S2/S3 labels from API data | NOT STARTED (UI not implemented) |
 | C2 | Single mint window and purchase | B5 + B7 on an S2 track | NOT STARTED |
-| L5 | Protected media | Owner grant; non-owner and anonymous get 403; access moves on resale | NOT STARTED |
+| L5 | Protected media | Owner grant; non-owner and anonymous get 403; access moves on resale. Legacy-contract evidence and the no-transaction path for a factory clone: [`L5-PROTECTED-MEDIA-EVIDENCE.md`](./L5-PROTECTED-MEDIA-EVIDENCE.md) | NOT STARTED |
 | P0 | Public masters in `refs/pull/*` | GitHub Support purge, or a private repo | OPEN |
 
 ## 7. Not verified here
