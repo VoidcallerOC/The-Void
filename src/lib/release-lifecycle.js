@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../../config/release-network.js";
+import { releaseDeploymentForFactory } from "../../config/release-network.js";
 
 // D3 lifecycle: one release contract is either standalone (editions via createEdition) or an album
 // (tracks via createAlbumTrack) for its whole life. An album that reuses earlier music is a new
@@ -42,22 +42,36 @@ function revertDataOf(error) {
   return null;
 }
 
+// Lifecycle getters per known release implementation, keyed by the factory's ReleaseCreated version.
+// This is deliberately a closed list, separate from provenance semantics: a new implementation is
+// trusted only after it is reviewed and added here, never because its version number is higher.
+//   2, album-capable factory -> VoidRelease1155V4: albumCreated(), no hasStandaloneEditions()
+//   2, pre-album factory     -> pre-album implementation: no album getters
+//   3, album-capable factory -> VoidRelease1155V5: albumCreated() and hasStandaloneEditions()
+const LIFECYCLE_GETTERS = Object.freeze({
+  V4: Object.freeze({ albumCreated: true, hasStandaloneEditions: false }),
+  PRE_ALBUM: Object.freeze({ albumCreated: false, hasStandaloneEditions: false }),
+  V5: Object.freeze({ albumCreated: true, hasStandaloneEditions: true }),
+});
+const LIFECYCLE_IMPLEMENTATIONS = Object.freeze({
+  2: (deployment) => (deployment.albumCapable === true ? LIFECYCLE_GETTERS.V4 : LIFECYCLE_GETTERS.PRE_ALBUM),
+  3: (deployment) => (deployment.albumCapable === true ? LIFECYCLE_GETTERS.V5 : null),
+});
+
 /**
  * Which lifecycle getters a release clone must answer, from trusted deployment metadata, never from
  * an error: a failed or rate-limited eth_call is not evidence that a getter is missing. The factory
- * must be a recorded release deployment whose version matches the binding's, for every version:
- * a version number alone never vouches for a contract. Version 3+ clones are VoidRelease1155V5 and
- * have both getters. Version 2 clones take album support from the recorded factory (V4 album-capable,
- * or the pre-album implementation); V4 has no hasStandaloneEditions(). Returns null when the
- * deployment is not recognised, so callers fail closed.
+ * must be a recorded release deployment whose releaseVersion equals the binding's version, and that
+ * version must be a known implementation in LIFECYCLE_IMPLEMENTATIONS. Returns null otherwise, so
+ * callers fail closed before any chain read.
  */
 export function lifecycleExpectations({ implementationVersion, factoryAddress }) {
   const version = Number(implementationVersion);
   if (!Number.isSafeInteger(version) || version < 1) return null;
   const deployment = releaseDeploymentForFactory(factoryAddress);
   if (!deployment || Number(deployment.releaseVersion) !== version) return null;
-  if (anchorsProvenanceAtCreation(version)) return Object.freeze({ albumCreated: true, hasStandaloneEditions: true });
-  return Object.freeze({ albumCreated: deployment.albumCapable === true, hasStandaloneEditions: false });
+  const implementation = Object.hasOwn(LIFECYCLE_IMPLEMENTATIONS, version) ? LIFECYCLE_IMPLEMENTATIONS[version] : null;
+  return implementation ? implementation(deployment) : null;
 }
 
 /** Expectations for a release clone known only by its factory (Studio): the recorded factory's version. */

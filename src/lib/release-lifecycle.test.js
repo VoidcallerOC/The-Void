@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ethers } from "ethers";
-// One recorded Factory V3 (version 3, V5 clones), as an activated manifest would list it.
-const V3_FACTORY = "0x00000000000000000000000000000000000000f3";
+// Recorded test factories, as a manifest would list them: Factory V3 (version 3, V5 clones), a future
+// version 4 nobody has reviewed for lifecycle support, and a contradictory version 3 entry.
+const { V3_FACTORY, FUTURE_FACTORY, V3_NOT_ALBUM_FACTORY } = vi.hoisted(() => ({ V3_FACTORY: "0x00000000000000000000000000000000000000f3", FUTURE_FACTORY: "0x00000000000000000000000000000000000000f4", V3_NOT_ALBUM_FACTORY: "0x00000000000000000000000000000000000000f5" }));
 vi.mock("../../config/release-network.js", async (importOriginal) => {
   const original = await importOriginal();
-  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === V3_FACTORY ? { factoryAddress: V3_FACTORY, releaseVersion: 3, albumCapable: true } : original.releaseDeploymentForFactory(address)) };
+  const extra = { [V3_FACTORY]: { releaseVersion: 3, albumCapable: true }, [FUTURE_FACTORY]: { releaseVersion: 4, albumCapable: true }, [V3_NOT_ALBUM_FACTORY]: { releaseVersion: 3, albumCapable: false } };
+  return { ...original, releaseDeploymentForFactory: (address) => { const entry = extra[String(address).toLowerCase()]; return entry ? { factoryAddress: String(address).toLowerCase(), ...entry } : original.releaseDeploymentForFactory(address); } };
 });
 import { ALBUM_NOT_SUPPORTED_MESSAGE, ALBUM_TYPE_LOCKED_MESSAGE, STANDALONE_EDITIONS_EXIST_MESSAGE, editionSlugFromTitle, lifecycleExpectations, lifecycleExpectationsForFactory, readReleaseLifecycle, releaseEditionTokenId, releaseTypeChangeBlocker } from "./release-lifecycle.js";
 
@@ -47,6 +49,11 @@ describe("release lifecycle (D3)", () => {
     expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: "0x00000000000000000000000000000000000000aa" })).toBeNull();
     expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8" })).toBeNull();
     expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: V3_FACTORY })).toBeNull();
+    // A recorded factory with a matching but unreviewed future version is not a V5: its lifecycle
+    // interface is unknown, so nothing is trusted. A contradictory version 3 entry is not trusted either.
+    expect(lifecycleExpectations({ implementationVersion: 4, factoryAddress: FUTURE_FACTORY })).toBeNull();
+    expect(lifecycleExpectationsForFactory(FUTURE_FACTORY)).toBeNull();
+    expect(lifecycleExpectations({ implementationVersion: 3, factoryAddress: V3_NOT_ALBUM_FACTORY })).toBeNull();
     expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8" })).toEqual(V4);
     expect(lifecycleExpectations({ implementationVersion: 2, factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" })).toEqual(PRE_ALBUM);
     expect(lifecycleExpectationsForFactory("0x3e4e0d9187f6fd11bd6d792a7088d0c2de8e3ac8")).toEqual(V4);

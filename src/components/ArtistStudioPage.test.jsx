@@ -29,6 +29,12 @@ vi.mock("../lib/fuji-release.js", async (importOriginal) => {
   sendReleaseTransaction: (...args) => sendReleaseTransaction(...args),
   };
 });
+// A recorded factory with a future version 4 whose lifecycle interface has not been reviewed.
+const { FUTURE_FACTORY } = vi.hoisted(() => ({ FUTURE_FACTORY: "0x00000000000000000000000000000000000000f4" }));
+vi.mock("../../config/release-network.js", async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === FUTURE_FACTORY ? { factoryAddress: FUTURE_FACTORY, releaseVersion: 4, albumCapable: true, chainId: 43113 } : original.releaseDeploymentForFactory(address)) };
+});
 vi.mock("../lib/release-lifecycle.js", async (importOriginal) => ({ ...(await importOriginal()), readReleaseLifecycle: (...args) => readReleaseLifecycle(...args) }));
 vi.mock("../lib/primary-sale.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -435,6 +441,7 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     ["an edition has no stored token IDs", () => ({ editions: [{ ...renamedDraft, stored_token_ids: undefined }], releaseBindings: [binding] })],
     ["the binding's factory is not a recorded deployment", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: "0x00000000000000000000000000000000000000aa" }] })],
     ["the release has no binding in the catalog", () => ({ editions: [renamedDraft] })],
+    ["the recorded factory's version is not a reviewed lifecycle implementation", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: FUTURE_FACTORY }] })],
   ]) {
     it(`refuses activation before reading the chain when ${label}`, async () => {
       mockConfirmedAlbumDraft(setup());

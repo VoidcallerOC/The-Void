@@ -3,11 +3,13 @@ import { createServer } from "node:http";
 import { ethers } from "ethers";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 
-// One recorded Factory V3 (version 3, V5 clones), as an activated manifest would list it.
-const V3_FACTORY = "0x00000000000000000000000000000000000000f3";
+// Recorded test factories, as a manifest would list them: Factory V3 (version 3, V5 clones) and a
+// future version 4 whose lifecycle interface has not been reviewed.
+const { V3_FACTORY, FUTURE_FACTORY } = vi.hoisted(() => ({ V3_FACTORY: "0x00000000000000000000000000000000000000f3", FUTURE_FACTORY: "0x00000000000000000000000000000000000000f4" }));
 vi.mock("../config/release-network.js", async (importOriginal) => {
   const original = await importOriginal();
-  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === V3_FACTORY ? { factoryAddress: V3_FACTORY, releaseVersion: 3, albumCapable: true, chainId: 43113 } : original.releaseDeploymentForFactory(address)) };
+  const extra = { [V3_FACTORY]: { releaseVersion: 3, albumCapable: true, chainId: 43113 }, [FUTURE_FACTORY]: { releaseVersion: 4, albumCapable: true, chainId: 43113 } };
+  return { ...original, releaseDeploymentForFactory: (address) => { const entry = extra[String(address).toLowerCase()]; return entry ? { factoryAddress: String(address).toLowerCase(), ...entry } : original.releaseDeploymentForFactory(address); } };
 });
 import { ArtistStudioService } from "./studio-service.js";
 
@@ -251,6 +253,35 @@ describe("standalone single on an album", () => {
         expect(repo.saveRelease).not.toHaveBeenCalled();
         expect(chain.request).not.toHaveBeenCalled();
       }
+    });
+
+    it("refuses a recorded factory with an unreviewed future version before any chain read or save", async () => {
+      for (const [stored, target] of [["EP", "ALBUM"], ["ALBUM", "EP"], ["SINGLE", "EP"]]) {
+        const chain = clonedChain({ albumCreated: true, standaloneFlag: true });
+        const { instance, repo } = service(routed(stored, { binding: { ...v4Binding, implementation_version: 4, factory_address: FUTURE_FACTORY } }), { publicationChain: chain });
+        await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: target } })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+        expect(repo.saveRelease).not.toHaveBeenCalled();
+        expect(chain.request).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses a binding whose version does not match its recorded factory", async () => {
+      for (const binding of [{ ...v4Binding, implementation_version: 3 }, { ...v5Binding, implementation_version: 2 }, { ...v4Binding, implementation_version: 4, factory_address: V3_FACTORY }]) {
+        const chain = clonedChain();
+        const { instance, repo } = service(routed("EP", { binding }), { publicationChain: chain });
+        await expect(instance.updateRelease({ request, releaseId: "release-1", input: toAlbum })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
+        expect(repo.saveRelease).not.toHaveBeenCalled();
+        expect(chain.request).not.toHaveBeenCalled();
+      }
+    });
+
+    it("reads both lifecycle getters on the known V3/V5 implementation", async () => {
+      const chain = clonedChain({ standaloneFlag: false });
+      const { instance, repo } = service(routed("EP", { binding: v5Binding }), { publicationChain: chain });
+      await instance.updateRelease({ request, releaseId: "release-1", input: toAlbum });
+      expect(repo.saveRelease.mock.calls[0][0].metadata.releaseType).toBe("ALBUM");
+      const calls = chain.request.mock.calls.map(([payload]) => payload.params[0].data);
+      expect(calls).toEqual(expect.arrayContaining([lifecycle.encodeFunctionData("albumCreated"), lifecycle.encodeFunctionData("hasStandaloneEditions")]));
     });
 
     it("refuses ALBUM on a pre-album clone even with no editions, without reading the chain", async () => {
