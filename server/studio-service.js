@@ -285,8 +285,7 @@ export class ArtistStudioService {
       this.db.query("SELECT a.id, a.slug, a.display_name, a.status, ao.owner_wallet, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY a.display_name LIMIT 100", [owner]),
       this.db.query("SELECT r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY r.created_at DESC LIMIT 500", [owner]),
       // token_id only for PUBLISHED editions: a draft's token does not exist on-chain yet.
-      // stored_token_ids are every token ID prepared for the edition (mined or not), for the D3 album check.
-      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, ARRAY(SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at) AS stored_token_ids, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT s.album_release_id, s.single_release_id, s.single_edition_id, s.track_position FROM release_album_singles s JOIN releases r ON r.id=s.album_release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY s.album_release_id, s.track_position LIMIT 1000", [owner]),
       // Every factory binding (any factory version) so Studio can read each sale contract's balances.
@@ -296,6 +295,24 @@ export class ArtistStudioService {
     // wallet still drops Voidcaller artist profiles so those releases stay with
     // the platform artist wallet.
     return studioCatalogForConnectedWallet({ artists: artists.rows, releases: releases.rows, editions: editions.rows, experiences: experiences.rows, albumSingles: albumSingles.rows, releaseBindings: releaseBindings.rows }, owner);
+  }
+
+  /**
+   * D3: every token ID stored for one release's editions, and its factory bindings, for Studio's
+   * check immediately before album activation. Scoped to the release after the same ownership check
+   * as updateRelease, and deliberately uncapped: the owner-wide catalog is limited to the newest 500
+   * editions, so an older edition could be missing from it. The token query is the server guard's.
+   */
+  async releaseLifecycleEditions({ request, releaseId }) {
+    const identity = await this.identity(request);
+    const { rows } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
+    const [tokens, bindings] = await Promise.all([
+      this.db.query("SELECT DISTINCT t.token_id::text AS token_id FROM tokens t JOIN editions e ON e.id=t.edition_id WHERE e.release_id=$1", [release.id]),
+      this.db.query("SELECT rc.release_id, rc.chain_id, release_contract.address AS release_contract_address, factory_contract.address AS factory_address FROM release_contracts rc JOIN contracts release_contract ON release_contract.id=rc.release_contract_id LEFT JOIN contracts factory_contract ON factory_contract.id=rc.factory_contract_id WHERE rc.release_id=$1 AND rc.status IN ('DEPLOYED','VERIFIED')", [release.id]),
+    ]);
+    return { releaseId: release.id, complete: true, tokenIds: tokens.rows.map((row) => row.token_id), releaseBindings: bindings.rows };
   }
   async ownedArtist({ artistId, request, lock = false }) {
     const identity = await this.identity(request);

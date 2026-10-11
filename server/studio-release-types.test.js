@@ -380,3 +380,44 @@ describe("standalone single on an album", () => {
     });
   });
 });
+
+describe("D3: release-scoped lifecycle editions for Studio album activation", () => {
+  const CLONE = "0x00000000000000000000000000000000000000c1";
+  const ownedRelease = (sql) => sql.startsWith("SELECT r.id FROM releases r JOIN artist_owners");
+  const tokenQuery = (sql) => sql.includes("SELECT DISTINCT t.token_id::text AS token_id FROM tokens t");
+  const bindingQuery = (sql) => sql.includes("FROM release_contracts rc") && !sql.includes("LIMIT");
+
+  it("returns every stored token ID and factory binding of the owner's release, uncapped and scoped to it", async () => {
+    const binding = { release_id: "release-1", chain_id: 43113, release_contract_address: CLONE, factory_address: V3_FACTORY };
+    const { instance, db } = service((sql, params) => (ownedRelease(sql) ? (params[0] === "release-1" && params[1] === owner ? [{ id: "release-1" }] : []) : tokenQuery(sql) ? [{ token_id: "5" }, { token_id: "7" }] : bindingQuery(sql) ? [binding] : []));
+    await expect(instance.releaseLifecycleEditions({ request, releaseId: "release-1" })).resolves.toEqual({ releaseId: "release-1", complete: true, tokenIds: ["5", "7"], releaseBindings: [binding] });
+    const scoped = db.query.mock.calls.filter(([sql]) => tokenQuery(String(sql)) || bindingQuery(String(sql)));
+    expect(scoped).toHaveLength(2);
+    for (const [sql, params] of scoped) {
+      expect(params).toEqual(["release-1"]);
+      expect(String(sql)).toContain(tokenQuery(String(sql)) ? "WHERE e.release_id=$1" : "WHERE rc.release_id=$1");
+      expect(String(sql)).not.toMatch(/LIMIT/i);
+    }
+  });
+
+  it("returns a complete empty result for an owned release with no stored editions", async () => {
+    const { instance } = service((sql) => (ownedRelease(sql) ? [{ id: "release-1" }] : []));
+    await expect(instance.releaseLifecycleEditions({ request, releaseId: "release-1" })).resolves.toEqual({ releaseId: "release-1", complete: true, tokenIds: [], releaseBindings: [] });
+  });
+
+  it("refuses another artist's or an unknown release before reading any edition", async () => {
+    const { instance, db } = service(() => []);
+    await expect(instance.releaseLifecycleEditions({ request, releaseId: "release-of-someone-else" })).rejects.toMatchObject({ status: 403, code: "ARTIST_ACCESS_DENIED" });
+    expect(db.query.mock.calls.some(([sql]) => tokenQuery(String(sql)))).toBe(false);
+    await expect(instance.releaseLifecycleEditions({ request, releaseId: "" })).rejects.toMatchObject({ name: "PersistenceValidationError" });
+  });
+
+  it("fails rather than answering when the edition query fails", async () => {
+    const { instance } = service((sql) => {
+      if (ownedRelease(sql)) return [{ id: "release-1" }];
+      if (tokenQuery(sql)) throw new Error("connection terminated");
+      return [];
+    });
+    await expect(instance.releaseLifecycleEditions({ request, releaseId: "release-1" })).rejects.toThrow("connection terminated");
+  });
+});

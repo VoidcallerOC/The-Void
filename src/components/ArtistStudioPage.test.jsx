@@ -78,16 +78,18 @@ function albumDraftCatalog({ editions = [], releaseBindings = undefined } = {}) 
   return { artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Album Draft", status: "DRAFT", release_metadata: { releaseType: "ALBUM" } }], editions, experiences: [], ...(releaseBindings ? { releaseBindings } : {}) };
 }
 
-// refresh: what /studio/catalog returns after the page-load request (a catalog object, or a function
-// that returns one or throws); by default the same catalog.
-function mockConfirmedAlbumDraft({ editions = [], releaseBindings = undefined, refresh = undefined } = {}) {
+const LIFECYCLE_PATH = "/studio/releases/rel-draft/lifecycle-editions";
+
+// The release-scoped read Studio makes right before album activation: every stored token ID for the
+// release and its factory bindings. `lifecycle` overrides the response (an object, or a function that
+// returns one or throws); by default it is a complete response with `tokenIds` and `releaseBindings`.
+function mockConfirmedAlbumDraft({ editions = [], releaseBindings = undefined, tokenIds = [], lifecycle = undefined } = {}) {
   const catalog = albumDraftCatalog({ editions, releaseBindings });
-  let catalogRequests = 0;
   studioFetch.mockImplementation(async (path) => {
-    if (path === "/studio/catalog") {
-      catalogRequests += 1;
-      if (catalogRequests === 1 || refresh === undefined) return catalog;
-      return typeof refresh === "function" ? refresh() : refresh;
+    if (path === "/studio/catalog") return catalog;
+    if (path === LIFECYCLE_PATH) {
+      if (lifecycle === undefined) return { releaseId: "rel-draft", complete: true, tokenIds, releaseBindings: releaseBindings ?? [] };
+      return typeof lifecycle === "function" ? lifecycle() : lifecycle;
     }
     if (path.endsWith("/provisioning/prepare")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account };
     if (path.endsWith("/provisioning/status")) return { state: "CONFIRMED", chainId: CHAIN_ID, releaseContractAddress: CLONE, primarySaleAddress: SALE, provenanceAnchorAddress: ANCHOR };
@@ -415,7 +417,9 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
   const binding = { release_id: "rel-draft", chain_id: CHAIN_ID, release_contract_address: CLONE, primary_sale_address: SALE, factory_address: V4_FACTORY, artist_wallet: wallet.account };
   const MINED_TOKEN = "25679935302133066722236771263728427871936411831072189551573738559199048803312";
   // Prepared and mined under its first title, confirmation never completed, then renamed as a draft.
-  const renamedDraft = { id: "ed-draft", release_id: "rel-draft", title: "Renamed Draft", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [MINED_TOKEN] };
+  const renamedDraft = { id: "ed-draft", release_id: "rel-draft", title: "Renamed Draft", status: "DRAFT", supply: "10", application_metadata: {} };
+  const lifecycleCalls = () => studioFetch.mock.calls.filter(([path]) => path === LIFECYCLE_PATH).length;
+  const catalogCalls = () => studioFetch.mock.calls.filter(([path]) => path === "/studio/catalog").length;
 
   async function clickActivate() {
     renderStudio("rel-draft");
@@ -427,7 +431,7 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
   }
 
   it("refuses to activate an album when the stored token of a renamed draft is mined, before any wallet prompt", async () => {
-    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding] });
+    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding], tokenIds: [MINED_TOKEN] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
     readReleaseLifecycle.mockResolvedValue({ albumCreated: false, standaloneFlag: null, existingTokenIds: [BigInt(MINED_TOKEN)], hasEditions: true });
     await clickActivate();
@@ -439,7 +443,7 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
   });
 
   it("refuses activation without a wallet prompt when the chain read fails", async () => {
-    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding] });
+    mockConfirmedAlbumDraft({ editions: [renamedDraft], releaseBindings: [binding], tokenIds: [MINED_TOKEN] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
     readReleaseLifecycle.mockRejectedValue(new Error("Fuji RPC unavailable"));
     await clickActivate();
@@ -449,10 +453,9 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
   });
 
   for (const [label, setup] of [
-    ["an edition has no stored token IDs", () => ({ editions: [{ ...renamedDraft, stored_token_ids: undefined }], releaseBindings: [binding] })],
-    ["the binding's factory is not a recorded deployment", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: "0x00000000000000000000000000000000000000aa" }] })],
-    ["the release has no binding in the catalog", () => ({ editions: [renamedDraft] })],
-    ["the recorded factory's version is not a reviewed lifecycle implementation", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: FUTURE_FACTORY }] })],
+    ["the binding's factory is not a recorded deployment", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: "0x00000000000000000000000000000000000000aa" }], tokenIds: [MINED_TOKEN] })],
+    ["the release has no binding", () => ({ editions: [renamedDraft], tokenIds: [MINED_TOKEN] })],
+    ["the recorded factory's version is not a reviewed lifecycle implementation", () => ({ editions: [renamedDraft], releaseBindings: [{ ...binding, factory_address: FUTURE_FACTORY }], tokenIds: [MINED_TOKEN] })],
   ]) {
     it(`refuses activation before reading the chain when ${label}`, async () => {
       mockConfirmedAlbumDraft(setup());
@@ -475,8 +478,8 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     expect(sendReleaseTransaction).not.toHaveBeenCalled();
   });
 
-  it("activates the album on a release contract with no editions", async () => {
-    mockConfirmedAlbumDraft({ releaseBindings: [binding] });
+  it("activates the album when the complete release-scoped read has no editions", async () => {
+    mockConfirmedAlbumDraft({ releaseBindings: [binding], tokenIds: [] });
     readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
     readReleaseLifecycle.mockResolvedValue({ albumCapable: true, albumCreated: false, standaloneFlag: null, existingTokenIds: [], hasEditions: false });
     simulateReleaseCall.mockResolvedValue(undefined);
@@ -484,11 +487,12 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     await clickActivate();
     await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledWith(expect.objectContaining({ to: CLONE, data: new Interface(["function createAlbum(bytes32)"]).encodeFunctionData("createAlbum", [`0x${"ab".repeat(32)}`]) })));
     expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [], expect: V4_EXPECT });
+    expect(lifecycleCalls()).toBe(1);
   });
 
-  describe("refreshes the release's editions from the server before deciding", () => {
+  describe("re-reads the release's editions from the release-scoped server read before deciding", () => {
     const NEW_TOKEN = "11111111111111111111111111111111111111111111111111111111111111111111";
-    const catalogCalls = () => studioFetch.mock.calls.filter(([path]) => path === "/studio/catalog").length;
+    const OLD_TOKEN = "22222222222222222222222222222222222222222222222222222222222222222222";
     // A fake chain: an edition exists on-chain only if its token ID was minted.
     function chainWithMinted(...minted) {
       readReleaseLifecycle.mockImplementation(async (_request, _address, { tokenIds }) => {
@@ -497,26 +501,40 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
       });
     }
 
+    it("refuses when the release's only edition is older than the owner's newest 500 catalog editions", async () => {
+      // The owner-wide catalog holds the newest 500 editions, all from other releases, so this
+      // release's old mined standalone edition is not in it. The release-scoped read still returns it.
+      const newer = Array.from({ length: 500 }, (_, index) => ({ id: `ed-other-${index}`, release_id: "rel-other", title: `Other ${index}`, status: "PUBLISHED", supply: "1", application_metadata: {} }));
+      mockConfirmedAlbumDraft({ editions: newer, releaseBindings: [binding], tokenIds: [OLD_TOKEN] });
+      readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
+      chainWithMinted(OLD_TOKEN);
+      await clickActivate();
+      expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
+      expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(OLD_TOKEN)], expect: V4_EXPECT });
+      expect(simulateReleaseCall).not.toHaveBeenCalled();
+      expect(sendReleaseTransaction).not.toHaveBeenCalled();
+    });
+
     it("refuses when an edition was created and mined after the page loaded", async () => {
       // Page load: no editions. Later: an edition is created, prepared (token stored) and mined.
-      const later = albumDraftCatalog({ editions: [{ id: "ed-new", release_id: "rel-draft", title: "Late Single", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [NEW_TOKEN] }], releaseBindings: [binding] });
-      mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh: later });
+      mockConfirmedAlbumDraft({ releaseBindings: [binding], tokenIds: [NEW_TOKEN] });
       readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
       chainWithMinted(NEW_TOKEN);
       await clickActivate();
       expect(await screen.findByText(/cannot become an Album Contract/)).toBeTruthy();
-      expect(catalogCalls()).toBe(2);
+      // The decision comes from the release-scoped read, never from the page-load catalog.
+      expect(lifecycleCalls()).toBe(1);
+      expect(catalogCalls()).toBe(1);
       expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(NEW_TOKEN)], expect: V4_EXPECT });
       expect(simulateReleaseCall).not.toHaveBeenCalled();
       expect(sendReleaseTransaction).not.toHaveBeenCalled();
     });
 
-    it("checks the token stored for a draft renamed and published after the page loaded", async () => {
+    it("checks the token stored for a draft renamed and republished after the page loaded", async () => {
       // Page load: one draft under its first title. Later: renamed, prepared again under the new title
       // (a new token stored) and published; that new token is the one on-chain.
-      const initial = { id: "ed-1", release_id: "rel-draft", title: "First Title", status: "DRAFT", supply: "10", application_metadata: {}, stored_token_ids: [MINED_TOKEN] };
-      const later = albumDraftCatalog({ editions: [{ ...initial, title: "Second Title", status: "PUBLISHED", stored_token_ids: [MINED_TOKEN, NEW_TOKEN] }], releaseBindings: [binding] });
-      mockConfirmedAlbumDraft({ editions: [initial], releaseBindings: [binding], refresh: later });
+      const initial = { id: "ed-1", release_id: "rel-draft", title: "First Title", status: "DRAFT", supply: "10", application_metadata: {} };
+      mockConfirmedAlbumDraft({ editions: [initial], releaseBindings: [binding], tokenIds: [MINED_TOKEN, NEW_TOKEN] });
       readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
       chainWithMinted(NEW_TOKEN);
       await clickActivate();
@@ -525,17 +543,21 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
       expect(sendReleaseTransaction).not.toHaveBeenCalled();
     });
 
-    for (const [label, refresh] of [
-      ["the refresh request fails", () => { throw Object.assign(new Error("Artist Studio request failed (502)."), { status: 502 }); }],
-      ["the refresh returns no catalog", null],
-      ["the refreshed catalog omits the release", { ...albumDraftCatalog({ releaseBindings: [binding] }), releases: [] }],
-      ["the refreshed catalog has no binding for this contract", albumDraftCatalog({ releaseBindings: [{ ...binding, release_contract_address: SALE }] })],
-      ["the refreshed catalog binds this contract to two factories", albumDraftCatalog({ releaseBindings: [binding, { ...binding, factory_address: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" }] })],
-      ["an edition in the refreshed catalog has no stored token IDs", albumDraftCatalog({ editions: [{ id: "ed-x", release_id: "rel-draft", title: "X", status: "DRAFT", supply: "1", application_metadata: {} }], releaseBindings: [binding] })],
-      ["an edition in the refreshed catalog has an unusable token ID", albumDraftCatalog({ editions: [{ id: "ed-x", release_id: "rel-draft", title: "X", status: "DRAFT", supply: "1", application_metadata: {}, stored_token_ids: ["0xabc"] }], releaseBindings: [binding] })],
+    const complete = { releaseId: "rel-draft", complete: true, tokenIds: [], releaseBindings: [binding] };
+    for (const [label, lifecycle] of [
+      ["the read fails (database or server error)", () => { throw Object.assign(new Error("Artist Studio request failed (500)."), { status: 500 }); }],
+      ["the server refuses the release as not the wallet's", () => { throw Object.assign(new Error("The authenticated wallet cannot manage this release."), { status: 403, code: "ARTIST_ACCESS_DENIED" }); }],
+      ["the read returns nothing", null],
+      ["the read is for another release", { ...complete, releaseId: "rel-other" }],
+      ["the read is not marked complete", { ...complete, complete: undefined }],
+      ["the read has no token ID list", { ...complete, tokenIds: undefined }],
+      ["the read has no binding list", { ...complete, releaseBindings: undefined }],
+      ["the read has no binding for this contract", { ...complete, releaseBindings: [{ ...binding, release_contract_address: SALE }] }],
+      ["the read binds this contract to two factories", { ...complete, releaseBindings: [binding, { ...binding, factory_address: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" }] }],
+      ["the read has an unusable token ID", { ...complete, tokenIds: ["0xabc"] }],
     ]) {
       it(`refuses before any chain read or wallet prompt when ${label}`, async () => {
-        mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh });
+        mockConfirmedAlbumDraft({ releaseBindings: [binding], lifecycle });
         readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
         chainWithMinted();
         await clickActivate();
@@ -546,16 +568,15 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
       });
     }
 
-    it("activates when the fresh catalog shows no editions on-chain", async () => {
-      const later = albumDraftCatalog({ editions: [{ id: "ed-draft-only", release_id: "rel-draft", title: "Never Sent", status: "DRAFT", supply: "1", application_metadata: {}, stored_token_ids: [NEW_TOKEN] }], releaseBindings: [binding] });
-      mockConfirmedAlbumDraft({ releaseBindings: [binding], refresh: later });
+    it("activates when the release's stored editions are not on-chain", async () => {
+      mockConfirmedAlbumDraft({ releaseBindings: [binding], tokenIds: [NEW_TOKEN] });
       readReleaseAlbumState.mockResolvedValue(ALBUM_READY);
       chainWithMinted();
       simulateReleaseCall.mockResolvedValue(undefined);
       sendReleaseTransaction.mockResolvedValue({ hash: `0x${"cd".repeat(32)}` });
       await clickActivate();
       await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalledTimes(1));
-      expect(catalogCalls()).toBe(2);
+      expect(lifecycleCalls()).toBe(1);
       expect(readReleaseLifecycle).toHaveBeenCalledWith(expect.any(Function), CLONE, { tokenIds: [BigInt(NEW_TOKEN)], expect: V4_EXPECT });
     });
   });

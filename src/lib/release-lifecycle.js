@@ -119,21 +119,22 @@ export async function readReleaseLifecycle(request, releaseContractAddress, { to
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 /**
- * Fetches the owner's Studio catalog now (never a page-load snapshot) and returns the current
- * canonical token IDs and recorded factory of one bound release. Every token ID the server stored for
- * the release's editions is returned, so an edition created, mined, renamed or republished after the
- * page loaded is still checked by its stored ID. Throws CURRENT_EDITIONS_UNAVAILABLE_MESSAGE when the
- * fetch fails or times out, or when the response cannot establish the release, its single binding to
- * this contract, or every edition's stored token IDs.
+ * Fetches, now (never from a page-load snapshot), the canonical token IDs and recorded factory of one
+ * bound release from the owner-only, release-scoped GET /studio/releases/:id/lifecycle-editions. That
+ * response lists every token ID the server stored for the release's editions, with no row cap, so an
+ * edition created, mined, renamed or republished after the page loaded is still checked by its stored
+ * ID. Throws CURRENT_EDITIONS_UNAVAILABLE_MESSAGE when the fetch fails or times out, or when the
+ * response is not marked complete for this release or cannot establish its single binding to this
+ * contract. An empty tokenIds array in a complete response means the release has no stored editions.
  */
-export async function readCurrentReleaseEditions({ fetchCatalog, releaseId, releaseContractAddress, timeoutMs = CATALOG_REFRESH_TIMEOUT_MS }) {
+export async function readCurrentReleaseEditions({ fetchEditions, releaseId, releaseContractAddress, timeoutMs = CATALOG_REFRESH_TIMEOUT_MS }) {
   const unavailable = () => new Error(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
   if (!releaseId || !ethers.isAddress(releaseContractAddress || "")) throw unavailable();
   let timer;
   let payload;
   try {
     payload = await Promise.race([
-      Promise.resolve().then(fetchCatalog),
+      Promise.resolve().then(fetchEditions),
       new Promise((_, reject) => { timer = setTimeout(() => reject(unavailable()), timeoutMs); }),
     ]);
   } catch {
@@ -141,21 +142,17 @@ export async function readCurrentReleaseEditions({ fetchCatalog, releaseId, rele
   } finally {
     clearTimeout(timer);
   }
-  if (!payload || !Array.isArray(payload.releases) || !Array.isArray(payload.editions) || !Array.isArray(payload.releaseBindings)) throw unavailable();
-  if (!payload.releases.some((row) => row?.id === releaseId)) throw unavailable();
+  if (!payload || payload.releaseId !== releaseId || payload.complete !== true || !Array.isArray(payload.tokenIds) || !Array.isArray(payload.releaseBindings)) throw unavailable();
   const contract = ethers.getAddress(releaseContractAddress);
   const bindings = payload.releaseBindings.filter((row) => row?.release_id === releaseId && ethers.isAddress(row?.release_contract_address || "") && ethers.getAddress(row.release_contract_address) === contract);
   const factories = new Set(bindings.map((row) => (ethers.isAddress(row?.factory_address || "") ? ethers.getAddress(row.factory_address) : "")));
   if (bindings.length === 0 || factories.size !== 1 || factories.has("")) throw unavailable();
   const tokenIds = new Set();
-  for (const edition of payload.editions.filter((row) => row?.release_id === releaseId)) {
-    if (!Array.isArray(edition.stored_token_ids)) throw unavailable();
-    for (const value of edition.stored_token_ids) {
-      if (typeof value !== "string" || !/^[0-9]{1,78}$/.test(value)) throw unavailable();
-      const tokenId = BigInt(value);
-      if (tokenId === 0n || tokenId > MAX_UINT256) throw unavailable();
-      tokenIds.add(tokenId);
-    }
+  for (const value of payload.tokenIds) {
+    if (typeof value !== "string" || !/^[0-9]{1,78}$/.test(value)) throw unavailable();
+    const tokenId = BigInt(value);
+    if (tokenId === 0n || tokenId > MAX_UINT256) throw unavailable();
+    tokenIds.add(tokenId);
   }
   return { tokenIds: [...tokenIds], factoryAddress: [...factories][0] };
 }

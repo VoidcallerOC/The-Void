@@ -117,26 +117,50 @@ describe("release lifecycle (D3)", () => {
 
   describe("readCurrentReleaseEditions", () => {
     const FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
-    const catalog = (editions, extra = {}) => ({ releases: [{ id: "rel-1" }], editions, releaseBindings: [{ release_id: "rel-1", release_contract_address: CLONE, factory_address: FACTORY }], ...extra });
-    const read = (payload, options = {}) => readCurrentReleaseEditions({ fetchCatalog: async () => payload, releaseId: "rel-1", releaseContractAddress: CLONE, ...options });
+    const response = (tokenIds, extra = {}) => ({ releaseId: "rel-1", complete: true, tokenIds, releaseBindings: [{ release_id: "rel-1", release_contract_address: CLONE, factory_address: FACTORY }], ...extra });
+    const read = (payload, options = {}) => readCurrentReleaseEditions({ fetchEditions: async () => payload, releaseId: "rel-1", releaseContractAddress: CLONE, ...options });
 
     it("returns every stored token ID of the release once, with its recorded factory", async () => {
-      const result = await read(catalog([{ release_id: "rel-1", stored_token_ids: ["5", "7"] }, { release_id: "rel-1", stored_token_ids: ["7"] }, { release_id: "other", stored_token_ids: ["9"] }]));
-      expect(result).toEqual({ tokenIds: [5n, 7n], factoryAddress: FACTORY });
+      await expect(read(response(["5", "7", "7"]))).resolves.toEqual({ tokenIds: [5n, 7n], factoryAddress: FACTORY });
     });
 
-    it("fails closed when the refresh never answers within the timeout", async () => {
-      const fetchCatalog = vi.fn(() => new Promise(() => {}));
-      await expect(readCurrentReleaseEditions({ fetchCatalog, releaseId: "rel-1", releaseContractAddress: CLONE, timeoutMs: 20 })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
-      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+    it("accepts a complete empty result as a release with no stored editions", async () => {
+      await expect(read(response([]))).resolves.toEqual({ tokenIds: [], factoryAddress: FACTORY });
+    });
+
+    it("fails closed when the response is not a complete read of this release", async () => {
+      for (const payload of [null, {}, response(["5"], { releaseId: "rel-2" }), response(["5"], { complete: false }), response(["5"], { complete: "true" }), response(["5"], { complete: undefined }), response(undefined), response(["5"], { releaseBindings: undefined })]) {
+        await expect(read(payload)).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      }
+    });
+
+    it("fails closed without exactly one recorded factory binding for this contract", async () => {
+      const bound = (rows) => response(["5"], { releaseBindings: rows });
+      for (const rows of [[], [{ release_id: "rel-2", release_contract_address: CLONE, factory_address: FACTORY }], [{ release_id: "rel-1", release_contract_address: "0x2222222222222222222222222222222222222222", factory_address: FACTORY }], [{ release_id: "rel-1", release_contract_address: CLONE, factory_address: null }], [{ release_id: "rel-1", release_contract_address: CLONE, factory_address: FACTORY }, { release_id: "rel-1", release_contract_address: CLONE, factory_address: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505" }]]) {
+        await expect(read(bound(rows))).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      }
+    });
+
+    it("fails closed when the read fails or never answers within the timeout", async () => {
+      await expect(readCurrentReleaseEditions({ fetchEditions: async () => { throw new Error("500"); }, releaseId: "rel-1", releaseContractAddress: CLONE })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      const fetchEditions = vi.fn(() => new Promise(() => {}));
+      await expect(readCurrentReleaseEditions({ fetchEditions, releaseId: "rel-1", releaseContractAddress: CLONE, timeoutMs: 20 })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      expect(fetchEditions).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a response that arrives after the timeout", async () => {
+      let answer;
+      const fetchEditions = () => new Promise((resolve) => { answer = resolve; });
+      await expect(readCurrentReleaseEditions({ fetchEditions, releaseId: "rel-1", releaseContractAddress: CLONE, timeoutMs: 20 })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      answer(response([]));
     });
 
     it("fails closed on out-of-range token IDs and a missing release identity", async () => {
-      for (const value of ["0", (1n << 256n).toString(), "-1", "1.5", 12]) {
-        await expect(read(catalog([{ release_id: "rel-1", stored_token_ids: [value] }]))).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      for (const value of ["0", (1n << 256n).toString(), "-1", "1.5", "0xabc", 12]) {
+        await expect(read(response([value]))).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
       }
-      await expect(readCurrentReleaseEditions({ fetchCatalog: async () => catalog([]), releaseId: "", releaseContractAddress: CLONE })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
-      await expect(read(catalog([]), { releaseContractAddress: "not-an-address" })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      await expect(readCurrentReleaseEditions({ fetchEditions: async () => response([]), releaseId: "", releaseContractAddress: CLONE })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
+      await expect(read(response([]), { releaseContractAddress: "not-an-address" })).rejects.toThrow(CURRENT_EDITIONS_UNAVAILABLE_MESSAGE);
     });
   });
 });

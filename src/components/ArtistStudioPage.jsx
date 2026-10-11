@@ -598,9 +598,10 @@ export function ArtistStudioPage() {
       // D3: a release contract with standalone editions never becomes an album. Read the chain, not
       // the catalog status: a mined edition can still be a draft here. V5 clones also refuse this
       // on-chain; V4 clones rely on this check, which a direct wallet call can bypass. The editions
-      // are re-read from the server now, not from the page-load catalog, and checked by the token IDs
-      // the server stored when each was prepared, never re-derived from titles.
-      const currentEditions = await readCurrentReleaseEditions({ fetchCatalog: () => studioFetch("/studio/catalog", { headers }), releaseId, releaseContractAddress: activeReleaseAsset.releaseContractAddress });
+      // are re-read now from the release-scoped, uncapped server read (never the page-load catalog,
+      // which is capped owner-wide), and checked by the token IDs the server stored when each was
+      // prepared, never re-derived from titles.
+      const currentEditions = await readCurrentReleaseEditions({ fetchEditions: () => studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/lifecycle-editions`, { headers }), releaseId, releaseContractAddress: activeReleaseAsset.releaseContractAddress });
       const expect = lifecycleExpectationsForFactory(currentEditions.factoryAddress);
       if (!expect) throw new Error(RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
       const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
