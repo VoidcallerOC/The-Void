@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCreateAddress, keccak256 } from "ethers";
-import { MAINNET_ARTIST_WALLET, MAINNET_DEPLOYER, MAINNET_FEE_RECIPIENT, assertDefinedDeployer, assertNoPrivateKeyInEnv, assertReadyToSign, creationRequest, requestBindingFields, verifyCreationTransaction, walletTransaction } from "./mainnet-signing-requests.mjs";
+import { MAINNET_ARTIST_WALLET, MAINNET_DEPLOYER, MAINNET_FEE_RECIPIENT, assertDefinedDeployer, assertNoPrivateKeyInEnv, assertReadyToSign, creationRequest, requestBindingFields, runtimeMatchesArtifact, verifyCreationTransaction, walletTransaction } from "./mainnet-signing-requests.mjs";
 import { ARTIST, DEPLOYER, RECIPIENT, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
 
 const DATA = "0x6001600155";
@@ -76,5 +76,18 @@ describe("verifying a mined creation transaction", () => {
     const chain = fakeChain();
     const hash = chain.mine(request(), { tx: { chainId: 1n, from: ARTIST, nonce: 9, value: 5n, data: "0x60" } });
     await expect(verifyCreationTransaction(chain, request(), hash)).rejects.toThrow(/chainId 1; sender .*; nonce 9; value 5; creation data hash/);
+  });
+});
+
+describe("runtime code against the reviewed artifact", () => {
+  // 8 bytes of code with one 4-byte immutable at offset 2 (zeroed in the artifact, filled at deployment).
+  const artifact = { deployedBytecode: { object: "0x6080000000005b00", immutableReferences: { 7: [{ start: 2, length: 4 }] } } };
+  it("ignores only the compiler-listed immutable bytes", () => {
+    expect(runtimeMatchesArtifact("0x6080deadbeef5b00", artifact)).toBe(true);
+    expect(runtimeMatchesArtifact("0x6080deadbeef5b01", artifact)).toBe(false);
+    expect(runtimeMatchesArtifact("0x6081000000005b00", artifact)).toBe(false);
+    expect(runtimeMatchesArtifact("0x6080deadbeef5b0000", artifact)).toBe(false);
+    expect(runtimeMatchesArtifact("0x", artifact)).toBe(false);
+    expect(runtimeMatchesArtifact("0x6080000000005b00", { deployedBytecode: { object: "0x6080000000005b00" } })).toBe(true);
   });
 });

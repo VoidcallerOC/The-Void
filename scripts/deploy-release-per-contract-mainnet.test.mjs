@@ -155,6 +155,9 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
       const plan = await readyPlan(chain);
       await expect(verifyReleaseStep(chain, plan, 1, await minedFactory(chain, plan, options), { load: artifacts })).rejects.toThrow(message);
     }
+    const chain = fakeChain();
+    const plan = await readyPlan(chain);
+    await expect(verifyReleaseStep(chain, plan, 1, await minedFactory(chain, plan, {}, { runtime: "0x6002" }), { load: artifacts })).rejects.toThrow(/factory runtime code differs/);
   });
 
   it("refuses a marketplace bound to another factory, recipient, fee or chain", async () => {
@@ -163,11 +166,12 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
       [{ feeRecipient: ARTIST }, /feeRecipient/],
       [{ fee: 0n }, /platformFeeBps/],
       [{ chain: 43113n }, /deploymentChainId/],
+      [{ runtime: "0x6001" }, /marketplace runtime code differs/],
     ]) {
       const chain = fakeChain();
       const plan = await readyPlan(chain);
       await verifyReleaseStep(chain, plan, 1, await minedFactory(chain, plan), { load: artifacts });
-      const hash = chain.mine(plan.signingRequests[1]);
+      const hash = chain.mine(plan.signingRequests[1], options.runtime ? { runtime: options.runtime } : {});
       chain.marketplaceViews(plan.transactions[1].predictedAddress, { registry: plan.transactions[0].predictedAddress, ...options });
       await expect(verifyReleaseStep(chain, plan, 2, hash, { load: artifacts })).rejects.toThrow(message);
     }

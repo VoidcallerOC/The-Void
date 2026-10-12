@@ -36,6 +36,25 @@ export function assertDefinedDeployer(value, name = "EXPECTED_DEPLOYER_ADDRESS")
   return address;
 }
 
+/**
+ * Whether deployed runtime code is the artifact's runtime code. Solidity writes immutables into the
+ * runtime code at deployment, so the byte ranges the compiler lists in immutableReferences are
+ * masked on both sides; every other byte, the metadata hash included, must be identical.
+ */
+export function runtimeMatchesArtifact(code, artifact) {
+  const expected = String(artifact?.deployedBytecode?.object || "").toLowerCase().replace(/^0x/, "");
+  const actual = String(code || "").toLowerCase().replace(/^0x/, "");
+  if (!expected || expected.length !== actual.length) return false;
+  const mask = (hex) => {
+    const chars = hex.split("");
+    for (const ranges of Object.values(artifact.deployedBytecode.immutableReferences || {})) {
+      for (const { start, length } of ranges) for (let i = start * 2; i < (start + length) * 2; i += 1) chars[i] = "0";
+    }
+    return chars.join("");
+  };
+  return mask(expected) === mask(actual);
+}
+
 /** One unsigned CREATE transaction. `data` is the full creation code plus encoded constructor args. */
 export function creationRequest({ step, contract, chainId = MAINNET_CHAIN_ID, from, nonce, data, estimatedGas, predictedAddress }) {
   if (!/^0x([0-9a-fA-F]{2})+$/.test(String(data || ""))) throw new SigningRequestError(`Step ${step}: creation data must be non-empty hex.`);

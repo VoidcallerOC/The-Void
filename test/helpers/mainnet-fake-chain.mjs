@@ -64,7 +64,8 @@ export function fakeChain({ chainId = 43114n, nonce = 0, pendingNonce, balance =
       state.txs[hash] = { tx, receipt };
       state.nonce += 1;
       state.pendingNonce = state.nonce;
-      if (receipt.status === 1) state.code[getAddress(contractAddress)] = overrides.runtime ?? "0x6001";
+      const runtime = overrides.runtime ?? (request.contract === "ReleaseMarketplaceV4" ? marketplaceRuntime : "0x6001");
+      if (receipt.status === 1) state.code[getAddress(contractAddress)] = runtime;
       return hash;
     },
     /** Read-only views of a mined factory and its implementation. */
