@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG, fujiExplorerUrl, requestWithTimeout } from "./fuji-release.js";
 import { SIMULATION_GAS } from "./primary-sale.js";
-import { FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS, releaseDeploymentForFactory } from "../../config/release-network.js";
+import { ACTIVE_RELEASE_PER_CONTRACT_DEPLOYMENTS, releaseDeploymentForFactory } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 
 // VoidPrimarySale holds proceeds as pull payments: purchase() credits
@@ -95,7 +95,7 @@ export function earningsTargets(catalog = {}, { chainId = FUJI_RELEASE_FACTORY_V
  * primarySaleOf(release). Covers releases the API has not reported (or an API
  * that predates releaseBindings). A factory that cannot be read is skipped.
  */
-export async function discoverFactoryBindings(provider, account, deployments = FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS) {
+export async function discoverFactoryBindings(provider, account, deployments = ACTIVE_RELEASE_PER_CONTRACT_DEPLOYMENTS) {
   const wallet = checksum(account);
   if (!wallet) return [];
   const bindings = [];

@@ -1,5 +1,5 @@
 import { Interface, getAddress, isAddress } from "ethers";
-import { FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForMarketplace } from "../../config/release-network.js";
+import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -34,7 +34,7 @@ async function read(provider, address, contractInterface, method, args = []) {
 
 export function isReleasePerContractCandidate(edition) {
   const tokenId = edition?.tokenIds?.[0];
-  return Number(edition?.chainId) === Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId)
+  return Number(edition?.chainId) === Number(RELEASE_PER_CONTRACT.chainId)
     && !isCertifiedFujiEdition(edition)
     && validContractAddress(edition?.contractAddress)
     && validContractAddress(edition?.primarySaleAddress)
@@ -51,10 +51,10 @@ export async function readReleaseListingContext({
   tokenId,
   seller,
 }) {
-  const expectedChainId = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
+  const expectedChainId = Number(RELEASE_PER_CONTRACT.chainId);
   // Each recorded deployment pairs one factory with the one marketplace whose registry it is.
   const deployment = validContractAddress(marketplaceAddress) ? releaseDeploymentForMarketplace(marketplaceAddress) : null;
-  const expectedFeeBps = BigInt(FUJI_RELEASE_PER_CONTRACT_V2.marketplaceFeeBps);
+  const expectedFeeBps = BigInt(RELEASE_PER_CONTRACT.marketplaceFeeBps);
 
   if (!provider?.request) fail("Connect a browser wallet to verify this release on chain.", "WALLET_REQUIRED");
   if (!deployment) {

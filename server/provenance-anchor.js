@@ -3,7 +3,7 @@ import process from "node:process";
 import { ApiError } from "./api-errors.js";
 import { requireWalletAuth } from "./api-runtime.js";
 import { ConfigurationError } from "./config.js";
-import { anchorsProvenanceAtCreation, releaseDeploymentFor, FUJI_RELEASE_PER_CONTRACT_V2 } from "../config/release-network.js";
+import { anchorsProvenanceAtCreation, releaseDeploymentFor, releasePerContractManifestFor } from "../config/release-network.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { publicationView } from "./studio-publication.js";
@@ -61,8 +61,10 @@ export function loadProvenanceAnchorConfig(env = process.env) {
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
   const selectedNetwork = String(env.RELEASE_NETWORK || "fuji").trim().toLowerCase();
   let deployment;
+  let perContract;
   try {
     deployment = releaseDeploymentFor(selectedNetwork);
+    perContract = releasePerContractManifestFor(selectedNetwork);
   } catch (error) {
     throw new ConfigurationError(`Release network configuration is incomplete: ${error.message}`);
   }
@@ -76,7 +78,7 @@ export function loadProvenanceAnchorConfig(env = process.env) {
   const releaseContract = String(env.PROVENANCE_RELEASE_CONTRACT || deployment.contractAddress || "").trim().toLowerCase();
   const configured = deployment.provenance || {};
   const address = String(env.PROVENANCE_ANCHOR_ADDRESS || configured.anchorAddress || "").trim().toLowerCase();
-  const v2Rpc = FUJI_RELEASE_PER_CONTRACT_V2.provisioningEnabled === true && FUJI_RELEASE_PER_CONTRACT_V2.deploymentAuthorized === true ? FUJI_RELEASE_PER_CONTRACT_V2.rpcUrl : "";
+  const v2Rpc = perContract.provisioningEnabled === true && perContract.deploymentAuthorized === true ? perContract.rpcUrl : "";
   const rpcUrl = String(env.PROVENANCE_ANCHOR_RPC_URL || configured.rpcUrl || v2Rpc || "").trim();
   if (!rpcUrl) return Object.freeze({ enabled: false, chainId, network, releaseContract, eventName: EVENT_NAME });
   if (address && !/^0x[0-9a-f]{40}$/.test(address)) throw new ConfigurationError("PROVENANCE_ANCHOR_ADDRESS must be a valid address when used as a legacy override.");
