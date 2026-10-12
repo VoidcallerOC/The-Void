@@ -3,13 +3,14 @@ import { Interface, getAddress } from "ethers";
 // Genesis (0xD1B4…98eE, C-Chain) is a Launchpeg ERC1155SingleBundle: token IDs 0-3 are fungible
 // units with no per-unit identity, and transfers are plain ERC-1155 (no hooks the claim could use).
 // A live balance alone cannot tell whether a unit already backed a free claim, so the claim service
-// keeps this ledger of "used" units:
-//   - When a wallet's voucher is issued at C-Chain block B, every Genesis unit it holds at B (all IDs)
-//     becomes used. One claim per wallet, however many IDs or units it holds.
-//   - Used units travel with transfers: a transfer moves the sender's used units first.
-//   - A wallet is eligible only while it holds at least one unused unit.
-// Each unit can therefore back at most one free claim, Genesis tokens are never moved or locked by the
-// claim, and a holding passed to another wallet after its claim carries no new eligibility.
+// keeps this off-chain ledger of "used" units. It is eligibility accounting only: it never calls, moves,
+// burns, locks or approves Genesis tokens, and Genesis balances and ownership are read, never written.
+//   - When a wallet's voucher is issued at C-Chain block B, exactly one of its unused Genesis units
+//     (the lowest token ID that has one) becomes used. Its other units stay unused.
+//   - Used units travel with transfers: a transfer moves the sender's used units of that ID first, so
+//     the claimed unit cannot qualify a buyer, while unused units qualify their new holders.
+//   - A wallet is eligible only while it holds at least one unused unit (and has not claimed).
+// Each unit can therefore back at most one free claim.
 
 export const GENESIS_TOKEN_ID_SET = Object.freeze(["0", "1", "2", "3"]);
 const TRANSFER_INTERFACE = new Interface([
@@ -54,9 +55,9 @@ function bucket(map, wallet) {
 }
 
 /**
- * Replays reservations (voucher issuances) and Genesis transfers in C-Chain order and returns the
- * used-unit counts per wallet and token ID. A reservation at block B applies after every transfer in
- * blocks <= B, because its balances were read at B. `transfers` must cover every block after the
+ * Replays reservations (voucher issuances, each using one unit of `usedTokenId`) and Genesis
+ * transfers in C-Chain order and returns the used-unit counts per wallet and token ID. A reservation at
+ * block B applies after every transfer in blocks <= B, because its eligibility was read at B. `transfers` must cover every block after the
  * earliest reservation through `throughBlock`.
  */
 export function replayUsedUnits({ reservations, transfers, throughBlock }) {
@@ -69,9 +70,10 @@ export function replayUsedUnits({ reservations, transfers, throughBlock }) {
   const applyReservationsThrough = (block) => {
     while (next < queue.length && queue[next].block <= block) {
       const reservation = queue[next++];
-      const wallet = getAddress(reservation.wallet);
-      const units = bucket(used, wallet);
-      for (const id of GENESIS_TOKEN_ID_SET) units.set(id, BigInt(reservation.balances?.[id] ?? 0));
+      const id = String(reservation.usedTokenId);
+      if (!GENESIS_TOKEN_ID_SET.includes(id)) throw new GenesisLedgerError(`Reservation names Genesis token ${id}, outside 0-3.`);
+      const units = bucket(used, getAddress(reservation.wallet));
+      units.set(id, (units.get(id) ?? 0n) + 1n);
     }
   };
   for (const transfer of ordered) {
@@ -87,6 +89,11 @@ export function replayUsedUnits({ reservations, transfers, throughBlock }) {
   }
   applyReservationsThrough(throughBlock);
   return used;
+}
+
+/** The unit a new claim uses: one unit of the lowest token ID with an unused unit, or null. */
+export function unitToUse(unused) {
+  return GENESIS_TOKEN_ID_SET.find((id) => BigInt(unused[id] ?? 0) > 0n) ?? null;
 }
 
 /**

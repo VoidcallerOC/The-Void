@@ -97,7 +97,7 @@ function ClaimSchedule({ target }) {
     <>
       <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
       <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.claimEnd)} → {instant(target.publicSaleEnd)}</InfoRow>
-      <InfoRow label="Eligibility">Currently holds Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, checked when you claim. One free claim per wallet; Genesis tokens already used for a claim do not qualify again after a transfer. Genesis tokens stay in your wallet.</InfoRow>
+      <InfoRow label="Eligibility">Currently holds Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, checked when you claim. One free claim per wallet, and each claim uses one Genesis unit's eligibility; a used unit does not qualify again after a transfer. Your Genesis tokens are never moved, burned or locked.</InfoRow>
       <InfoRow label="Supply">{String(target.publicAllocation) === "0" && String(target.allocation) === "0" ? "Open edition · uncapped" : `Claim ${target.allocation} · public ${target.publicAllocation}`}</InfoRow>
     </>
   );
@@ -263,7 +263,7 @@ export function ClaimPage() {
         if (!result.eligible) {
           setPhase(CLAIM_PHASES.ACCESS_DENIED);
           setMessage(result.holdingUsed
-            ? "Access denied. The Genesis tokens in this wallet were already used for a free claim by a previous holder. Nothing was claimed."
+            ? "Access denied. Every Genesis unit in this wallet was already used for a free claim by a previous holder. Nothing was claimed."
             : "Access denied. This wallet does not currently hold Genesis token 0, 1, 2 or 3 on Avalanche C-Chain. Nothing was claimed.");
           return;
         }

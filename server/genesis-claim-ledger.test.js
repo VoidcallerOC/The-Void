@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Interface, getAddress } from "ethers";
-import { GenesisLedgerError, decodeGenesisTransfers, replayUsedUnits, unusedUnits } from "./genesis-claim-ledger.js";
+import { GenesisLedgerError, decodeGenesisTransfers, replayUsedUnits, unitToUse, unusedUnits } from "./genesis-claim-ledger.js";
 
 const A = getAddress("0x1111111111111111111111111111111111111111");
 const B = getAddress("0x2222222222222222222222222222222222222222");
@@ -30,14 +30,24 @@ describe("decodeGenesisTransfers", () => {
 });
 
 describe("replayUsedUnits", () => {
-  it("uses every unit of every ID the wallet held at its claim block", () => {
-    const used = replayUsedUnits({ reservations: [{ wallet: A, block: 5, balances: { 0: "4", 1: "2", 3: "21" } }], transfers: [], throughBlock: 9 });
-    expect(units(used, A)).toEqual({ 0: 4n, 1: 2n, 2: 0n, 3: 21n });
+  it("marks exactly one unit used per claim and leaves the wallet's other units unused", () => {
+    const used = replayUsedUnits({ reservations: [{ wallet: A, block: 5, usedTokenId: "0" }], transfers: [], throughBlock: 9 });
+    expect(units(used, A)).toEqual({ 0: 1n });
+    expect(unusedUnits(A, { 0: "4", 1: "2", 3: "21" }, used)).toEqual({ 0: 3n, 1: 2n, 2: 0n, 3: 21n });
+  });
+
+  it("picks the lowest token ID that still has an unused unit", () => {
+    expect(unitToUse({ 0: 0n, 1: 2n, 2: 0n, 3: 21n })).toBe("1");
+    expect(unitToUse({ 0: 0n, 1: 0n, 2: 0n, 3: 0n })).toBeNull();
+  });
+
+  it("refuses a reservation outside token IDs 0-3", () => {
+    expect(() => replayUsedUnits({ reservations: [{ wallet: A, block: 1, usedTokenId: "7" }], transfers: [], throughBlock: 1 })).toThrow(GenesisLedgerError);
   });
 
   it("applies transfers in the claim block before the claim, and later ones after it", () => {
     const used = replayUsedUnits({
-      reservations: [{ wallet: A, block: 5, balances: { 0: "1" } }],
+      reservations: [{ wallet: A, block: 5, usedTokenId: "0" }],
       transfers: [t(5, B, A, 0, 1), t(6, A, B, 0, 1)],
       throughBlock: 6,
     });
@@ -45,20 +55,29 @@ describe("replayUsedUnits", () => {
     expect(units(used, B)["0"]).toBe(1n);
   });
 
-  it("moves used units first and leaves the rest fresh", () => {
+  it("moves the used unit first: one buyer receives it, the next receives an unused unit", () => {
     const used = replayUsedUnits({
-      reservations: [{ wallet: A, block: 1, balances: { 3: "2" } }],
-      transfers: [t(2, C, A, 3, 3), t(3, A, B, 3, 4)],
+      reservations: [{ wallet: A, block: 1, usedTokenId: "3" }],
+      transfers: [t(2, A, B, 3, 1), t(3, A, C, 3, 1)],
       throughBlock: 3,
     });
-    expect(units(used, B)["3"]).toBe(2n);
-    expect(units(used, A)["3"]).toBe(0n);
-    expect(unusedUnits(B, { 3: "4" }, used)).toEqual({ 0: 0n, 1: 0n, 2: 0n, 3: 2n });
+    expect(unusedUnits(B, { 3: "1" }, used)["3"]).toBe(0n);
+    expect(unusedUnits(C, { 3: "1" }, used)["3"]).toBe(1n);
+    expect(unusedUnits(A, { 3: "2" }, used)["3"]).toBe(2n);
+  });
+
+  it("carries the used unit inside a multi-unit transfer and leaves the rest of it unused", () => {
+    const used = replayUsedUnits({
+      reservations: [{ wallet: A, block: 1, usedTokenId: "0" }],
+      transfers: [t(2, A, B, 0, 3)],
+      throughBlock: 2,
+    });
+    expect(unusedUnits(B, { 0: "3" }, used)["0"]).toBe(2n);
   });
 
   it("follows a used unit through several wallets in log order within a block", () => {
     const used = replayUsedUnits({
-      reservations: [{ wallet: A, block: 1, balances: { 1: "1" } }],
+      reservations: [{ wallet: A, block: 1, usedTokenId: "1" }],
       transfers: [t(4, B, C, 1, 1, 7), t(4, A, B, 1, 1, 3)],
       throughBlock: 4,
     });
@@ -68,17 +87,17 @@ describe("replayUsedUnits", () => {
 
   it("drops used units that are burned and ignores transfers after the head", () => {
     const used = replayUsedUnits({
-      reservations: [{ wallet: A, block: 1, balances: { 0: "2" } }],
+      reservations: [{ wallet: A, block: 1, usedTokenId: "0" }],
       transfers: [t(2, A, ZERO, 0, 1), t(9, A, B, 0, 1)],
       throughBlock: 5,
     });
-    expect(units(used, A)["0"]).toBe(1n);
+    expect(units(used, A)["0"]).toBe(0n);
     expect(used.get(B)).toBeUndefined();
   });
 
-  it("re-uses everything a wallet holds at its own claim, including units it received used", () => {
+  it("adds a receiver's own claim on top of a used unit it received", () => {
     const used = replayUsedUnits({
-      reservations: [{ wallet: A, block: 1, balances: { 0: "1" } }, { wallet: B, block: 3, balances: { 0: "2" } }],
+      reservations: [{ wallet: A, block: 1, usedTokenId: "0" }, { wallet: B, block: 3, usedTokenId: "0" }],
       transfers: [t(2, A, B, 0, 1)],
       throughBlock: 3,
     });

@@ -8,7 +8,7 @@
 | Recorded target `0x12Ff…0Fe6` / `0x3671…5aFD` / token `1` | BLOCKED: cannot hold an uncapped open edition (§1) |
 | Live claim, public mint and closure on Fuji | NOT STARTED |
 
-> **2026-10-12: eligibility changed from a fixed snapshot to live ownership, with a used-unit ledger so one Genesis holding backs only one free claim (§2).** The owner replaced the
+> **2026-10-12: eligibility changed from a fixed snapshot to live ownership, with an off-chain used-unit ledger: each free claim uses one Genesis unit's eligibility, and a used unit cannot qualify again after resale (§2). Genesis tokens are never moved or burned.** The owner replaced the
 > fixed C-Chain snapshot with a live read of the connected wallet's current Genesis balances. Sections that
 > describe the snapshot (§1 row 12, the §6 simulation) are kept as history of what was tested at the time.
 
@@ -91,7 +91,7 @@ Supply accounting holds: minted 1 = sold 1.
   - archive the empty ‑26 draft;
   - cancel ‑27's never-sent request.
 
-## 2. Genesis eligibility: live ownership, one claim per Genesis holding
+## 2. Genesis eligibility: live ownership, one free claim per Genesis unit
 
 **Genesis contract evidence (read 2026-10-12, read-only):**
 - `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` on C-Chain (43114) is an EIP-1167 clone of `0x2e61967a569bc18affc5e1b9f71e00af93a268c7`. The clone has no upgrade path.
@@ -112,44 +112,59 @@ Supply accounting holds: minted 1 = sold 1.
 
 **Why the live balance alone is not enough.** A balance says how many units a wallet holds now, not whether those units already backed a claim. A per-wallet `hasClaimed` stops one wallet claiming twice, but not the same unit qualifying wallet after wallet. A per-token-ID "used" flag is wrong: each ID has hundreds of units, so it would allow at most four claims in total.
 
+**Asset rule.** Genesis tokens are never burned, transferred, escrowed, locked, approved or modified by the claim:
+- The server only reads Genesis: `eth_call` to `balanceOf`, `eth_getLogs`, the block number and the chain ID.
+- The claim contract never calls the Genesis collection.
+- The ledger below is off-chain eligibility accounting. Marking a unit "used" changes no on-chain balance or ownership, and no supply.
+
 **Mechanism: a used-unit ledger** (`server/genesis-claim-ledger.js`, `server/genesis-claim-store.js`, migration `039`):
-1. **Issuing a voucher.** When a wallet is issued a voucher, at C-Chain block `B`, every Genesis unit it holds at `B` is marked used, across all IDs and all units. Holding several IDs or units does not add claims.
-2. **Transfers.** Used units travel with transfers. The ledger replays the Genesis `TransferSingle`/`TransferBatch` logs after each issuance, and a transfer moves the sender's used units first.
-3. **Eligibility.** A wallet is eligible while it holds at least one unused unit at the current C-Chain head, has not claimed, and the window is open.
-4. **Serialization.** Issuance runs under a Postgres advisory lock per claim contract, so a holding that changes hands mid-issuance cannot back two vouchers.
-5. **Repeat requests.** A repeat request returns the same voucher, with the same nonce.
-6. **Expiry.** A voucher not redeemed by its deadline, plus 120 s on the destination chain, is settled through `hasClaimed`. If it was not redeemed it becomes EXPIRED, and its units are released.
-7. **Fail closed.** Any failed read returns 503, and nothing is signed. That covers a provider on the wrong chain, a failed balance or log read, a provider behind the ledger, and a ledger showing more used units than the wallet holds. Without the reservation store, the service refuses to start.
+1. **What a claim consumes.** A wallet qualifies if it holds at least one unit of IDs 0–3 that no earlier claim used. Each successful voucher issuance, at C-Chain block `B`, marks exactly one of the wallet's unused units used: one unit of the lowest ID that has one. That ID is stored as `used_token_id`. The wallet's other units stay unused.
+2. **One copy per wallet.** The claimant receives one Forgive & Forget token, minted directly to it. One claim per wallet still applies (`hasClaimed`).
+3. **Transfers.** The ledger replays Genesis `TransferSingle`/`TransferBatch` logs. When a wallet sends units of an ID, its used units of that ID go first, so the claimed unit leaves with the first transfer. Remaining units are unused and qualify their new holders. Units are fungible, so "the claimed unit" can only be defined by this rule.
+4. **Eligibility.** A wallet is eligible while it holds an unused unit at the current C-Chain head, has not claimed, and the window is open.
+5. **Concurrency and expiry.** Issuance runs under a Postgres advisory lock per claim contract. A repeat request returns the same voucher, with the same nonce. A voucher still unredeemed 120 s past its deadline (destination-chain time) is settled through `hasClaimed`; if it was never redeemed, it becomes EXPIRED and its unit is released.
+6. **Fail closed.** A wrong chain, a failed balance or log read, a provider behind the ledger, or an inconsistent ledger returns 503 and nothing is signed. The service refuses to start without the store.
+
+**Example.** `0x6a86…` holds 4 / 2 / 0 / 21 units of IDs 0–3.
+1. It claims. One ID-0 unit becomes used, and 26 units stay unused.
+2. If it then sells one ID-0 unit, the buyer receives the used unit and cannot claim.
+3. If it sells another ID-0 unit, that buyer can claim.
+4. Units of IDs 1 and 3 it sends to others qualify their new holders.
 
 **What is preserved:**
 - Live eligibility, with no snapshot.
-- Genesis tokens are only read: never transferred, burned, escrowed or locked, and free to trade.
-- One free Forgive & Forget token per wallet, minted directly to the claimant.
+- Genesis tokens stay freely tradable.
+- One free copy per wallet.
 - The open edition and the public sale stay uncapped, with no global free-claim cap.
-- Window, transition, replay and price rules are unchanged.
-- The contract changes only its rule text (`v3`). `ELIGIBILITY_RULE` now names this rule.
+- The claim window, the switch to the public sale, and replay protection.
+- Prices: 0.01 AVAX on Fuji and 0.25 AVAX on mainnet.
+
+The contract changes only its `ELIGIBILITY_RULE` text (`v3`) and comments.
 
 **Tradeoffs and limits:**
-- **Server-enforced.** The claim contract cannot see C-Chain transfer history (and on Fuji, cannot see C-Chain at all). This is the same trust model as before: the server was already the only eligibility authority.
+- **Server-enforced.** The claim contract cannot see C-Chain transfer history. This is the same trust model as before.
 - **The ledger is private.** It is the reservations table plus public chain logs, so a third party cannot audit it without the table.
-- **Operational dependencies.** It needs a C-Chain RPC that serves `eth_getLogs` (2,048-block chunks) and Postgres migration `039`.
-- **Cannot be prevented with live ownership and fungible units.** A holder can split units across several wallets *before* any of them claims. Each of those wallets then legitimately holds unused units and can claim once. Such wallets cannot be told apart on-chain from independent holders: the only signal would be a snapshot, identity, or a transfer restriction, all excluded. The bound is one free claim per Genesis unit: at most ≈1,635 in total, set by the collection's supply, not by a cap.
-- **Owner choice: what a claim uses.** As implemented, a claim uses everything the wallet holds; a 220-unit holder that claims leaves 220 used units, and buyers of them cannot claim. The alternative is that a claim uses one unit only, which leaves the holder's other units fresh for buyers. The worst-case bound is the same either way, because pre-splitting is possible in both.
+- **Operational dependencies.** It needs a C-Chain RPC that serves `eth_getLogs` in 2,048-block ranges, plus Postgres migration `039`.
+- **Bound on free claims.** Each Genesis unit can back at most one free claim, so at most ≈1,635 free claims in total, set by the collection's supply rather than a cap. A holder of N units can therefore produce up to N free claims by spreading units across N wallets, before or after its own claim. Each unit still backs only one claim.
 
 **Evidence:**
 - `server/genesis-claim.test.js`: adversarial cases.
-  - The holding passed A→B→C, after redemption and while A's voucher is pending.
-  - Simultaneous requests under the lock.
-  - Multiple IDs and units, with batch transfers.
+  - A multi-unit, multi-ID holder: one claim uses one unit. Resale of the used unit is denied; resale of an unused unit, and a batch of unused units, each qualify.
+  - A batch carrying the used unit: the receiver keeps its eligibility from the unused units in the batch.
+  - A wallet that received a used unit claims with one of its own unused units.
+  - A single claimed unit resold A→B→C, after redemption and while A's voucher is pending.
+  - Concurrent requests: the same holding is serialized, and independent holders are not blocked.
   - Repeat request and repeat claim.
-  - Independent holders, including one that also received a used unit.
-  - Used-first transfer order.
   - Expiry versus redemption.
-  - Log and head failures, and no voucher after the window.
-- `server/genesis-claim-ledger.test.js`: the replay rules.
-- `test/GenesisHolderClaimOpenEdition.t.sol`: the same voucher twice, another wallet using it, no free mint after the window, and an uncapped public mint.
-- **Mutation check.** Removing the lock fails the concurrency test. Disabling the ledger fails 7 adversarial tests.
-- **Local C-Chain fork (not live).** A run against the real Genesis contract, with real `safeTransferFrom` / `safeBatchTransferFrom` from impersonated `0x6a86…`, passed 8 of 8.
+  - Fail-closed paths, and no voucher after the window.
+  - Reads only: the Genesis provider sees only `getNetwork`, `getBlockNumber`, `getLogs`, and `call` with the `balanceOf` selector, and claims leave balances unchanged.
+- `server/genesis-claim-ledger.test.js`: replay rules, including one unit per reservation, the lowest-ID choice, and the used unit inside a multi-unit transfer.
+- `server/genesis-claim-store-db.test.js` (Postgres, run in CI): RLS; upsert including `used_token_id`; rollback; serialization across connections; rejected rows.
+- Forge:
+  - `test/GenesisHolderClaim.t.sol`: a claim succeeds with the Genesis address made to revert on any call, so the claim makes zero Genesis calls; it mints exactly one token, to the claimant.
+  - `test/GenesisHolderClaimOpenEdition.t.sol`: the same voucher twice and from another wallet, no free mint after the window, and an uncapped public mint.
+- **Mutation check.** Removing the lock fails the concurrency test. Disabling the ledger fails 9 tests.
+- **Local C-Chain fork, not live:** 11 of 11 checks passed. The run used the real Genesis contract, with real `safeTransferFrom` / `safeBatchTransferFrom` from impersonated `0x6a86…`. Issuing vouchers sent no C-Chain transaction (no new fork block) and left every Genesis balance unchanged. Resale of the used unit was denied; resale of unused units, single and batch, qualified.
 
 ## 3. Schedule and supply (contract-enforced)
 

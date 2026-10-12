@@ -10,6 +10,7 @@ function toRecord(row) {
     claimContract: getAddress(row.claim_contract),
     wallet: getAddress(row.wallet),
     block: Number(row.eligibility_block),
+    usedTokenId: row.used_token_id,
     balances: row.balances,
     deadline: BigInt(row.deadline),
     status: row.status,
@@ -33,11 +34,11 @@ export function createGenesisClaimReservationStore(pool) {
           },
           async upsert(record) {
             await client.query(
-              `INSERT INTO genesis_claim_reservations (claim_contract, wallet, eligibility_block, balances, deadline, status, voucher, signature)
-               VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8)
-               ON CONFLICT (claim_contract, wallet) DO UPDATE SET eligibility_block=EXCLUDED.eligibility_block, balances=EXCLUDED.balances,
+              `INSERT INTO genesis_claim_reservations (claim_contract, wallet, eligibility_block, used_token_id, balances, deadline, status, voucher, signature)
+               VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb,$9)
+               ON CONFLICT (claim_contract, wallet) DO UPDATE SET eligibility_block=EXCLUDED.eligibility_block, used_token_id=EXCLUDED.used_token_id, balances=EXCLUDED.balances,
                  deadline=EXCLUDED.deadline, status=EXCLUDED.status, voucher=EXCLUDED.voucher, signature=EXCLUDED.signature, updated_at=now()`,
-              [record.claimContract.toLowerCase(), record.wallet.toLowerCase(), record.block, JSON.stringify(record.balances), record.deadline.toString(), record.status, JSON.stringify(record.voucher), record.signature],
+              [record.claimContract.toLowerCase(), record.wallet.toLowerCase(), record.block, String(record.usedTokenId), JSON.stringify(record.balances), record.deadline.toString(), record.status, JSON.stringify(record.voucher), record.signature],
             );
           },
           async setStatus(wallet, status) {

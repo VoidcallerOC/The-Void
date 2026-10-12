@@ -2,7 +2,7 @@ import process from "node:process";
 import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
-import { GENESIS_TOKEN_ID_SET, TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC, decodeGenesisTransfers, replayUsedUnits, unusedUnits } from "./genesis-claim-ledger.js";
+import { GENESIS_TOKEN_ID_SET, TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC, decodeGenesisTransfers, replayUsedUnits, unitToUse, unusedUnits } from "./genesis-claim-ledger.js";
 
 export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_CHAIN_ID = 43114;
@@ -220,7 +220,7 @@ export function createGenesisClaimService({
   nonce = () => BigInt(hexlify(randomBytes(32))),
 } = {}) {
   if (!config) return null;
-  // The used-unit ledger is what stops one Genesis holding from qualifying wallet after wallet; without
+  // The used-unit ledger is what stops one Genesis unit from qualifying wallet after wallet; without
   // shared, durable storage for it the claim must not run.
   if (!reservationStore) throw new GenesisClaimConfigurationError("The Genesis claim requires the reservation store (migration 039).");
   const sourceProvider = genesisProvider || new JsonRpcProvider(config.genesisRpcUrl);
@@ -430,7 +430,8 @@ export function createGenesisClaimService({
         throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
       }
       if (!heldIds(position.balances).length) throw new ApiError(403, "ACCESS_DENIED", "This wallet does not currently hold Genesis token 0, 1, 2, or 3 on Avalanche C-Chain.");
-      if (!heldIds(position.unused).length) throw new ApiError(403, "GENESIS_HOLDING_ALREADY_USED", "The Genesis tokens in this wallet were already used for a free claim by a previous holder.");
+      const usedTokenId = unitToUse(position.unused);
+      if (usedTokenId === null) throw new ApiError(403, "GENESIS_HOLDING_ALREADY_USED", "Every Genesis unit in this wallet was already used for a free claim by a previous holder.");
       if (config.allocation !== 0n && BigInt(claimState.claimedSupply) >= config.allocation) throw new ApiError(409, "CLAIM_ALLOCATION_EXHAUSTED", "The reserved Genesis claim allocation has been exhausted.");
       try {
         const voucher = Object.freeze({
@@ -454,8 +455,9 @@ export function createGenesisClaimService({
           verifyingContract: config.claimContract,
         };
         const signature = await claimSigner.signTypedData(domain, VOUCHER_TYPES, voucher);
-        // Every Genesis unit the wallet holds now is used by this claim, whichever IDs they are.
-        await tx.upsert({ claimContract: config.claimContract, wallet, block: position.head, balances: position.balances, deadline: BigInt(voucher.deadline), status: "PENDING", voucher, signature });
+        // Off-chain accounting only: one unused Genesis unit (lowest ID) counts as used by this claim. No
+        // Genesis token is moved, burned, locked or approved; the wallet's other units stay unused.
+        await tx.upsert({ claimContract: config.claimContract, wallet, block: position.head, usedTokenId, balances: position.balances, deadline: BigInt(voucher.deadline), status: "PENDING", voucher, signature });
         return Object.freeze({ voucher, signature, target: toPublicConfig(config) });
       } catch {
         throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");

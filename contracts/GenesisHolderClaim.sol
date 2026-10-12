@@ -54,8 +54,9 @@ contract GenesisHolderClaim {
     uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
     /// @notice The rule every voucher must name: when the voucher is signed, the claimant holds at least
-    /// one Genesis unit (IDs 0-3, C-Chain) that no earlier claim used. A claim uses every unit the
-    /// claimant holds, and used units stay used through later transfers (server ledger).
+    /// one Genesis unit (IDs 0-3, C-Chain) that no earlier claim used. Each claim uses exactly one unit,
+    /// and a used unit stays used through later transfers. This is the server's off-chain eligibility
+    /// ledger: this contract never calls the Genesis collection, and no Genesis token is moved or burned.
     bytes32 public constant ELIGIBILITY_RULE = keccak256(
         "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
     );

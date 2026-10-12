@@ -15,7 +15,7 @@ const OTHER_CLAIM = "0x5555555555555555555555555555555555555555";
 const A = "0x1111111111111111111111111111111111111111";
 const B = "0x6666666666666666666666666666666666666666";
 const record = (wallet, block, status = "PENDING") => ({
-  claimContract: CLAIM, wallet, block, balances: { 0: "4", 1: "2", 2: "0", 3: "21" }, deadline: 1_800_000_300n, status,
+  claimContract: CLAIM, wallet, block, usedTokenId: "0", balances: { 0: "4", 1: "2", 2: "0", 3: "21" }, deadline: 1_800_000_300n, status,
   voucher: { claimant: wallet, nonce: "1" }, signature: `0x${"ab".repeat(65)}`,
 });
 
@@ -55,7 +55,7 @@ describe.skipIf(!testDatabaseUrl)("Genesis claim reservation store (Postgres)", 
     await store.withLock(CLAIM, (tx) => tx.setStatus(A, "REDEEMED"));
     const listed = await store.withLock(CLAIM, (tx) => tx.list());
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ wallet: A, block: 120, status: "REDEEMED", balances: { 3: "21" }, deadline: 1_800_000_300n });
+    expect(listed[0]).toMatchObject({ wallet: A, block: 120, usedTokenId: "0", status: "REDEEMED", balances: { 3: "21" }, deadline: 1_800_000_300n });
     await expect(store.withLock(OTHER_CLAIM, (tx) => tx.list())).resolves.toEqual([]);
   });
 
@@ -90,7 +90,8 @@ describe.skipIf(!testDatabaseUrl)("Genesis claim reservation store (Postgres)", 
     expect(order).toEqual(["first-commit", "second-start"]);
   });
 
-  it("rejects malformed rows", async () => {
+  it("rejects malformed rows, including a used unit outside Genesis IDs 0-3", async () => {
     await expect(store.withLock(CLAIM, (tx) => tx.upsert({ ...record(A, 150), status: "UNKNOWN" }))).rejects.toMatchObject({ code: "23514" });
+    await expect(store.withLock(CLAIM, (tx) => tx.upsert({ ...record(A, 150), usedTokenId: "7" }))).rejects.toMatchObject({ code: "23514" });
   });
 });

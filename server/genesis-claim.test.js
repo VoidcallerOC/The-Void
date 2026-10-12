@@ -174,7 +174,7 @@ describe("Genesis eligibility from live C-Chain ownership", () => {
 });
 
 describe("Genesis holding cannot be reused across wallets (adversarial)", () => {
-  it("denies the next wallet when a claimed holding is passed on, and the one after it", async () => {
+  it("denies the next wallet when a claimed single unit is resold, and the one after it", async () => {
     const { instance, chain, dest } = service({ holdings: { [`${A}:1`]: 1n } });
     await expect(instance.issueVoucher(A)).resolves.toMatchObject({ voucher: { claimant: getAddress(A) } });
     dest.redeem(A);
@@ -212,17 +212,76 @@ describe("Genesis holding cannot be reused across wallets (adversarial)", () => 
     await expect(second).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
   });
 
-  it("uses every unit and every ID in the claiming wallet: one claim, and none of them qualifies anyone after", async () => {
-    const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 4n, [`${A}:1`]: 2n, [`${A}:3`]: 21n } });
+  it("uses exactly one unit of a multi-unit, multi-ID holding; the wallet's other units still qualify new holders", async () => {
+    const { instance, chain, dest, store } = service({ holdings: { [`${A}:0`]: 4n, [`${A}:1`]: 2n, [`${A}:3`]: 21n } });
     await expect(instance.checkEligibility(A)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["0", "1", "3"] });
     const issued = await instance.issueVoucher(A);
     expect(issued.voucher.quantity).toBe("1");
+    expect([...store.rows.values()][0]).toMatchObject({ usedTokenId: "0", balances: { 0: "4", 1: "2", 2: "0", 3: "21" } });
     dest.redeem(A);
+    // Resale of the used unit: the first ID-0 unit to leave A is the used one.
     chain.transfer(A, B, 0n, 1n);
-    chain.batchTransfer(A, C, [[1n, 2n], [3n, 10n]]);
-    chain.transfer(A, D, 3n, 11n);
-    for (const wallet of [B, C, D]) await expect(instance.issueVoucher(wallet)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+    // Resale of an unused unit of the same ID, and a batch of unused units of other IDs.
+    chain.transfer(A, C, 0n, 1n);
+    chain.batchTransfer(A, D, [[1n, 2n], [3n, 10n]]);
+    await expect(instance.issueVoucher(C)).resolves.toMatchObject({ voucher: { claimant: getAddress(C) } });
+    await expect(instance.issueVoucher(D)).resolves.toMatchObject({ voucher: { claimant: getAddress(D) } });
     await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+  });
+
+  it("carries the used unit inside a batch: the receiver keeps eligibility from the unused units in it", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:2`]: 3n } });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.batchTransfer(A, B, [[2n, 3n]]);
+    await expect(instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["2"] });
+    const second = await instance.issueVoucher(B);
+    dest.redeem(B);
+    chain.transfer(B, C, 2n, 2n);
+    await expect(instance.issueVoucher(C)).rejects.toMatchObject({ code: "GENESIS_HOLDING_ALREADY_USED" });
+    chain.transfer(B, D, 2n, 1n);
+    await expect(instance.issueVoucher(D)).resolves.toMatchObject({ voucher: { claimant: getAddress(D) } });
+    expect(second.voucher.quantity).toBe("1");
+  });
+
+  it("skips a used unit the wallet received and uses one of its own unused units", async () => {
+    const { instance, chain, dest, store } = service({ holdings: { [`${A}:0`]: 1n, [`${B}:3`]: 1n } });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(A, B, 0n);
+    await instance.issueVoucher(B);
+    expect(store.rows.get(`${CLAIM.toLowerCase()}:${B.toLowerCase()}`)).toMatchObject({ usedTokenId: "3" });
+    dest.redeem(B);
+    chain.transfer(B, C, 3n);
+    chain.transfer(B, D, 0n);
+    for (const wallet of [C, D]) await expect(instance.issueVoucher(wallet)).rejects.toMatchObject({ code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("lets independent holders claim concurrently without blocking each other", async () => {
+    const { instance } = service({ holdings: { [`${A}:0`]: 1n, [`${B}:1`]: 1n, [`${C}:3`]: 2n } });
+    const results = await Promise.all([A, B, C].map((wallet) => instance.issueVoucher(wallet)));
+    expect(results.map((result) => result.voucher.claimant)).toEqual([A, B, C].map((wallet) => getAddress(wallet)));
+    expect(new Set(results.map((result) => result.voucher.nonce)).size).toBe(3);
+  });
+
+  it("only reads Genesis: balanceOf calls, logs, head and network; never a write, approval or transaction", async () => {
+    const chain = genesisChain({ [`${A}:0`]: 2n, [`${B}:1`]: 1n });
+    const methods = new Set();
+    const spy = new Proxy(chain, { get(target, property) { if (typeof target[property] === "function") methods.add(String(property)); return target[property]; } });
+    const { instance, dest } = service({ chain: spy });
+    const before = [0, 1, 2, 3].map((tokenId) => [chain.balanceAt(A, tokenId, chain.head), chain.balanceAt(B, tokenId, chain.head)]);
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(A, B, 0n);
+    await instance.issueVoucher(B);
+    await instance.checkEligibility(A);
+    expect([...methods].sort()).toEqual(["call", "getBlockNumber", "getLogs", "getNetwork"]);
+    const balanceOf = genesisIface.getFunction("balanceOf").selector;
+    expect(chain.call.mock.calls.every(([request]) => request.data.startsWith(balanceOf) && getAddress(request.to) === GENESIS_CONTRACT)).toBe(true);
+    // The ledger never touches balances: claims left them as they were; only the user's own transfer moved a unit.
+    expect([0, 1, 2, 3].map((tokenId) => chain.balanceAt(A, tokenId, chain.head) + chain.balanceAt(B, tokenId, chain.head)))
+      .toEqual(before.map(([a, b]) => a + b));
   });
 
   it("returns the same voucher to a repeat request, and refuses the wallet once it has claimed", async () => {
