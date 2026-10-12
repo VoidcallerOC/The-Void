@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { AbiCoder, Interface, Wallet, getAddress, getCreateAddress, id } from "ethers";
-import { CLAIM_ARTIFACT_PATH, broadcastClaim, buildPlan, preflightClaimDeployment, run, validateClaimDeploymentEnv } from "./deploy-genesis-claim.mjs";
+import { AbiCoder, Interface, Wallet, ZeroHash, getAddress, getCreateAddress, id, keccak256 } from "ethers";
+import { CLAIM_ARTIFACT_PATH, broadcastClaim, buildClaimRecord, buildPlan, mainnetSigningPlan, preflightClaimDeployment, run, validateClaimDeploymentEnv, verifyClaimDeployment } from "./deploy-genesis-claim.mjs";
 import { ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT } from "../server/genesis-claim.js";
 
 const KEY = `0x${"11".repeat(32)}`;
@@ -117,7 +117,9 @@ describe("Genesis claim deployment: environment", () => {
 
 describe("Genesis claim deployment: environment schedule", () => {
   const FUJI_TEST = { ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" };
-  const MAINNET = { ...ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc" };
+  const RABBY_DEPLOYER = "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174";
+  const { DEPLOYER_PRIVATE_KEY: _fujiKey, ...KEYLESS } = ENV;
+  const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER };
 
   it("accepts an accelerated Fuji schedule at the Fuji price", () => {
     expect(validateClaimDeploymentEnv(FUJI_TEST)).toMatchObject({ network: "fuji", chainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleEnd: BigInt(CLAIM_START + 899), publicPriceWei: 10_000_000_000_000_000n });
@@ -130,11 +132,13 @@ describe("Genesis claim deployment: environment schedule", () => {
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" })).toThrow(/0.25 AVAX/);
   });
 
-  it("plans a dry run from the reviewed deployer address alone and needs the key only to broadcast", () => {
-    const keyless = { ...MAINNET, DEPLOYER_PRIVATE_KEY: "", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
-    expect(validateClaimDeploymentEnv(keyless)).toMatchObject({ deployerAddress: DEPLOYER, deployerPrivateKey: null, broadcast: false });
-    expect(() => validateClaimDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: "" })).toThrow(/DEPLOYER_PRIVATE_KEY or EXPECTED_DEPLOYER_ADDRESS/);
-    expect(() => validateClaimDeploymentEnv({ ...keyless, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes", EXPECTED_DEPLOYER_NONCE: "2" })).toThrow(/DEPLOYER_PRIVATE_KEY is required to broadcast/);
+  it("plans mainnet only for the defined deployer, never with a key and never as a broadcast", () => {
+    expect(validateClaimDeploymentEnv(MAINNET)).toMatchObject({ deployerAddress: RABBY_DEPLOYER, deployerPrivateKey: null, broadcast: false });
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, EXPECTED_DEPLOYER_ADDRESS: "" })).toThrow(/EXPECTED_DEPLOYER_ADDRESS is required/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER })).toThrow(/defined mainnet deployer/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, DEPLOYER_PRIVATE_KEY: KEY })).toThrow(/never reads a private key/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, MAINNET_DEPLOYER_PRIVATE_KEY: KEY })).toThrow(/never reads a private key/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes", EXPECTED_DEPLOYER_NONCE: "2" })).toThrow(/signs the planned transaction in Rabby/);
   });
 
   it("keeps the fee recipient, voucher signer, claim admin, artist and deployer separate on mainnet", () => {
@@ -142,17 +146,15 @@ describe("Genesis claim deployment: environment schedule", () => {
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: NANO })).toThrow(/passive wallet/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: NANO })).toThrow(/passive wallet/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toThrow(/not the claim admin/);
-    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: DEPLOYER })).toThrow(/not the deployer/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: RABBY_DEPLOYER })).toThrow(/not the deployer/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ARTIST })).toThrow(/not the artist wallet/);
     expect(validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: ARTIST })).toMatchObject({ admin: ARTIST, signer: SIGNER });
     // Fuji keeps its existing rules.
     expect(validateClaimDeploymentEnv({ ...ENV, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toMatchObject({ network: "fuji" });
   });
 
-  it("needs the mainnet confirmation, not the Fuji one, to broadcast on mainnet", () => {
-    const broadcast = { ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0" };
-    expect(() => validateClaimDeploymentEnv(broadcast)).toThrow(/CONFIRM_MAINNET_DEPLOY=yes/);
-    expect(validateClaimDeploymentEnv({ ...broadcast, CONFIRM_MAINNET_DEPLOY: "yes" })).toMatchObject({ broadcast: true });
+  it("never broadcasts a mainnet claim through the Fuji broadcast path", async () => {
+    await expect(broadcastClaim({ network: "mainnet" }, {}, {}, { artifact: ARTIFACT })).rejects.toThrow(/Only Fuji/);
   });
 
   it("checks the accelerated sale schedule against the chain", async () => {
@@ -246,5 +248,102 @@ describe("compiled GenesisHolderClaim artifact", () => {
     expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
     for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
+  });
+});
+
+describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain", () => {
+  const RABBY_DEPLOYER = getAddress("0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
+  const NANO = getAddress("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
+  const { DEPLOYER_PRIVATE_KEY: _unused, ...KEYLESS_ENV } = ENV;
+  const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST };
+  const roles = new Interface(["function owner() view returns (address)", "function hasRole(bytes32 role,address account) view returns (bool)"]);
+  const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)"]));
+
+  /** C-Chain holding the artist's release; owner and DEFAULT_ADMIN_ROLE holders are configurable. */
+  function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [] } = {}) {
+    const base = fuji({ chainId: 43114n, nonce: 2 });
+    const state = { txs: {}, claim: null, claimValues: {} };
+    return {
+      ...base,
+      state,
+      estimateGas: async () => 2_000_000n,
+      waitForTransaction: async (hash) => state.txs[hash]?.receipt ?? null,
+      getTransaction: async (hash) => state.txs[hash]?.tx ?? null,
+      call: async (tx) => {
+        if (tx.to && getAddress(tx.to) === RELEASE) {
+          const selector = tx.data.slice(0, 10);
+          if (selector === roles.getFunction("owner").selector) return roles.encodeFunctionResult("owner", [owner]);
+          if (selector === roles.getFunction("hasRole").selector) {
+            const [role, account] = roles.decodeFunctionData("hasRole", tx.data);
+            const holders = role === ZeroHash ? admins : issuers;
+            return roles.encodeFunctionResult("hasRole", [holders.map(getAddress).includes(getAddress(account))]);
+          }
+        }
+        if (tx.to && state.claim && getAddress(tx.to) === state.claim) {
+          const fn = claimViews.parseTransaction({ data: tx.data }).name;
+          return claimViews.encodeFunctionResult(fn, [state.claimValues[fn]]);
+        }
+        return base.call(tx);
+      },
+      mine(request, plan, { tx: txOverrides = {}, values = {} } = {}) {
+        const hash = `0x${"c".repeat(64)}`;
+        state.txs[hash] = { tx: { hash, chainId: 43114n, from: request.from, nonce: request.nonce, to: null, value: 0n, data: request.data, ...txOverrides }, receipt: { hash, status: 1, blockNumber: 77, gasUsed: 1n, contractAddress: request.predictedAddress } };
+        state.claim = getAddress(request.predictedAddress);
+        state.claimValues = {
+          releaseContract: plan.target.releaseContract, primarySale: plan.target.primarySale, tokenId: plan.target.tokenId, allocation: plan.supply.claimAllocation, publicAllocation: plan.supply.publicAllocation,
+          claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds, claimEnd: plan.schedule.claimEnd, publicSaleEnd: plan.schedule.publicSaleEnd,
+          publicPriceWei: plan.schedule.publicPriceWei, ELIGIBILITY_RULE: plan.eligibility.rule, admin: plan.roles.admin, signer: plan.roles.signer, ...values,
+        };
+        return hash;
+      },
+    };
+  }
+
+  async function mainnetPlan(chain = cchain()) {
+    const config = validateClaimDeploymentEnv(MAINNET_ENV);
+    const facts = await preflightClaimDeployment(config, { provider: chain, genesisProvider: cChain(), artifact: ARTIFACT });
+    return mainnetSigningPlan(config, facts, buildPlan(config, facts), { provider: chain, artifact: ARTIFACT });
+  }
+
+  it("carries the exact unsigned creation transaction from the defined deployer and its re-plan inputs", async () => {
+    const plan = await mainnetPlan();
+    const data = `0x6080${AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "address", "address"], [RELEASE, SALE, TOKEN, 0, 0, CLAIM_START, 86_400, 604_800, PRICE, ARTIST, SIGNER]).slice(2)}`;
+    expect(plan.signingRequests).toEqual([{ step: 1, contract: "GenesisHolderClaim", chainId: 43114, from: RABBY_DEPLOYER, to: null, nonce: 2, value: "0", data: data.toLowerCase(), dataHash: keccak256(data), gasLimit: "2400000", predictedAddress: getCreateAddress({ from: RABBY_DEPLOYER, nonce: 2 }) }]);
+    expect(plan).toMatchObject({ readyToSign: true, deployer: RABBY_DEPLOYER, predictedClaimAddress: getCreateAddress({ from: RABBY_DEPLOYER, nonce: 2 }) });
+    expect(plan.planInputs).toMatchObject({ DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_START: String(CLAIM_START), GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_CLAIM_SIGNER_ADDRESS: SIGNER });
+    expect(JSON.stringify(plan)).not.toMatch(/PRIVATE_KEY"\s*:\s*"0x|privateKey|mnemonic/i);
+  });
+
+  it("prepares the ISSUER_ROLE grant for the release's verified admin, the artist wallet, never the deployer", async () => {
+    const plan = await mainnetPlan();
+    expect(plan.followUps.issuerGrant).toMatchObject({ from: ARTIST, to: RELEASE, authority: "DEFAULT_ADMIN_ROLE on the release, verified on chain" });
+    expect(plan.followUps.issuerGrant.data).toBe(new Interface(["function grantRole(bytes32 role,address account)"]).encodeFunctionData("grantRole", [id("ISSUER_ROLE"), plan.predictedClaimAddress]));
+    await expect(mainnetPlan(cchain({ owner: RABBY_DEPLOYER, admins: [RABBY_DEPLOYER] }))).rejects.toThrow(/Releases are created by the artist, never the deployer/);
+    await expect(mainnetPlan(cchain({ admins: [] }))).rejects.toThrow(/does not hold DEFAULT_ADMIN_ROLE/);
+    await expect(mainnetPlan(cchain({ admins: [ARTIST, RABBY_DEPLOYER] }))).rejects.toThrow(/deployer must hold no release authority/);
+    await expect(mainnetPlan(cchain({ admins: [ARTIST, NANO] }))).rejects.toThrow(/fee recipient holds DEFAULT_ADMIN_ROLE/);
+  });
+
+  it("verifies the mined claim against the reviewed plan and reports the separate grant as pending", async () => {
+    const chain = cchain();
+    const plan = await mainnetPlan(chain);
+    const verified = await verifyClaimDeployment(chain, plan, chain.mine(plan.signingRequests[0], plan));
+    expect(verified).toMatchObject({ address: plan.predictedClaimAddress, issuerGrant: "PENDING (artist operation)" });
+    expect(buildClaimRecord(plan, verified, { sourceCommit: "a".repeat(40) })).toMatchObject({ signedBy: { deployer: RABBY_DEPLOYER }, claim: { address: plan.predictedClaimAddress }, issuerGrant: { status: "PENDING (artist operation)", from: ARTIST } });
+  });
+
+  it("refuses a mined claim with another signer, admin or schedule, or from another account", async () => {
+    for (const [overrides, message] of [
+      [{ values: { signer: ADMIN } }, /signer/],
+      [{ values: { admin: SIGNER } }, /admin/],
+      [{ values: { claimStart: String(CLAIM_START + 1) } }, /claimStart/],
+      [{ tx: { from: ARTIST } }, /sender/],
+      [{ tx: { data: "0x6080" } }, /creation data hash/],
+      [{ tx: { chainId: 43113n } }, /chainId 43113/],
+    ]) {
+      const chain = cchain();
+      const plan = await mainnetPlan(chain);
+      await expect(verifyClaimDeployment(chain, plan, chain.mine(plan.signingRequests[0], plan, overrides))).rejects.toThrow(message);
+    }
   });
 });

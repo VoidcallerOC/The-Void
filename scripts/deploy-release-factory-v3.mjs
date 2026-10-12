@@ -89,6 +89,11 @@ export function validateDeploymentEnv(env = process.env) {
   const network = String(env.DEPLOY_NETWORK || "").trim().toLowerCase();
   const target = NETWORKS[network];
   if (!target) throw new DeploymentError('DEPLOY_NETWORK must be exactly "fuji" or "mainnet".');
+  // Factory V3 / V5 is a Fuji candidate only. Mainnet never signs from a script or reads a key here:
+  // the mainnet deployer signs in Rabby (deploy/mainnet/OWNER-SIGNING.md). A mainnet dry run still plans.
+  if (network === "mainnet" && (String(env.DEPLOYER_PRIVATE_KEY ?? "").trim() || String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes")) {
+    throw new DeploymentError("Factory V3 is never signed for mainnet from this script and never reads a mainnet key. Mainnet deployments are signed by the owner in Rabby.");
+  }
   const rpcUrl = required(env[target.rpcEnv], target.rpcEnv);
   if (!/^https?:\/\//i.test(rpcUrl) || /@/.test(rpcUrl)) throw new DeploymentError(`${target.rpcEnv} must be an HTTP(S) URL without embedded credentials.`);
   const deployerPrivateKey = String(env.DEPLOYER_PRIVATE_KEY ?? "").trim() || null;

@@ -1,20 +1,18 @@
-name: Deploy Genesis holder claim to C-Chain mainnet
+name: Plan the Genesis holder claim for C-Chain mainnet
 
-# GenesisHolderClaim for the mainnet Forgive & Forget release token (created on the mainnet
-# VoidReleaseFactoryV2; the Fuji -28 release is never a mainnet target). Production schedule only:
-# 24-hour free Genesis claim from claim_start, then the token's own primary sale (already configured
-# as the public phase) for 7 days at 0.25 AVAX; the contract, script and API all enforce it.
-# The default path is a read-only dry run that needs no private key: it verifies the release, sale,
-# schedule and the C-Chain Genesis collection, enforces role separation (the passive fee recipient is
-# never admin or signer; the signer is a dedicated key) and simulates the constructor. No run grants
-# ISSUER_ROLE, edits config/ or enables the API claim; those follow-ups are printed for the owner.
+# GenesisHolderClaim for the mainnet Forgive & Forget release token (created by the artist wallet on
+# the recorded mainnet VoidReleaseFactoryV2Royalty; the Fuji -28 release is never a mainnet target).
+# Production schedule only: 24-hour free Genesis claim from claim_start, then the token's own primary
+# sale (already configured by the artist as the public phase) for 7 days at 0.25 AVAX; the contract,
+# script and API all enforce it.
 #
-# Two jobs (see deploy/mainnet/DEPLOYMENT-AUTHORITY.md): `plan` (main only, no key, no environment)
-# dry-runs and, for a requested broadcast, binds the reviewed plan to this commit; `broadcast` waits
-# for the `mainnet-deployment` environment approval, re-plans without the key, refuses unless the
-# fresh plan matches the approved binding, and only then exposes the environment secret
-# MAINNET_DEPLOYER_PRIVATE_KEY (as DEPLOYER_PRIVATE_KEY) to the single signing step. The plan job
-# refuses to run if that secret is reachable without the environment. Required reviewers on that environment are configured in GitHub settings, not here.
+# Plan only. This workflow holds no private key, signs nothing and broadcasts nothing. The dry run
+# verifies the release, sale, schedule and the C-Chain Genesis collection, enforces role separation,
+# simulates the constructor, and prepares the ISSUER_ROLE grant for the release's verified admin (the
+# artist wallet). It binds the plan, including the exact unsigned creation transaction, to this commit.
+# The owner signs that transaction in Rabby with the defined deployer, on their own machine, with
+# `npm run sign:mainnet` (deploy/mainnet/OWNER-SIGNING.md). No run grants ISSUER_ROLE, edits config/
+# or enables the API claim; those are separate, separately approved operations.
 
 on:
   workflow_dispatch:
@@ -44,21 +42,12 @@ on:
         required: true
         type: string
       expected_deployer_address:
-        description: Deployer address the owner reviewed.
+        description: The defined mainnet deployer (Rabby). Any other address is refused.
         required: true
         type: string
+        default: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
       expected_deployer_nonce:
-        description: deployerNonce printed by the reviewed dry run. Required for a broadcast.
-        required: false
-        type: string
-        default: ""
-      broadcast_deployment:
-        description: Set true only for the owner-approved mainnet broadcast.
-        required: true
-        type: boolean
-        default: false
-      confirm_mainnet_deploy:
-        description: Type I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY only for the approved broadcast.
+        description: Deployer nonce the plan is for. Required for a binding.
         required: false
         type: string
         default: ""
@@ -67,10 +56,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: void-genesis-claim-mainnet-deployment
+  group: void-genesis-claim-mainnet-plan
   cancel-in-progress: false
 
-# Non-secret plan inputs shared by both jobs. DEPLOYER_PRIVATE_KEY is never set at workflow or job level.
 env:
   DEPLOY_NETWORK: mainnet
   AVALANCHE_MAINNET_RPC_URL: ${{ secrets.AVALANCHE_MAINNET_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc' }}
@@ -87,7 +75,6 @@ env:
   GENESIS_PUBLIC_PRICE_WEI: "250000000000000000"
   GENESIS_CLAIM_ADMIN: ${{ inputs.claim_admin }}
   GENESIS_CLAIM_SIGNER_ADDRESS: ${{ inputs.claim_signer_address }}
-  CONFIRM_MAINNET_DEPLOY: ${{ inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY' && 'yes' || 'no' }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
   EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
 
@@ -99,21 +86,18 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-    env:
-      BROADCAST_DEPLOYMENT: "no"
     steps:
-      - name: Refuse a mainnet key that is reachable outside the protected environment
-        # This job has no environment, so it can see only repository- or organization-level secrets.
-        # MAINNET_DEPLOYER_PRIVATE_KEY must exist only as a `mainnet-deployment` environment secret.
-        # The expression yields true/false; the secret value never enters this job's environment.
+      - name: Refuse to run while a mainnet deployer key exists in GitHub
+        # The mainnet deployer key never belongs in GitHub. The expression yields true/false; the
+        # secret value never enters this job's environment.
         env:
-          MAINNET_KEY_OUTSIDE_ENVIRONMENT: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}
+          MAINNET_KEY_IN_GITHUB: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}
         run: |
-          if [ "${MAINNET_KEY_OUTSIDE_ENVIRONMENT}" != "false" ]; then
-            echo "MAINNET_DEPLOYER_PRIVATE_KEY is visible without the mainnet-deployment environment (repository or organization secret). Move it to the environment; refusing to run." >&2
+          if [ "${MAINNET_KEY_IN_GITHUB}" != "false" ]; then
+            echo "A MAINNET_DEPLOYER_PRIVATE_KEY secret exists. The mainnet deployer signs only in Rabby; delete that secret. Refusing to run." >&2
             exit 1
           fi
-          echo "MAINNET_DEPLOYER_PRIVATE_KEY is not reachable from this unprotected job."
+          echo "No MAINNET_DEPLOYER_PRIVATE_KEY secret is reachable."
 
       - name: Check out source
         uses: actions/checkout@v4
@@ -134,8 +118,8 @@ jobs:
           forge build
           forge test --match-contract GenesisHolderClaim
 
-      - name: Run claim service and deployment script tests
-        run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js scripts/deployment-plan-binding.test.mjs
+      - name: Run claim service, deployment and owner-signing tests
+        run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js scripts/deployment-plan-binding.test.mjs scripts/mainnet-signing-requests.test.mjs scripts/mainnet-owner-signing.test.mjs
 
       - name: Dry run (no key)
         shell: bash
@@ -145,13 +129,11 @@ jobs:
           set -euo pipefail
           npm run deploy:genesis-claim -- --dry-run | tee plan-output.log
 
-      - name: Check broadcast inputs and bind the reviewed plan (no key)
-        if: inputs.broadcast_deployment
+      - name: Bind the plan to this commit (no key)
         shell: bash
         run: |
           set -euo pipefail
-          test "${CONFIRM_MAINNET_DEPLOY}" = "yes" || { echo "Broadcast requires the exact confirmation string." >&2; exit 1; }
-          [[ "${EXPECTED_DEPLOYER_NONCE}" =~ ^[0-9]+$ ]] || { echo "Broadcast requires expected_deployer_nonce." >&2; exit 1; }
+          [[ "${EXPECTED_DEPLOYER_NONCE}" =~ ^[0-9]+$ ]] || { echo "No expected_deployer_nonce given; no binding was written."; exit 0; }
           node scripts/deployment-plan-binding.mjs bind --kind genesis-claim-mainnet --plan plan.json --commit "${GITHUB_SHA}" --out plan-binding.json
 
       - name: Preserve the reviewed plan
@@ -163,71 +145,4 @@ jobs:
             plan-output.log
             plan.json
             plan-binding.json
-          if-no-files-found: ignore
-
-  broadcast:
-    name: Broadcast the approved mainnet Genesis claim
-    needs: plan
-    if: github.ref == 'refs/heads/main' && inputs.broadcast_deployment && inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    # Approval gate. Required reviewers and the main-only branch rule must be set on this environment in
-    # GitHub (Settings > Environments); the YAML reference alone does not create them.
-    environment: mainnet-deployment
-    permissions:
-      contents: read
-    steps:
-      - name: Check out the planned commit
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-
-      - name: Install Node dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Install pinned Foundry toolchain
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.3.1
-
-      - name: Build the claim artifact
-        run: forge build
-
-      - name: Fetch the approved plan
-        uses: actions/download-artifact@v4
-        with:
-          name: genesis-claim-mainnet-plan-${{ github.run_id }}
-          path: approved
-
-      - name: Re-plan without the key and match it to the approved plan
-        shell: bash
-        env:
-          BROADCAST_DEPLOYMENT: "no"
-          PLAN_OUTPUT_PATH: fresh-plan.json
-        run: |
-          set -euo pipefail
-          npm run deploy:genesis-claim -- --dry-run > /dev/null
-          node scripts/deployment-plan-binding.mjs verify --kind genesis-claim-mainnet --approved approved/plan-binding.json --plan fresh-plan.json --commit "${GITHUB_SHA}"
-
-      - name: Sign and broadcast (the only step with the key)
-        shell: bash
-        env:
-          # Environment-scoped secret, distinct from the Fuji DEPLOYER_PRIVATE_KEY: if it is missing from
-          # mainnet-deployment, this is empty and the script refuses; it never falls back to a repository secret.
-          DEPLOYER_PRIVATE_KEY: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY }}
-          BROADCAST_DEPLOYMENT: "yes"
-        run: |
-          set -euo pipefail
-          npm run deploy:genesis-claim | tee deployment-output.log
-
-      - name: Preserve deployment output and record
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: genesis-claim-mainnet-${{ github.run_id }}
-          path: |
-            deployment-output.log
-            deployments/genesis-claim-mainnet-*.json
           if-no-files-found: ignore

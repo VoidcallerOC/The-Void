@@ -2,9 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, Wallet, formatEther, getAddress, getCreateAddress, id, isAddress, keccak256 } from "ethers";
+import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, formatEther, getAddress, getCreateAddress, id, isAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
+import { assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
 
 // C-Chain deployment of the release-per-contract architecture validated on Fuji, with the artist
 // royalty enforced on chain: VoidReleaseFactoryV2Royalty (VoidReleaseFactoryV2 whose constructor
@@ -12,7 +13,10 @@ import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
 // artist wallet of its release, never to the fee recipient) followed by ReleaseMarketplaceV4 (V3 that
 // independently enforces the same royalty at listing and settlement). Both are ownerless and their fee recipients
 // and fee rates are immutable, so the recipient must be the owner's physically verified address.
-// The default path is a read-only dry run; nothing is signed or sent without every broadcast gate.
+// This script never signs and never reads a private key. It builds the key-less plan, including the
+// exact unsigned creation transactions, and verifies mined transactions against that plan. The owner
+// signs those transactions in Rabby with the defined deployer (scripts/mainnet-owner-signing.mjs,
+// deploy/mainnet/OWNER-SIGNING.md); the deployer creates contracts only, never releases.
 export const MAINNET_CHAIN_ID = 43114;
 export const FEE_BPS = 250;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,7 +32,6 @@ export function missingSelectors(runtimeBytecode, signatures) {
   return signatures.filter((signature) => !code.includes(`63${id(signature).slice(2, 10)}`));
 }
 const ROYALTY_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
-const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const ZERO = "0x0000000000000000000000000000000000000000";
 // The single passive platform fee recipient (the owner's Nano S Plus) is recorded in the mainnet
 // manifest; both fees must go to exactly that address. Other roles never double as the recipient.
@@ -38,7 +41,7 @@ export const REFUSED_RECIPIENTS = Object.freeze({
   "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a": "the artist wallet; artist and platform fee recipient are separate roles",
   "0xD1B4367dd9f235f9ee61878019d66E31511E98eE": "the Genesis collection contract",
 });
-// Gas headroom required over the estimate before a broadcast (percent).
+// Gas headroom required over the estimate before signing (percent).
 const FUNDING_HEADROOM_PERCENT = 150n;
 
 export class DeploymentError extends Error {}
@@ -67,15 +70,25 @@ function feeBps(value, name) {
 /** Validates the environment. Recipients may be absent in a dry run; the plan then reports them BLOCKED. */
 export function validateDeploymentEnv(env = process.env) {
   if (text(env.DEPLOY_NETWORK).toLowerCase() !== "mainnet") throw new DeploymentError('DEPLOY_NETWORK must be exactly "mainnet".');
+  try {
+    assertNoPrivateKeyInEnv(env, "The mainnet deployment plan");
+  } catch (error) {
+    throw new DeploymentError(error.message);
+  }
+  if (text(env.BROADCAST_DEPLOYMENT).toLowerCase() === "yes") {
+    throw new DeploymentError("This script never signs or broadcasts. The owner signs the planned transactions in Rabby: npm run sign:mainnet (deploy/mainnet/OWNER-SIGNING.md).");
+  }
   const rpcUrl = text(env.AVALANCHE_MAINNET_RPC_URL) || mainnetManifest.rpcUrl;
-  if (!/^https:\/\//i.test(rpcUrl) || /@/.test(rpcUrl)) throw new DeploymentError("AVALANCHE_MAINNET_RPC_URL must be an HTTPS URL without embedded credentials.");
-  const keyText = text(env.DEPLOYER_PRIVATE_KEY);
-  if (keyText && !PRIVATE_KEY_PATTERN.test(keyText)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
-  const keyAddress = keyText ? new Wallet(keyText).address : null;
-  const expectedDeployer = optionalAddress(env.EXPECTED_DEPLOYER_ADDRESS, "EXPECTED_DEPLOYER_ADDRESS");
-  if (keyAddress && expectedDeployer && keyAddress !== expectedDeployer) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
-  const deployerAddress = keyAddress || expectedDeployer;
-  if (!deployerAddress) throw new DeploymentError("EXPECTED_DEPLOYER_ADDRESS (or DEPLOYER_PRIVATE_KEY) is required to plan the deployment.");
+  // HTTPS, or a node on this machine (a local C-Chain node or fork rehearsal). Never embedded credentials.
+  if (!(/^https:\/\//i.test(rpcUrl) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(rpcUrl)) || /@/.test(rpcUrl)) {
+    throw new DeploymentError("AVALANCHE_MAINNET_RPC_URL must be an HTTPS URL (or a local node) without embedded credentials.");
+  }
+  let deployerAddress;
+  try {
+    deployerAddress = assertDefinedDeployer(env.EXPECTED_DEPLOYER_ADDRESS);
+  } catch (error) {
+    throw new DeploymentError(error.message);
+  }
 
   const platformRecipient = optionalAddress(env.RELEASE_PLATFORM_RECIPIENT, "RELEASE_PLATFORM_RECIPIENT");
   const marketplaceInput = optionalAddress(env.RELEASE_MARKETPLACE_FEE_RECIPIENT, "RELEASE_MARKETPLACE_FEE_RECIPIENT");
@@ -92,25 +105,26 @@ export function validateDeploymentEnv(env = process.env) {
   const platformFeeBps = feeBps(env.RELEASE_PLATFORM_FEE_BPS, "RELEASE_PLATFORM_FEE_BPS");
   const marketplaceFeeBps = feeBps(env.RELEASE_MARKETPLACE_FEE_BPS, "RELEASE_MARKETPLACE_FEE_BPS");
 
-  const broadcast = text(env.BROADCAST_DEPLOYMENT).toLowerCase() === "yes";
   const nonceText = text(env.EXPECTED_DEPLOYER_NONCE);
   if (nonceText && !/^\d+$/.test(nonceText)) throw new DeploymentError("EXPECTED_DEPLOYER_NONCE must be a non-negative integer.");
-  if (broadcast) {
-    if (text(env.CONFIRM_MAINNET_DEPLOY) !== "yes") throw new DeploymentError("Broadcast requires CONFIRM_MAINNET_DEPLOY=yes.");
-    if (!keyText) throw new DeploymentError("Broadcast requires DEPLOYER_PRIVATE_KEY.");
-    if (!expectedDeployer) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
-    if (!nonceText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_NONCE, so the reviewed predicted addresses hold.");
-    if (!platformRecipient) throw new DeploymentError("Broadcast requires RELEASE_PLATFORM_RECIPIENT, the physically verified Nano S Plus address.");
-    // The owner re-types the address read from the device screen; any difference refuses the broadcast.
-    if (optionalAddress(env.RECIPIENT_VERIFIED_ON_DEVICE, "RECIPIENT_VERIFIED_ON_DEVICE") !== platformRecipient) {
-      throw new DeploymentError("Broadcast requires RECIPIENT_VERIFIED_ON_DEVICE to equal RELEASE_PLATFORM_RECIPIENT exactly, as read from the hardware wallet screen.");
-    }
-  }
   return Object.freeze({
-    network: "mainnet", rpcUrl, deployerPrivateKey: keyText || null, deployerAddress, expectedDeployer,
+    network: "mainnet", rpcUrl, deployerAddress,
     expectedNonce: nonceText ? Number(nonceText) : null, platformRecipient, marketplaceFeeRecipient,
-    platformFeeBps, marketplaceFeeBps, broadcast,
+    platformFeeBps, marketplaceFeeBps,
   });
+}
+
+/** The non-secret inputs that reproduce a plan, recorded in it so the signing tool can re-plan. */
+export function planInputs(config) {
+  return {
+    DEPLOY_NETWORK: "mainnet",
+    EXPECTED_DEPLOYER_ADDRESS: config.deployerAddress,
+    EXPECTED_DEPLOYER_NONCE: config.expectedNonce === null ? "" : String(config.expectedNonce),
+    RELEASE_PLATFORM_RECIPIENT: config.platformRecipient || "",
+    RELEASE_MARKETPLACE_FEE_RECIPIENT: config.marketplaceFeeRecipient || "",
+    RELEASE_PLATFORM_FEE_BPS: String(config.platformFeeBps),
+    RELEASE_MARKETPLACE_FEE_BPS: String(config.marketplaceFeeBps),
+  };
 }
 
 async function loadArtifact(relativePath) {
@@ -148,9 +162,11 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
   const marketplaceArgs = [config.marketplaceFeeRecipient || deployer, config.marketplaceFeeBps, factoryAddress];
   const factoryData = new ContractFactory(factoryArtifact.abi, factoryArtifact.bytecode.object).interface.encodeDeploy(factoryArgs);
   const marketplaceData = new ContractFactory(marketplaceArtifact.abi, marketplaceArtifact.bytecode.object).interface.encodeDeploy(marketplaceArgs);
+  const factoryCreation = factoryArtifact.bytecode.object + factoryData.slice(2);
+  const marketplaceCreation = marketplaceArtifact.bytecode.object + marketplaceData.slice(2);
   const [factoryGas, marketplaceGas] = await Promise.all([
-    provider.estimateGas({ from: deployer, data: factoryArtifact.bytecode.object + factoryData.slice(2) }),
-    provider.estimateGas({ from: deployer, data: marketplaceArtifact.bytecode.object + marketplaceData.slice(2) }),
+    provider.estimateGas({ from: deployer, data: factoryCreation }),
+    provider.estimateGas({ from: deployer, data: marketplaceCreation }),
   ]);
   const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
   const estimatedCost = (factoryGas + marketplaceGas) * gasPrice;
@@ -161,12 +177,13 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     if (!value) { recipientChecks.push({ name, status: "BLOCKED", reason: "Not provided: awaiting the physically verified Nano S Plus address." }); continue; }
     const code = await provider.getCode(value);
     recipientChecks.push(code === "0x"
-      ? { name, address: value, status: "UNVERIFIED", reason: "Externally owned account on C-Chain; receives fees passively and never signs a deployment. Physical device verification is still required before broadcast." }
+      ? { name, address: value, status: "UNVERIFIED", reason: "Externally owned account on C-Chain; receives fees passively and never signs a deployment. The owner confirms it on the device screen (view only; the device signs nothing) before signing the deployment." }
       : { name, address: value, status: "BLOCKED", reason: "Has contract code on C-Chain; a hardware-wallet recipient must be an EOA." });
   }
 
   const checks = [
     { check: "chainId", status: "PASS", value: Number(network.chainId) },
+    { check: "deployer is the defined mainnet deployer", status: deployer === getAddress(mainnetManifest.deployerAddress) ? "PASS" : "FAIL", value: deployer },
     { check: "deployer is an EOA", status: deployerCode === "0x" ? "PASS" : "FAIL" },
     { check: "no pending deployer transactions", status: pendingNonce === nonce ? "PASS" : "FAIL", value: { nonce, pendingNonce } },
     { check: "nonce matches EXPECTED_DEPLOYER_NONCE", status: config.expectedNonce === null ? "NOT PROVIDED" : config.expectedNonce === nonce ? "PASS" : "FAIL", value: config.expectedNonce },
@@ -197,91 +214,98 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     } : null,
     gas: { maxFeePerGasWei: gasPrice.toString(), estimatedCostAvax: formatEther(estimatedCost), requiredWithHeadroomAvax: formatEther(requiredBalance), note: config.platformRecipient ? null : "Estimated with the deployer standing in for the pending recipient; the address does not change the gas cost." },
     checks,
-    readyToBroadcast: checks.every((item) => item.status === "PASS" || (item.check.endsWith("verified") && item.status === "UNVERIFIED")) && config.expectedNonce !== null,
+    // The exact unsigned transactions the owner signs in Rabby, in order. Present only once the
+    // recipient is named, because the recipient is part of the creation data.
+    signingRequests: config.platformRecipient ? [
+      creationRequest({ step: 1, contract: "VoidReleaseFactoryV2Royalty", from: deployer, nonce, data: factoryCreation, estimatedGas: factoryGas, predictedAddress: factoryAddress }),
+      creationRequest({ step: 2, contract: "ReleaseMarketplaceV4", from: deployer, nonce: nonce + 1, data: marketplaceCreation, estimatedGas: marketplaceGas, predictedAddress: marketplaceAddress }),
+    ] : null,
+    planInputs: planInputs(config),
+    // "Ready to sign": every check passes (the recipient's device confirmation is taken by the signing tool).
+    readyToBroadcast: checks.every((item) => item.status === "PASS" || (item.check.endsWith("verified") && item.status === "UNVERIFIED")) && config.expectedNonce !== null && Boolean(config.platformRecipient),
     broadcasted: false,
   };
-}
-
-async function deployContract(artifact, args, signer) {
-  const contract = await new ContractFactory(artifact.abi, artifact.bytecode.object, signer).deploy(...args);
-  const receipt = await contract.deploymentTransaction().wait();
-  if (!receipt || receipt.status !== 1) throw new DeploymentError("Deployment transaction did not succeed.");
-  return { contract, receipt, address: getAddress(await contract.getAddress()) };
 }
 
 export function deploymentRecordPath(factoryAddress) {
   return `deployments/release-per-contract-mainnet-${getAddress(factoryAddress)}.json`;
 }
 
-async function writeRecordFile(relativePath, record) {
+/**
+ * Verifies one owner-signed step from chain: the creation transaction against its reviewed request,
+ * then the mined contract's immutables against the plan. Step 1 is the factory (and the
+ * implementation it creates), step 2 the marketplace bound to that factory.
+ */
+export async function verifyReleaseStep(provider, plan, stepNumber, hash, { load = loadArtifact, timeoutMs } = {}) {
+  const request = plan.signingRequests?.find((item) => item.step === stepNumber);
+  if (!request) throw new DeploymentError(`The plan has no signing request for step ${stepNumber}.`);
+  const mined = await verifyCreationTransaction(provider, request, hash, { timeoutMs });
+  const recipient = getAddress(plan.transactions[0].constructor.platformRecipient);
+  const marketplaceStep = plan.transactions[1];
+  if (stepNumber === 1) {
+    const factoryArtifact = await load(FACTORY_ARTIFACT_PATH);
+    const factory = new Contract(mined.address, factoryArtifact.abi, provider);
+    const implementationAddress = getAddress(await factory.implementation());
+    const [onChainRecipient, onChainFee, onChainVersion, factoryRoyalty] = await Promise.all([factory.platformRecipient(), factory.PLATFORM_FEE_BPS(), factory.RELEASE_VERSION(), factory.REQUIRED_ROYALTY_BPS()]);
+    const implementationViews = new Contract(implementationAddress, ROYALTY_VIEWS, provider);
+    const [implementationRoyalty, implementationForbidden, implementationCode] = await Promise.all([implementationViews.REQUIRED_ROYALTY_BPS(), implementationViews.platformFeeRecipient(), provider.getCode(implementationAddress)]);
+    const problems = [];
+    if (implementationAddress !== getAddress(plan.transactions[0].predictedImplementation)) problems.push(`implementation ${implementationAddress}`);
+    if (keccak256(implementationCode) !== plan.artifacts.implementation.runtimeCodeHash) problems.push("implementation runtime code differs from the reviewed artifact");
+    if (getAddress(onChainRecipient) !== recipient) problems.push(`platformRecipient ${onChainRecipient}`);
+    if (Number(onChainFee) !== FEE_BPS) problems.push(`PLATFORM_FEE_BPS ${onChainFee}`);
+    if (Number(onChainVersion) !== 2) problems.push(`RELEASE_VERSION ${onChainVersion}`);
+    if (Number(factoryRoyalty) !== ROYALTY_BPS || Number(implementationRoyalty) !== ROYALTY_BPS) problems.push("royalty lock");
+    if (getAddress(implementationForbidden) !== recipient) problems.push(`implementation platformFeeRecipient ${implementationForbidden}`);
+    const missingOnChain = missingAlbumSelectors(implementationCode);
+    if (missingOnChain.length) problems.push(`implementation missing ${missingOnChain.join(", ")}`);
+    if (problems.length) throw new DeploymentError(`The mined factory does not match the reviewed configuration: ${problems.join("; ")}. Do not sign the marketplace.`);
+    return { ...mined, implementationAddress, platformRecipient: recipient, platformFeeBps: FEE_BPS, releaseVersion: 2, requiredRoyaltyBps: ROYALTY_BPS };
+  }
+  if (stepNumber === 2) {
+    const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
+    const marketplace = new Contract(mined.address, marketplaceArtifact.abi, provider);
+    const [registry, feeRecipient, platformFeeBps, deploymentChainId, marketplaceRoyalty] = await Promise.all([marketplace.registry(), marketplace.feeRecipient(), marketplace.platformFeeBps(), marketplace.deploymentChainId(), marketplace.REQUIRED_ROYALTY_BPS()]);
+    const problems = [];
+    if (getAddress(registry) !== getAddress(marketplaceStep.constructor.releaseFactory)) problems.push(`registry ${registry}`);
+    if (getAddress(feeRecipient) !== getAddress(marketplaceStep.constructor.feeRecipient)) problems.push(`feeRecipient ${feeRecipient}`);
+    if (Number(platformFeeBps) !== FEE_BPS) problems.push(`platformFeeBps ${platformFeeBps}`);
+    if (Number(deploymentChainId) !== MAINNET_CHAIN_ID) problems.push(`deploymentChainId ${deploymentChainId}`);
+    if (Number(marketplaceRoyalty) !== ROYALTY_BPS) problems.push(`REQUIRED_ROYALTY_BPS ${marketplaceRoyalty}`);
+    if (problems.length) throw new DeploymentError(`The mined marketplace does not match the reviewed configuration: ${problems.join("; ")}.`);
+    return { ...mined, factoryAddress: getAddress(registry), feeRecipient: getAddress(feeRecipient), feeBps: FEE_BPS, requiredRoyaltyBps: ROYALTY_BPS };
+  }
+  throw new DeploymentError(`Unknown step ${stepNumber}.`);
+}
+
+/** The committed deployment record, built only from two verified steps. */
+export function buildDeploymentRecord(plan, [factory, marketplace], { sourceCommit = null, planDigest = null } = {}) {
+  return {
+    network: "mainnet",
+    chainId: MAINNET_CHAIN_ID,
+    architecture: "release-per-contract",
+    signedBy: { deployer: plan.deployer.address, method: "owner-signed in Rabby; no private key left the wallet" },
+    plan: { sourceCommit, digest: planDigest },
+    factory: { address: factory.address, deploymentTransaction: factory.transaction, deploymentBlock: factory.block, implementationAddress: factory.implementationAddress, implementation: "VoidRelease1155V4Royalty", implementationVersion: 2, implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: "VoidReleaseFactoryV2Royalty", sourceCommit, platformRecipient: factory.platformRecipient, platformFeeBps: FEE_BPS },
+    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.transaction, deploymentBlock: marketplace.block, chainId: MAINNET_CHAIN_ID, factoryAddress: marketplace.factoryAddress, feeRecipient: marketplace.feeRecipient, feeBps: marketplace.feeBps, requiredRoyaltyBps: ROYALTY_BPS, contract: "ReleaseMarketplaceV4" },
+  };
+}
+
+export async function writeRecordFile(relativePath, record) {
   const recordPath = resolve(ROOT, relativePath);
   await mkdir(dirname(recordPath), { recursive: true });
   await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
 }
 
-/** Broadcasts both deployments and verifies every immutable against the reviewed plan. */
-export async function broadcastDeployment(config, provider, plan, {
-  load = loadArtifact,
-  deploy = deployContract,
-  writeRecord = writeRecordFile,
-  log = (value) => console.log(JSON.stringify(value)),
-  signer = new Wallet(config.deployerPrivateKey, provider),
-} = {}) {
-  if (!plan.readyToBroadcast) throw new DeploymentError("The dry-run plan is not ready to broadcast. Nothing was sent.");
-  const [factoryStep, marketplaceStep] = plan.transactions;
-  const factoryArtifact = await load(FACTORY_ARTIFACT_PATH);
-  const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
-  const factory = await deploy(factoryArtifact, [config.platformRecipient], signer);
-  log({ step: "FACTORY_MINED", factoryAddress: factory.address, transaction: factory.receipt.hash, block: factory.receipt.blockNumber });
-  if (factory.address !== factoryStep.predictedAddress) throw new DeploymentError(`Factory mined at ${factory.address}, not the reviewed ${factoryStep.predictedAddress}. The marketplace was not deployed.`);
-  const implementationAddress = getAddress(await factory.contract.implementation());
-  const [onChainRecipient, onChainFee, onChainVersion] = await Promise.all([factory.contract.platformRecipient(), factory.contract.PLATFORM_FEE_BPS(), factory.contract.RELEASE_VERSION()]);
-  const missingOnChain = missingAlbumSelectors(await provider.getCode(implementationAddress));
-  const implementationViews = new Contract(implementationAddress, ROYALTY_VIEWS, provider);
-  const [factoryRoyalty, implementationRoyalty, implementationForbidden] = await Promise.all([factory.contract.REQUIRED_ROYALTY_BPS(), implementationViews.REQUIRED_ROYALTY_BPS(), implementationViews.platformFeeRecipient()]);
-  const royaltyLocked = Number(factoryRoyalty) === ROYALTY_BPS && Number(implementationRoyalty) === ROYALTY_BPS && getAddress(implementationForbidden) === config.platformRecipient;
-  if (getAddress(onChainRecipient) !== config.platformRecipient || Number(onChainFee) !== FEE_BPS || Number(onChainVersion) !== 2 || missingOnChain.length || !royaltyLocked) {
-    log({ step: "FACTORY_STATE_MISMATCH", implementationAddress, onChainRecipient, onChainFee: String(onChainFee), onChainVersion: String(onChainVersion), missingOnChain, royaltyLocked });
-    throw new DeploymentError("The mined factory does not match the reviewed configuration. The marketplace was not deployed.");
-  }
-  const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.marketplaceFeeBps, factory.address], signer);
-  log({ step: "MARKETPLACE_MINED", marketplaceAddress: marketplace.address, transaction: marketplace.receipt.hash, block: marketplace.receipt.blockNumber });
-  const [registry, feeRecipient, platformFeeBps, deploymentChainId, marketplaceRoyalty] = await Promise.all([marketplace.contract.registry(), marketplace.contract.feeRecipient(), marketplace.contract.platformFeeBps(), marketplace.contract.deploymentChainId(), marketplace.contract.REQUIRED_ROYALTY_BPS()]);
-  if (marketplace.address !== marketplaceStep.predictedAddress || getAddress(registry) !== factory.address || getAddress(feeRecipient) !== config.marketplaceFeeRecipient || Number(platformFeeBps) !== config.marketplaceFeeBps || Number(deploymentChainId) !== MAINNET_CHAIN_ID || Number(marketplaceRoyalty) !== ROYALTY_BPS) {
-    throw new DeploymentError("The mined marketplace does not match the reviewed configuration. Record the logged addresses before any further action.");
-  }
-  const record = {
-    network: "mainnet",
-    chainId: MAINNET_CHAIN_ID,
-    architecture: "release-per-contract",
-    factory: { address: factory.address, deploymentTransaction: factory.receipt.hash, deploymentBlock: factory.receipt.blockNumber, implementationAddress, implementation: "VoidRelease1155V4Royalty", implementationVersion: 2, implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: "VoidReleaseFactoryV2Royalty", sourceCommit: process.env.GITHUB_SHA || null, platformRecipient: config.platformRecipient, platformFeeBps: FEE_BPS },
-    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.receipt.hash, deploymentBlock: marketplace.receipt.blockNumber, chainId: MAINNET_CHAIN_ID, factoryAddress: factory.address, feeRecipient: config.marketplaceFeeRecipient, feeBps: config.marketplaceFeeBps, requiredRoyaltyBps: ROYALTY_BPS, contract: "ReleaseMarketplaceV4" },
-  };
-  const recordPath = deploymentRecordPath(factory.address);
-  log({ step: "RECORD", path: recordPath, record });
-  try {
-    await writeRecord(recordPath, record);
-  } catch (error) {
-    log({ step: "RECORD_WRITE_FAILED", path: recordPath, error: error.message });
-  }
-  return record;
-}
-
 export async function run(argv = process.argv.slice(2), env = process.env, dependencies = {}) {
   const config = validateDeploymentEnv(env);
-  if (config.broadcast && argv.includes("--dry-run")) throw new DeploymentError("--dry-run cannot be combined with BROADCAST_DEPLOYMENT=yes.");
   const provider = dependencies.provider || new JsonRpcProvider(config.rpcUrl, MAINNET_CHAIN_ID, { staticNetwork: true });
   const plan = await (dependencies.buildDryRunPlan || buildDryRunPlan)(config, provider);
   console.log(JSON.stringify(plan, null, 2));
-  if (!config.broadcast) {
-    // The workflow binds the approved broadcast to this exact plan (scripts/deployment-plan-binding.mjs).
-    if (text(env.PLAN_OUTPUT_PATH)) await writeFile(resolve(text(env.PLAN_OUTPUT_PATH)), `${JSON.stringify(plan, null, 2)}\n`);
-    console.log("No transaction was signed or broadcast.");
-    return plan;
-  }
-  const record = await (dependencies.broadcastDeployment || broadcastDeployment)(config, provider, plan);
-  console.log(JSON.stringify({ mode: "BROADCAST_COMPLETE", record }, null, 2));
-  return { mode: "BROADCAST_COMPLETE", record };
+  // The plan binding (scripts/deployment-plan-binding.mjs) ties the owner's signing session to this exact plan.
+  if (text(env.PLAN_OUTPUT_PATH)) await writeFile(resolve(text(env.PLAN_OUTPUT_PATH)), `${JSON.stringify(plan, null, 2)}\n`);
+  console.log("No transaction was signed or broadcast. The owner signs the planned transactions in Rabby: npm run sign:mainnet.");
+  return plan;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -2,9 +2,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Static checks on the tracked workflows: who can reach DEPLOYER_PRIVATE_KEY, and from where.
-// They prove what the YAML does; required reviewers and secret scoping live in GitHub settings
-// (deploy/mainnet/DEPLOYMENT-AUTHORITY.md) and cannot be verified from the repository.
+// Static checks on the tracked workflows: who can reach DEPLOYER_PRIVATE_KEY, and from where. Mainnet
+// workflows plan only and never hold a key: the mainnet deployer signs in Rabby on the owner's machine
+// (deploy/mainnet/OWNER-SIGNING.md). Fuji workflows keep their gated, step-scoped Fuji key.
 const ROOT = resolve(import.meta.dirname, "..");
 const WORKFLOWS = resolve(ROOT, ".github/workflows");
 const read = (path) => readFileSync(resolve(ROOT, path), "utf8");
@@ -60,6 +60,9 @@ function parseWorkflow(source) {
 }
 const workflows = Object.fromEntries(workflowFiles.map((name) => [name, parseWorkflow(readFileSync(resolve(WORKFLOWS, name), "utf8"))]));
 const keyWorkflows = Object.entries(workflows).filter(([, wf]) => wf.source.includes("DEPLOYER_PRIVATE_KEY"));
+// Workflow text without comment lines: what actually runs.
+const executable = (wf) => wf.source.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+const RUNS_SIGNING_TOOL = /sign:mainnet|mainnet-owner-signing\.mjs (serve|verify)/;
 const signingSteps = (wf) => wf.jobs.flatMap((job) => job.steps.filter((step) => KEY_REF.test(step.env)).map((step) => ({ job, step })));
 
 describe("legacy shared-contract mainnet path is retired", () => {
@@ -71,7 +74,7 @@ describe("legacy shared-contract mainnet path is retired", () => {
     for (const wf of Object.values(workflows)) expect(wf.source).not.toMatch(/deploy-release-v2-mainnet|deploy:release-v2-mainnet/);
   });
 
-  it("leaves exactly the two reviewed mainnet broadcast workflows", () => {
+  it("leaves exactly the two reviewed mainnet plan workflows", () => {
     const mainnet = Object.entries(workflows).filter(([, wf]) => /DEPLOY_NETWORK:\s*mainnet/.test(wf.source)).map(([name]) => name).sort();
     expect(mainnet).toEqual(["deploy-genesis-claim-mainnet.yml", "deploy-release-per-contract-mainnet.yml"]);
   });
@@ -125,59 +128,56 @@ describe("deployer key exposure", () => {
   });
 });
 
-describe("mainnet broadcast requires the protected environment and the reviewed plan", () => {
+describe("mainnet workflows plan only: no key, no signing, no broadcast", () => {
   const cases = [
-    ["deploy-release-per-contract-mainnet.yml", "release-per-contract-mainnet", "I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY", "deploy:release-per-contract:mainnet"],
-    ["deploy-genesis-claim-mainnet.yml", "genesis-claim-mainnet", "I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY", "deploy:genesis-claim"],
+    ["deploy-release-per-contract-mainnet.yml", "release-per-contract-mainnet", "deploy:release-per-contract:mainnet"],
+    ["deploy-genesis-claim-mainnet.yml", "genesis-claim-mainnet", "deploy:genesis-claim"],
   ];
-  for (const [file, kind, confirmation, command] of cases) {
-    it(`${file}: plan job is key-less; broadcast job is environment-gated and signs last`, () => {
+  for (const [file, kind, command] of cases) {
+    it(`${file}: one key-less plan job that dry-runs and binds the plan`, () => {
       const wf = workflows[file];
-      const dispatch = wf.source.slice(wf.source.indexOf("broadcast_deployment:"));
-      expect(dispatch.slice(0, 200)).toMatch(/type: boolean\n\s+default: false/);
-      const plan = wf.jobs.find((job) => job.name === "plan");
-      const broadcast = wf.jobs.find((job) => job.name === "broadcast");
-      expect(wf.jobs.map((job) => job.name)).toEqual(["plan", "broadcast"]);
+      expect(wf.jobs.map((job) => job.name)).toEqual(["plan"]);
+      const [plan] = wf.jobs;
       expect(plan.header).toMatch(/if: github\.ref == 'refs\/heads\/main'/);
-      expect(plan.header).not.toMatch(/environment:/);
-      expect(`${plan.header}\n${plan.steps.map((step) => step.text).join("\n")}`).not.toMatch(KEY_REF);
-      // The first plan step fails closed if the mainnet key is visible without the environment,
-      // using only a boolean of the secret (never its value).
+      // No environment, no signing step, no broadcast, no wallet or key input of any kind.
+      expect(wf.source).not.toMatch(/environment:/);
+      expect(signingSteps(wf)).toHaveLength(0);
+      expect(wf.source).not.toMatch(KEY_REF);
+      expect(wf.source).not.toMatch(/BROADCAST_DEPLOYMENT|broadcast_deployment|confirm_mainnet_deploy|recipient_verified_on_device/);
+      expect(executable(wf)).not.toMatch(RUNS_SIGNING_TOOL);
+      // The only secret reference to a private key is the boolean tripwire that fails the run if a
+      // mainnet deployer key exists in GitHub at all.
+      expect(wf.source.match(/secrets\.[A-Z_]*PRIVATE_KEY[^}]*/g)).toEqual(["secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' "]);
       const guard = plan.steps[0];
-      expect(guard.env).toContain("MAINNET_KEY_OUTSIDE_ENVIRONMENT: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}");
-      expect(guard.text).toMatch(/if \[ "\$\{MAINNET_KEY_OUTSIDE_ENVIRONMENT\}" != "false" \]; then[\s\S]*exit 1/);
-      const secretRefs = wf.source.match(/secrets\.[A-Z_]*PRIVATE_KEY[^}]*/g);
-      expect(secretRefs).toEqual(["secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' ", "secrets.MAINNET_DEPLOYER_PRIVATE_KEY "]);
+      expect(guard.env).toContain("MAINNET_KEY_IN_GITHUB: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}");
+      expect(guard.text).toMatch(/if \[ "\$\{MAINNET_KEY_IN_GITHUB\}" != "false" \]; then[\s\S]*exit 1/);
       expect(plan.steps.some((step) => step.text.includes(`npm run ${command} -- --dry-run`))).toBe(true);
       expect(plan.steps.some((step) => step.text.includes(`deployment-plan-binding.mjs bind --kind ${kind}`))).toBe(true);
-
-      expect(broadcast.header).toMatch(/needs: plan/);
-      expect(broadcast.header).toMatch(/environment: mainnet-deployment/);
-      expect(broadcast.header).toMatch(new RegExp(`if: github\\.ref == 'refs/heads/main' && inputs\\.broadcast_deployment && inputs\\.confirm_mainnet_deploy == '${confirmation}'`));
-      expect(broadcast.header).toMatch(/permissions:\n {6}contents: read/);
-      const checkout = broadcast.steps.find((step) => step.text.includes("actions/checkout"));
-      expect(checkout.text).toContain("ref: ${{ github.sha }}");
+      expect(plan.steps.some((step) => step.text.includes("actions/upload-artifact"))).toBe(true);
+      const checkout = plan.steps.find((step) => step.text.includes("actions/checkout"));
       expect(checkout.text).toContain("persist-credentials: false");
-
-      const signing = signingSteps(wf);
-      expect(signing).toHaveLength(1);
-      expect(signing[0].job.name).toBe("broadcast");
-      const signIndex = broadcast.steps.indexOf(signing[0].step);
-      const verifyIndex = broadcast.steps.findIndex((step) => step.text.includes(`deployment-plan-binding.mjs verify --kind ${kind}`));
-      expect(verifyIndex).toBeGreaterThan(-1);
-      expect(verifyIndex).toBeLessThan(signIndex);
-      expect(broadcast.steps[verifyIndex].env).toMatch(/BROADCAST_DEPLOYMENT: "no"/);
-      expect(broadcast.steps[verifyIndex].env).not.toMatch(KEY_REF);
-      expect(signing[0].step.text).toContain(`npm run ${command} |`);
-      expect(signing[0].step.env).toMatch(/BROADCAST_DEPLOYMENT: "yes"/);
-      // Mainnet signs only with the environment-scoped secret, never the repository-level Fuji name.
-      expect(signing[0].step.env).toContain("DEPLOYER_PRIVATE_KEY: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY }}");
-      // Steps after signing only upload the record.
-      for (const step of broadcast.steps.slice(signIndex + 1)) expect(step.text).toMatch(/actions\/upload-artifact/);
-      // The workflow-level confirmation still reaches the script's own guard.
-      expect(wf.topEnv).toContain(`inputs.confirm_mainnet_deploy == '${confirmation}' && 'yes' || 'no'`);
+      // The defined deployer is the default and cannot be swapped silently: the scripts refuse any other.
+      expect(wf.source).toContain('default: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"');
     });
   }
+
+  it("no workflow references a mainnet-deployment environment or runs the owner signing tool", () => {
+    for (const [name, wf] of Object.entries(workflows)) {
+      expect(wf.source, name).not.toMatch(/mainnet-deployment/);
+      expect(executable(wf), name).not.toMatch(RUNS_SIGNING_TOOL);
+    }
+  });
+
+  it("no mainnet deployment script can sign: no Wallet from a key and no broadcast path", () => {
+    for (const path of ["scripts/deploy-release-per-contract-mainnet.mjs", "scripts/mainnet-owner-signing.mjs", "scripts/mainnet-signing-requests.mjs"]) {
+      const source = read(path);
+      // No signer is constructed, nothing is signed or sent from Node, and no key variable is read.
+      expect(source, path).not.toMatch(/new Wallet\(|\.signTransaction\(|\.sendTransaction\(|eth_sendRawTransaction|\.deploy\(|env\.(MAINNET_)?DEPLOYER_PRIVATE_KEY/);
+    }
+    const scripts = JSON.parse(read("package.json")).scripts;
+    expect(scripts["sign:mainnet"]).toBe("node scripts/mainnet-owner-signing.mjs serve");
+    expect(scripts["verify:mainnet"]).toBe("node scripts/mainnet-owner-signing.mjs verify");
+  });
 });
 
 describe("mainnet authorization and Fuji state are untouched", () => {
@@ -186,6 +186,9 @@ describe("mainnet authorization and Fuji state are untouched", () => {
     expect(manifest).toMatchObject({ chainId: 43114, deployed: false, deploymentAuthorized: false, provisioningEnabled: false, factoryAddress: null, implementationAddress: null, marketplaceAddress: null });
     expect(manifest.platformRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
     expect(manifest.marketplaceFeeRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
+    // The defined deployer (Rabby) and the artist wallet are fixed and distinct from the fee recipient.
+    expect(manifest.deployerAddress).toBe("0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
+    expect(manifest.artistWallet).toBe("0x284C09a7CC187E096cbbdc88d99DEFE6df32180a");
   });
 
   it("keeps the Fuji rehearsal record and the recorded Fuji factory", () => {

@@ -1,49 +1,31 @@
-name: Deploy release-per-contract infrastructure to C-Chain mainnet
+name: Plan release-per-contract infrastructure for C-Chain mainnet
 
 # VoidReleaseFactoryV2Royalty + ReleaseMarketplaceV4 on Avalanche C-Chain (43114): the architecture
 # validated on Fuji with the 2.5% artist royalty enforced on chain by the release clones and,
 # independently, by the marketplace. Both contracts are ownerless and their fee recipient and fee
 # rate are immutable once mined.
 #
-# Two jobs (see deploy/mainnet/DEPLOYMENT-AUTHORITY.md):
-# - plan: always runs, on main only, with no private key and no environment. It builds, tests and
-#   dry-runs, and for a requested broadcast checks the typed inputs and binds the reviewed plan to
-#   this commit (plan-binding.json, uploaded for review).
-# - broadcast: only for a requested broadcast with the exact confirmation, on main. It waits for the
-#   `mainnet-deployment` environment approval, re-plans without the key, refuses unless the fresh
-#   plan matches the approved binding, and only then exposes the environment secret
-#   MAINNET_DEPLOYER_PRIVATE_KEY (as DEPLOYER_PRIVATE_KEY) to the single signing step. The plan job
-#   refuses to run if that secret is reachable without the environment. Required reviewers on that environment are configured in GitHub settings, not here.
+# Plan only. This workflow holds no private key, signs nothing and broadcasts nothing. It builds,
+# tests and dry-runs, then binds the reviewed plan (including the exact unsigned creation
+# transactions) to this commit and uploads plan.json and plan-binding.json. The owner signs those
+# transactions in Rabby with the defined deployer, on their own machine, with
+# `npm run sign:mainnet` (deploy/mainnet/OWNER-SIGNING.md). No mainnet key belongs in GitHub.
 
 on:
   workflow_dispatch:
     inputs:
       expected_deployer_address:
-        description: Deployer address (0x...) the owner reviewed.
+        description: The defined mainnet deployer (Rabby). Any other address is refused.
         required: true
         type: string
+        default: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
       expected_deployer_nonce:
-        description: Deployer nonce from the reviewed dry run (the predicted addresses depend on it). Required for a broadcast.
+        description: Deployer nonce the plan is for (the predicted addresses depend on it). Required for a binding.
         required: false
         type: string
         default: ""
       platform_recipient:
-        description: Primary and marketplace fee recipient. Only the Nano S Plus recorded in config/mainnet-release-per-contract.json, confirmed on the device.
-        required: false
-        type: string
-        default: ""
-      recipient_verified_on_device:
-        description: Re-type the recipient exactly as read from the hardware wallet screen. Required for a broadcast.
-        required: false
-        type: string
-        default: ""
-      broadcast_deployment:
-        description: Set true only for the separately approved mainnet broadcast.
-        required: true
-        type: boolean
-        default: false
-      confirm_mainnet_deploy:
-        description: Type I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY only for the approved broadcast.
+        description: Primary and marketplace fee recipient. Only the Nano S Plus recorded in config/mainnet-release-per-contract.json.
         required: false
         type: string
         default: ""
@@ -52,21 +34,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: void-release-per-contract-mainnet-deployment
+  group: void-release-per-contract-mainnet-plan
   cancel-in-progress: false
 
-# Non-secret plan inputs shared by both jobs. DEPLOYER_PRIVATE_KEY is never set at workflow or job level.
 env:
   DEPLOY_NETWORK: mainnet
   AVALANCHE_MAINNET_RPC_URL: ${{ secrets.AVALANCHE_MAINNET_RPC_URL }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
   EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
   RELEASE_PLATFORM_RECIPIENT: ${{ inputs.platform_recipient }}
-  RECIPIENT_VERIFIED_ON_DEVICE: ${{ inputs.recipient_verified_on_device }}
   RELEASE_PLATFORM_FEE_BPS: "250"
   RELEASE_MARKETPLACE_FEE_BPS: "250"
-  BROADCAST_REQUESTED: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
-  CONFIRM_MAINNET_DEPLOY: ${{ inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY' && 'yes' || 'no' }}
 
 jobs:
   plan:
@@ -76,21 +54,18 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    env:
-      BROADCAST_DEPLOYMENT: "no"
     steps:
-      - name: Refuse a mainnet key that is reachable outside the protected environment
-        # This job has no environment, so it can see only repository- or organization-level secrets.
-        # MAINNET_DEPLOYER_PRIVATE_KEY must exist only as a `mainnet-deployment` environment secret.
-        # The expression yields true/false; the secret value never enters this job's environment.
+      - name: Refuse to run while a mainnet deployer key exists in GitHub
+        # The mainnet deployer key never belongs in GitHub. The expression yields true/false; the
+        # secret value never enters this job's environment.
         env:
-          MAINNET_KEY_OUTSIDE_ENVIRONMENT: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}
+          MAINNET_KEY_IN_GITHUB: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}
         run: |
-          if [ "${MAINNET_KEY_OUTSIDE_ENVIRONMENT}" != "false" ]; then
-            echo "MAINNET_DEPLOYER_PRIVATE_KEY is visible without the mainnet-deployment environment (repository or organization secret). Move it to the environment; refusing to run." >&2
+          if [ "${MAINNET_KEY_IN_GITHUB}" != "false" ]; then
+            echo "A MAINNET_DEPLOYER_PRIVATE_KEY secret exists. The mainnet deployer signs only in Rabby; delete that secret. Refusing to run." >&2
             exit 1
           fi
-          echo "MAINNET_DEPLOYER_PRIVATE_KEY is not reachable from this unprotected job."
+          echo "No MAINNET_DEPLOYER_PRIVATE_KEY secret is reachable."
 
       - name: Check out source
         uses: actions/checkout@v4
@@ -111,8 +86,8 @@ jobs:
           forge build
           forge test --match-contract "RoyaltyEnforcementTest|MainnetEconomicsTest"
 
-      - name: Run deployment workflow tests
-        run: npm test -- scripts/deploy-release-per-contract-mainnet.test.mjs scripts/deploy-release-per-contract-fuji.test.mjs scripts/deployment-plan-binding.test.mjs
+      - name: Run deployment and owner-signing tests
+        run: npm test -- scripts/deploy-release-per-contract-mainnet.test.mjs scripts/deploy-release-per-contract-fuji.test.mjs scripts/deployment-plan-binding.test.mjs scripts/mainnet-signing-requests.test.mjs scripts/mainnet-owner-signing.test.mjs
 
       - name: Dry run (no key)
         shell: bash
@@ -122,19 +97,15 @@ jobs:
           set -euo pipefail
           npm run deploy:release-per-contract:mainnet -- --dry-run | tee plan-output.log
 
-      - name: Check broadcast inputs and bind the reviewed plan (no key)
-        if: inputs.broadcast_deployment
+      - name: Bind the plan to this commit when it is ready to sign (no key)
         shell: bash
         run: |
           set -euo pipefail
-          test "${CONFIRM_MAINNET_DEPLOY}" = "yes" || { echo "Broadcast requires the exact confirmation string." >&2; exit 1; }
-          node --input-type=module -e '
-            import { getAddress, isAddress } from "ethers";
-            const { RELEASE_PLATFORM_RECIPIENT: recipient, RECIPIENT_VERIFIED_ON_DEVICE: device, EXPECTED_DEPLOYER_NONCE: nonce } = process.env;
-            if (!/^\d+$/.test(String(nonce || ""))) throw new Error("Broadcast requires expected_deployer_nonce.");
-            if (!isAddress(recipient) || !isAddress(device) || getAddress(recipient) !== getAddress(device)) throw new Error("recipient_verified_on_device must equal platform_recipient exactly.");
-          '
-          node scripts/deployment-plan-binding.mjs bind --kind release-per-contract-mainnet --plan plan.json --commit "${GITHUB_SHA}" --out plan-binding.json
+          if node -e 'process.exit(JSON.parse(require("fs").readFileSync("plan.json","utf8")).readyToBroadcast === true ? 0 : 1)'; then
+            node scripts/deployment-plan-binding.mjs bind --kind release-per-contract-mainnet --plan plan.json --commit "${GITHUB_SHA}" --out plan-binding.json
+          else
+            echo "The plan is not ready to sign (see its checks); no binding was written."
+          fi
 
       - name: Preserve the reviewed plan
         if: always()
@@ -145,71 +116,4 @@ jobs:
             plan-output.log
             plan.json
             plan-binding.json
-          if-no-files-found: ignore
-
-  broadcast:
-    name: Broadcast the approved C-Chain deployment
-    needs: plan
-    if: github.ref == 'refs/heads/main' && inputs.broadcast_deployment && inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    # Approval gate. Required reviewers and the main-only branch rule must be set on this environment in
-    # GitHub (Settings > Environments); the YAML reference alone does not create them.
-    environment: mainnet-deployment
-    permissions:
-      contents: read
-    steps:
-      - name: Check out the planned commit
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-
-      - name: Install Node dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Install pinned Foundry toolchain
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.3.1
-
-      - name: Build the reviewed artifacts
-        run: forge build
-
-      - name: Fetch the approved plan
-        uses: actions/download-artifact@v4
-        with:
-          name: release-per-contract-mainnet-plan-${{ github.run_id }}
-          path: approved
-
-      - name: Re-plan without the key and match it to the approved plan
-        shell: bash
-        env:
-          BROADCAST_DEPLOYMENT: "no"
-          PLAN_OUTPUT_PATH: fresh-plan.json
-        run: |
-          set -euo pipefail
-          npm run deploy:release-per-contract:mainnet -- --dry-run > /dev/null
-          node scripts/deployment-plan-binding.mjs verify --kind release-per-contract-mainnet --approved approved/plan-binding.json --plan fresh-plan.json --commit "${GITHUB_SHA}"
-
-      - name: Sign and broadcast (the only step with the key)
-        shell: bash
-        env:
-          # Environment-scoped secret, distinct from the Fuji DEPLOYER_PRIVATE_KEY: if it is missing from
-          # mainnet-deployment, this is empty and the script refuses; it never falls back to a repository secret.
-          DEPLOYER_PRIVATE_KEY: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY }}
-          BROADCAST_DEPLOYMENT: "yes"
-        run: |
-          set -euo pipefail
-          npm run deploy:release-per-contract:mainnet | tee deployment-output.log
-
-      - name: Preserve deployment output and record
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-per-contract-mainnet-${{ github.run_id }}
-          path: |
-            deployment-output.log
-            deployments/release-per-contract-mainnet-*.json
           if-no-files-found: ignore

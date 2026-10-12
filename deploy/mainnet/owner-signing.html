@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Void mainnet signing</title>
+<style>
+  :root { --bg: #0d0d10; --fg: #ececf1; --muted: #9a9aa6; --line: #2a2a33; --ok: #3ccf91; --bad: #ff6b6b; --warn: #f5c451; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  .muted { color: var(--muted); }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 4px 8px 4px 0; vertical-align: top; }
+  td:first-child { color: var(--muted); white-space: nowrap; width: 1%; }
+  code, textarea { font: 12.5px/1.45 ui-monospace, monospace; word-break: break-all; }
+  textarea { width: 100%; height: 90px; background: #15151a; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: #1d1d24; color: var(--fg); cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .status { font-weight: 600; }
+  input[type=text] { width: 100%; font: 13px ui-monospace, monospace; padding: 6px; background: #15151a; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">The Void mainnet signing</h1>
+  <p class="muted">Each transaction below was planned without any private key and matched to the approved plan binding.
+  Rabby asks you to approve each one with the deployer. The key never leaves Rabby. Nothing is sent until you approve in Rabby.</p>
+
+  <div class="box" id="session">Loading the session…</div>
+
+  <h2>1. Connect Rabby</h2>
+  <div class="box">
+    <p id="wallet" class="muted">Not connected.</p>
+    <button id="connect">Connect Rabby</button>
+  </div>
+
+  <h2>2. Review and sign, one step at a time</h2>
+  <div id="steps"></div>
+
+  <h2>Result</h2>
+  <div class="box" id="result"><span class="muted">No step verified yet.</span></div>
+</main>
+<script src="ethers.js"></script>
+<script>
+"use strict";
+const RABBY_RDNS = "io.rabby";
+const announced = new Map();
+let rabby = null;
+let session = null;
+let account = null;
+
+window.addEventListener("eip6963:announceProvider", (event) => {
+  const detail = event.detail;
+  if (detail && detail.info && detail.provider) announced.set(detail.info.rdns, detail);
+});
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const value = await res.json();
+  if (!res.ok) throw new Error(value.error || `HTTP ${res.status}`);
+  return value;
+}
+
+/** Rabby only: by its EIP-6963 announcement, or its own injected provider. Any other wallet is refused. */
+function findRabby() {
+  if (announced.has(RABBY_RDNS)) return announced.get(RABBY_RDNS).provider;
+  if (window.ethereum && window.ethereum.isRabby === true) return window.ethereum;
+  return null;
+}
+
+async function walletState() {
+  const [accounts, chainId] = await Promise.all([rabby.request({ method: "eth_accounts" }), rabby.request({ method: "eth_chainId" })]);
+  return { account: accounts[0] || null, chainId: Number(BigInt(chainId)) };
+}
+
+function renderSession() {
+  $("title").textContent = session.title;
+  $("session").innerHTML = `<table>
+    <tr><td>Chain</td><td>Avalanche C-Chain (${session.chainId})</td></tr>
+    <tr><td>Deployer (Rabby)</td><td><code>${esc(session.deployer)}</code></td></tr>
+    <tr><td>Fee recipient</td><td><code>${esc(session.feeRecipient)}</code> <span class="muted">(passive; signs nothing)</span></td></tr>
+    <tr><td>Reviewed commit</td><td><code>${esc(session.commit)}</code></td></tr>
+    <tr><td>Plan binding</td><td><code>${esc(session.digest)}</code></td></tr>
+  </table>
+  <details><summary>Planned contracts and constructor arguments</summary><pre><code>${esc(JSON.stringify(session.contracts, null, 2))}</code></pre></details>`;
+  $("steps").innerHTML = session.steps.map((step) => {
+    const earlierVerified = session.steps.filter((s) => s.step < step.step).every((s) => s.status === "verified");
+    const canSign = account && step.status === "pending" && earlierVerified && !session.steps.some((s) => s.status === "failed");
+    const statusClass = step.status === "verified" ? "ok" : step.status === "failed" ? "bad" : "warn";
+    return `<div class="box">
+      <p class="status">Step ${step.step}: ${esc(step.contract)} — <span class="${statusClass}">${esc(step.status)}</span></p>
+      <table>
+        <tr><td>Type</td><td>Contract creation (no recipient), value 0 AVAX</td></tr>
+        <tr><td>From</td><td><code>${esc(step.from)}</code></td></tr>
+        <tr><td>Nonce</td><td>${step.nonce}</td></tr>
+        <tr><td>Creates</td><td><code>${esc(step.predictedAddress)}</code></td></tr>
+        <tr><td>Creation data</td><td>${step.dataBytes} bytes, keccak256 <code>${esc(step.dataHash)}</code></td></tr>
+        <tr><td>Gas limit</td><td>${esc(step.gasLimit)}</td></tr>
+        ${step.hash ? `<tr><td>Transaction</td><td><code>${esc(step.hash)}</code></td></tr>` : ""}
+        ${step.error ? `<tr><td>Refused</td><td class="bad">${esc(step.error)}</td></tr>` : ""}
+      </table>
+      ${step.status === "pending" ? `<p><label><input type="checkbox" id="review-${step.step}"> I reviewed step ${step.step}: chain 43114, from the deployer, nonce ${step.nonce}, creating ${esc(step.predictedAddress)}, data hash ${esc(step.dataHash.slice(0, 10))}…</label></p>
+        <button data-sign="${step.step}" ${canSign ? "" : "disabled"}>Send step ${step.step} to Rabby for approval</button>` : ""}
+      ${step.status === "awaiting-wallet" ? `<p class="warn">Waiting for Rabby. If Rabby already submitted it but this page lost track, paste the transaction hash from Rabby:</p>
+        <input type="text" id="hash-${step.step}" placeholder="0x…"> <p><button data-hash="${step.step}">Verify this hash</button></p>` : ""}
+      ${step.verified ? `<details open><summary class="ok">Verified on chain</summary><pre><code>${esc(JSON.stringify(step.verified, null, 2))}</code></pre></details>` : ""}
+    </div>`;
+  }).join("");
+  if (session.record) $("result").innerHTML = `<p class="ok">All steps verified. Record written to <code>${esc(session.record.path)}</code>; commit it in a record PR.</p><pre><code>${esc(JSON.stringify(session.record.record, null, 2))}</code></pre>`;
+  else if (session.steps.some((s) => s.status === "failed")) $("result").innerHTML = `<p class="bad">Verification failed. Stop: sign nothing further and review the refusal above.</p>`;
+}
+
+async function refresh() {
+  session = await api("session");
+  renderSession();
+  return session;
+}
+
+async function connect() {
+  rabby = findRabby();
+  if (!rabby) { $("wallet").innerHTML = `<span class="bad">Rabby was not detected. Install or unlock the Rabby extension in this browser profile, then reload. Other wallets are not used.</span>`; return; }
+  const accounts = await rabby.request({ method: "eth_requestAccounts" });
+  const state = await walletState();
+  if (!same(accounts[0], session.deployer) || !same(state.account, session.deployer)) {
+    account = null;
+    $("wallet").innerHTML = `<span class="bad">Rabby's current account is ${esc(accounts[0])}. Switch Rabby to the deployer ${esc(session.deployer)}; no other account may sign.</span>`;
+  } else if (state.chainId !== session.chainId) {
+    account = null;
+    $("wallet").innerHTML = `<span class="bad">Rabby is on chain ${state.chainId}. Switch Rabby to Avalanche C-Chain (43114), then connect again.</span>`;
+  } else {
+    account = state.account;
+    $("wallet").innerHTML = `<span class="ok">Connected: Rabby, deployer ${esc(account)}, Avalanche C-Chain.</span>`;
+  }
+  renderSession();
+}
+
+async function sign(n) {
+  if (!$(`review-${n}`)?.checked) { alert(`Tick the review box for step ${n} first.`); return; }
+  // The wallet must still be the deployer on C-Chain at the moment of signing.
+  const state = await walletState();
+  if (!same(state.account, session.deployer) || state.chainId !== session.chainId) { account = null; await connect(); return; }
+  const prepared = await api(`steps/${n}/prepare`, {});
+  const tx = prepared.transaction;
+  const step = session.steps[n - 1];
+  // Independent check in the page: the data handed to Rabby hashes to the reviewed value.
+  const problems = [];
+  if (window.ethers.keccak256(tx.data) !== step.dataHash) problems.push("creation data hash");
+  if (!same(tx.from, session.deployer)) problems.push("sender");
+  if (Number(BigInt(tx.nonce)) !== step.nonce) problems.push("nonce");
+  if (Number(BigInt(tx.chainId)) !== session.chainId) problems.push("chain");
+  if (tx.to !== undefined || BigInt(tx.value) !== 0n) problems.push("not a zero-value contract creation");
+  if (problems.length) { await api(`steps/${n}/cancel`, {}); alert(`Refused before Rabby: ${problems.join(", ")} differ from the review.`); await refresh(); return; }
+  await refresh();
+  let hash;
+  try {
+    hash = await rabby.request({ method: "eth_sendTransaction", params: [tx] });
+  } catch (error) {
+    await api(`steps/${n}/cancel`, {});
+    alert(`Rabby did not send step ${n}: ${error.message || error}. Nothing was signed.`);
+    await refresh();
+    return;
+  }
+  await submit(n, hash);
+}
+
+async function submit(n, hash) {
+  await api(`steps/${n}/submitted`, { hash });
+  for (;;) {
+    await refresh();
+    const status = session.steps[n - 1].status;
+    if (status === "verified" || status === "failed") return;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+}
+
+$("connect").addEventListener("click", () => connect().catch((error) => { $("wallet").innerHTML = `<span class="bad">${esc(error.message || error)}</span>`; }));
+$("steps").addEventListener("click", (event) => {
+  const signButton = event.target.closest("button[data-sign]");
+  const hashButton = event.target.closest("button[data-hash]");
+  if (signButton) { signButton.disabled = true; sign(Number(signButton.dataset.sign)).catch(async (error) => { alert(error.message || error); await refresh(); }); }
+  if (hashButton) { const n = Number(hashButton.dataset.hash); submit(n, $(`hash-${n}`).value.trim()).catch(async (error) => { alert(error.message || error); await refresh(); }); }
+});
+refresh().catch((error) => { $("session").innerHTML = `<span class="bad">${esc(error.message || error)}</span>`; });
+</script>
+</body>
+</html>

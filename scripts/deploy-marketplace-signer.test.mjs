@@ -246,7 +246,7 @@ describe("marketplace deployment signer hardening", () => {
     expect([...privateKeyInput].every((byte) => byte === 0)).toBe(true);
   });
 
-  it("keeps Fuji at chain 43113, preserves fee settings, and retains the explicit mainnet confirmation gate", () => {
+  it("keeps Fuji at chain 43113, preserves fee settings, and never deploys the legacy marketplace to mainnet", () => {
     expect(resolveMarketplaceConfig(makeEnv())).toMatchObject({
       network: "fuji",
       chainId: 43113,
@@ -256,13 +256,13 @@ describe("marketplace deployment signer hardening", () => {
     expect(() => resolveMarketplaceConfig(makeEnv({
       DEPLOY_NETWORK: "mainnet",
       AVALANCHE_CCHAIN_RPC_URL: "https://mainnet.rpc.example.invalid",
-    }))).toThrow("Mainnet deployment requires CONFIRM_MAINNET_DEPLOY=yes.");
-    expect(resolveMarketplaceConfig(makeEnv({
+    }))).toThrow(/never deployed to mainnet/);
+    expect(() => resolveMarketplaceConfig(makeEnv({
       DEPLOY_NETWORK: "mainnet",
       AVALANCHE_CCHAIN_RPC_URL: "https://mainnet.rpc.example.invalid",
       CCHAIN_CANONICAL_TOKEN,
       CONFIRM_MAINNET_DEPLOY: "yes",
-    }))).toMatchObject({ network: "mainnet", chainId: 43114, canonicalToken: CCHAIN_CANONICAL_TOKEN });
+    }))).toThrow(/signed by the owner in Rabby/);
     expect(() => resolveMarketplaceConfig(makeEnv({ FUJI_CANONICAL_TOKEN: CCHAIN_CANONICAL_TOKEN })))
       .toThrow("Fuji canonical token must be 0x82b26Da27136935454Bdf1e40801190B521b82e5.");
   });
