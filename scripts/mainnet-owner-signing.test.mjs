@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { getAddress } from "ethers";
 import { bindPlan } from "./deployment-plan-binding.mjs";
 import { buildDryRunPlan, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
-import { KINDS, cancelStep, checkedOutCommit, createSigningSession, createSigningServer, prepareStep, sessionView, submitStep, verifyCommand } from "./mainnet-owner-signing.mjs";
+import { readFileSync } from "node:fs";
+import { KINDS, approvePlan, cancelStep, checkedOutCommit, createPlanningSession, createSigningSession, createSigningServer, nextAction, prepareStep, recheckPlan, sessionView, startInputs, submitStep, verifyCommand } from "./mainnet-owner-signing.mjs";
 import { ARTIST, DEPLOYER, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
 
 const KIND = "release-per-contract-mainnet";
@@ -291,5 +292,94 @@ describe("verify command", () => {
     } finally {
       KINDS[KIND].verifyStep = original;
     }
+  });
+});
+
+describe("owner:deploy entry point: plan, show what blocks, approve on the page", () => {
+  const START_INPUTS = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0", RELEASE_PLATFORM_RECIPIENT: RECIPIENT };
+  const planning = (live) => createPlanningSession({ kind: KIND, commit: COMMIT, inputs: START_INPUTS, env: {}, verifyOptions: { load: artifacts }, replan: (inputs = START_INPUTS) => planOn(live, inputs) });
+  const approve = (session, live, recipientVerifiedOnDevice = RECIPIENT, written = []) => approvePlan(session, { recipientVerifiedOnDevice, providers: { provider: live }, env: {}, replan: (inputs = START_INPUTS) => planOn(live, inputs), writePlanFiles: async (kind, plan, binding) => { written.push({ kind, plan, binding }); return { plan: "/x/plan.json", binding: "/x/plan-binding.json" }; } });
+
+  it("serves a planning session on an unfunded chain and says exactly what to do (the defect: the old path refused to start at all)", async () => {
+    const live = fakeChain({ balance: 0n });
+    const session = await planning(live);
+    const view = sessionView(session);
+    expect(view).toMatchObject({ phase: "planning", readyToApprove: false, digest: null });
+    expect(view.checks.find((check) => /funded/.test(check.check))).toMatchObject({ status: "FAIL" });
+    expect(view.nextAction).toMatch(/^Fund the deployer 0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174 on Avalanche C-Chain with at least [0-9.]+ AVAX \(it holds 0\.0\), then press Re-check\.$/);
+    // The steps are visible for review but cannot be offered, and the plan cannot be approved yet.
+    expect(view.steps.map((step) => step.status)).toEqual(["not approved", "not approved"]);
+    await expect(prepareStep(session, 1, { provider: live })).rejects.toThrow(/Approve the plan first/);
+    await expect(approve(session, live)).rejects.toThrow(/not ready to sign/);
+  });
+
+  it("re-checks after funding, then binds the approved plan and offers step 1", async () => {
+    const live = fakeChain({ balance: 0n });
+    const session = await planning(live);
+    live.state.balance = 10n ** 18n;
+    await recheckPlan(session, { replan: (inputs) => planOn(live, inputs) });
+    expect(sessionView(session)).toMatchObject({ readyToApprove: true, nextAction: expect.stringMatching(/type the fee recipient exactly as your Nano S Plus screen shows it/) });
+    await expect(approve(session, live, ARTIST)).rejects.toThrow(/recipient-verified-on-device/);
+    expect(session.phase).toBe("planning");
+    const written = [];
+    await approve(session, live, RECIPIENT.toLowerCase(), written);
+    expect(session.phase).toBe("signing");
+    expect(written).toHaveLength(1);
+    expect(written[0].binding).toEqual(bindPlan(KIND, written[0].plan, COMMIT));
+    expect(session.digest).toBe(written[0].binding.digest);
+    expect(sessionView(session)).toMatchObject({ phase: "signing", planFiles: { plan: "/x/plan.json" }, nextAction: expect.stringMatching(/Connect Rabby .* send step 1 to Rabby/) });
+    const prepared = await prepareStep(session, 1, { provider: live, replan: () => planOn(live) });
+    expect(prepared.transaction).toMatchObject({ from: DEPLOYER, nonce: "0x0", chainId: "0xa86a", value: "0x0" });
+    await expect(recheckPlan(session, { replan: () => planOn(live) })).rejects.toThrow(/already approved/);
+  });
+
+  it("turns a missing build or a planning error into an actionable message instead of a crash", async () => {
+    const enoent = Object.assign(new Error("ENOENT: no such file or directory, open '/repo/out/VoidReleaseFactoryV2Royalty.sol/VoidReleaseFactoryV2Royalty.json'"), { code: "ENOENT", path: "/repo/out/VoidReleaseFactoryV2Royalty.sol/VoidReleaseFactoryV2Royalty.json" });
+    const session = await createPlanningSession({ kind: KIND, commit: COMMIT, inputs: START_INPUTS, env: {}, replan: async () => { throw enoent; } });
+    expect(sessionView(session)).toMatchObject({ phase: "planning", readyToApprove: false, planError: expect.stringMatching(/Run `forge build`/) });
+    expect(nextAction(session)).toMatch(/^Fix this, then press Re-check: The compiled contracts are missing/);
+    await expect(createPlanningSession({ kind: KIND, commit: COMMIT, inputs: START_INPUTS, env: { DEPLOYER_PRIVATE_KEY: `0x${"55".repeat(32)}` }, replan: async () => ({}) })).rejects.toThrow(/never reads a private key/);
+  });
+
+  it("plans for the defined deployer at its live nonce, and refuses a key or another deployer as input", async () => {
+    const live = fakeChain({ nonce: 4 });
+    await expect(startInputs(KIND, { provider: live })).resolves.toEqual({ DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "4", RELEASE_PLATFORM_RECIPIENT: RECIPIENT });
+    await expect(startInputs("genesis-claim-mainnet", { provider: live, input: ["GENESIS_CLAIM_TOKEN_ID=7"] })).resolves.toMatchObject({ EXPECTED_DEPLOYER_NONCE: "4", GENESIS_CLAIM_TOKEN_ID: "7" });
+    await expect(startInputs(KIND, { provider: live, input: ["DEPLOYER_PRIVATE_KEY=0x1"] })).rejects.toThrow(/never an input/);
+    await expect(startInputs(KIND, { provider: live, input: [`EXPECTED_DEPLOYER_ADDRESS=${ARTIST}`] })).rejects.toThrow(/deployer is fixed/);
+    await expect(startInputs(KIND, { provider: live, input: ["no-equals"] })).rejects.toThrow(/KEY=VALUE/);
+  });
+
+  it("re-checks and approves over HTTP from the page's own origin only", async () => {
+    const live = fakeChain({ balance: 0n });
+    const session = await planning(live);
+    const replan = (inputs = START_INPUTS) => planOn(live, inputs);
+    const handle = createSigningServer(session, { provider: live, providers: { provider: live }, replan, env: {}, writePlanFiles: async () => ({ plan: "/x/plan.json", binding: "/x/plan-binding.json" }), log: () => {} });
+    const url = await handle.listen(0);
+    const origin = new URL(url).origin;
+    const post = (path, body = {}, headers = { origin }) => raw(new URL(path, url), { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
+    try {
+      expect(JSON.parse((await raw(new URL("session", url))).text)).toMatchObject({ phase: "planning", readyToApprove: false });
+      expect((await post("approve", { recipientVerifiedOnDevice: RECIPIENT })).status).toBe(409);
+      live.state.balance = 10n ** 18n;
+      expect((await post("approve", { recipientVerifiedOnDevice: RECIPIENT }, { origin: "https://evil.example" })).status).toBe(403);
+      expect(JSON.parse((await post("recheck")).text)).toMatchObject({ readyToApprove: true });
+      const approved = await post("approve", { recipientVerifiedOnDevice: RECIPIENT });
+      expect(approved.status).toBe(200);
+      expect(JSON.parse(approved.text)).toMatchObject({ phase: "signing", steps: [{ status: "pending" }, { status: "pending" }] });
+      expect((await post("steps/1/prepare")).status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("the page explains how to start when it has no session, and never reads a session it does not have", () => {
+    const page = readFileSync(new URL("../deploy/mainnet/owner-signing.html", import.meta.url), "utf8");
+    expect(page).toContain("npm run owner:deploy");
+    expect(page).toContain("This page has no signing session.");
+    expect(page).toMatch(/async function connect\(\) \{\n  if \(!session\) \{/);
+    expect(page).toMatch(/id="approve"/);
+    expect(page).toMatch(/id="recheck"/);
+    expect(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).scripts["owner:deploy"]).toBe("node scripts/mainnet-owner-signing.mjs start");
   });
 });

@@ -82,17 +82,22 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      by the owner; no key goes into GitHub. Resolve its open item O1 (existing copies of the deployer
      key outside Rabby) before funding the deployer.
 4. **Dry runs (no key, no transaction).**
-   - Actions → *Plan release-per-contract infrastructure for C-Chain mainnet*, with
+   - Locally: `npm run owner:deploy` (after `npm ci` and `forge build`) plans from the live chain and
+     opens the planning stage of the signing page. It shows every check and the next action, for
+     example the exact funding needed ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md#quick-start-from-a-clean-checkout-the-entry-point)).
+   - Or in GitHub: Actions → *Plan release-per-contract infrastructure for C-Chain mainnet*, with
      `expected_deployer_address=0xaBd3…c174` (the default), `expected_deployer_nonce=0` and
-     `platform_recipient=0xb65C…1ce4`. Or run the same plan locally ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)).
+     `platform_recipient=0xb65C…1ce4`.
    - Every check must be PASS, except the funding check (until step 5) and the two recipient checks,
      which stay UNVERIFIED until the device confirmation is typed into the signing tool.
 5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.071 AVAX at 10 gwei; the fork run
    used 0.030) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
    C-Chain today) for creating the release, the edition, the sale and the `ISSUER_ROLE` grant.
 6. **[APPROVAL] Owner signs V2 in Rabby** ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)):
-   - re-plan at the funded state (nonce 0) and bind it, then run `npm run sign:mainnet` with the
-     address read from the Nano screen as `--recipient-verified-on-device`;
+   - in the running `npm run owner:deploy` page, press **Re-check from the chain**. Type the address
+     read from the Nano screen and press **Approve plan**; this binds the plan to the commit. (With a
+     GitHub plan, use `npm run sign:mainnet --plan … --binding … --recipient-verified-on-device …`
+     instead.);
    - in Rabby, with the deployer account, approve step 1 (factory, nonce 0) and, after it is verified,
      step 2 (marketplace, nonce 1).
 
@@ -156,7 +161,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
     - The plan verifies the release, the sale schedule and the Genesis collection. It refuses a release
       that the artist wallet does not own and administer.
     - The owner signs the single step in Rabby:
-      `npm run sign:mainnet -- --kind genesis-claim-mainnet …`. The tool verifies the mined parameters.
+      `npm run owner:deploy -- --kind genesis-claim-mainnet --input …` (or `sign:mainnet` with a GitHub
+      plan). The tool verifies the mined parameters.
 12. **[APPROVAL] Authorize the claim to mint.**
     - The artist sends the `grantRole(ISSUER_ROLE, <claim>)` call from the plan's
       `followUps.issuerGrant`, signed in the artist wallet's own session. The plan verified on chain

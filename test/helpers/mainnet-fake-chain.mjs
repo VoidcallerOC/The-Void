@@ -36,14 +36,14 @@ export const artifacts = async (path) => {
 };
 
 export function fakeChain({ chainId = 43114n, nonce = 0, pendingNonce, balance = 10n ** 18n, code = {} } = {}) {
-  const state = { nonce, pendingNonce: pendingNonce ?? nonce, code: Object.fromEntries(Object.entries(code).map(([k, v]) => [getAddress(k), v])), views: {}, txs: {} };
+  const state = { balance, nonce, pendingNonce: pendingNonce ?? nonce, code: Object.fromEntries(Object.entries(code).map(([k, v]) => [getAddress(k), v])), views: {}, txs: {} };
   let counter = 0;
   const chain = {
     state,
     send: async (method) => { if (method !== "eth_chainId") throw new Error(`unexpected ${method}`); return `0x${chainId.toString(16)}`; },
     getNetwork: async () => ({ chainId }),
     getTransactionCount: async (_address, tag) => (tag === "pending" ? state.pendingNonce : state.nonce),
-    getBalance: async () => balance,
+    getBalance: async () => state.balance,
     getCode: async (target) => state.code[getAddress(target)] ?? "0x",
     getFeeData: async () => ({ maxFeePerGas: 10_000_000_000n }),
     estimateGas: async () => 1_000_000n,

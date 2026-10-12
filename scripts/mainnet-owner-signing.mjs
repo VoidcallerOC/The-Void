@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -21,10 +21,15 @@ import { GENESIS_CHAIN_ID } from "../server/genesis-claim.js";
 // it. The tool then verifies the mined transaction and contract state from the RPC, independently of
 // the wallet, before the next step is offered. `verify` re-checks mined transactions at any time.
 // `--resume <hash>` continues after earlier steps were signed in a session that has since ended.
+// `start` (npm run owner:deploy) is the single entry point: it plans from the live chain without any
+// key, shows on the page what blocks signing (funding, nonce, inputs) with a re-check, and lets the
+// owner approve the plan on the page, which binds it to the commit before any step is offered.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGE_PATH = resolve(ROOT, "deploy/mainnet/owner-signing.html");
 const ETHERS_BUNDLE = resolve(ROOT, "node_modules/ethers/dist/ethers.umd.min.js");
 const MAX_BODY_BYTES = 4096;
+// Approved plans and bindings written by `start` (public data, no secrets; ignored by git).
+export const PLAN_DIR = resolve(ROOT, ".owner-signing");
 
 export class OwnerSigningError extends Error {}
 
@@ -95,6 +100,7 @@ export async function createSigningSession({ kind, reviewedPlan, approvedBinding
   const binding = verifyBinding(approvedBinding, kind, fresh, commit);
   if (!spec.ready(fresh)) fail("The fresh plan is not ready to sign (see its checks: funding, nonce, pending transactions, empty addresses).");
   return {
+    phase: "signing",
     kind,
     title: spec.title,
     commit: binding.sourceCommit,
@@ -125,11 +131,112 @@ async function resumeSession({ kind, spec, reviewedPlan, approvedBinding, commit
     steps[index].hash = hash;
     steps[index].status = "verified";
   }
-  return { kind, title: spec.title, commit, digest: approvedBinding.digest, binding: approvedBinding, plan: reviewedPlan, steps, record: null, verifyOptions };
+  return { phase: "signing", kind, title: spec.title, commit, digest: approvedBinding.digest, binding: approvedBinding, plan: reviewedPlan, steps, record: null, verifyOptions };
+}
+
+/** A plan failure in words the operator can act on. */
+function planErrorMessage(error) {
+  if (error?.code === "ENOENT" && /out\//.test(String(error.path || error.message))) return "The compiled contracts are missing. Run `forge build` (Foundry v1.3.1) in this checkout, then press Re-check.";
+  return error?.message || String(error);
+}
+
+/**
+ * The entry point's first phase: a key-less plan from the live chain, re-checkable from the page.
+ * Nothing can be handed to the wallet until the owner approves a ready plan (approvePlan).
+ */
+export async function createPlanningSession({ kind, commit, inputs, replan, env = process.env, verifyOptions = {} }) {
+  assertNoPrivateKeyInEnv(env, "The owner signing tool");
+  const spec = kindOf(kind);
+  const session = { phase: "planning", kind, title: spec.title, commit, inputs, plan: null, planError: null, steps: [], record: null, verifyOptions, planFiles: null };
+  await recheckPlan(session, { replan });
+  return session;
+}
+
+/** Re-plans from the live chain (after funding, for example). Planning phase only. */
+export async function recheckPlan(session, { replan }) {
+  if (session.phase !== "planning") fail("The plan is already approved; signing has started.");
+  try {
+    session.plan = await replan(session.inputs);
+    session.planError = null;
+  } catch (error) {
+    session.plan = null;
+    session.planError = planErrorMessage(error);
+  }
+  return session;
+}
+
+/**
+ * The owner approves the ready plan on the page. It is bound to the checked-out commit, written to
+ * .owner-signing/ (plan.json, plan-binding.json) for the record and for --resume, and then the
+ * signing session is built exactly as `serve` builds it: the fresh plan must match the binding.
+ */
+export async function approvePlan(session, { recipientVerifiedOnDevice, providers, replan, env = process.env, writePlanFiles = writePlanFilesToDisk }) {
+  if (session.phase !== "planning") fail("The plan is already approved.");
+  const spec = kindOf(session.kind);
+  if (!session.plan) fail(`There is no plan to approve: ${session.planError || "press Re-check"}.`);
+  if (!spec.ready(session.plan)) fail("The plan is not ready to sign. Resolve the failing checks, then press Re-check.");
+  const approvedBinding = bindPlan(session.kind, session.plan, session.commit);
+  const signing = await createSigningSession({ kind: session.kind, reviewedPlan: session.plan, approvedBinding, commit: session.commit, providers, recipientVerifiedOnDevice, env, replan, verifyOptions: session.verifyOptions });
+  const planFiles = await writePlanFiles(session.kind, session.plan, approvedBinding);
+  Object.assign(session, signing, { planFiles, planError: null });
+  return session;
+}
+
+async function writePlanFilesToDisk(kind, plan, binding) {
+  const dir = resolve(PLAN_DIR, `${kind}-${binding.sourceCommit.slice(0, 7)}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(resolve(dir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`, { flag: "wx" });
+  await writeFile(resolve(dir, "plan-binding.json"), `${JSON.stringify(binding, null, 2)}\n`, { flag: "wx" });
+  return { plan: `${dir}/plan.json`, binding: `${dir}/plan-binding.json` };
+}
+
+/** The non-secret inputs `start` plans with: the defined deployer at its live nonce, plus the kind's own. */
+export async function startInputs(kind, { provider, input = [] }) {
+  kindOf(kind);
+  const given = Object.fromEntries(input.map((pair) => {
+    const at = pair.indexOf("=");
+    if (at < 1) fail(`--input must be KEY=VALUE, not ${pair}.`);
+    return [pair.slice(0, at).trim(), pair.slice(at + 1).trim()];
+  }));
+  for (const key of Object.keys(given)) {
+    if (/PRIVATE_KEY/i.test(key)) fail("A private key is never an input.");
+    if (key === "EXPECTED_DEPLOYER_ADDRESS" && getAddress(given[key]) !== MAINNET_DEPLOYER) fail(`The deployer is fixed: ${MAINNET_DEPLOYER}.`);
+  }
+  const nonce = String(await provider.getTransactionCount(MAINNET_DEPLOYER, "latest"));
+  const base = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: MAINNET_DEPLOYER, EXPECTED_DEPLOYER_NONCE: nonce };
+  if (kind === "release-per-contract-mainnet") return { ...base, RELEASE_PLATFORM_RECIPIENT: FEE_RECIPIENT, ...given };
+  return { ...base, ...given };
+}
+
+/** The one thing the operator should do next, from the session state. */
+export function nextAction(session) {
+  const spec = KINDS[session.kind];
+  if (session.phase === "planning") {
+    if (session.planError) return `Fix this, then press Re-check: ${session.planError}`;
+    const failing = (session.plan?.checks || []).filter((check) => check.status === "FAIL" || check.status === "BLOCKED");
+    const funding = failing.find((check) => /funded/.test(check.check));
+    if (funding) return `Fund the deployer ${MAINNET_DEPLOYER} on Avalanche C-Chain with at least ${funding.value.requiredAvax} AVAX (it holds ${funding.value.balanceAvax}), then press Re-check.`;
+    if (failing.length) return `Signing is blocked by: ${failing.map((check) => check.check).join("; ")}. Resolve it, then press Re-check.`;
+    if (!spec.ready(session.plan)) return "The plan is not ready to sign. Press Re-check.";
+    return spec.needsDeviceConfirmation
+      ? `Review the plan, type the fee recipient exactly as your Nano S Plus screen shows it (${FEE_RECIPIENT}), and press Approve plan.`
+      : "Review the plan, then press Approve plan.";
+  }
+  const failed = session.steps.find((step) => step.status === "failed");
+  if (failed) return `Stop. Step ${failed.request.step} failed verification: ${failed.error}`;
+  if (session.record) return `Done. Commit ${session.record.path} in a record PR.`;
+  const current = session.steps.find((step) => step.status !== "verified");
+  if (!current) return "All steps are verified.";
+  const n = current.request.step;
+  if (current.status === "pending") return `Connect Rabby (deployer, Avalanche C-Chain), tick step ${n}'s review box and send step ${n} to Rabby.`;
+  if (current.status === "awaiting-wallet") return `Approve or reject step ${n} in Rabby.`;
+  if (current.status === "awaiting-receipt") return `Step ${n} is not mined yet. Check its hash again once Rabby shows it confirmed.`;
+  return `Step ${n} is ${current.status}; wait.`;
 }
 
 /** Live checks for step n, then the exact wallet transaction. Marks the step as waiting for Rabby. */
 export async function prepareStep(session, n, { provider, replan }) {
+  if (session.phase !== "signing") fail("Approve the plan first; nothing is offered for signing before that.");
   const step = session.steps[n - 1] || fail(`There is no step ${n}.`);
   if (session.steps.some((item) => item.status === "failed")) fail("A step failed verification. Stop and review; nothing more is offered for signing in this session.");
   if (session.steps.slice(0, n - 1).some((item) => item.status !== "verified")) fail(`Step ${n} is offered only after every earlier step is verified on chain.`);
@@ -195,16 +302,25 @@ export async function submitStep(session, n, hash, { provider, writeRecord = wri
 
 /** What the page shows. Contains no secret: only public addresses, bytecode hashes and plan facts. */
 export function sessionView(session) {
+  const spec = KINDS[session.kind];
+  const requests = session.phase === "signing" ? session.steps : (session.plan?.signingRequests || []).map((request) => ({ request, status: "not approved", hash: null, verified: null, error: null }));
   return {
+    phase: session.phase,
     kind: session.kind,
     title: session.title,
     chainId: MAINNET_CHAIN_ID,
     deployer: MAINNET_DEPLOYER,
     feeRecipient: FEE_RECIPIENT,
     commit: session.commit,
-    digest: session.digest,
-    contracts: KINDS[session.kind].summary(session.plan),
-    steps: session.steps.map(({ request, status, hash, verified, error }) => ({
+    digest: session.digest ?? null,
+    needsDeviceConfirmation: spec.needsDeviceConfirmation,
+    readyToApprove: session.phase === "planning" && Boolean(session.plan) && spec.ready(session.plan),
+    planError: session.planError ?? null,
+    checks: (session.plan?.checks || []).map(({ check, status, value, reason }) => ({ check, status, value: value ?? null, reason: reason ?? null })),
+    nextAction: nextAction(session),
+    planFiles: session.planFiles ?? null,
+    contracts: session.plan ? spec.summary(session.plan) : [],
+    steps: requests.map(({ request, status, hash, verified, error }) => ({
       step: request.step, contract: request.contract, nonce: request.nonce, from: request.from, predictedAddress: request.predictedAddress,
       dataHash: request.dataHash, dataBytes: (request.data.length - 2) / 2, gasLimit: request.gasLimit, status, hash, verified, error,
     })),
@@ -224,7 +340,7 @@ async function readBody(req) {
 }
 
 /** A loopback-only HTTP server for one session. Requests need the session token and same-origin. */
-export function createSigningServer(session, { provider, replan, writeRecord, timeoutMs, log = (value) => console.log(JSON.stringify(value)), token = randomBytes(16).toString("hex") } = {}) {
+export function createSigningServer(session, { provider, providers = { provider }, replan, writeRecord, writePlanFiles, timeoutMs, env = process.env, log = (value) => console.log(JSON.stringify(value)), token = randomBytes(16).toString("hex") } = {}) {
   let origin = null;
   const base = `/s/${token}`;
   const json = (res, status, value) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(value)); };
@@ -248,6 +364,13 @@ export function createSigningServer(session, { provider, replan, writeRecord, ti
         return res.end(await readFile(ETHERS_BUNDLE));
       }
       if (req.method === "GET" && route === "/session") return json(res, 200, sessionView(session));
+      if (req.method === "POST" && route === "/recheck") { await readBody(req); await recheckPlan(session, { replan }); return json(res, 200, sessionView(session)); }
+      if (req.method === "POST" && route === "/approve") {
+        const body = await readBody(req);
+        await approvePlan(session, { recipientVerifiedOnDevice: body.recipientVerifiedOnDevice, providers, replan, env, ...(writePlanFiles ? { writePlanFiles } : {}) });
+        log({ step: "PLAN_APPROVED", kind: session.kind, sourceCommit: session.commit, digest: session.digest, files: session.planFiles });
+        return json(res, 200, sessionView(session));
+      }
       const match = /^\/steps\/(\d+)\/(prepare|submitted|cancel)$/.exec(route);
       if (req.method === "POST" && match) {
         const n = Number(match[1]);
@@ -278,7 +401,7 @@ export function createSigningServer(session, { provider, replan, writeRecord, ti
 }
 
 function options(argv) {
-  const out = { tx: [], resume: [] };
+  const out = { tx: [], resume: [], input: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith("--")) continue;
@@ -286,7 +409,7 @@ function options(argv) {
     if (name === "write-record") { out.writeRecord = true; continue; }
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) fail(`--${name} needs a value.`);
-    if (name === "tx" || name === "resume") out[name].push(value); else out[name] = value;
+    if (name === "tx" || name === "resume" || name === "input") out[name].push(value); else out[name] = value;
     i += 1;
   }
   return out;
@@ -327,6 +450,26 @@ export async function verifyCommand(opts, { providers, writeRecord = writeRecord
   return { mode: "VERIFIED", path, record };
 }
 
+/**
+ * `start` (npm run owner:deploy): the single entry point from a clean checkout. It plans from the live
+ * chain for the defined deployer at its current nonce, serves the page even when signing is blocked
+ * (the page shows why and re-checks), and offers steps only after the owner approves the plan there.
+ */
+async function startCommand(opts, { providers, env }) {
+  const kind = opts.kind || "release-per-contract-mainnet";
+  const spec = kindOf(kind);
+  const commit = checkedOutCommit();
+  const inputs = await startInputs(kind, { provider: providers.provider, input: opts.input });
+  const replan = (planInputs = inputs) => spec.replan(planInputs, providers);
+  const session = await createPlanningSession({ kind, commit, inputs, replan, env });
+  const handle = createSigningServer(session, { provider: providers.provider, providers, replan, env });
+  const url = await handle.listen(opts.port ? Number(opts.port) : 0);
+  console.log(JSON.stringify({ step: "PLANNED", kind, sourceCommit: commit, deployer: MAINNET_DEPLOYER, nonce: inputs.EXPECTED_DEPLOYER_NONCE, readyToApprove: sessionView(session).readyToApprove }));
+  console.log(`\nNext: ${nextAction(session)}`);
+  console.log(`\nOpen this page in the browser profile where Rabby holds the deployer ${MAINNET_DEPLOYER}:\n\n  ${url}\n\nNothing is signed until you approve the plan on the page and then each transaction in Rabby. Press Ctrl+C to stop.`);
+  return handle;
+}
+
 export async function main(argv = process.argv.slice(2), env = process.env) {
   assertNoPrivateKeyInEnv(env, "The owner signing tool");
   const [command, ...rest] = argv;
@@ -337,7 +480,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     console.log(JSON.stringify(result, null, 2));
     return result;
   }
-  if (command !== "serve") fail('Use "serve" or "verify".');
+  if (command === "start") return startCommand(opts, { providers, env });
+  if (command !== "serve") fail('Use "start", "serve" or "verify".');
   const spec = kindOf(opts.kind);
   const reviewedPlan = await readJson(opts.plan || fail("--plan is required (the reviewed plan.json)."));
   const approvedBinding = await readJson(opts.binding || fail("--binding is required (the approved plan-binding.json)."));

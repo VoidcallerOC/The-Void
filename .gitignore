@@ -55,3 +55,6 @@ public/assets/marketplace-heroes/*
 # Artist profile pictures and banners. The API serves them; do not commit the bytes.
 public/assets/artist-portfolio/*
 !public/assets/artist-portfolio/.gitkeep
+
+# Plans and bindings approved on the owner signing page (public data, no secrets)
+.owner-signing/

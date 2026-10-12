@@ -21,6 +21,7 @@
     "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs",
     "deploy:release-per-contract:fuji": "node scripts/deploy-release-per-contract-fuji.mjs",
     "deploy:release-per-contract:mainnet": "node scripts/deploy-release-per-contract-mainnet.mjs",
+    "owner:deploy": "node scripts/mainnet-owner-signing.mjs start",
     "sign:mainnet": "node scripts/mainnet-owner-signing.mjs serve",
     "verify:mainnet": "node scripts/mainnet-owner-signing.mjs verify",
     "rehearse:royalty:fuji": "node scripts/rehearse-royalty-fuji.mjs",
