@@ -214,7 +214,7 @@ describe("browser deployment path: no key anywhere, verification only in CI", ()
   });
 
   it("the owner page asks for no key and signs only through the wallet", () => {
-    const page = `${read("owner-deploy.html")}\n${read("src/owner-deploy/main.js")}\n${read("src/owner-deploy/flow.js")}`;
+    const page = ["owner-deploy.html", "fuji-rabby-test.html", "src/owner-deploy/main.js", "src/owner-deploy/fuji-main.js", "src/owner-deploy/page.js", "src/owner-deploy/flow.js", "scripts/fuji-rabby-probe.mjs"].map(read).join("\n");
     expect(page).not.toMatch(/private ?key|mnemonic|seed phrase|new Wallet\(|signTransaction|eth_sendRawTransaction|sendTransaction\(/i);
     expect(page).toContain('method: "eth_sendTransaction"');
     expect(read("vercel.json")).toContain('"destination": "/owner-deploy.html"');

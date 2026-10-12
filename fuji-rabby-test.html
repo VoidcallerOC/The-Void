@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Fuji Rabby Test</title>
+<style>
+  :root { --bg: #0f1012; --fg: #ececf1; --muted: #9a9aa6; --line: #2a2a33; --ok: #3ccf91; --bad: #ff6b6b; --warn: #f5c451; --panel: #15151a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  .muted { color: var(--muted); }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 12px 0; background: var(--panel); }
+  .banner { border-color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 4px 8px 4px 0; vertical-align: top; }
+  td:first-child { color: var(--muted); width: 1%; white-space: nowrap; }
+  code, pre { font: 12.5px/1.45 ui-monospace, monospace; word-break: break-all; white-space: pre-wrap; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: #22222b; color: var(--fg); cursor: pointer; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=text] { width: 100%; font: 13px ui-monospace, monospace; padding: 6px; background: #0f0f13; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .status { font-weight: 600; }
+  @media (max-width: 600px) { td:first-child { white-space: normal; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="box bad" style="border-color: var(--warn); font-weight: 600">FUJI TESTNET ONLY. Test AVAX, no real value. This page never touches Avalanche mainnet and never switches your network.</div>
+  <h1>The Void: Fuji Rabby test (owner)</h1>
+  <p class="muted">A test of the owner-signing page with Rabby on Fuji: one zero-value contract creation from a plan approved in GitHub and checked again in this browser.
+  Nothing is signed or sent unless you approve it in Rabby. No key is ever asked for.
+  First use <strong>Connect Rabby</strong> alone: it checks Rabby, the account and the chain without sending anything.</p>
+  <div class="box banner" id="next">Loading…</div>
+  <div id="rpc-warning"></div>
+
+  <h2>1. Approved Fuji test plan</h2>
+  <div class="box" id="plan"></div>
+
+  <h2>2. Rabby connection check (no transaction)</h2>
+  <div class="box">
+    <p id="wallet" class="muted">Not connected.</p>
+    <button id="connect">Connect Rabby</button>
+  </div>
+
+  <h2>3. Readiness (live from Fuji)</h2>
+  <div class="box" id="readiness"><span class="muted">Not checked yet.</span></div>
+
+  <h2>4. Test transaction</h2>
+  <div id="steps"></div>
+
+  <h2>5. Result</h2>
+  <div class="box" id="result"><span class="muted">Nothing confirmed yet.</span></div>
+</main>
+<script type="module" src="/src/owner-deploy/fuji-main.js"></script>
+</body>
+</html>

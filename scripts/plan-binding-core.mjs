@@ -21,10 +21,10 @@ function consistent(requests, expected) {
   return requests;
 }
 
-function signingRequests(plan, count) {
+function signingRequests(plan, count, chainId = 43114) {
   if (!Array.isArray(plan.signingRequests) || plan.signingRequests.length !== count) throw new BindingError(`The plan must carry exactly ${count} unsigned signing request(s); name the fee recipient and re-plan.`);
   return plan.signingRequests.map((request) => {
-    if (request.chainId !== 43114 || request.to !== null || String(request.value) !== "0") throw new BindingError("A signing request must be a zero-value contract creation on chain 43114.");
+    if (request.chainId !== chainId || request.to !== null || String(request.value) !== "0") throw new BindingError(`A signing request must be a zero-value contract creation on chain ${chainId}.`);
     return requestBindingFields(request);
   });
 }
@@ -70,6 +70,17 @@ export const BINDERS = Object.freeze({
       eligibilityRule: plan.eligibility?.rule,
       signingRequests: consistent(signingRequests(plan, 1), [{ from: plan.deployer, nonce: plan.deployerNonce, predictedAddress: plan.predictedClaimAddress }]),
       issuerGrantFrom: lower(plan.followUps?.issuerGrant?.from),
+    };
+  },
+  // Test only (Fuji). Its own kind, chain and fields: it can never produce a mainnet binding.
+  "rabby-probe-fuji": (plan) => {
+    if (plan.mode !== "DRY_RUN" || plan.network !== "fuji" || plan.chainId !== 43113) throw new BindingError("Not a Fuji dry-run plan.");
+    return {
+      chainId: plan.chainId,
+      deployer: lower(plan.deployer?.address),
+      deployerNonce: plan.deployer?.nonce,
+      probe: { contract: plan.probe?.contract, label: lower(plan.probe?.label), predictedAddress: lower(plan.probe?.predictedAddress), initCodeHash: plan.probe?.initCodeHash, runtimeCodeHash: plan.probe?.runtimeCodeHash },
+      signingRequests: consistent(signingRequests(plan, 1, 43113), [{ from: plan.deployer?.address, nonce: plan.deployer?.nonce, predictedAddress: plan.probe?.predictedAddress }]),
     };
   },
 });

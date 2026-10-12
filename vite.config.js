@@ -16,8 +16,9 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // The site, plus the owner's mainnet deployment page (owner-deploy.html, served at /owner-deploy).
-      input: { main: 'index.html', ownerDeploy: 'owner-deploy.html' },
+      // The site, the owner's mainnet deployment page (/owner-deploy) and its separate Fuji test page
+      // (/fuji-rabby-test). Each page bundles only its own network's approved plans.
+      input: { main: 'index.html', ownerDeploy: 'owner-deploy.html', fujiRabbyTest: 'fuji-rabby-test.html' },
       output: {
         // Split long-lived vendor code out of the app bundle so it caches
         // across deploys; route sections are split via React.lazy.

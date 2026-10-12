@@ -28,6 +28,10 @@
       "destination": "/owner-deploy.html"
     },
     {
+      "source": "/fuji-rabby-test",
+      "destination": "/fuji-rabby-test.html"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
@@ -52,7 +56,7 @@
       ]
     },
     {
-      "source": "/owner-deploy(.html)?",
+      "source": "/(owner-deploy|fuji-rabby-test)(.html)?",
       "headers": [
         {
           "key": "X-Frame-Options",
