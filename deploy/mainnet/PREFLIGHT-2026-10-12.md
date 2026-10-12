@@ -33,7 +33,8 @@ setting changed. Manifest `config/mainnet-release-per-contract.json` stays at `d
 | Plan readiness | PASS | dry-run `readyToBroadcast: true`; all checks PASS except the device confirmation (UNVERIFIED) |
 | Genesis claim plan separate | PASS | no `genesis-claim-mainnet` approved plan exists; this preflight covers release infrastructure only |
 | No private key in this environment | PASS | no `*PRIVATE_KEY*` variable is set; the planner refuses to run if one is |
-| Mainnet deployer key not in GitHub | **FAIL (owner action)** | The repository secret `DEPLOYER_PRIVATE_KEY`, used by six Fuji workflows, signs as this same address (its Fuji nonce is 71). See below. |
+| Deployer key never held outside Rabby | **FAIL (historical)** | Repository records show the Fuji workflows' `DEPLOYER_PRIVATE_KEY` secret signed as this address; the last such run (`rehearse-royalty-fuji.yml`, run 38252855896) succeeded on 2026-10-12 13:01 UTC. Deleting the secret cannot undo this. See below. |
+| `DEPLOYER_PRIVATE_KEY` secret present now | UNVERIFIED | The secrets API returns 403 in this session. The secret was never deleted by Claude, and its deletion has not been confirmed by the owner. |
 | Real Rabby path proven | UNVERIFIED | only stand-in wallets so far; the Fuji Rabby test (`deploy/fuji/RABBY-TEST.md`) is not yet authorized |
 
 ## Legacy key-based workflows (owner cleanup)
@@ -67,4 +68,7 @@ owner's decision; Claude does not change wallet responsibilities. The owner's op
 2. also designate a new deployer created only in Rabby, which needs a new approved plan
    (new addresses) and new owner authorization.
 
-This session cannot delete the secret (the GitHub proxy returns 403) and has not read its value.
+This session cannot list or delete secrets (the GitHub API returns 403) and has never read the value.
+Whether the secret still exists is UNVERIFIED. To confirm it is gone, the owner checks Repository
+secrets in Settings, or runs any of the six workflows: once the secret is deleted, its signing step
+fails before sending anything.

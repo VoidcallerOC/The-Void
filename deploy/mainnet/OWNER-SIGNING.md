@@ -5,9 +5,10 @@ Every mainnet contract deployment is signed by the owner in **Rabby**, with the 
 leaves Rabby. No script, workflow, CI job, cloud service, file or environment variable holds it, and
 the scripts refuse to run if any `*PRIVATE_KEY` variable is set.
 
-> **Open owner action (2026-10-12):** this is the rule, but it is not yet true. The repository secret
-> `DEPLOYER_PRIVATE_KEY`, used by six legacy Fuji workflows, signs as this same address. Until the owner
-> deletes it and decides whether to keep this deployer, the launch is blocked
+> **Open owner action (2026-10-12):** this is the rule, but it has not always held. The repository
+> secret `DEPLOYER_PRIVATE_KEY`, used by six legacy Fuji workflows, signed as this same address, most
+> recently on 2026-10-12 13:01 UTC. Whether it still exists is unverified. The launch stays blocked until
+> the owner confirms it is deleted and decides whether to keep this deployer
 > (`deploy/mainnet/PREFLIGHT-2026-10-12.md`).
 >
 > **Test first on Fuji:** `/fuji-rabby-test` is the same page with a Fuji-only plan
