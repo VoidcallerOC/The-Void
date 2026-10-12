@@ -52,7 +52,7 @@ export function fakeChain({ chainId = 43114n, nonce = 0, pendingNonce, balance =
       if (!handler) throw new Error(`no contract at ${to}`);
       return handler(data);
     },
-    waitForTransaction: async (hash) => state.txs[hash]?.receipt ?? null,
+    getTransactionReceipt: async (hash) => state.txs[hash]?.receipt ?? null,
     getTransaction: async (hash) => state.txs[hash]?.tx ?? null,
     /** Mines a request the way the wallet would submit it; `overrides` model a deviation. */
     mine(request, overrides = {}) {

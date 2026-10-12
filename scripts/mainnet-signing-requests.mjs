@@ -120,6 +120,22 @@ export async function assertReadyToSign(provider, request, emptyAddresses = [req
 }
 
 /**
+ * Polls for the receipt until it exists or the timeout passes. Waiting on new-block events instead
+ * (ethers' waitForTransaction) can miss a receipt that appears just after the first read and then wait
+ * for a block that a quiet chain never produces.
+ */
+export async function receiptOf(provider, hash, timeoutMs, { intervalMs = 2000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const receipt = await provider.getTransactionReceipt(hash);
+    if (receipt) return receipt;
+    const left = deadline - Date.now();
+    if (left <= 0) return null;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, left)));
+  }
+}
+
+/**
  * Independently verifies a mined creation transaction against its reviewed request, from the RPC
  * (never from the wallet): chain, sender, nonce, no recipient, zero value, exact creation data,
  * success, and the contract at the predicted address.
@@ -128,7 +144,7 @@ export async function verifyCreationTransaction(provider, request, hash, { timeo
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash || ""))) throw new SigningRequestError(`Step ${request.step}: a 32-byte transaction hash is required.`);
   const chainId = await rpcChainId(provider);
   if (chainId !== BigInt(request.chainId)) throw new SigningRequestError(`The RPC reports chain ${chainId}, not ${request.chainId}.`);
-  const receipt = await provider.waitForTransaction(hash, 1, timeoutMs);
+  const receipt = await receiptOf(provider, hash, timeoutMs);
   if (!receipt) throw new NotMinedYetError(`Step ${request.step}: ${hash} was not mined within ${timeoutMs / 1000}s; check the same hash again once Rabby shows it confirmed.`);
   const tx = await provider.getTransaction(hash);
   if (!tx) throw new SigningRequestError(`Step ${request.step}: ${hash} is unknown to the RPC.`);
