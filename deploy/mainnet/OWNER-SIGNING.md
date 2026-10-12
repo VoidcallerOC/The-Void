@@ -5,6 +5,15 @@ Every mainnet contract deployment is signed by the owner in **Rabby**, with the 
 leaves Rabby. No script, workflow, CI job, cloud service, file or environment variable holds it, and
 the scripts refuse to run if any `*PRIVATE_KEY` variable is set.
 
+> **Open owner action (2026-10-12):** this is the rule, but it is not yet true. The repository secret
+> `DEPLOYER_PRIVATE_KEY`, used by six legacy Fuji workflows, signs as this same address. Until the owner
+> deletes it and decides whether to keep this deployer, the launch is blocked
+> (`deploy/mainnet/PREFLIGHT-2026-10-12.md`).
+>
+> **Test first on Fuji:** `/fuji-rabby-test` is the same page with a Fuji-only plan
+> (`deploy/fuji/RABBY-TEST.md`). It proves Rabby, the account, one exact transaction and the
+> verification before any mainnet signature. It needs its own authorization.
+
 ## In the browser (the owner's path; no terminal)
 
 **Entry point:** <https://the-void-alpha.vercel.app/owner-deploy> (also `/owner-deploy.html`).

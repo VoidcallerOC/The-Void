@@ -1,12 +1,16 @@
 # Forgive & Forget: Genesis claim + open edition
 
-**Status:**
+**Status (2026-10-12, PR for the Fuji Rabby path):** PARTIAL. Code and local tests are done; nothing exists on any chain.
 
-| Item | Status |
-|---|---|
-| Code (claim contract, live-ownership eligibility, API, UI, deployment tooling) | PARTIAL: implemented and tested; the snapshot design merged in `d50f042`, the live-ownership change (§2) is not merged or deployed |
-| Recorded target `0x12Ff…0Fe6` / `0x3671…5aFD` / token `1` | BLOCKED: cannot hold an uncapped open edition (§1) |
-| Live claim, public mint and closure on Fuji | NOT STARTED |
+| Item | Evidence tier | Status |
+|---|---|---|
+| Claim contract, live-ownership eligibility, used-unit ledger, API, UI, deployment tooling | Local tests | COMPLETE in code: merged on `main` (`f37e0e8`, `c6914c8`, migration `039`). 52 forge tests (`GenesisHolderClaim*`) and 76 API tests pass locally; the 5 Postgres store tests run only in CI (`TEST_DATABASE_URL`). |
+| Migration `039` applied to the production database | — | UNVERIFIED: not read in this session. |
+| Uncapped open edition on the mainnet implementation (`VoidRelease1155V4Royalty` via `VoidReleaseFactoryV2Royalty`) | Local tests | PASS: `GenesisHolderClaimRoyaltyRelease.t.sol` (`maxSupply 0`, allocations 0, 250 bps locked royalty, claim, public sale, resale on `ReleaseMarketplaceV4`). Not exercised on any live chain. |
+| Uncapped open edition on Fuji Factory V2 implementation `0x45c3…E452` | Fuji on-chain record (read-only) | PASS: release ‑28 is a live open edition (`maxSupply 0`) on a clone of this implementation (§1b). Not re-read in this session. |
+| Recorded Fuji target `0x12Ff…0Fe6` / `0x3671…5aFD` / token `1` | Fuji read-only | BLOCKED: its implementation reverts `maxSupply 0` (§1). Resolution: the separate plan in §4a. |
+| Live claim, public mint and closure on Fuji | Fuji transactions | NOT STARTED: needs the §4a plan approved and signed by the artist wallet. |
+| Mainnet release, edition, sale, claim, `ISSUER_ROLE`, activation | Mainnet | NOT STARTED and not authorized (§7). The claim UI is still bound to Fuji (`src/lib/claim-state.js`). |
 
 > **2026-10-12: eligibility changed from a fixed snapshot to live ownership, with an off-chain used-unit ledger: each free claim uses one Genesis unit's eligibility, and a used unit cannot qualify again after resale (§2). Genesis tokens are never moved or burned.** The owner replaced the
 > fixed C-Chain snapshot with a live read of the connected wallet's current Genesis balances. Sections that
@@ -210,6 +214,44 @@ Every step below is a transaction or a production change. **None is authorized b
    - an ineligible wallet gets 403;
    - after `T + 24h`, a non-holder mints at 0.25 AVAX;
    - after `T + 8d`, the mint is refused.
+
+## 4a. Definition of the launch objects, and the separate Fuji plan
+
+**What is created, by whom.** The artist wallet `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` holds every artist role; the deployer only deploys the claim contract and holds no role afterwards.
+
+| Object | Exact definition | Signed by |
+|---|---|---|
+| Release | `factory.createRelease(applicationReleaseId, releaseKey, "Forgive & Forget", symbol, contractURI)`; `releaseKey = keccak256(abi.encode("the-void:studio-release:v2", chainId, factory, applicationReleaseId, artist))`. The artist becomes the release admin; the factory keeps no role. | Artist |
+| Edition / token | `createEditionWithMintEnd(releaseKey, editionId, 0, metadataUri, artist, 250, T + 8d − 1)`: uncapped (`maxSupply 0`), royalty exactly 250 bps to the artist (enforced on chain by V4Royalty), no mint after `T + 8d − 1`. | Artist |
+| Sale | `configureSale(tokenId, 250000000000000000, 0, 0, T + 86400, T + 691199, false)`: 0.25 AVAX, no cap, no per-wallet limit, public window exactly 7 days. Platform fee 250 bps to the Nano S Plus, sealed in the factory. | Artist |
+| Claim | `GenesisHolderClaim(release, sale, tokenId, 0, 0, T, 86400, 604800, 0.25 AVAX, admin, signer)`: free, one per wallet, quantity 1, vouchers bound to the live-ownership rule, only `T ≤ t < T + 24h`. | Deployer (Rabby) |
+| Issuer permission | `release.grantRole(ISSUER_ROLE, claim)` before `T`; only the release admin can grant or revoke it (`testUnauthorizedRoleChangesAreRejected`). | Artist |
+| Closure | Claims end at `T + 86400` (`ClaimWindowClosed`); the sale ends after `T + 691199` (`SaleEnded`); the edition's `mintEnd` refuses any issuer mint after it (`MintingEnded`). No further mint path (`testNoMintPathRemainsAfterClosure`). | — |
+
+**Fuji plan (option A), separate from mainnet and NOT authorized here.** It resolves the §1 incompatibility without touching `0x12Ff…`. All transactions are on Fuji (43113), on Factory V2 `0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8` (implementation `0x45c3…E452`, which accepts `maxSupply 0`), with the accelerated Fuji windows of §6 and 0.01 AVAX:
+1. Artist: `createRelease` (new release; never ‑26's `0x12Ff…`).
+2. Artist: `createEditionWithMintEnd(…, 0, …, mintEnd = T + claimWindow + publicWindow − 1)`.
+3. Artist: `configureSale(tokenId, 0.01 AVAX, 0, 0, T + claimWindow, T + claimWindow + publicWindow − 1, false)`.
+4. Deployer: the claim, via `Deploy Genesis holder claim to Fuji` dry run first.
+5. Artist: `grantRole(ISSUER_ROLE, claim)`.
+6. Render configuration and enablement (a production change; separate authorization).
+Each step needs the owner's explicit approval of its exact calldata, prepared as an unsigned plan for the artist wallet in Rabby. The artist steps are not yet available on the owner-signing page, which today offers contract creations only. That extension is a follow-up, and must keep the artist and deployer accounts separate.
+
+**Test coverage against the required cases** (local; forge unless marked API):
+
+| Case | Test |
+|---|---|
+| Eligible / ineligible / zero balance | API: "denies a wallet that holds no Genesis token now", "issues one quantity-one voucher…" |
+| Multiple units | API: "uses exactly one unit of a multi-unit, multi-ID holding…" |
+| Resale after use | API: "denies the next wallet when a claimed single unit is resold…"; forge `testAClaimedTokenResellsOnMarketplaceV4AtTheExactSplit` |
+| Duplicates / replay | `testSameWalletCannotClaimTwiceEvenWithDifferentValidVoucher`, `testNonceReplayRejectedAcrossClaimants`, `testFreeClaimMintsOneTokenToTheClaimantAndRejectsDuplicatesAndReplays`; API "returns the same voucher to a repeat request…" |
+| Time boundaries | `testClaimRejectedBeforeTheClaimWindowOpens`, `testClaimIsFreeFromTheFirstToTheLastSecondOfTheWindow`, `testClaimRejectedAtAndAfterTheWindowCloses`; API "refuses vouchers before the window opens and from the second it closes" |
+| Public sale start and end | `testPublicMintBlockedUntilTheGenesisWindowEnds`, `testPublicMintOpenOnItsLastSecondAndClosedAfterSevenDays` |
+| Payment | `testPublicMintIsUngatedAtExactlyQuarterAvaxFromTheFirstSecond`, `testWrongPaymentIsRejectedWithoutMintingOrKeepingFunds`, `testMainnetRefusesAnyPriceOtherThanProduction` |
+| Supply (uncapped) | `testOpenEditionHasNoSupplyCapAndClaimHasNoAllocationCap`, `testMixedClaimAndPublicSaleAccountingRemainsExact` |
+| Closure | `testNoMintPathRemainsAfterClosure` |
+| Unauthorized role changes | `testUnauthorizedRoleChangesAreRejected` (new), `testSignerRotationIsAdminControlled`, `testPausedClaimRejectedAndAdminCanResume` |
+| Genesis never moved or burned | `testClaimMintsOnlyTheReleaseTokenToTheClaimantAndNeverTouchesGenesis`; API "only reads Genesis…" |
 
 ## 5. Claim start: constraints
 

@@ -134,13 +134,12 @@ describe("chain separation, both directions", () => {
     }
   });
 
-  it("serves /fuji-rabby-test with the owner page's headers on both Vercel projects", () => {
-    for (const path of ["vercel.json", "deploy/vercel-mainnet/vercel.json"]) {
-      const config = JSON.parse(read(path));
-      expect(config.rewrites).toContainEqual({ source: "/fuji-rabby-test", destination: "/fuji-rabby-test.html" });
-      expect(config.headers.find((h) => h.source === "/(owner-deploy|fuji-rabby-test)(.html)?").headers).toContainEqual({ key: "Cache-Control", value: "no-store" });
-    }
-    expect(read("vite.config.js")).toMatch(/fujiRabbyTest: 'fuji-rabby-test\.html'/);
+  it("serves /fuji-rabby-test with the owner page's headers on the Fuji project only, never in the mainnet build", () => {
+    const config = JSON.parse(read("vercel.json"));
+    expect(config.rewrites).toContainEqual({ source: "/fuji-rabby-test", destination: "/fuji-rabby-test.html" });
+    expect(config.headers.find((h) => h.source === "/(owner-deploy|fuji-rabby-test)(.html)?").headers).toContainEqual({ key: "Cache-Control", value: "no-store" });
+    expect(read("deploy/vercel-mainnet/vercel.json")).not.toMatch(/fuji/);
+    expect(read("vite.config.js")).toMatch(/process\.env\.VITE_RELEASE_NETWORK === 'mainnet' \? \{\} : \{ fujiRabbyTest: 'fuji-rabby-test\.html' \}/);
   });
 });
 

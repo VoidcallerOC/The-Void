@@ -66,7 +66,11 @@ describe("mainnet runtime configuration", () => {
   it("serves the mainnet web build from its own Vercel project with only the API host changed", () => {
     const swap = (value) => JSON.parse(JSON.stringify(value).replaceAll("the-void-api-mainnet.onrender.com", "the-void-api-fuji.onrender.com"));
     const { installCommand, buildCommand, outputDirectory, ...routing } = mainnetVercel;
-    expect(swap(routing)).toEqual(fujiVercel);
+    // Identical routing, except that the Fuji Rabby test page exists only on the Fuji project.
+    const withoutFujiTest = JSON.parse(JSON.stringify(fujiVercel));
+    withoutFujiTest.rewrites = withoutFujiTest.rewrites.filter((rule) => rule.source !== "/fuji-rabby-test");
+    for (const rule of withoutFujiTest.headers) if (rule.source === "/(owner-deploy|fuji-rabby-test)(.html)?") rule.source = "/owner-deploy(.html)?";
+    expect(swap(routing)).toEqual(withoutFujiTest);
     expect(buildCommand).toContain("VITE_RELEASE_NETWORK=mainnet");
     expect(JSON.stringify(mainnetVercel)).not.toMatch(/fuji/);
     expect({ installCommand, outputDirectory }).toEqual({ installCommand: "cd ../.. && npm ci", outputDirectory: "dist" });

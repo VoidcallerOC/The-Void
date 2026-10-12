@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -16,9 +17,13 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // The site, the owner's mainnet deployment page (/owner-deploy) and its separate Fuji test page
-      // (/fuji-rabby-test). Each page bundles only its own network's approved plans.
-      input: { main: 'index.html', ownerDeploy: 'owner-deploy.html', fujiRabbyTest: 'fuji-rabby-test.html' },
+      // The site, the owner's mainnet deployment page (/owner-deploy) and, except in the mainnet build,
+      // its separate Fuji test page (/fuji-rabby-test). Each page bundles only its own network's plans.
+      input: {
+        main: 'index.html',
+        ownerDeploy: 'owner-deploy.html',
+        ...(process.env.VITE_RELEASE_NETWORK === 'mainnet' ? {} : { fujiRabbyTest: 'fuji-rabby-test.html' }),
+      },
       output: {
         // Split long-lived vendor code out of the app bundle so it caches
         // across deploys; route sections are split via React.lazy.
