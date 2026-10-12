@@ -60,7 +60,8 @@ function feeBps(value) {
 }
 
 function privateKey(value) {
-  const text = required(value, "DEPLOYER_PRIVATE_KEY");
+  const text = String(value ?? "").trim();
+  if (!text) return null;
   if (!PRIVATE_KEY_PATTERN.test(text)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
   return text;
 }
@@ -78,10 +79,13 @@ export function validateDeploymentEnv(env = process.env) {
   const confirmFuji = String(env.CONFIRM_FUJI_DEPLOY || "").trim();
   const broadcast = String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes";
   if (broadcast && confirmFuji !== "yes") throw new DeploymentError("Broadcast requires CONFIRM_FUJI_DEPLOY=yes.");
-  // The owner names the deployer they reviewed; a broadcast from any other key is refused.
-  const deployerAddress = new Wallet(deployerPrivateKey).address;
+  // The owner names the deployer they reviewed; a broadcast from any other key is refused. A dry run
+  // plans from that address alone, so the key reaches only the signing step of an approved broadcast.
   const expectedText = String(env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
+  if (broadcast && !deployerPrivateKey) throw new DeploymentError("Broadcast requires DEPLOYER_PRIVATE_KEY.");
   if (broadcast && !expectedText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
+  if (!deployerPrivateKey && !expectedText) throw new DeploymentError("EXPECTED_DEPLOYER_ADDRESS (or DEPLOYER_PRIVATE_KEY) is required to plan the deployment.");
+  const deployerAddress = deployerPrivateKey ? new Wallet(deployerPrivateKey).address : address(expectedText, "EXPECTED_DEPLOYER_ADDRESS");
   if (expectedText && address(expectedText, "EXPECTED_DEPLOYER_ADDRESS") !== deployerAddress) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
   return Object.freeze({ network, rpcUrl, deployerPrivateKey, deployerAddress, platformRecipient, marketplaceFeeRecipient, platformFeeBps, confirmFuji, broadcast });
 }

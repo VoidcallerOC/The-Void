@@ -34,6 +34,13 @@ function fakeDeploy({ releaseVersion = 3n, from = DEPLOYER, factoryAddress = FAC
 }
 
 describe("Factory V3 deployment preflight", () => {
+  it("plans a dry run from the reviewed address alone and requires the key only to broadcast", () => {
+    const { DEPLOYER_PRIVATE_KEY: _omitted, ...keyless } = FUJI;
+    expect(validateDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER })).toMatchObject({ deployerAddress: DEPLOYER, deployerPrivateKey: null, broadcast: false });
+    expect(() => validateDeploymentEnv(keyless)).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
+    expect(() => validateDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0", BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes" })).toThrow(/requires DEPLOYER_PRIVATE_KEY/);
+  });
+
   it("dry-runs by default on Fuji with the existing treasury and never broadcasts", async () => {
     const config = validateDeploymentEnv(FUJI);
     expect(config).toMatchObject({ network: "fuji", chainId: 43113, platformRecipient: TREASURY, broadcast: false });

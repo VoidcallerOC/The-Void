@@ -8,7 +8,8 @@ name: Deploy VoidRelease1155V2 + VoidPrimarySale to Avalanche Fuji
 #
 # Required inputs to the V2 script:
 #   AVALANCHE_FUJI_RPC_URL     -> secrets.AVALANCHE_FUJI_RPC_URL
-#   DEPLOYER_PRIVATE_KEY       -> secrets.DEPLOYER_PRIVATE_KEY
+#   DEPLOYER_PRIVATE_KEY       -> secrets.DEPLOYER_PRIVATE_KEY (only the signing step; the preflight
+#                                 plans from RELEASE_ADMIN_ADDRESS, which the key must control)
 #   RELEASE_ADMIN_ADDRESS      -> secrets.RELEASE_ADMIN_ADDRESS
 #   PLATFORM_FEE_RECIPIENT     -> config/fuji-v2-platform-fees.json (reviewed, not a secret)
 #   PLATFORM_FEE_BPS           -> config/fuji-v2-platform-fees.json (reviewed, not a secret)
@@ -55,6 +56,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Load and validate reviewed fee values
@@ -101,7 +103,6 @@ jobs:
     timeout-minutes: 30
     env:
       AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
-      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
       RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
       PLATFORM_FEE_RECIPIENT: ${{ needs.validate-fee-config.outputs.platform_fee_recipient }}
       PLATFORM_FEE_BPS: ${{ needs.validate-fee-config.outputs.platform_fee_bps }}
@@ -109,6 +110,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Install Node dependencies
@@ -123,6 +125,8 @@ jobs:
         run: forge build
 
       - name: Verify credentials, Fuji, balance, and gas without broadcasting
+        # No private key in this job: the deployer must be RELEASE_ADMIN_ADDRESS, and the deploy script
+        # checks that the key controls it inside the signing step.
         shell: bash
         run: |
           set -euo pipefail
@@ -130,7 +134,7 @@ jobs:
           import { readFile } from "node:fs/promises";
           import { ethers } from "ethers";
 
-          for (const name of ["AVALANCHE_FUJI_RPC_URL", "DEPLOYER_PRIVATE_KEY", "RELEASE_ADMIN_ADDRESS"]) {
+          for (const name of ["AVALANCHE_FUJI_RPC_URL", "RELEASE_ADMIN_ADDRESS"]) {
             if (!process.env[name]) throw new Error(`${name} is unavailable`);
           }
           const address = (value, name) => {
@@ -145,25 +149,24 @@ jobs:
           const provider = new ethers.JsonRpcProvider(process.env.AVALANCHE_FUJI_RPC_URL, 43113, { staticNetwork: true });
           const network = await provider.getNetwork();
           if (network.chainId !== 43113n) throw new Error(`Refusing non-Fuji chain: ${network.chainId}`);
-          const wallet = new ethers.Wallet(process.env.DEPLOYER_PRIVATE_KEY, provider);
-          if (wallet.address.toLowerCase() !== admin.toLowerCase()) throw new Error("DEPLOYER_PRIVATE_KEY does not match RELEASE_ADMIN_ADDRESS");
+          const deployer = admin;
 
           const releaseArtifact = JSON.parse(await readFile("out/VoidRelease1155V2.sol/VoidRelease1155V2.json", "utf8"));
           const saleArtifact = JSON.parse(await readFile("out/VoidPrimarySale.sol/VoidPrimarySale.json", "utf8"));
-          const releaseFactory = new ethers.ContractFactory(releaseArtifact.abi, releaseArtifact.bytecode.object, wallet);
-          const saleFactory = new ethers.ContractFactory(saleArtifact.abi, saleArtifact.bytecode.object, wallet);
-          const nonce = await provider.getTransactionCount(wallet.address, "pending");
-          const predictedRelease = ethers.getCreateAddress({ from: wallet.address, nonce });
-          const predictedSale = ethers.getCreateAddress({ from: wallet.address, nonce: nonce + 1 });
+          const releaseFactory = new ethers.ContractFactory(releaseArtifact.abi, releaseArtifact.bytecode.object);
+          const saleFactory = new ethers.ContractFactory(saleArtifact.abi, saleArtifact.bytecode.object);
+          const nonce = await provider.getTransactionCount(deployer, "pending");
+          const predictedRelease = ethers.getCreateAddress({ from: deployer, nonce });
+          const predictedSale = ethers.getCreateAddress({ from: deployer, nonce: nonce + 1 });
           const releaseTx = await releaseFactory.getDeployTransaction(admin);
           const saleTx = await saleFactory.getDeployTransaction(predictedRelease, recipient, feeBps);
           const grantInterface = new ethers.Interface(["function grantRole(bytes32 role, address account)"]);
-          const grantTx = { from: wallet.address, to: predictedRelease, data: grantInterface.encodeFunctionData("grantRole", [ethers.id("ISSUER_ROLE"), predictedSale]) };
+          const grantTx = { from: deployer, to: predictedRelease, data: grantInterface.encodeFunctionData("grantRole", [ethers.id("ISSUER_ROLE"), predictedSale]) };
           const [releaseGas, saleGas, gasPrice, balance] = await Promise.all([
-            provider.estimateGas({ from: wallet.address, data: releaseTx.data }),
-            provider.estimateGas({ from: wallet.address, data: saleTx.data }),
+            provider.estimateGas({ from: deployer, data: releaseTx.data }),
+            provider.estimateGas({ from: deployer, data: saleTx.data }),
             provider.getFeeData().then((fee) => fee.gasPrice ?? fee.maxFeePerGas),
-            provider.getBalance(wallet.address),
+            provider.getBalance(deployer),
           ]);
           if (gasPrice === null) throw new Error("Fuji gas price unavailable");
           // The grant cannot be estimated against a not-yet-deployed predicted address.
@@ -172,8 +175,8 @@ jobs:
           const safetyMargin = (estimatedRequired * 25n) / 100n;
           const threshold = estimatedRequired + safetyMargin;
           const format = (value) => `${ethers.formatEther(value)} AVAX`;
-          console.log(`RPC: PRESENT; FUJI CHAIN: ${network.chainId}; DEPLOYER/ADMIN MATCH: YES`);
-          console.log(`DEPLOYER ADDRESS: ${wallet.address}`);
+          console.log(`RPC: PRESENT; FUJI CHAIN: ${network.chainId}; DEPLOYER = RELEASE_ADMIN_ADDRESS (key match checked at signing)`);
+          console.log(`DEPLOYER ADDRESS: ${deployer}`);
           console.log(`FUJI BALANCE: ${format(balance)}`);
           console.log(`GAS: release=${releaseGas} sale=${saleGas} grant-reserve=${grantGas} gasPriceWei=${gasPrice}`);
           console.log(`ESTIMATED REQUIRED: ${format(estimatedRequired)}`);
@@ -185,12 +188,11 @@ jobs:
   deploy-and-verify:
     name: Deploy V2 + VoidPrimarySale to Fuji
     needs: [validate-fee-config, read-only-preflight]
-    if: ${{ inputs.preflight_only != true }}
+    if: ${{ inputs.preflight_only != true && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
-      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
       RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
       PLATFORM_FEE_RECIPIENT: ${{ needs.validate-fee-config.outputs.platform_fee_recipient }}
       PLATFORM_FEE_BPS: ${{ needs.validate-fee-config.outputs.platform_fee_bps }}
@@ -213,6 +215,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Confirm V2 script and V1 workflow isolation
@@ -248,7 +251,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          required=(AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS PLATFORM_FEE_RECIPIENT PLATFORM_FEE_BPS)
+          required=(AVALANCHE_FUJI_RPC_URL RELEASE_ADMIN_ADDRESS PLATFORM_FEE_RECIPIENT PLATFORM_FEE_BPS)
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
               echo "Missing required V2 input: ${name}" >&2
@@ -280,13 +283,9 @@ jobs:
             echo "Refusing non-Fuji chain: ${chain_id}" >&2
             exit 1
           fi
-          deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
-          deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
-          admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
-          if [ "${deployer_lc}" != "${admin_lc}" ]; then
-            echo "RELEASE_ADMIN_ADDRESS must match the funded deployer so ISSUER_ROLE can be granted" >&2
-            exit 1
-          fi
+          # The deployer must be RELEASE_ADMIN_ADDRESS so ISSUER_ROLE can be granted. The key is not
+          # available here; scripts/deploy-release-v2-fuji.mjs refuses a key that does not control it.
+          deployer="${RELEASE_ADMIN_ADDRESS}"
           balance_wei="$(cast balance "${deployer}" --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
           if ! [[ "${balance_wei}" =~ ^[0-9]+$ ]] || [ "${balance_wei}" -le 0 ]; then
             echo "Deployer has zero or unreadable Fuji AVAX balance" >&2
@@ -295,7 +294,7 @@ jobs:
           echo "Fuji V2 preflight passed: chain_id=${chain_id}, deployer=${deployer}, balance_wei=${balance_wei}"
           echo "PLATFORM_FEE_RECIPIENT=${PLATFORM_FEE_RECIPIENT}"
           echo "PLATFORM_FEE_BPS=${PLATFORM_FEE_BPS}"
-          echo "Secrets present: AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS (values not printed)"
+          echo "Secrets present: AVALANCHE_FUJI_RPC_URL RELEASE_ADMIN_ADDRESS (values not printed); DEPLOYER_PRIVATE_KEY is exposed only to the deploy step"
           grep -Fq 'out/VoidRelease1155V2.sol/VoidRelease1155V2.json' scripts/deploy-release-v2-fuji.mjs
           grep -Fq 'out/VoidPrimarySale.sol/VoidPrimarySale.json' scripts/deploy-release-v2-fuji.mjs
           ! grep -Fq 'MusicMarketplace.sol:MusicMarketplace' scripts/deploy-release-v2-fuji.mjs
@@ -303,6 +302,8 @@ jobs:
 
       - name: Deploy VoidRelease1155V2 and VoidPrimarySale to Fuji
         id: deploy
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           export DEPLOY_NETWORK=fuji

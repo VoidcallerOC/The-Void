@@ -302,6 +302,9 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   const plan = buildPlan(config, facts);
   if (!config.broadcast) {
     console.log(JSON.stringify({ mode: "DRY_RUN", ...plan }, null, 2));
+    // The workflow binds the approved broadcast to this exact plan (scripts/deployment-plan-binding.mjs).
+    const planOutput = String(env.PLAN_OUTPUT_PATH ?? "").trim();
+    if (planOutput) await writeFile(resolve(planOutput), `${JSON.stringify({ mode: "DRY_RUN", ...plan }, null, 2)}\n`);
     console.log("No transaction was broadcast.");
     return { mode: "DRY_RUN", plan };
   }

@@ -75,7 +75,13 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      38252855896, all 14 checks PASS and independently re-verified. Record:
      `deployments/fuji-royalty-rehearsal-0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338.json`.
    - `LAUNCH-GATE.md` (NO-GO) and `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` cover the old shared-contract
-     path, which this launch does not use.
+     path, which this launch does not use. Its workflow and script are removed.
+   - **Deployment authority** (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`). Before step 6:
+     - create the protected `mainnet-deployment` environment, with required reviewers and `main` only;
+     - move `DEPLOYER_PRIVATE_KEY` into that environment's secrets;
+     - decide how Fuji will sign.
+
+     These are GitHub settings, not code; check them in GitHub.
 4. **Dry runs (no key, no transaction).**
    - Actions → *Deploy release-per-contract infrastructure to C-Chain mainnet*, with
      `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.
@@ -98,6 +104,11 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - the marketplace `registry`, `feeRecipient` and `deploymentChainId`.
 
    It stops before the marketplace if the factory or implementation differs.
+
+   The run first completes the key-less `plan` job. Review its `…-plan-<run id>` artifact (the dry
+   run and `plan-binding.json`), then approve the `mainnet-deployment` environment. The `broadcast`
+   job re-plans without the key. It signs only if the fresh plan matches the approved binding on the
+   same commit.
 7. **Record PR.** From the workflow's record artifact, fill `config/mainnet-release-per-contract.json`:
    - factory, implementation and marketplace addresses and their deployment blocks;
    - `source: VoidReleaseFactoryV2Royalty`, `releaseVersion: 2`, `albumCapable: true`;
@@ -144,7 +155,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
       - `claim_signer_address`;
       - `expected_deployer_address=0xaBd3…c174`.
     - Dry run first. Then broadcast with `expected_deployer_nonce` from the dry run and
-      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`.
+      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`. As in step 6, approve the
+      `mainnet-deployment` environment only after reviewing the plan artifact.
     - The script verifies the release, the sale schedule, the Genesis collection and the mined
       parameters.
 12. **[APPROVAL] Authorize the claim to mint.**

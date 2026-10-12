@@ -12,6 +12,11 @@
 - PR #142 is not merged.
 - The Fuji archive/reconciliation gate still stands, and nothing here claims mainnet readiness.
 
+> **Update:** `deploy-release-v2-mainnet.yml` is removed. Every remaining workflow exposes
+> `DEPLOYER_PRIVATE_KEY` only to its signing step. Mainnet broadcasts wait for the
+> `mainnet-deployment` environment. See `deploy/mainnet/DEPLOYMENT-AUTHORITY.md`. The tables below
+> describe the state on 2026-10-09.
+
 **Subject (old authority):** `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`. This is the Fuji deployer and the cron key.
 
 **Evidence tiers** (kept separate throughout):

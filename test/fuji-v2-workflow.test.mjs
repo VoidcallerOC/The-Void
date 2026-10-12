@@ -35,7 +35,7 @@ describe("Fuji V2 workflow dispatch safety", () => {
     expect(preflight).toContain("Verify credentials, Fuji, balance, and gas without broadcasting");
     expect(preflight).not.toContain("npm run deploy:release-v2");
     expect(deployment).toContain("needs: [validate-fee-config, read-only-preflight]");
-    expect(deployment).toContain("if: ${{ inputs.preflight_only != true }}");
+    expect(deployment).toContain("if: ${{ inputs.preflight_only != true && github.ref == 'refs/heads/main' }}");
     expect(deployment).toContain('expected="I_CONFIRM_FUJI_V2_PRIMARY_SALE_DEPLOY"');
     expect(deployment).toContain('if [ "${{ github.event.inputs.confirm_fuji_v2_deploy }}" != "${expected}" ]');
     expect(deployment).toContain("npm run deploy:release-v2");

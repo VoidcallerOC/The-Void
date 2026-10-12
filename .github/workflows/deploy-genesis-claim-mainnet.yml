@@ -8,6 +8,12 @@ name: Deploy Genesis holder claim to C-Chain mainnet
 # schedule and the C-Chain Genesis collection, enforces role separation (the passive fee recipient is
 # never admin or signer; the signer is a dedicated key) and simulates the constructor. No run grants
 # ISSUER_ROLE, edits config/ or enables the API claim; those follow-ups are printed for the owner.
+#
+# Two jobs (see deploy/mainnet/DEPLOYMENT-AUTHORITY.md): `plan` (main only, no key, no environment)
+# dry-runs and, for a requested broadcast, binds the reviewed plan to this commit; `broadcast` waits
+# for the `mainnet-deployment` environment approval, re-plans without the key, refuses unless the
+# fresh plan matches the approved binding, and only then exposes DEPLOYER_PRIVATE_KEY to the single
+# signing step. Required reviewers on that environment are configured in GitHub settings, not here.
 
 on:
   workflow_dispatch:
@@ -63,12 +69,11 @@ concurrency:
   group: void-genesis-claim-mainnet-deployment
   cancel-in-progress: false
 
+# Non-secret plan inputs shared by both jobs. DEPLOYER_PRIVATE_KEY is never set at workflow or job level.
 env:
   DEPLOY_NETWORK: mainnet
   AVALANCHE_MAINNET_RPC_URL: ${{ secrets.AVALANCHE_MAINNET_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc' }}
   GENESIS_RPC_URL: https://api.avax.network/ext/bc/C/rpc
-  # The key is exposed to the job only for an approved broadcast; the dry run plans from the address.
-  DEPLOYER_PRIVATE_KEY: ${{ inputs.broadcast_deployment && secrets.DEPLOYER_PRIVATE_KEY || '' }}
   GENESIS_CLAIM_RELEASE_CONTRACT: ${{ inputs.release_contract }}
   GENESIS_CLAIM_PRIMARY_SALE: ${{ inputs.primary_sale }}
   GENESIS_CLAIM_TOKEN_ID: ${{ inputs.token_id }}
@@ -82,19 +87,24 @@ env:
   GENESIS_CLAIM_ADMIN: ${{ inputs.claim_admin }}
   GENESIS_CLAIM_SIGNER_ADDRESS: ${{ inputs.claim_signer_address }}
   CONFIRM_MAINNET_DEPLOY: ${{ inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY' && 'yes' || 'no' }}
-  BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
   EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
 
 jobs:
-  deploy:
-    name: Plan (and, only when approved, broadcast) the mainnet Genesis claim
+  plan:
+    name: Plan the mainnet Genesis claim (no key)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BROADCAST_DEPLOYMENT: "no"
     steps:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Install Node dependencies
@@ -111,18 +121,90 @@ jobs:
           forge test --match-contract GenesisHolderClaim
 
       - name: Run claim service and deployment script tests
-        run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js
+        run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js scripts/deployment-plan-binding.test.mjs
 
-      - name: Plan or broadcast
+      - name: Dry run (no key)
+        shell: bash
+        env:
+          PLAN_OUTPUT_PATH: plan.json
+        run: |
+          set -euo pipefail
+          npm run deploy:genesis-claim -- --dry-run | tee plan-output.log
+
+      - name: Check broadcast inputs and bind the reviewed plan (no key)
+        if: inputs.broadcast_deployment
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
-            test "${CONFIRM_MAINNET_DEPLOY}" = "yes"
-            npm run deploy:genesis-claim | tee deployment-output.log
-          else
-            npm run deploy:genesis-claim -- --dry-run | tee deployment-output.log
-          fi
+          test "${CONFIRM_MAINNET_DEPLOY}" = "yes" || { echo "Broadcast requires the exact confirmation string." >&2; exit 1; }
+          [[ "${EXPECTED_DEPLOYER_NONCE}" =~ ^[0-9]+$ ]] || { echo "Broadcast requires expected_deployer_nonce." >&2; exit 1; }
+          node scripts/deployment-plan-binding.mjs bind --kind genesis-claim-mainnet --plan plan.json --commit "${GITHUB_SHA}" --out plan-binding.json
+
+      - name: Preserve the reviewed plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-claim-mainnet-plan-${{ github.run_id }}
+          path: |
+            plan-output.log
+            plan.json
+            plan-binding.json
+          if-no-files-found: ignore
+
+  broadcast:
+    name: Broadcast the approved mainnet Genesis claim
+    needs: plan
+    if: github.ref == 'refs/heads/main' && inputs.broadcast_deployment && inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Approval gate. Required reviewers and the main-only branch rule must be set on this environment in
+    # GitHub (Settings > Environments); the YAML reference alone does not create them.
+    environment: mainnet-deployment
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build the claim artifact
+        run: forge build
+
+      - name: Fetch the approved plan
+        uses: actions/download-artifact@v4
+        with:
+          name: genesis-claim-mainnet-plan-${{ github.run_id }}
+          path: approved
+
+      - name: Re-plan without the key and match it to the approved plan
+        shell: bash
+        env:
+          BROADCAST_DEPLOYMENT: "no"
+          PLAN_OUTPUT_PATH: fresh-plan.json
+        run: |
+          set -euo pipefail
+          npm run deploy:genesis-claim -- --dry-run > /dev/null
+          node scripts/deployment-plan-binding.mjs verify --kind genesis-claim-mainnet --approved approved/plan-binding.json --plan fresh-plan.json --commit "${GITHUB_SHA}"
+
+      - name: Sign and broadcast (the only step with the key)
+        shell: bash
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BROADCAST_DEPLOYMENT: "yes"
+        run: |
+          set -euo pipefail
+          npm run deploy:genesis-claim | tee deployment-output.log
 
       - name: Preserve deployment output and record
         if: always()
