@@ -12,8 +12,9 @@ name: Deploy Genesis holder claim to C-Chain mainnet
 # Two jobs (see deploy/mainnet/DEPLOYMENT-AUTHORITY.md): `plan` (main only, no key, no environment)
 # dry-runs and, for a requested broadcast, binds the reviewed plan to this commit; `broadcast` waits
 # for the `mainnet-deployment` environment approval, re-plans without the key, refuses unless the
-# fresh plan matches the approved binding, and only then exposes DEPLOYER_PRIVATE_KEY to the single
-# signing step. Required reviewers on that environment are configured in GitHub settings, not here.
+# fresh plan matches the approved binding, and only then exposes the environment secret
+# MAINNET_DEPLOYER_PRIVATE_KEY (as DEPLOYER_PRIVATE_KEY) to the single signing step. The plan job
+# refuses to run if that secret is reachable without the environment. Required reviewers on that environment are configured in GitHub settings, not here.
 
 on:
   workflow_dispatch:
@@ -101,6 +102,19 @@ jobs:
     env:
       BROADCAST_DEPLOYMENT: "no"
     steps:
+      - name: Refuse a mainnet key that is reachable outside the protected environment
+        # This job has no environment, so it can see only repository- or organization-level secrets.
+        # MAINNET_DEPLOYER_PRIVATE_KEY must exist only as a `mainnet-deployment` environment secret.
+        # The expression yields true/false; the secret value never enters this job's environment.
+        env:
+          MAINNET_KEY_OUTSIDE_ENVIRONMENT: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}
+        run: |
+          if [ "${MAINNET_KEY_OUTSIDE_ENVIRONMENT}" != "false" ]; then
+            echo "MAINNET_DEPLOYER_PRIVATE_KEY is visible without the mainnet-deployment environment (repository or organization secret). Move it to the environment; refusing to run." >&2
+            exit 1
+          fi
+          echo "MAINNET_DEPLOYER_PRIVATE_KEY is not reachable from this unprotected job."
+
       - name: Check out source
         uses: actions/checkout@v4
         with:
@@ -200,7 +214,9 @@ jobs:
       - name: Sign and broadcast (the only step with the key)
         shell: bash
         env:
-          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          # Environment-scoped secret, distinct from the Fuji DEPLOYER_PRIVATE_KEY: if it is missing from
+          # mainnet-deployment, this is empty and the script refuses; it never falls back to a repository secret.
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY }}
           BROADCAST_DEPLOYMENT: "yes"
         run: |
           set -euo pipefail

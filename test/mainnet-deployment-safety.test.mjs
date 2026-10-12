@@ -111,6 +111,10 @@ describe("deployer key exposure", () => {
     for (const [name, wf] of Object.entries(workflows)) expect(wf.source, name).not.toMatch(/pull_request_target/);
   });
 
+  it("keeps the mainnet secret name out of every non-mainnet workflow", () => {
+    for (const [name, wf] of Object.entries(workflows).filter(([file]) => !file.includes("mainnet"))) expect(wf.source, name).not.toMatch(/MAINNET_DEPLOYER_PRIVATE_KEY/);
+  });
+
   it("is gated on main and the exact confirmation in every Fuji signing step", () => {
     for (const [name, wf] of keyWorkflows.filter(([file]) => !file.includes("mainnet"))) {
       for (const { job, step } of signingSteps(wf)) {
@@ -136,7 +140,14 @@ describe("mainnet broadcast requires the protected environment and the reviewed 
       expect(wf.jobs.map((job) => job.name)).toEqual(["plan", "broadcast"]);
       expect(plan.header).toMatch(/if: github\.ref == 'refs\/heads\/main'/);
       expect(plan.header).not.toMatch(/environment:/);
-      expect(`${plan.header}\n${plan.steps.map((step) => step.text).join("\n")}`).not.toMatch(/DEPLOYER_PRIVATE_KEY/);
+      expect(`${plan.header}\n${plan.steps.map((step) => step.text).join("\n")}`).not.toMatch(KEY_REF);
+      // The first plan step fails closed if the mainnet key is visible without the environment,
+      // using only a boolean of the secret (never its value).
+      const guard = plan.steps[0];
+      expect(guard.env).toContain("MAINNET_KEY_OUTSIDE_ENVIRONMENT: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' }}");
+      expect(guard.text).toMatch(/if \[ "\$\{MAINNET_KEY_OUTSIDE_ENVIRONMENT\}" != "false" \]; then[\s\S]*exit 1/);
+      const secretRefs = wf.source.match(/secrets\.[A-Z_]*PRIVATE_KEY[^}]*/g);
+      expect(secretRefs).toEqual(["secrets.MAINNET_DEPLOYER_PRIVATE_KEY != '' ", "secrets.MAINNET_DEPLOYER_PRIVATE_KEY "]);
       expect(plan.steps.some((step) => step.text.includes(`npm run ${command} -- --dry-run`))).toBe(true);
       expect(plan.steps.some((step) => step.text.includes(`deployment-plan-binding.mjs bind --kind ${kind}`))).toBe(true);
 
@@ -159,6 +170,8 @@ describe("mainnet broadcast requires the protected environment and the reviewed 
       expect(broadcast.steps[verifyIndex].env).not.toMatch(KEY_REF);
       expect(signing[0].step.text).toContain(`npm run ${command} |`);
       expect(signing[0].step.env).toMatch(/BROADCAST_DEPLOYMENT: "yes"/);
+      // Mainnet signs only with the environment-scoped secret, never the repository-level Fuji name.
+      expect(signing[0].step.env).toContain("DEPLOYER_PRIVATE_KEY: ${{ secrets.MAINNET_DEPLOYER_PRIVATE_KEY }}");
       // Steps after signing only upload the record.
       for (const step of broadcast.steps.slice(signIndex + 1)) expect(step.text).toMatch(/actions\/upload-artifact/);
       // The workflow-level confirmation still reaches the script's own guard.

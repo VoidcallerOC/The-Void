@@ -25,7 +25,7 @@ A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.
 | Role | Address | Never used as |
 | --- | --- | --- |
 | Platform fee recipient (passive) | Nano S Plus `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`, recorded in `config/mainnet-release-per-contract.json` | deployer, signer, contract admin, artist |
-| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` (`DEPLOYER_PRIVATE_KEY` secret) | fee recipient, signer |
+| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` today, which is also the Fuji deployer. A separate mainnet key is recommended (`DEPLOYMENT-AUTHORITY.md` §6). Mainnet signs only with the `mainnet-deployment` environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`. | fee recipient, signer |
 | Artist (release admin, edition payout) | `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` | fee recipient, signer |
 | Genesis voucher signer | A new dedicated key, generated offline by the owner; only its public address leaves the device | anything else |
 | Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer |
@@ -78,8 +78,10 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      path, which this launch does not use. Its workflow and script are removed.
    - **Deployment authority** (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`). Before step 6:
      - create the protected `mainnet-deployment` environment, with required reviewers and `main` only;
-     - move `DEPLOYER_PRIVATE_KEY` into that environment's secrets;
-     - decide how Fuji will sign.
+     - add the mainnet deployer key as the environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`, never
+       at repository level (the mainnet workflows fail closed otherwise);
+     - decide whether mainnet gets a new deployer key, separate from the Fuji `DEPLOYER_PRIVATE_KEY`.
+       This is recommended (section 6 of that file); a new key changes the predicted addresses.
 
      These are GitHub settings, not code; check them in GitHub.
 4. **Dry runs (no key, no transaction).**
