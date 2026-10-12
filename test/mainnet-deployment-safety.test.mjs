@@ -62,7 +62,8 @@ const workflows = Object.fromEntries(workflowFiles.map((name) => [name, parseWor
 const keyWorkflows = Object.entries(workflows).filter(([, wf]) => wf.source.includes("DEPLOYER_PRIVATE_KEY"));
 // Workflow text without comment lines: what actually runs.
 const executable = (wf) => wf.source.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
-const RUNS_SIGNING_TOOL = /sign:mainnet|mainnet-owner-signing\.mjs (serve|verify)/;
+// Workflows may run the key-less verify command, never a signing entry point.
+const RUNS_SIGNING_TOOL = /sign:mainnet|owner:deploy|mainnet-owner-signing\.mjs (serve|start)/;
 const signingSteps = (wf) => wf.jobs.flatMap((job) => job.steps.filter((step) => KEY_REF.test(step.env)).map((step) => ({ job, step })));
 
 describe("legacy shared-contract mainnet path is retired", () => {
@@ -163,7 +164,7 @@ describe("mainnet workflows plan only: no key, no signing, no broadcast", () => 
 
   it("no workflow references a mainnet-deployment environment or runs the owner signing tool", () => {
     for (const [name, wf] of Object.entries(workflows)) {
-      expect(wf.source, name).not.toMatch(/mainnet-deployment/);
+      expect(wf.source, name).not.toMatch(/environment:\s*mainnet-deployment/);
       expect(executable(wf), name).not.toMatch(RUNS_SIGNING_TOOL);
     }
   });
@@ -201,3 +202,22 @@ describe("mainnet authorization and Fuji state are untouched", () => {
     expect(JSON.parse(read("config/fuji-release-per-contract-v2.json")).factoryAddress).toBe("0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8");
   });
 });
+
+describe("browser deployment path: no key anywhere, verification only in CI", () => {
+  it("the verify workflow is manual, read-only, key-less and runs only the verify command", () => {
+    const wf = workflows["verify-mainnet-deployment.yml"];
+    expect(wf.source).toMatch(/\non:\n {2}workflow_dispatch:/);
+    expect(wf.source).toMatch(/\npermissions:\n {2}contents: read\n/);
+    expect(wf.source).not.toMatch(/secrets\.|PRIVATE_KEY|environment:|:\s*write\b/);
+    expect(executable(wf)).toMatch(/mainnet-owner-signing\.mjs verify/);
+    expect(executable(wf)).not.toMatch(RUNS_SIGNING_TOOL);
+  });
+
+  it("the owner page asks for no key and signs only through the wallet", () => {
+    const page = `${read("owner-deploy.html")}\n${read("src/owner-deploy/main.js")}\n${read("src/owner-deploy/flow.js")}`;
+    expect(page).not.toMatch(/private ?key|mnemonic|seed phrase|new Wallet\(|signTransaction|eth_sendRawTransaction|sendTransaction\(/i);
+    expect(page).toContain('method: "eth_sendTransaction"');
+    expect(read("vercel.json")).toContain('"destination": "/owner-deploy.html"');
+  });
+});
+

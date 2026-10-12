@@ -108,3 +108,13 @@ describe("deployment plan binding", () => {
     expect(() => bindPlan("genesis-claim-mainnet", genesisPlan({ signingRequests: [] }), COMMIT)).toThrow(/exactly 1 unsigned signing request/);
   });
 });
+
+describe("plan binding digest", () => {
+  it("is the SHA-256 of the canonical binding, identical in Node and in the browser (ethers)", async () => {
+    const { createHash } = await import("node:crypto");
+    const { canonical } = await import("./plan-binding-core.mjs");
+    const binding = bindPlan("release-per-contract-mainnet", releasePlan(), COMMIT);
+    const nodeDigest = createHash("sha256").update(canonical({ kind: binding.kind, sourceCommit: binding.sourceCommit, fields: binding.fields })).digest("hex");
+    expect(binding.digest).toBe(nodeDigest);
+  });
+});

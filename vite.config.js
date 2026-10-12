@@ -16,6 +16,8 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      // The site, plus the owner's mainnet deployment page (owner-deploy.html, served at /owner-deploy).
+      input: { main: 'index.html', ownerDeploy: 'owner-deploy.html' },
       output: {
         // Split long-lived vendor code out of the app bundle so it caches
         // across deploys; route sections are split via React.lazy.

@@ -82,6 +82,10 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      by the owner; no key goes into GitHub. Resolve its open item O1 (existing copies of the deployer
      key outside Rabby) before funding the deployer.
 4. **Dry runs (no key, no transaction).**
+   - In the browser (the owner's path): Claude opens a PR adding the key-less plan under
+     `deploy/mainnet/approved-plans/`; merging it approves the plan, and
+     <https://the-void-alpha.vercel.app/owner-deploy> then shows it with live readiness checks
+     ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md#in-the-browser-the-owners-path-no-terminal)).
    - Locally: `npm run owner:deploy` (after `npm ci` and `forge build`) plans from the live chain and
      opens the planning stage of the signing page. It shows every check and the next action, for
      example the exact funding needed ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md#quick-start-from-a-clean-checkout-the-entry-point)).
@@ -93,7 +97,9 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
 5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.071 AVAX at 10 gwei; the fork run
    used 0.030) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
    C-Chain today) for creating the release, the edition, the sale and the `ISSUER_ROLE` grant.
-6. **[APPROVAL] Owner signs V2 in Rabby** ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)):
+6. **[APPROVAL] Owner signs V2 in Rabby** ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)). In the browser:
+   on `/owner-deploy`, connect Rabby, then request and approve step 1 and step 2 in Rabby. Then run
+   the *Verify mainnet deployment* workflow with the hashes. Or locally:
    - in the running `npm run owner:deploy` page, press **Re-check from the chain**. Type the address
      read from the Nano screen and press **Approve plan**; this binds the plan to the commit. (With a
      GitHub plan, use `npm run sign:mainnet --plan … --binding … --recipient-verified-on-device …`
