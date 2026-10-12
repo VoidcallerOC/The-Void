@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCreateAddress, keccak256 } from "ethers";
-import { MAINNET_ARTIST_WALLET, MAINNET_DEPLOYER, MAINNET_FEE_RECIPIENT, assertDefinedDeployer, assertNoPrivateKeyInEnv, assertReadyToSign, creationRequest, requestBindingFields, runtimeMatchesArtifact, verifyCreationTransaction, walletTransaction } from "./mainnet-signing-requests.mjs";
+import { MAINNET_ARTIST_WALLET, MAINNET_DEPLOYER, MAINNET_FEE_RECIPIENT, assertDefinedDeployer, assertNoPrivateKeyInEnv, assertReadyToSign, creationRequest, receiptOf, requestBindingFields, runtimeMatchesArtifact, verifyCreationTransaction, walletTransaction } from "./mainnet-signing-requests.mjs";
 import { ARTIST, DEPLOYER, RECIPIENT, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
 
 const DATA = "0x6001600155";
@@ -89,5 +89,19 @@ describe("runtime code against the reviewed artifact", () => {
     expect(runtimeMatchesArtifact("0x6080deadbeef5b0000", artifact)).toBe(false);
     expect(runtimeMatchesArtifact("0x", artifact)).toBe(false);
     expect(runtimeMatchesArtifact("0x6080000000005b00", { deployedBytecode: { object: "0x6080000000005b00" } })).toBe(true);
+  });
+});
+
+describe("waiting for a receipt", () => {
+  it("finds a receipt that appears after the first read, with no new block (the page's stalled-confirmation defect)", async () => {
+    let reads = 0;
+    const provider = { getTransactionReceipt: async () => { reads += 1; return reads >= 3 ? { status: 1 } : null; } };
+    await expect(receiptOf(provider, "0x1", 1_000, { intervalMs: 5 })).resolves.toEqual({ status: 1 });
+    expect(reads).toBe(3);
+  });
+
+  it("returns null after the timeout instead of waiting forever", async () => {
+    const provider = { getTransactionReceipt: async () => null };
+    await expect(receiptOf(provider, "0x1", 20, { intervalMs: 5 })).resolves.toBeNull();
   });
 });

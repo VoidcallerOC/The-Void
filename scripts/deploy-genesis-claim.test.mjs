@@ -267,7 +267,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
       ...base,
       state,
       estimateGas: async () => 2_000_000n,
-      waitForTransaction: async (hash) => state.txs[hash]?.receipt ?? null,
+      getTransactionReceipt: async (hash) => state.txs[hash]?.receipt ?? null,
       getTransaction: async (hash) => state.txs[hash]?.tx ?? null,
       call: async (tx) => {
         if (tx.to && getAddress(tx.to) === RELEASE) {

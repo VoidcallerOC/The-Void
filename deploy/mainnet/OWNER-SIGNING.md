@@ -5,6 +5,53 @@ Every mainnet contract deployment is signed by the owner in **Rabby**, with the 
 leaves Rabby. No script, workflow, CI job, cloud service, file or environment variable holds it, and
 the scripts refuse to run if any `*PRIVATE_KEY` variable is set.
 
+## In the browser (the owner's path; no terminal)
+
+**Entry point:** <https://the-void-alpha.vercel.app/owner-deploy> (also `/owner-deploy.html`).
+
+Open it in the browser profile where Rabby holds the deployer.
+
+**How a plan gets there.** Claude prepares the plan without any key, from live C-Chain, and opens a
+GitHub PR that adds it under `deploy/mainnet/approved-plans/`. CI recomputes every transaction from
+the contracts compiled on that commit. **Merging that PR is your approval of those exact
+transactions.** Vercel then publishes the page with the plan.
+
+**What you click:**
+1. Open the page. The **Next** banner always shows the one thing to do. Section 1 shows the
+   approved plan: deployer, fee recipient, contracts, constructor arguments, predicted addresses,
+   binding. The page re-checks the binding in your browser.
+2. Press **Connect Rabby**. Approve the site connection in Rabby. The page accepts only the deployer
+   `0xaBd3…c174` on Avalanche C-Chain.
+3. Section 3 shows live readiness from C-Chain: nonce, no pending transaction, empty target
+   addresses, enough AVAX for gas. Every row must say PASS. If one fails, the banner says what to
+   do; then press **Re-check**.
+4. Once, before the first real signature, do the [Rabby check](#before-the-first-real-signature-rabby-check-sends-nothing):
+   request step 1, read it in Rabby, and **reject** it.
+5. **Step 1: factory.** Tick the review box and press **Request approval in Rabby**. In Rabby, check:
+   - a contract deployment;
+   - from `0xaBd3…c174`;
+   - Avalanche C-Chain;
+   - nonce 0;
+   - value 0.
+
+   Then **approve** in Rabby. The step moves from *Prepared* to *Wallet approval requested* to
+   *Submitted* to **Confirmed and verified on chain**. The page verifies the transaction and the
+   factory's settings itself, from Avalanche's public RPC.
+6. **Step 2: marketplace.** The same, at nonce 1. It is offered only after step 1 is confirmed.
+7. **Final check in GitHub.** The page then lists the transaction hashes.
+   1. Open *Actions* → **Verify mainnet deployment** → **Run workflow**.
+   2. Choose `release-per-contract-mainnet` and paste the hashes.
+
+   It re-checks everything, including the deployed code against the compiled source, without any
+   key. Send the hashes to Claude for the record PR.
+
+If you reload, the page remembers submitted hashes in this browser and re-checks them. If Rabby
+shows an error after sending, paste the hash from Rabby's activity into the step instead of signing
+again. Nothing on the page can sign or send without your approval in Rabby.
+
+The terminal procedures below remain for reference and recovery. Neither is needed for the browser
+path.
+
 ## Wallets and what each one does
 
 | Wallet | Address | In this launch |
@@ -239,6 +286,9 @@ Launch activation stays a separate, separately approved step (README step 13).
     `GRANTED`.
   - Stale plans, a tampered binding, a key in the environment and a wrong device confirmation were
     each refused.
+- **Browser page** (`/owner-deploy`): its logic is unit-tested (`src/owner-deploy/flow.test.js`). The
+  built page was rehearsed in Chromium on a local C-Chain fork with a stand-in wallet. It was also
+  loaded against live C-Chain (read-only, nothing signed).
 - **Not tested: the real Rabby extension.** Also unverified: whether Rabby injects its provider into
   a page served from `http://127.0.0.1`. The page sends no content-security policy that would block
   an injected script; it only refuses framing. The page uses only standard EIP-1193 calls:

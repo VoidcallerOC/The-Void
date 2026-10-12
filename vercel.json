@@ -1,26 +1,75 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "routes": [
-    { "src": "/assets/audio(?:/.*)?", "status": 404 },
-    { "src": "/assets/audio-preview/(?!.*-preview\\.mp3$).*", "status": 404 }
+    {
+      "src": "/assets/audio(?:/.*)?",
+      "status": 404
+    },
+    {
+      "src": "/assets/audio-preview/(?!.*-preview\\.mp3$).*",
+      "status": 404
+    }
   ],
   "rewrites": [
-    { "source": "/assets/marketplace-heroes/:file", "destination": "https://the-void-api-fuji.onrender.com/api/marketplace/heroes/:file" },
-    { "source": "/assets/artist-portfolio/:file", "destination": "https://the-void-api-fuji.onrender.com/api/artists/portfolio/:file" },
-    { "source": "/api/:path*", "destination": "https://the-void-api-fuji.onrender.com/api/:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/assets/marketplace-heroes/:file",
+      "destination": "https://the-void-api-fuji.onrender.com/api/marketplace/heroes/:file"
+    },
+    {
+      "source": "/assets/artist-portfolio/:file",
+      "destination": "https://the-void-api-fuji.onrender.com/api/artists/portfolio/:file"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://the-void-api-fuji.onrender.com/api/:path*"
+    },
+    {
+      "source": "/owner-deploy",
+      "destination": "/owner-deploy.html"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/assets/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     },
     {
       "source": "/fonts/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/owner-deploy(.html)?",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'none'"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
       ]
     }
   ]

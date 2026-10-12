@@ -6,6 +6,7 @@ import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, format
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
 import { assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, runtimeMatchesArtifact, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
+import { checkFactoryState, checkMarketplaceState } from "./mainnet-onchain-checks.mjs";
 
 // C-Chain deployment of the release-per-contract architecture validated on Fuji, with the artist
 // royalty enforced on chain: VoidReleaseFactoryV2Royalty (VoidReleaseFactoryV2 whose constructor
@@ -240,43 +241,25 @@ export async function verifyReleaseStep(provider, plan, stepNumber, hash, { load
   const request = plan.signingRequests?.find((item) => item.step === stepNumber);
   if (!request) throw new DeploymentError(`The plan has no signing request for step ${stepNumber}.`);
   const mined = await verifyCreationTransaction(provider, request, hash, { timeoutMs });
-  const recipient = getAddress(plan.transactions[0].constructor.platformRecipient);
-  const marketplaceStep = plan.transactions[1];
   if (stepNumber === 1) {
     const [factoryArtifact, implementationArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH)]);
-    const factory = new Contract(mined.address, factoryArtifact.abi, provider);
-    const implementationAddress = getAddress(await factory.implementation());
-    const [onChainRecipient, onChainFee, onChainVersion, factoryRoyalty] = await Promise.all([factory.platformRecipient(), factory.PLATFORM_FEE_BPS(), factory.RELEASE_VERSION(), factory.REQUIRED_ROYALTY_BPS()]);
-    const implementationViews = new Contract(implementationAddress, ROYALTY_VIEWS, provider);
-    const [implementationRoyalty, implementationForbidden, implementationCode] = await Promise.all([implementationViews.REQUIRED_ROYALTY_BPS(), implementationViews.platformFeeRecipient(), provider.getCode(implementationAddress)]);
-    const problems = [];
-    if (implementationAddress !== getAddress(plan.transactions[0].predictedImplementation)) problems.push(`implementation ${implementationAddress}`);
+    // State checks shared with the browser deployment page, then the runtime code against the artifacts.
+    const { problems, facts } = await checkFactoryState(provider, plan, mined.address);
+    const implementationCode = await provider.getCode(facts.implementationAddress);
     if (keccak256(implementationArtifact.deployedBytecode.object) !== plan.artifacts.implementation.runtimeCodeHash) problems.push("the local implementation artifact is not the reviewed one");
     if (!runtimeMatchesArtifact(implementationCode, implementationArtifact)) problems.push("implementation runtime code differs from the reviewed artifact");
     if (!runtimeMatchesArtifact(await provider.getCode(mined.address), factoryArtifact)) problems.push("factory runtime code differs from the reviewed artifact");
-    if (getAddress(onChainRecipient) !== recipient) problems.push(`platformRecipient ${onChainRecipient}`);
-    if (Number(onChainFee) !== FEE_BPS) problems.push(`PLATFORM_FEE_BPS ${onChainFee}`);
-    if (Number(onChainVersion) !== 2) problems.push(`RELEASE_VERSION ${onChainVersion}`);
-    if (Number(factoryRoyalty) !== ROYALTY_BPS || Number(implementationRoyalty) !== ROYALTY_BPS) problems.push("royalty lock");
-    if (getAddress(implementationForbidden) !== recipient) problems.push(`implementation platformFeeRecipient ${implementationForbidden}`);
     const missingOnChain = missingAlbumSelectors(implementationCode);
     if (missingOnChain.length) problems.push(`implementation missing ${missingOnChain.join(", ")}`);
     if (problems.length) throw new DeploymentError(`The mined factory does not match the reviewed configuration: ${problems.join("; ")}. Do not sign the marketplace.`);
-    return { ...mined, implementationAddress, platformRecipient: recipient, platformFeeBps: FEE_BPS, releaseVersion: 2, requiredRoyaltyBps: ROYALTY_BPS };
+    return { ...mined, ...facts };
   }
   if (stepNumber === 2) {
     const marketplaceArtifact = await load(MARKETPLACE_ARTIFACT_PATH);
-    const marketplace = new Contract(mined.address, marketplaceArtifact.abi, provider);
-    const [registry, feeRecipient, platformFeeBps, deploymentChainId, marketplaceRoyalty] = await Promise.all([marketplace.registry(), marketplace.feeRecipient(), marketplace.platformFeeBps(), marketplace.deploymentChainId(), marketplace.REQUIRED_ROYALTY_BPS()]);
-    const problems = [];
-    if (!runtimeMatchesArtifact(await provider.getCode(mined.address), marketplaceArtifact)) problems.push("marketplace runtime code differs from the reviewed artifact");
-    if (getAddress(registry) !== getAddress(marketplaceStep.constructor.releaseFactory)) problems.push(`registry ${registry}`);
-    if (getAddress(feeRecipient) !== getAddress(marketplaceStep.constructor.feeRecipient)) problems.push(`feeRecipient ${feeRecipient}`);
-    if (Number(platformFeeBps) !== FEE_BPS) problems.push(`platformFeeBps ${platformFeeBps}`);
-    if (Number(deploymentChainId) !== MAINNET_CHAIN_ID) problems.push(`deploymentChainId ${deploymentChainId}`);
-    if (Number(marketplaceRoyalty) !== ROYALTY_BPS) problems.push(`REQUIRED_ROYALTY_BPS ${marketplaceRoyalty}`);
+    const { problems, facts } = await checkMarketplaceState(provider, plan, mined.address);
+    if (!runtimeMatchesArtifact(await provider.getCode(mined.address), marketplaceArtifact)) problems.unshift("marketplace runtime code differs from the reviewed artifact");
     if (problems.length) throw new DeploymentError(`The mined marketplace does not match the reviewed configuration: ${problems.join("; ")}.`);
-    return { ...mined, factoryAddress: getAddress(registry), feeRecipient: getAddress(feeRecipient), feeBps: FEE_BPS, requiredRoyaltyBps: ROYALTY_BPS };
+    return { ...mined, ...facts };
   }
   throw new DeploymentError(`Unknown step ${stepNumber}.`);
 }

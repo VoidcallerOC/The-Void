@@ -1,0 +1,79 @@
+name: Verify mainnet deployment
+
+# Key-less, read-only verification of owner-signed mainnet transactions against the approved plan in
+# deploy/mainnet/approved-plans/. The owner runs it from the GitHub UI after the deployment page shows
+# every step confirmed, pasting the transaction hashes the page lists. It re-checks, from the public
+# C-Chain RPC: each transaction's chain, sender, nonce, creation data and created address; every
+# immutable; and the deployed runtime code against the contracts compiled from this commit. It holds
+# no secret, signs nothing and writes nothing to the repository; the record is uploaded as an artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Which approved plan the transactions belong to.
+        required: true
+        type: choice
+        options:
+          - release-per-contract-mainnet
+          - genesis-claim-mainnet
+      tx_hashes:
+        description: Transaction hashes in step order, comma-separated (as listed on the deployment page).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: void-verify-mainnet-deployment
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify the deployment from chain (no key)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build the contracts this plan was approved for
+        run: forge build
+
+      - name: Verify the transactions against the approved plan
+        shell: bash
+        env:
+          KIND: ${{ inputs.kind }}
+          TX_HASHES: ${{ inputs.tx_hashes }}
+        run: |
+          set -euo pipefail
+          [[ "${TX_HASHES}" =~ ^0x[0-9a-fA-F]{64}(,0x[0-9a-fA-F]{64})*$ ]] || { echo "tx_hashes must be 0x-prefixed 32-byte hashes, comma-separated." >&2; exit 1; }
+          node scripts/approved-plan-cli.mjs split --kind "${KIND}" --out approved
+          args=()
+          IFS=',' read -ra hashes <<< "${TX_HASHES}"
+          for hash in "${hashes[@]}"; do args+=(--tx "${hash}"); done
+          node scripts/mainnet-owner-signing.mjs verify --kind "${KIND}" --plan approved/plan.json --binding approved/plan-binding.json --write-record "${args[@]}" | tee verification.json
+
+      - name: Preserve the verification and record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mainnet-verification-${{ github.run_id }}
+          path: |
+            verification.json
+            deployments/*-mainnet-*.json
+          if-no-files-found: ignore
