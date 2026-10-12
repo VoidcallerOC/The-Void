@@ -110,8 +110,8 @@ function renderSession() {
       </table>
       ${step.status === "pending" ? `<p><label><input type="checkbox" id="review-${step.step}"> I reviewed step ${step.step}: chain 43114, from the deployer, nonce ${step.nonce}, creating ${esc(step.predictedAddress)}, data hash ${esc(step.dataHash.slice(0, 10))}…</label></p>
         <button data-sign="${step.step}" ${canSign ? "" : "disabled"}>Send step ${step.step} to Rabby for approval</button>` : ""}
-      ${step.status === "awaiting-wallet" ? `<p class="warn">Waiting for Rabby. If Rabby already submitted it but this page lost track, paste the transaction hash from Rabby:</p>
-        <input type="text" id="hash-${step.step}" placeholder="0x…"> <p><button data-hash="${step.step}">Verify this hash</button></p>` : ""}
+      ${["pending", "awaiting-wallet", "awaiting-receipt"].includes(step.status) && earlierVerified ? `<p class="${step.status === "pending" ? "muted" : "warn"}">${step.status === "awaiting-receipt" ? "Not mined yet. Check again once Rabby shows it confirmed:" : step.status === "awaiting-wallet" ? "Waiting for Rabby. If Rabby already submitted it but this page lost track, paste the transaction hash from Rabby:" : "If Rabby already submitted this step (for example after an error), paste its hash from Rabby's activity instead of signing again:"}</p>
+        <input type="text" id="hash-${step.step}" placeholder="0x…" value="${esc(step.status === "awaiting-receipt" ? step.hash : "")}"> <p><button data-hash="${step.step}">Verify this hash</button></p>` : ""}
       ${step.verified ? `<details open><summary class="ok">Verified on chain</summary><pre><code>${esc(JSON.stringify(step.verified, null, 2))}</code></pre></details>` : ""}
     </div>`;
   }).join("");
@@ -165,7 +165,10 @@ async function sign(n) {
     hash = await rabby.request({ method: "eth_sendTransaction", params: [tx] });
   } catch (error) {
     await api(`steps/${n}/cancel`, {});
-    alert(`Rabby did not send step ${n}: ${error.message || error}. Nothing was signed.`);
+    // EIP-1193 code 4001 is an explicit user rejection. Any other error does not prove nothing was sent.
+    alert(error && error.code === 4001
+      ? `You rejected step ${n} in Rabby. Nothing was signed.`
+      : `Rabby returned an error for step ${n}: ${error.message || error}. Check Rabby's activity before anything else: if it sent the transaction, paste its hash into step ${n}; do not sign again. The tool refuses a second signature while the nonce has moved or a transaction is pending.`);
     await refresh();
     return;
   }
@@ -177,7 +180,7 @@ async function submit(n, hash) {
   for (;;) {
     await refresh();
     const status = session.steps[n - 1].status;
-    if (status === "verified" || status === "failed") return;
+    if (status === "verified" || status === "failed" || status === "awaiting-receipt") return;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 }

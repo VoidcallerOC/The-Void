@@ -220,9 +220,10 @@ separately; none is created only to fill this list.
   and record only the correct pair. The predicted-address and device-confirmation gates exist to
   prevent this.
 - **Partial V2 deployment** (factory signed and verified, marketplace not): keep the verified factory.
-  If the marketplace step was only rejected in Rabby, re-offer it in the same session. Otherwise the
-  signing tool cannot yet produce a marketplace-only plan bound to an existing factory, so that
-  recovery needs a reviewed code change before anything more is signed.
+  If the marketplace step was only rejected in Rabby, re-offer it in the same session. If the session
+  ended (a closed terminal or browser), restart it with `--resume <factory transaction hash>`. The
+  tool verifies the factory from chain against the reviewed plan, then offers only the marketplace,
+  behind the same live checks ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md#recovery)).
 - **Claim problems before or during the window:**
   - set `GENESIS_CLAIM_ENABLED=false` to stop new vouchers;
   - the claim admin can `pause()` the claim and `setSigner()` to rotate a compromised signer key;

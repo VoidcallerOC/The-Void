@@ -117,6 +117,32 @@ If you reject in Rabby, nothing is signed and the step can be offered again. If 
 after Rabby submitted, paste the hash from Rabby's history into the step. If verification fails, stop
 and review: nothing further is offered.
 
+## Recovery
+
+- **You rejected the request in Rabby.** Nothing was signed. The step is offered again.
+- **Rabby returned an error other than a rejection.** Do not sign again. Open Rabby's activity:
+  - If the transaction was sent, paste its hash into the step. It is verified against the reviewed
+    request like any other.
+  - The tool refuses to hand the step to Rabby again while the deployer's nonce has moved or a
+    transaction is pending.
+- **The transaction is slow to mine.** After 10 minutes the step shows *not mined yet* and keeps its
+  hash. Check again once Rabby shows it confirmed. A slow transaction never fails the session.
+- **The session ended between steps** (a closed terminal or browser). Restart it with the reviewed
+  plan, the binding and each already-signed step's hash, in order:
+  ```
+  npm run sign:mainnet -- --kind release-per-contract-mainnet --plan plan.json \
+    --binding plan-binding.json --recipient-verified-on-device <Nano address> --resume <factory tx hash>
+  ```
+  A fresh plan cannot match any more, because the nonce has moved. So resume works from the reviewed
+  plan itself:
+  - the plan must produce the binding on the checked-out commit;
+  - every request's data must hash to its bound value;
+  - each given hash is verified from chain as its step.
+
+  Only then are the remaining steps offered, each behind the same live checks.
+- **A step fails verification.** Stop. Nothing more is offered. Review the reason. The contracts are
+  ownerless, so a wrong deployment is never recorded (runbook, *Failure handling*).
+
 ## Procedure: Genesis claim (separate, later)
 
 1. The artist creates the release and edition and configures the sale with the artist wallet
@@ -165,7 +191,9 @@ Launch activation stays a separate, separately approved step (README step 13).
     `GRANTED`.
   - Stale plans, a tampered binding, a key in the environment and a wrong device confirmation were
     each refused.
-- **Not tested: the real Rabby extension.** The page uses only standard EIP-1193 calls:
+- **Not tested: the real Rabby extension.** Also unverified: whether Rabby injects its provider into
+  a page served from `http://127.0.0.1`. The page sends no content-security policy that would block
+  an injected script; it only refuses framing. The page uses only standard EIP-1193 calls:
   - `eth_requestAccounts`, `eth_accounts` and `eth_chainId`;
   - `eth_sendTransaction` with no `to`, plus `data`, `value`, `gas`, `nonce` and `chainId`.
 

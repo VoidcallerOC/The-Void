@@ -5,12 +5,12 @@ import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { JsonRpcProvider, getAddress } from "ethers";
+import { JsonRpcProvider, getAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { bindPlan, verifyBinding } from "./deployment-plan-binding.mjs";
 import { FEE_RECIPIENT, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, validateDeploymentEnv, verifyReleaseStep, writeRecordFile } from "./deploy-release-per-contract-mainnet.mjs";
 import { buildClaimRecord, buildPlan as buildClaimPlan, loadClaimArtifact, mainnetSigningPlan, preflightClaimDeployment, validateClaimDeploymentEnv, verifyClaimDeployment } from "./deploy-genesis-claim.mjs";
-import { MAINNET_CHAIN_ID, MAINNET_DEPLOYER, assertNoPrivateKeyInEnv, assertReadyToSign, walletTransaction } from "./mainnet-signing-requests.mjs";
+import { MAINNET_CHAIN_ID, MAINNET_DEPLOYER, NotMinedYetError, assertNoPrivateKeyInEnv, assertReadyToSign, walletTransaction } from "./mainnet-signing-requests.mjs";
 import { GENESIS_CHAIN_ID } from "../server/genesis-claim.js";
 
 // Owner-controlled mainnet signing through Rabby. This tool never holds, reads or asks for a private
@@ -20,6 +20,7 @@ import { GENESIS_CHAIN_ID } from "../server/genesis-claim.js";
 // reviews and approves every transaction in Rabby with the defined deployer; Rabby signs and submits
 // it. The tool then verifies the mined transaction and contract state from the RPC, independently of
 // the wallet, before the next step is offered. `verify` re-checks mined transactions at any time.
+// `--resume <hash>` continues after earlier steps were signed in a session that has since ended.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGE_PATH = resolve(ROOT, "deploy/mainnet/owner-signing.html");
 const ETHERS_BUNDLE = resolve(ROOT, "node_modules/ethers/dist/ethers.umd.min.js");
@@ -77,7 +78,7 @@ export function checkedOutCommit({ exec = execFileSync } = {}) {
  * Builds a signing session: the reviewed plan must match the approved binding, and a fresh key-less
  * plan from the live chain must match it too, on the checked-out commit. Nothing is signed here.
  */
-export async function createSigningSession({ kind, reviewedPlan, approvedBinding, commit, providers, recipientVerifiedOnDevice, env = process.env, replan, verifyOptions = {} }) {
+export async function createSigningSession({ kind, reviewedPlan, approvedBinding, commit, providers, recipientVerifiedOnDevice, env = process.env, replan, verifyOptions = {}, resumeHashes = [] }) {
   assertNoPrivateKeyInEnv(env, "The owner signing tool");
   const spec = kindOf(kind);
   if (bindPlan(kind, reviewedPlan, approvedBinding.sourceCommit).digest !== approvedBinding.digest) fail("The reviewed plan file does not produce the approved binding.");
@@ -89,6 +90,7 @@ export async function createSigningSession({ kind, reviewedPlan, approvedBinding
     try { confirmed = getAddress(typed); } catch { confirmed = null; }
     if (confirmed !== FEE_RECIPIENT) fail(`--recipient-verified-on-device must be the fee recipient exactly as read on the Nano S Plus screen (${FEE_RECIPIENT}). The device only displays it; it signs nothing.`);
   }
+  if (resumeHashes.length) return resumeSession({ kind, spec, reviewedPlan, approvedBinding, commit, providers, verifyOptions, resumeHashes });
   const fresh = await (replan ? replan(reviewedPlan.planInputs) : spec.replan(reviewedPlan.planInputs, providers));
   const binding = verifyBinding(approvedBinding, kind, fresh, commit);
   if (!spec.ready(fresh)) fail("The fresh plan is not ready to sign (see its checks: funding, nonce, pending transactions, empty addresses).");
@@ -105,17 +107,43 @@ export async function createSigningSession({ kind, reviewedPlan, approvedBinding
   };
 }
 
+/**
+ * Continues after earlier steps were signed in a session that ended (a closed terminal or browser, or
+ * a receipt that arrived late). A fresh plan cannot match any more, because the deployer's nonce has
+ * moved, so the reviewed plan itself is used: it must produce the approved binding on this commit,
+ * every request's data must hash to its bound value, and each given hash is verified from chain as
+ * that step before the remaining steps are offered, each again behind the live pre-sign checks.
+ */
+async function resumeSession({ kind, spec, reviewedPlan, approvedBinding, commit, providers, verifyOptions, resumeHashes }) {
+  if (commit !== approvedBinding.sourceCommit) fail(`The approved plan was made on ${approvedBinding.sourceCommit}, not ${commit}.`);
+  const requests = reviewedPlan.signingRequests || [];
+  if (resumeHashes.length >= requests.length) fail("Every planned step already has a hash; use `npm run verify:mainnet` instead.");
+  for (const request of requests) if (keccak256(request.data) !== request.dataHash) fail(`Step ${request.step}: the reviewed plan's creation data does not hash to its bound value.`);
+  const steps = requests.map((request) => ({ request, status: "pending", hash: null, verified: null, error: null }));
+  for (const [index, hash] of resumeHashes.entries()) {
+    steps[index].verified = await spec.verifyStep(providers.provider, reviewedPlan, index + 1, hash, verifyOptions);
+    steps[index].hash = hash;
+    steps[index].status = "verified";
+  }
+  return { kind, title: spec.title, commit, digest: approvedBinding.digest, binding: approvedBinding, plan: reviewedPlan, steps, record: null, verifyOptions };
+}
+
 /** Live checks for step n, then the exact wallet transaction. Marks the step as waiting for Rabby. */
 export async function prepareStep(session, n, { provider, replan }) {
   const step = session.steps[n - 1] || fail(`There is no step ${n}.`);
   if (session.steps.some((item) => item.status === "failed")) fail("A step failed verification. Stop and review; nothing more is offered for signing in this session.");
   if (session.steps.slice(0, n - 1).some((item) => item.status !== "verified")) fail(`Step ${n} is offered only after every earlier step is verified on chain.`);
   if (step.status !== "pending") fail(`Step ${n} is ${step.status}.`);
-  // Before the first signature the whole plan is re-derived from chain and re-matched to the approval.
-  if (n === 1 && replan) {
-    verifyBinding(session.binding, session.kind, await replan(), session.commit);
+  // Claimed before any await, so two concurrent requests can never both hand the step to the wallet.
+  step.status = "preparing";
+  try {
+    // Before the first signature the whole plan is re-derived from chain and re-matched to the approval.
+    if (n === 1 && replan) verifyBinding(session.binding, session.kind, await replan(), session.commit);
+    await assertReadyToSign(provider, step.request, KINDS[session.kind].emptyBefore(session.plan, n));
+  } catch (error) {
+    step.status = "pending";
+    throw error;
   }
-  await assertReadyToSign(provider, step.request, KINDS[session.kind].emptyBefore(session.plan, n));
   step.status = "awaiting-wallet";
   return { step: n, transaction: walletTransaction(step.request), dataHash: step.request.dataHash, predictedAddress: step.request.predictedAddress };
 }
@@ -130,7 +158,11 @@ export function cancelStep(session, n) {
 /** Records the hash Rabby returned and verifies the mined result from the RPC. */
 export async function submitStep(session, n, hash, { provider, writeRecord = writeRecordFile, timeoutMs, log = () => {} }) {
   const step = session.steps[n - 1] || fail(`There is no step ${n}.`);
-  if (step.status !== "awaiting-wallet") fail(`Step ${n} is ${step.status}; it was not handed to the wallet.`);
+  // A hash is accepted for a step that was handed to Rabby, that is waiting for its receipt, or that
+  // went back to pending after Rabby reported an error although it had in fact sent the transaction.
+  // Verification against the reviewed request is the gate, whatever the page believed.
+  if (!["awaiting-wallet", "awaiting-receipt", "pending"].includes(step.status)) fail(`Step ${n} is ${step.status}.`);
+  if (session.steps.slice(0, n - 1).some((item) => item.status !== "verified")) fail(`Step ${n} is accepted only after every earlier step is verified on chain.`);
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash || ""))) fail("A 32-byte transaction hash is required.");
   step.status = "submitted";
   step.hash = hash;
@@ -140,11 +172,18 @@ export async function submitStep(session, n, hash, { provider, writeRecord = wri
     step.status = "verified";
     log({ step: "VERIFIED", n, result: step.verified });
   } catch (error) {
-    step.status = "failed";
     step.error = error.message;
+    if (error instanceof NotMinedYetError) {
+      // Not a mismatch: the transaction is not mined yet. Keep the hash and allow a re-check.
+      step.status = "awaiting-receipt";
+      log({ step: "NOT_MINED_YET", n, hash });
+      return step;
+    }
+    step.status = "failed";
     log({ step: "VERIFICATION_FAILED", n, hash, error: error.message });
     return step;
   }
+  step.error = null;
   if (session.steps.every((item) => item.status === "verified")) {
     const { path, record } = KINDS[session.kind].record(session.plan, session.steps.map((item) => item.verified), { sourceCommit: session.commit, planDigest: session.digest });
     session.record = { path, record };
@@ -199,7 +238,9 @@ export function createSigningServer(session, { provider, replan, writeRecord, ti
       const route = url.pathname.slice(base.length);
       res.setHeader("x-content-type-options", "nosniff");
       if (req.method === "GET" && route === "/") {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" });
+        // No script-src or connect-src restriction: a wallet extension injects its provider into the page
+        // and may make requests from it, and a restrictive policy can break that. Framing is refused.
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY" });
         return res.end(await readFile(PAGE_PATH));
       }
       if (req.method === "GET" && route === "/ethers.js") {
@@ -237,7 +278,7 @@ export function createSigningServer(session, { provider, replan, writeRecord, ti
 }
 
 function options(argv) {
-  const out = { tx: [] };
+  const out = { tx: [], resume: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith("--")) continue;
@@ -245,7 +286,7 @@ function options(argv) {
     if (name === "write-record") { out.writeRecord = true; continue; }
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) fail(`--${name} needs a value.`);
-    if (name === "tx") out.tx.push(value); else out[name] = value;
+    if (name === "tx" || name === "resume") out[name].push(value); else out[name] = value;
     i += 1;
   }
   return out;
@@ -276,9 +317,11 @@ export async function verifyCommand(opts, { providers, writeRecord = writeRecord
   const spec = kindOf(opts.kind);
   const plan = await readJson(opts.plan || fail("--plan is required."));
   if (!Array.isArray(plan.signingRequests) || opts.tx.length !== plan.signingRequests.length) fail(`Give one --tx per planned step (${plan.signingRequests?.length ?? 0}), in order.`);
+  // The plan must be the approved one before anything is checked against it.
+  const binding = opts.binding ? await readJson(opts.binding) : null;
+  if (binding && bindPlan(opts.kind, plan, binding.sourceCommit).digest !== binding.digest) fail("The plan file does not produce the given binding.");
   const verified = [];
   for (const [index, hash] of opts.tx.entries()) verified.push(await spec.verifyStep(providers.provider, plan, index + 1, hash, {}));
-  const binding = opts.binding ? await readJson(opts.binding) : null;
   const { path, record } = spec.record(plan, verified, { sourceCommit: binding?.sourceCommit ?? null, planDigest: binding?.digest ?? null });
   if (opts.writeRecord) await writeRecord(path, record);
   return { mode: "VERIFIED", path, record };
@@ -298,7 +341,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const spec = kindOf(opts.kind);
   const reviewedPlan = await readJson(opts.plan || fail("--plan is required (the reviewed plan.json)."));
   const approvedBinding = await readJson(opts.binding || fail("--binding is required (the approved plan-binding.json)."));
-  const session = await createSigningSession({ kind: opts.kind, reviewedPlan, approvedBinding, commit: checkedOutCommit(), providers, recipientVerifiedOnDevice: opts["recipient-verified-on-device"], env });
+  const session = await createSigningSession({ kind: opts.kind, reviewedPlan, approvedBinding, commit: checkedOutCommit(), providers, recipientVerifiedOnDevice: opts["recipient-verified-on-device"], env, resumeHashes: opts.resume });
   const handle = createSigningServer(session, { provider: providers.provider, replan: () => spec.replan(reviewedPlan.planInputs, providers) });
   const url = await handle.listen(opts.port ? Number(opts.port) : 0);
   console.log(JSON.stringify({ step: "PLAN_MATCHES_APPROVAL", kind: session.kind, sourceCommit: session.commit, digest: session.digest, deployer: MAINNET_DEPLOYER }));

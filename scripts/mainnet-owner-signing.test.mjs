@@ -124,14 +124,81 @@ describe("owner signing session: one step at a time, verified from chain", () =>
     expect(session.steps[0].status).toBe("pending");
   });
 
-  it("lets the owner retry after rejecting in Rabby, and accepts a hash only for a step handed to the wallet", async () => {
+  it("lets the owner retry after rejecting in Rabby", async () => {
     const { session, live } = await setup();
-    await expect(submitStep(session, 1, `0x${"1".repeat(64)}`, { provider: live })).rejects.toThrow(/not handed to the wallet/);
     await prepareStep(session, 1, { provider: live });
     cancelStep(session, 1);
     expect(session.steps[0].status).toBe("pending");
     await prepareStep(session, 1, { provider: live });
     await expect(submitStep(session, 1, "0x12", { provider: live })).rejects.toThrow(/32-byte/);
+  });
+
+  it("never hands one step to the wallet twice from concurrent requests", async () => {
+    const { session, live } = await setup();
+    const results = await Promise.allSettled([prepareStep(session, 1, { provider: live }), prepareStep(session, 1, { provider: live })]);
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(String(results.find((result) => result.status === "rejected").reason.message)).toMatch(/preparing|awaiting-wallet/);
+  });
+
+  it("returns a step to pending when a live check fails during prepare", async () => {
+    const { session, live } = await setup();
+    live.state.pendingNonce = 1;
+    await expect(prepareStep(session, 1, { provider: live })).rejects.toThrow(/pending transactions/);
+    expect(session.steps[0].status).toBe("pending");
+  });
+
+  it("recovers a transaction Rabby sent although the page recorded a rejection", async () => {
+    const { session, live } = await setup();
+    await prepareStep(session, 1, { provider: live });
+    cancelStep(session, 1);
+    // The hash from Rabby's history is verified against the reviewed request like any other.
+    await submitStep(session, 1, mineAsWallet(live, session, 1), { provider: live });
+    expect(session.steps[0].status).toBe("verified");
+    // Still no hash for a later step before the earlier one is verified.
+    const fresh = await setup();
+    await expect(submitStep(fresh.session, 2, `0x${"1".repeat(64)}`, { provider: fresh.live })).rejects.toThrow(/only after every earlier step is verified/);
+  });
+
+  it("keeps a slow transaction re-checkable instead of failing the session", async () => {
+    const { session, live } = await setup();
+    await prepareStep(session, 1, { provider: live });
+    const request = session.steps[0].request;
+    const hash = `0x${"7".repeat(64)}`;
+    await submitStep(session, 1, hash, { provider: live, timeoutMs: 1 });
+    expect(session.steps[0]).toMatchObject({ status: "awaiting-receipt", hash, error: expect.stringMatching(/not mined/) });
+    // Mined later under the same hash: checking again verifies it.
+    const [factory] = session.plan.transactions;
+    live.state.txs[hash] = { tx: { hash, chainId: 43114n, from: request.from, nonce: request.nonce, to: null, value: 0n, data: request.data }, receipt: { hash, status: 1, blockNumber: 500, gasUsed: 1n, contractAddress: request.predictedAddress } };
+    live.state.code[getAddress(request.predictedAddress)] = "0x6001";
+    live.factoryViews(factory.predictedAddress, { implementation: factory.predictedImplementation });
+    await submitStep(session, 1, hash, { provider: live });
+    expect(session.steps[0]).toMatchObject({ status: "verified", error: null });
+  });
+
+  it("resumes after step 1 was signed in an earlier session, from the reviewed plan", async () => {
+    const first = await setup();
+    await prepareStep(first.session, 1, { provider: first.live });
+    const hash = mineAsWallet(first.live, first.session, 1);
+    // The earlier session ended. A fresh plan no longer matches (the nonce moved), so resume uses the reviewed plan.
+    const resumed = await createSigningSession({ kind: KIND, reviewedPlan: first.reviewedPlan, approvedBinding: first.approvedBinding, commit: COMMIT, providers: { provider: first.live }, recipientVerifiedOnDevice: RECIPIENT, env: {}, verifyOptions: { load: artifacts }, resumeHashes: [hash] });
+    expect(resumed.steps.map((step) => step.status)).toEqual(["verified", "pending"]);
+    await prepareStep(resumed, 2, { provider: first.live });
+    await submitStep(resumed, 2, mineAsWallet(first.live, resumed, 2), { provider: first.live, writeRecord: async () => {} });
+    expect(resumed.steps.map((step) => step.status)).toEqual(["verified", "verified"]);
+    expect(resumed.record.record.plan).toEqual({ sourceCommit: COMMIT, digest: first.approvedBinding.digest });
+  });
+
+  it("refuses to resume on another commit, with a wrong hash, with tampered data or with nothing left", async () => {
+    const first = await setup();
+    await prepareStep(first.session, 1, { provider: first.live });
+    const hash = mineAsWallet(first.live, first.session, 1);
+    const resume = (overrides) => createSigningSession({ kind: KIND, reviewedPlan: first.reviewedPlan, approvedBinding: first.approvedBinding, commit: COMMIT, providers: { provider: first.live }, recipientVerifiedOnDevice: RECIPIENT, env: {}, verifyOptions: { load: artifacts }, resumeHashes: [hash], ...overrides });
+    await expect(resume({ commit: "60b71f0f8534fbf2abaaed7ebd1fec5f19ba2ee4" })).rejects.toThrow(/made on/);
+    await expect(resume({ resumeHashes: [`0x${"9".repeat(64)}`], verifyOptions: { load: artifacts, timeoutMs: 1 } })).rejects.toThrow(/not mined/);
+    await expect(resume({ resumeHashes: [hash, hash] })).rejects.toThrow(/verify:mainnet/);
+    const tampered = JSON.parse(JSON.stringify(first.reviewedPlan));
+    tampered.signingRequests[1].data = `${tampered.signingRequests[1].data}00`;
+    await expect(resume({ reviewedPlan: tampered })).rejects.toThrow(/does not hash to its bound value/);
   });
 
   it("shows the page public facts only", async () => {
@@ -168,7 +235,9 @@ describe("owner signing server (loopback only)", () => {
       expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/s\/[0-9a-f]{32}\/$/);
       const page = await raw(url);
       expect(page.status).toBe(200);
-      expect(page.headers["content-security-policy"]).toMatch(/default-src 'none'/);
+      // Framing is refused; scripts are not restricted, so the wallet extension can inject its provider.
+      expect(page.headers["content-security-policy"]).toBe("frame-ancestors 'none'");
+      expect(page.headers["x-frame-options"]).toBe("DENY");
       expect(page.text).toContain("io.rabby");
       expect((await raw(new URL("ethers.js", url))).status).toBe(200);
       for (const n of [1, 2]) {
@@ -215,6 +284,10 @@ describe("verify command", () => {
       const result = await verifyCommand({ kind: KIND, plan: join(dir, "plan.json"), binding: join(dir, "binding.json"), tx: hashes }, { providers: { provider: live } });
       expect(result).toMatchObject({ mode: "VERIFIED", record: { plan: { sourceCommit: COMMIT, digest: approvedBinding.digest }, factory: { address: getAddress(reviewedPlan.transactions[0].predictedAddress) } } });
       await expect(verifyCommand({ kind: KIND, plan: join(dir, "plan.json"), tx: hashes.slice(0, 1) }, { providers: { provider: live } })).rejects.toThrow(/one --tx per planned step/);
+      const other = JSON.parse(JSON.stringify(reviewedPlan));
+      other.signingRequests[0].dataHash = `0x${"ee".repeat(32)}`;
+      writeFileSync(join(dir, "other.json"), JSON.stringify(other));
+      await expect(verifyCommand({ kind: KIND, plan: join(dir, "other.json"), binding: join(dir, "binding.json"), tx: hashes }, { providers: { provider: live } })).rejects.toThrow(/does not produce the given binding/);
     } finally {
       KINDS[KIND].verifyStep = original;
     }

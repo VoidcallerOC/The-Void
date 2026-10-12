@@ -13,6 +13,8 @@ export const MAINNET_FEE_RECIPIENT = getAddress(mainnetManifest.platformRecipien
 export const GAS_LIMIT_HEADROOM_PERCENT = 120n;
 
 export class SigningRequestError extends Error {}
+/** The transaction is not mined yet: not a mismatch, so the caller may check the same hash again. */
+export class NotMinedYetError extends SigningRequestError {}
 
 if (new Set([MAINNET_DEPLOYER, MAINNET_ARTIST_WALLET, MAINNET_FEE_RECIPIENT]).size !== 3) {
   throw new Error("The mainnet manifest must keep the deployer, artist wallet and fee recipient distinct.");
@@ -127,7 +129,7 @@ export async function verifyCreationTransaction(provider, request, hash, { timeo
   const chainId = await rpcChainId(provider);
   if (chainId !== BigInt(request.chainId)) throw new SigningRequestError(`The RPC reports chain ${chainId}, not ${request.chainId}.`);
   const receipt = await provider.waitForTransaction(hash, 1, timeoutMs);
-  if (!receipt) throw new SigningRequestError(`Step ${request.step}: ${hash} was not mined within ${timeoutMs / 1000}s.`);
+  if (!receipt) throw new NotMinedYetError(`Step ${request.step}: ${hash} was not mined within ${timeoutMs / 1000}s; check the same hash again once Rabby shows it confirmed.`);
   const tx = await provider.getTransaction(hash);
   if (!tx) throw new SigningRequestError(`Step ${request.step}: ${hash} is unknown to the RPC.`);
   const problems = [];
