@@ -92,9 +92,45 @@ Each is tested in `test/mainnet-deployment-safety.test.mjs`, `scripts/mainnet-si
 
 | # | Item | Status |
 | --- | --- | --- |
-| O1 | **The GitHub copy of the deployer key.** Six Fuji workflows still sign with the repository secret `DEPLOYER_PRIVATE_KEY`: `deploy-release-fuji`, `deploy-release-v2-fuji`, `deploy-release-per-contract-fuji`, `deploy-release-factory-v3-fuji`, `deploy-genesis-claim-fuji` and `rehearse-royalty-fuji`. Fuji run 38252855896 (2026-10-12) signed as `0xaBd3…c174` from a job with no environment, so on that date the key was a repository- or organization-level secret. Whether it still exists cannot be read from this repository's automation (the secrets API is refused), and no secret value was read. Under the policy above, the owner decides whether to delete it. Deleting it stops those Fuji workflows from signing; mainnet does not need it. | **OPEN: owner decision** |
+| O1 | **The GitHub copy of the deployer key: delete it (owner decision made: the key must not remain in GitHub).** The repository secret `DEPLOYER_PRIVATE_KEY` is used by six Fuji workflows. Fuji run 38252855896 (2026-10-12) signed as `0xaBd3…c174` from a job with no environment, so it is a repository-level secret. Deleting it through automation was attempted and refused (HTTP 403: this session's proxy blocks the Actions secrets API). No secret value was read. Manual steps: section 5. Deleting it does not prove that no other copy exists. | **OPEN: owner action** |
 | O1a | **The Render cron copy.** `DEPLOYER-AUTHORITY-ROTATION-PLAN.md` recorded this address as the key of the suspended Render cron `crn-dat953e0tbcc73acrepg`. The owner deleted that cron on 2026-10-11 (`FUJI-V3-OWNER-DECISIONS.md`, D5). On 2026-10-12 the Render API returns 404 for it, and the workspace lists only `the-void-api-fuji` and `the-void-indexer-fuji`. Neither the server code nor either Render blueprint reads `DEPLOYER_PRIVATE_KEY`. | **Closed** (deleted; verified 404) |
 | O2 | While the GitHub copy (O1) or any other copy exists outside Rabby, whoever holds it could use nonce 0 or 1 first, or spend the deployer's funding. The tool fails closed in that case: nonce, empty-address and binding checks. The launch would then need a new plan. | Consequence of O1 |
-| O3 | First use of the real Rabby extension (section 3). This includes whether Rabby injects its provider into a page served from `http://127.0.0.1`, and whether it honours the supplied `nonce`. | **UNVERIFIED** until step 6 of the procedure |
+| O3 | First use of the real Rabby extension (section 3). This includes whether Rabby injects its provider into a page served from `http://127.0.0.1`, and whether it honours the supplied `nonce`. | **UNVERIFIED** until the no-transaction check in `OWNER-SIGNING.md` |
 | O4 | `main` ruleset 24685434 has only a `deletion` rule (no required PR, status checks or force-push block). | **OPEN** (repository setting) |
 | O5 | Actions are pinned by tag, not commit SHA. With no key in any mainnet job, the exposure is limited to the plan's integrity. The signing tool re-derives the plan locally and matches it. | Lower risk; open |
+
+## 5. Deleting `DEPLOYER_PRIVATE_KEY` from GitHub (owner, manual)
+
+1. GitHub → `VoidcallerOC/The-Void` → **Settings** → **Secrets and variables** → **Actions** →
+   **Repository secrets**.
+2. On the `DEPLOYER_PRIVATE_KEY` row, choose **Delete** (the bin icon), then confirm. GitHub never
+   shows the value. Do not copy it anywhere first.
+3. On **Environments**: no environment should hold any deployer key. Open each environment, if any,
+   and check its secrets.
+4. **To verify:**
+   - the Repository secrets list no longer shows `DEPLOYER_PRIVATE_KEY`;
+   - no `MAINNET_DEPLOYER_PRIVATE_KEY` exists either (the mainnet plan workflows fail if it does).
+
+**What stops working.** Every Fuji path that signs with the deployer refuses to run without the key.
+Each one fails closed, before any transaction:
+
+| Workflow | Stops | Still works (key-less) |
+| --- | --- | --- |
+| `deploy-release-fuji.yml` (legacy V1) | The whole workflow: every run deploys and smoke-tests with the key | — |
+| `deploy-release-v2-fuji.yml` (legacy V2) | The `deploy-and-verify` job | The preflight job (`preflight_only`), which plans from `RELEASE_ADMIN_ADDRESS` |
+| `deploy-release-per-contract-fuji.yml` | The broadcast step | The dry run |
+| `deploy-release-factory-v3-fuji.yml` | The broadcast step | The dry run |
+| `deploy-genesis-claim-fuji.yml` | The broadcast step | The dry run |
+| `rehearse-royalty-fuji.yml` | The rehearsal broadcast (the Fuji-first gate is already satisfied and recorded) | The plan |
+
+Unaffected:
+- the mainnet plan workflows;
+- `ci.yml`;
+- `fuji-readonly-probe.yml`;
+- the deployed Fuji contracts;
+- the Fuji API and indexer on Render, which read no deployer key.
+
+**Optional follow-up PR.** These Fuji workflows can then be made explicit, rather than failing at
+signing time: remove the signing step from each and leave its key-less dry run or plan. That is a
+separate change, made only with the owner's authorization.
+

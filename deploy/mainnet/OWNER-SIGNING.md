@@ -117,6 +117,31 @@ If you reject in Rabby, nothing is signed and the step can be offered again. If 
 after Rabby submitted, paste the hash from Rabby's history into the step. If verification fails, stop
 and review: nothing further is offered.
 
+## Before the first real signature: Rabby check (sends nothing)
+
+The page has been rehearsed only with a stand-in wallet. Do this check once with the real Rabby
+before approving anything. It needs a ready plan, so the deployer must already be funded (step 5 of
+the runbook).
+
+1. Start the session (procedure step 4), open the link and click **Connect Rabby**.
+   - **Pass:** Rabby asks to connect this site, and the page shows
+     `Connected: Rabby, deployer 0xaBd3…c174, Avalanche C-Chain`.
+   - **Fail:** *Rabby was not detected* (Rabby does not inject into `127.0.0.1`), or the wrong account
+     or chain is shown. Stop. Change nothing in the plan; report it.
+2. Tick step 1's review box and click **Send step 1 to Rabby for approval**. In Rabby's confirmation,
+   read without approving:
+   - a **contract deployment** (no recipient);
+   - from `0xaBd3…c174`;
+   - Avalanche C-Chain;
+   - value 0 AVAX;
+   - **nonce 0** (under Rabby's advanced or nonce setting).
+3. **Reject** in Rabby. The page must say *You rejected step 1 in Rabby. Nothing was signed.* and
+   offer step 1 again. The deployer's nonce is still 0, which you can confirm on Snowtrace.
+4. If any field differs (above all the nonce), do not approve. Rabby may have a queued transaction:
+   clear it in Rabby. Then start again.
+
+Only after this check passes, run step 1 for real.
+
 ## Recovery
 
 - **You rejected the request in Rabby.** Nothing was signed. The step is offered again.
