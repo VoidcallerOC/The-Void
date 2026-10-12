@@ -1,7 +1,7 @@
 import process from "node:process";
 import { resolve } from "node:path";
 import { id } from "ethers";
-import { FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS } from "../config/release-network.js";
+import { RELEASE_PER_CONTRACT_DEPLOYMENTS } from "../config/release-network.js";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 
@@ -152,11 +152,11 @@ function parseIndexerContracts(value, { chainId }) {
   return Object.freeze(contracts.map((contract) => contract.contractType === "ERC1155" ? Object.freeze({ ...contract, skipMintOperators: saleAddresses }) : contract));
 }
 
-// The committed deployment manifest (config/fuji-release-per-contract-v2.json) is authoritative for
-// release factories and their marketplaces. Each deployment on the indexed chain with a recorded
+// The committed deployment manifests (config/fuji-release-per-contract-v2.json, config/mainnet-release-per-contract.json)
+// are authoritative for release factories and their marketplaces. Each deployment on the indexed chain with a recorded
 // deployment block is indexed even when INDEXER_CONTRACTS_JSON does not list it; an address the env
 // already lists keeps its env entry. Set INDEXER_INCLUDE_RELEASE_MANIFEST=false to opt out.
-export function withManifestReleaseDeployments(contracts, { chainId, deployments = FUJI_RELEASE_PER_CONTRACT_V2_DEPLOYMENTS } = {}) {
+export function withManifestReleaseDeployments(contracts, { chainId, deployments = RELEASE_PER_CONTRACT_DEPLOYMENTS } = {}) {
   const known = new Set(contracts.map((contract) => contract.address));
   const added = [];
   for (const deployment of deployments) {

@@ -1,5 +1,10 @@
 # The Void — Avalanche C-Chain Production Runbook
 
+> **Superseded for the launch.** This runbook covers the old shared-contract `VoidRelease1155V2` path.
+> The mainnet launch uses the release-per-contract architecture (`VoidReleaseFactoryV2Royalty`,
+> `ReleaseMarketplaceV4`, Genesis claim). See [`deploy/mainnet/README.md`](../deploy/mainnet/README.md)
+> and [`deploy/mainnet/FUJI-FIRST-GATE.md`](../deploy/mainnet/FUJI-FIRST-GATE.md). Kept for history.
+
 This runbook is for the **V2 release path only**:
 
 - chain: Avalanche C-Chain (`43114`)

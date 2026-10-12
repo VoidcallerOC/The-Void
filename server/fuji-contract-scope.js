@@ -2,8 +2,11 @@ import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../config/release-network.js";
 
 export const CANONICAL_FUJI_CHAIN_ID = Number(deployment.chainId);
-export const CANONICAL_FUJI_RELEASE = String(deployment.contractAddress).toLowerCase();
-export const LEGACY_FUJI_V1_RELEASE = String(deployment.legacyV1?.contractAddress || "0x262B774cf9a1949170B58E2d57F6189980FE757b").toLowerCase();
+// "" on a network without a legacy shared contract (mainnet); "" never matches a validated address.
+export const CANONICAL_FUJI_RELEASE = String(deployment.contractAddress || "").toLowerCase();
+// The historical V1 release exists on Fuji only. The same deployer's nonce-0 address on another
+// chain is a different contract, so the Fuji fallback is not applied there.
+export const LEGACY_FUJI_V1_RELEASE = String(deployment.legacyV1?.contractAddress || (Number(deployment.chainId) === 43113 ? "0x262B774cf9a1949170B58E2d57F6189980FE757b" : "")).toLowerCase();
 export const C_CHAIN_VOIDCALLER_COLLECTION = String(deployment.outOfScope?.cChainVoidcallerCollection || "0xd1b4367dd9f235f9ee61878019d66e31511e98ee").toLowerCase();
 
 export function isCanonicalFujiRelease(address) {

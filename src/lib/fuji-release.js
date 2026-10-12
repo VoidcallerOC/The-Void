@@ -1,12 +1,17 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
-import { FUJI_RELEASE_PER_CONTRACT, FUJI_RELEASE_PER_CONTRACT_V2, releaseDeploymentForFactory } from "../../config/release-network.js";
+import { ARTIST_ROYALTY_POLICY, FUJI_RELEASE_PER_CONTRACT, RELEASE_PER_CONTRACT, releaseDeploymentForFactory, releaseRoyaltyPolicyViolation } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 import { STANDALONE_EDITIONS_EXIST_MESSAGE } from "./release-lifecycle.js";
 
 export const FUJI_RELEASE_CONFIG = Object.freeze({ ...deployment, network: deployment.networkName });
 export const FUJI_RELEASE_FACTORY_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT, network: FUJI_RELEASE_PER_CONTRACT.networkName });
-export const FUJI_RELEASE_FACTORY_V2_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_CONTRACT_V2, network: FUJI_RELEASE_PER_CONTRACT_V2.networkName });
+// The selected network's release-per-contract factory (Fuji V2 by default, mainnet with
+// VITE_RELEASE_NETWORK=mainnet). The FUJI_ name is kept for existing imports.
+export const RELEASE_FACTORY_CONFIG = Object.freeze({ ...RELEASE_PER_CONTRACT, network: RELEASE_PER_CONTRACT.networkName });
+export const FUJI_RELEASE_FACTORY_V2_CONFIG = RELEASE_FACTORY_CONFIG;
+// The legacy shared contract exists on Fuji only; "" on a network without one, which matches nothing.
+const LEGACY_SHARED_CONTRACT = String(deployment.contractAddress || "").toLowerCase();
 export const FUJI_RELEASE_ABI = Object.freeze(deployment.abi);
 
 export const FUJI_ROLES = Object.freeze({
@@ -39,7 +44,8 @@ export function fujiSlug(value, name = "id") {
 
 export function isCertifiedFujiEdition(edition) {
   return Boolean(edition)
-    && String(edition.contractAddress || "").toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()
+    && LEGACY_SHARED_CONTRACT !== ""
+    && String(edition.contractAddress || "").toLowerCase() === LEGACY_SHARED_CONTRACT
     && Number(edition.chainId) === FUJI_RELEASE_CONFIG.chainId;
 }
 
@@ -170,7 +176,7 @@ export function fujiRoleGranterAddress() {
 export function assertFujiTransactionTarget(address) {
   if (!ethers.isAddress(address)) throw new Error("Only the certified Fuji release or its primary sale contract is allowed for this path.");
   const target = ethers.getAddress(address);
-  if (target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) return ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress);
+  if (LEGACY_SHARED_CONTRACT && target.toLowerCase() === LEGACY_SHARED_CONTRACT) return ethers.getAddress(FUJI_RELEASE_CONFIG.contractAddress);
   const sale = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "");
   if (ethers.isAddress(sale) && ethers.getAddress(sale) !== ethers.ZeroAddress && target.toLowerCase() === sale.toLowerCase()) return ethers.getAddress(sale);
   const granter = fujiRoleGranterAddress();
@@ -179,7 +185,7 @@ export function assertFujiTransactionTarget(address) {
 }
 
 export function assertFujiAddress(address) {
-  if (!ethers.isAddress(address) || address.toLowerCase() !== FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) throw new Error("Only the certified Fuji VoidRelease1155 contract is allowed for this path.");
+  if (!ethers.isAddress(address) || !LEGACY_SHARED_CONTRACT || address.toLowerCase() !== LEGACY_SHARED_CONTRACT) throw new Error("Only the certified Fuji VoidRelease1155 contract is allowed for this path.");
   return FUJI_RELEASE_CONFIG.contractAddress;
 }
 
@@ -382,12 +388,15 @@ export function releaseProvenanceRoot(value) {
   return `0x${hash}`;
 }
 
-export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null }) {
+// On mainnet the artist resale royalty is fixed (ARTIST_ROYALTY_POLICY: 2.5% to the artist's own wallet).
+export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for this release.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
+  if (policyViolation) throw new Error(policyViolation);
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);
@@ -404,12 +413,14 @@ export function encodeCreateReleaseAlbum({ releaseKey }) {
   return { data: v4AlbumIface.encodeFunctionData("createAlbum", [releaseKey]) };
 }
 
-export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null }) {
+export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album tracks.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
+  if (policyViolation) throw new Error(policyViolation);
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);
@@ -461,8 +472,8 @@ export async function simulateFujiCall(provider, { from, to, data }) {
 }
 
 /** Simulate a transaction against an address discovered from VoidReleaseFactory. */
-export async function simulateReleaseCall(provider, { from, to, data, chainId = FUJI_RELEASE_FACTORY_CONFIG.chainId }) {
-  if (Number(chainId) !== FUJI_RELEASE_FACTORY_CONFIG.chainId) throw new Error("Release contracts must run on Fuji.");
+export async function simulateReleaseCall(provider, { from, to, data, chainId = RELEASE_FACTORY_CONFIG.chainId }) {
+  if (Number(chainId) !== Number(RELEASE_FACTORY_CONFIG.chainId)) throw new Error(`Release contracts must run on ${RELEASE_FACTORY_CONFIG.networkName}.`);
   await assertFujiProvider(provider);
   if (!ethers.isAddress(to) || ethers.getAddress(to) === ethers.ZeroAddress) throw new Error("The indexed release contract address is invalid.");
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
@@ -543,7 +554,7 @@ export async function verifyFujiE2EMint(provider, { transactionHash, plan }) {
   const checked = assertFujiE2EMintPlan(plan);
   const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
   if (!receipt || receipt.status !== "0x1") throw new Error("The E2E mint did not receive a successful Fuji receipt.");
-  const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()).map((log) => {
+  const event = (receipt.logs || []).filter((log) => LEGACY_SHARED_CONTRACT !== "" && log.address?.toLowerCase() === LEGACY_SHARED_CONTRACT).map((log) => {
     try { return mintIface.parseLog(log); } catch { return null; }
   }).find((parsed) => parsed?.name === "TransferSingle" && parsed.args.from === ethers.ZeroAddress && parsed.args.to.toLowerCase() === FUJI_E2E_MINT.wallet && parsed.args.id === checked.tokenId && parsed.args.value === checked.quantity);
   if (!event) throw new Error("The successful E2E mint receipt did not contain the expected TransferSingle event.");
@@ -568,7 +579,7 @@ export function encodeFujiTransfer(from, to, tokenId, amount = 1) { return iface
 export function assertProvenanceAnchorTarget(address) {
   if (!ethers.isAddress(address)) throw new Error("The provenance anchor contract address is invalid.");
   const target = ethers.getAddress(address);
-  if (target.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()) throw new Error("The provenance anchor cannot be the release contract.");
+  if (LEGACY_SHARED_CONTRACT && target.toLowerCase() === LEGACY_SHARED_CONTRACT) throw new Error("The provenance anchor cannot be the release contract.");
   const sale = String(FUJI_RELEASE_CONFIG.primarySaleAddress || "");
   if (ethers.isAddress(sale) && ethers.getAddress(sale) !== ethers.ZeroAddress && target.toLowerCase() === sale.toLowerCase()) throw new Error("The provenance anchor cannot be the sale contract.");
   return target;
@@ -727,7 +738,7 @@ export async function verifyFujiEditionCreation(provider, { transactionHash, rel
   const expectedTokenId = BigInt(tokenId).toString();
   const expectedReleaseId = fujiIds(releaseId, editionId).releaseId;
   const expectedEditionId = fujiIds(releaseId, editionId).editionId;
-  const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === FUJI_RELEASE_CONFIG.contractAddress.toLowerCase()).map((log) => {
+  const event = (receipt.logs || []).filter((log) => LEGACY_SHARED_CONTRACT !== "" && log.address?.toLowerCase() === LEGACY_SHARED_CONTRACT).map((log) => {
     try { return editionIface.parseLog(log); } catch { return null; }
   }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId.toString() === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId);
   if (!event) throw new Error("Create Edition receipt succeeded, but the expected EditionCreated event was not found.");

@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { RELEASE_DEPLOYMENT as deployment, FUJI_RELEASE_PER_CONTRACT_V2, anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../config/release-network.js";
+import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory, releaseRoyaltyPolicyForChain, releaseRoyaltyPolicyViolation } from "../config/release-network.js";
 import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
@@ -90,8 +90,32 @@ function contractAddress(value, field) {
 }
 
 const CERTIFIED_CHAIN_ID = deployment.chainId;
-const CERTIFIED_CONTRACT = deployment.contractAddress.toLowerCase();
+// The legacy shared contract exists on Fuji only. On a network without one (mainnet), a release
+// that is not bound to a factory clone fails closed instead of falling back to an empty address.
+const CERTIFIED_CONTRACT = String(deployment.contractAddress || "").toLowerCase();
+function legacySharedContract() {
+  if (!CERTIFIED_CONTRACT) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This network has no legacy shared release contract. Bind the release to a VoidReleaseFactory deployment first.");
+  return CERTIFIED_CONTRACT;
+}
 export const EDITION_ABI = "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))";
+const ROYALTY_CONFIGURED_IFACE = new ethers.Interface(["event RoyaltyConfigured(uint256 indexed tokenId, address indexed receiver, uint96 royaltyBps)"]);
+
+/**
+ * Where the network has a royalty policy (mainnet: 2.5% to the artist's own wallet), the edition's
+ * creation transaction must carry the release contract's RoyaltyConfigured event for this token with
+ * exactly that rate and a receiver that is not a platform fee wallet. The royalty cannot change after
+ * creation, so a non-compliant edition is never published. No policy (Fuji): nothing is checked.
+ */
+export function assertEditionRoyaltyPolicy({ receipt, publicationContract, tokenId, policy }) {
+  if (!policy) return;
+  const configured = (receipt?.logs || []).filter((log) => String(log.address || "").toLowerCase() === String(publicationContract).toLowerCase())
+    .map((log) => { try { return ROYALTY_CONFIGURED_IFACE.parseLog(log); } catch { return null; } })
+    .find((parsed) => parsed?.name === "RoyaltyConfigured" && parsed.args.tokenId === BigInt(tokenId));
+  if (!configured) throw new ApiError(409, "ROYALTY_POLICY_MISMATCH", "The edition transaction does not record its artist royalty.");
+  const violation = releaseRoyaltyPolicyViolation(policy, { receiver: configured.args.receiver, royaltyBps: configured.args.royaltyBps });
+  if (violation) throw new ApiError(409, "ROYALTY_POLICY_MISMATCH", `${violation} This edition cannot be published.`);
+}
+
 // VoidRelease1155V5 (Factory V3) records the provenance root inside the edition-creating
 // transaction and is its own anchor; the event signature matches VoidProvenanceAnchor's.
 export const RELEASE_PROVENANCE_ABI = Object.freeze([
@@ -149,7 +173,7 @@ function releaseKey(value, field = "releaseKey") {
   return key;
 }
 
-const PROVISIONING_CHAIN_ID = Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId);
+const PROVISIONING_CHAIN_ID = Number(RELEASE_PER_CONTRACT.chainId);
 const RELEASE_FACTORY_V2_ABI = Object.freeze([
   "function createRelease(bytes32 applicationReleaseId,bytes32 releaseKey,string name,string symbol,string contractURI) returns (address releaseContract,address primarySale,address provenanceAnchor)",
   "event ReleaseCreated(address indexed releaseContract,bytes32 indexed releaseKey,address indexed artist,address primarySale,address provenanceAnchor,address implementation,uint256 index,uint16 version)",
@@ -159,7 +183,7 @@ export function deriveStudioApplicationReleaseId(releaseId) {
   return ethers.keccak256(ethers.toUtf8Bytes(requiredText(releaseId, "releaseId", { max: 128 })));
 }
 
-export function deriveStudioReleaseKey({ releaseId, applicationReleaseId = deriveStudioApplicationReleaseId(releaseId), artistWallet, factoryAddress = FUJI_RELEASE_PER_CONTRACT_V2.factoryAddress, chainId: selectedChainId = PROVISIONING_CHAIN_ID }) {
+export function deriveStudioReleaseKey({ releaseId, applicationReleaseId = deriveStudioApplicationReleaseId(releaseId), artistWallet, factoryAddress = RELEASE_PER_CONTRACT.factoryAddress, chainId: selectedChainId = PROVISIONING_CHAIN_ID }) {
   const artist = walletAddress(artistWallet, "artistWallet");
   const factory = walletAddress(factoryAddress, "factoryAddress");
   const appId = releaseKey(applicationReleaseId, "applicationReleaseId");
@@ -170,7 +194,7 @@ export function deriveStudioReleaseKey({ releaseId, applicationReleaseId = deriv
 }
 
 function provisioningFactoryConfig() {
-  const config = FUJI_RELEASE_PER_CONTRACT_V2;
+  const config = RELEASE_PER_CONTRACT;
   const address = String(config.factoryAddress || "").trim();
   if (config.provisioningEnabled !== true || config.deploymentAuthorized !== true || !ethers.isAddress(address) || ethers.getAddress(address) === ethers.ZeroAddress) {
     throw new ApiError(503, "RELEASE_FACTORY_V2_NOT_CONFIGURED", "Artist release creation is unavailable until the separately authorized Factory V2 deployment is configured. The existing Factory is not used as a fallback.");
@@ -541,7 +565,7 @@ export class ArtistStudioService {
     if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
     if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
     const publishChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
-    const publishContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
+    const publishContract = binding ? String(binding.release_contract_address).toLowerCase() : legacySharedContract();
     const publishTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
     await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: publishContract, chainId: publishChainId, tokenId: publishTokenId });
     const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
@@ -579,7 +603,7 @@ export class ArtistStudioService {
       if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
       if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
       const publicationChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
-      const publicationContract = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
+      const publicationContract = binding ? String(binding.release_contract_address).toLowerCase() : legacySharedContract();
       const expectedTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
       const expectedReleaseId = binding ? binding.release_key : ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
       const provider = this.publicationChain || new ethers.JsonRpcProvider(deployment.rpcUrl);
@@ -599,6 +623,7 @@ export class ArtistStudioService {
       if (creator !== String(event.args.artist || "").toLowerCase()) throw new Error("on-chain edition creator does not match the publication event");
       const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
       if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
+      if (binding) assertEditionRoyaltyPolicy({ receipt, publicationContract, tokenId: expectedTokenId, policy: releaseRoyaltyPolicyForChain(publicationChainId) });
       const provenanceAtCreation = bindingAnchorsAtCreation(binding);
       const onChainProvenance = provenanceAtCreation
         ? await this.verifyProvenanceAtCreation({ receipt, provider, publicationContract, releaseId: expectedReleaseId, editionId: expectedEditionId, tokenId: expectedTokenId, artist: creator, provenanceRoot: provenance.root })
@@ -792,8 +817,8 @@ export class ArtistStudioService {
 
   releaseChainRequest(binding) {
     if (typeof this.publicationChain?.request === "function") return (payload) => this.publicationChain.request(payload);
-    if (Number(binding.chain_id) !== Number(FUJI_RELEASE_PER_CONTRACT_V2.chainId)) throw new ApiError(503, "RELEASE_CHAIN_STATE_UNAVAILABLE", RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
-    const provider = new ethers.JsonRpcProvider(FUJI_RELEASE_PER_CONTRACT_V2.rpcUrl, Number(binding.chain_id), { staticNetwork: true });
+    if (Number(binding.chain_id) !== Number(RELEASE_PER_CONTRACT.chainId)) throw new ApiError(503, "RELEASE_CHAIN_STATE_UNAVAILABLE", RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE);
+    const provider = new ethers.JsonRpcProvider(RELEASE_PER_CONTRACT.rpcUrl, Number(binding.chain_id), { staticNetwork: true });
     return ({ method, params }) => provider.send(method, params);
   }
 
@@ -847,7 +872,7 @@ export class ArtistStudioService {
     const binding = await this.releaseContractBinding(release.id);
     if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "Create and bind the release through VoidReleaseFactory before creating an edition. No legacy shared contract fallback is allowed.");
     const selectedChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
-    const address = binding ? String(binding.release_contract_address).toLowerCase() : CERTIFIED_CONTRACT;
+    const address = binding ? String(binding.release_contract_address).toLowerCase() : legacySharedContract();
     const editionName = requiredText(input.trackTitle || input.title || input.name || release.title, "track.title", { max: 256 });
     const editionSlug = generatedSlug(editionName, "track title");
     const tokenId = binding ? releaseCloneTokenId(editionSlug) : certifiedTokenId(release.slug, editionSlug);
