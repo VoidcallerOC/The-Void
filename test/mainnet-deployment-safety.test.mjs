@@ -174,6 +174,9 @@ describe("mainnet workflows plan only: no key, no signing, no broadcast", () => 
       // No signer is constructed, nothing is signed or sent from Node, and no key variable is read.
       expect(source, path).not.toMatch(/new Wallet\(|\.signTransaction\(|\.sendTransaction\(|eth_sendRawTransaction|\.deploy\(|env\.(MAINNET_)?DEPLOYER_PRIVATE_KEY/);
     }
+    // Live checks and verification never reuse a cached RPC answer (ethers caches for 250 ms by default).
+    const tool = read("scripts/mainnet-owner-signing.mjs");
+    expect(tool.match(/new JsonRpcProvider\([^)]*\)/g).every((call) => call.includes("cacheTimeout: -1"))).toBe(true);
     const scripts = JSON.parse(read("package.json")).scripts;
     expect(scripts["sign:mainnet"]).toBe("node scripts/mainnet-owner-signing.mjs serve");
     expect(scripts["verify:mainnet"]).toBe("node scripts/mainnet-owner-signing.mjs verify");

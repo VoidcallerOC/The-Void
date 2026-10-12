@@ -263,8 +263,9 @@ function makeProviders(opts, env) {
   return {
     rpcUrl,
     genesisRpcUrl,
-    provider: new JsonRpcProvider(rpcUrl, MAINNET_CHAIN_ID, { staticNetwork: true }),
-    genesisProvider: new JsonRpcProvider(genesisRpcUrl, GENESIS_CHAIN_ID, { staticNetwork: true }),
+    // cacheTimeout -1: every live check and every verification is a fresh read, never a cached one.
+    provider: new JsonRpcProvider(rpcUrl, MAINNET_CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 }),
+    genesisProvider: new JsonRpcProvider(genesisRpcUrl, GENESIS_CHAIN_ID, { staticNetwork: true, cacheTimeout: -1 }),
   };
 }
 
