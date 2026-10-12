@@ -4,9 +4,13 @@
 
 | Item | Status |
 |---|---|
-| Code (claim contract, snapshot eligibility, API, UI, deployment tooling) | PARTIAL: implemented and tested in this PR, not merged or deployed |
+| Code (claim contract, live-ownership eligibility, API, UI, deployment tooling) | PARTIAL: implemented and tested; the snapshot design merged in `d50f042`, the live-ownership change (§2) is not merged or deployed |
 | Recorded target `0x12Ff…0Fe6` / `0x3671…5aFD` / token `1` | BLOCKED: cannot hold an uncapped open edition (§1) |
 | Live claim, public mint and closure on Fuji | NOT STARTED |
+
+> **2026-10-12: eligibility changed from a fixed snapshot to live ownership (§2).** The owner replaced the
+> fixed C-Chain snapshot with a live read of the connected wallet's current Genesis balances. Sections that
+> describe the snapshot (§1 row 12, the §6 simulation) are kept as history of what was tested at the time.
 
 Nothing here was signed, broadcast or changed in production. The evidence was gathered with read-only RPC calls (including `eth_call` simulations), database `SELECT`s and log reads, on 2026-10-11 18:47–19:04 UTC (Fuji block about 59313024).
 
@@ -27,7 +31,7 @@ Nothing here was signed, broadcast or changed in production. The evidence was ga
 | 9 | Sale start, end, price | Not set | `sales(1)` |
 | 10 | 24-hour Genesis phase enforceable | Not with the deployed claim code (there is none). The reworked `GenesisHolderClaim` in this PR enforces it (§3). | — |
 | 11 | Corrected economics on this target | **No**, for two reasons. The deployed implementation cannot create a `maxSupply 0` edition. And token IDs are `keccak256("the-void:release-edition:v1", editionId)`, so token ID `1` cannot be produced. | `tokenIdFor` at `9ec82e2` |
-| 12 | Fixed C-Chain snapshot supported | Before this PR, no (live `balanceOf`). Now yes (§2). Historical `eth_call` at the snapshot block is served by `api.avax.network`, checked 1,000,000 blocks back. | — |
+| 12 | Fixed C-Chain snapshot supported (historical; superseded by live ownership, §2) | Before PR #169, no (live `balanceOf`). PR #169 added it; the 2026-10-12 change returns to live ownership. Historical `eth_call` at the snapshot block is served by `api.avax.network`, checked 1,000,000 blocks back. | — |
 
 **Repository and database records:**
 - `0x12Ff` is release `release-21249304…` (`forgive-forget-26`): status DRAFT, no editions, provisioned 2026-10-06 on the pre-album factory `0xa5Cb`.
@@ -87,13 +91,14 @@ Supply accounting holds: minted 1 = sold 1.
   - archive the empty ‑26 draft;
   - cancel ‑27's never-sent request.
 
-## 2. Genesis eligibility: fixed snapshot
+## 2. Genesis eligibility: live ownership
 
-- **The rule.** A wallet qualifies only if `balanceOf(wallet, id) > 0` for some `id` in 0–3 on `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` (C-Chain 43114) **at `GENESIS_SNAPSHOT_BLOCK`**.
-- **Where it is checked.** The server reads balances with `eth_call` at that block tag, after confirming the block's hash equals `GENESIS_SNAPSHOT_BLOCK_HASH`. A provider on another chain, a hash mismatch or a provider without historical state fails closed (503 `ELIGIBILITY_UNAVAILABLE`).
-- **What the contract stores.** `ELIGIBILITY_RULE = keccak256(text)`, where the text names chain, collection, block, hash and token IDs (`genesisEligibilityRule`). Every voucher carries the rule, so a voucher for another snapshot is invalid on-chain.
-- **Transfers.** A token transferred after the snapshot creates no new eligibility, and a holder who transfers away stays eligible. Each wallet claims once: `hasClaimed` on-chain, plus a server pre-check.
-- **Reproducibility.** Anyone can recompute eligibility with `balanceOf(wallet, id)` at that block.
+- **The rule.** A wallet qualifies if, when it requests a claim voucher, `balanceOf(wallet, id) > 0` for some `id` in 0–3 on `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` (C-Chain 43114), read at the latest block.
+- **Where it is checked.** The server reads the four balances with `eth_call` at `latest` through `GENESIS_RPC_URL`, after confirming the provider is C-Chain (43114). A provider on another chain, a failed call or a malformed result fails closed: 503 `ELIGIBILITY_UNAVAILABLE`, and no voucher is signed. A wallet holding none of the four gets 403.
+- **What the contract stores.** The constant `ELIGIBILITY_RULE = keccak256("the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|…|balanceOf(wallet,3)>0")`, the same live rule the claim used before PR #169. Every voucher names it; a voucher for any other rule is invalid on-chain. There is no snapshot block, hash or constructor parameter.
+- **No Genesis movement.** Genesis tokens are only read. The claim contract never calls the Genesis collection (a Forge test makes that collection revert on any call and the claim still succeeds). The one asset movement is the release token minted by the release's issuer path directly to the claimant (`voucher.claimant`, which must be `msg.sender`).
+- **Unchanged rules.** One claim per wallet (`hasClaimed` on-chain plus a server pre-check), one copy per claim, single-use nonces, five-minute vouchers that never outlive the claim window, allocation `0` = uncapped on an open edition.
+- **Consequence of live ownership (owner decision, not a defect).** Eligibility follows the token: if a holder claims and then transfers its Genesis token to another wallet, that wallet becomes eligible and can claim too. Within the 24-hour window one Genesis token can therefore yield one free copy per wallet it passes through. A snapshot prevented this. The existing lever that bounds it without new code is a finite `GENESIS_CLAIM_ALLOCATION` (a cap on total free claims).
 
 ## 3. Schedule and supply (contract-enforced)
 
@@ -124,33 +129,27 @@ Any drift reverts every claim (`PublicSaleSchedule`, `PublicPriceChanged`, `Publ
 
 Every step below is a transaction or a production change. **None is authorized by this PR.**
 
-1. **Owner:** approve the new release (option A) and choose the snapshot block and `T` (§5).
+1. **Owner:** approve the new release (option A) and choose `T` (§5).
 2. **Artist wallet:**
    1. create the release on Factory V2;
    2. create the open edition (`maxSupply 0`, with or without `mintEnd = T + 8d − 1`, §1);
    3. `configureSale(tokenId, 0.25 AVAX, 0, 0, T + 24h, T + 8d − 1, false)`.
-3. **Dry run:** run `Deploy Genesis holder claim to Fuji` with `broadcast_deployment=false`. Review its plan: predicted address, schedule, snapshot, constructor simulation, follow-ups.
+3. **Dry run:** run `Deploy Genesis holder claim to Fuji` with `broadcast_deployment=false`. Review its plan: predicted address, schedule, eligibility rule, constructor simulation, follow-ups.
 4. **Owner:** authorize the broadcast with `I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY`, the reviewed deployer and the reviewed nonce.
 5. **Artist wallet:** send the printed `grantRole(ISSUER_ROLE, claim)` before `T`.
 6. **Owner:** authorize setting the printed `GENESIS_*` values on Render, including the server-only signer key and `GENESIS_CLAIM_ENABLED=true`.
 7. **Verify:**
    - `GET /api/claims/config` returns 200 with the exact target;
-   - an eligible snapshot wallet claims once and its receipt and balance are confirmed;
+   - a wallet that currently holds Genesis claims once and its receipt and balance are confirmed;
    - an ineligible wallet gets 403;
    - after `T + 24h`, a non-holder mints at 0.25 AVAX;
    - after `T + 8d`, the mint is refused.
 
-## 5. Snapshot block and claim start: constraints
+## 5. Claim start: constraints
 
 **Genesis collection.** `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` on Avalanche C-Chain (43114). It is an EIP-1167 proxy (45 bytes of code) with an ERC-1155 interface, and its first activity was at block ~41,322,659.
 
-**Snapshot block.**
-- It must already exist when the claim is deployed, because the preflight and the API both check its hash.
-- It is set once, in the claim contract's `ELIGIBILITY_RULE`, and cannot be changed after deployment.
-- Choose it by rule, not by convenience: the last C-Chain block at or before a published snapshot time. That time should come before, or at, the moment the claim is announced, so nobody can buy into eligibility after learning of it.
-- Record both the number and the hash.
-
-**Verifying eligibility.** For each wallet, check `balanceOf(wallet, 0..3)` with an `eth_call` at that block. `api.avax.network` serves historical state; this was checked 1,000,000 blocks back. A full holder list for an announcement can be derived from the collection's `TransferSingle` and `TransferBatch` logs up to the snapshot, then cross-checked with those calls. No list is needed for the claim itself.
+**Eligibility source.** Live `balanceOf(wallet, 0..3)` at the latest C-Chain block, read when a voucher is requested (§2). The deploy preflight only checks that the Genesis collection has code on C-Chain; there is no block or hash to choose. Any C-Chain RPC works; no historical state is needed.
 
 **Claim start `T`.**
 - Claims are accepted while `T ≤ now < T + 86,400`.
@@ -183,14 +182,14 @@ Every step below is a transaction or a production change. **None is authorized b
 - **API** (`claimSchedule` in `server/genesis-claim.js`): with `RELEASE_NETWORK=mainnet` it refuses to load unless the windows are 86,400 s and 604,800 s and the price is 0.25 AVAX. It also checks the deployed claim's `claimWindow` and `publicWindow`.
 - **Deploy script** (`DEPLOY_NETWORK=fuji|mainnet`): applies the same rules. A mainnet broadcast needs `CONFIRM_MAINNET_DEPLOY`.
 
-None of these rules disables a timing, price, signature, snapshot, role or replay check.
+None of these rules disables a timing, price, signature, eligibility, role or replay check.
 
 **Fuji ‑28 test parameters** for a chosen start `T`:
 - sale: `configureSale(2567…3312, 10000000000000000, 0, 0, T + 300, T + 899, false)`;
 - claim constructor: windows `300` and `600`, price `10000000000000000`;
 - API: `GENESIS_CLAIM_WINDOW_SECONDS=300`, `GENESIS_PUBLIC_WINDOW_SECONDS=600`.
 
-**Local fork simulation (2026-10-11 19:30–19:45 UTC).** Not live: everything ran on anvil forks of Fuji (block ~59314100) and C-Chain (block ~97304200). It used the real ‑28 contracts, the real Genesis balances, the real claim service and HTTP handler, and the real deploy preflight. 24 of 24 checks passed:
+**Local fork simulation (2026-10-11 19:30–19:45 UTC; run against the snapshot design, before the 2026-10-12 live-ownership change).** Not live: everything ran on anvil forks of Fuji (block ~59314100) and C-Chain (block ~97304200). It used the real ‑28 contracts, the real Genesis balances, the real claim service and HTTP handler, and the real deploy preflight. 24 of 24 checks passed:
 - **Deployment:**
   - preflight passed, including the constructor simulation;
   - the claim was mined at the predicted address;
@@ -200,7 +199,7 @@ None of these rules disables a timing, price, signature, snapshot, role or repla
   - snapshot holder `0x6a86…` claimed for free (receipt status 1, +1 token);
   - wallet `0x284C…`, with no Genesis token, got 403;
   - a second voucher was refused with 409, and the replayed voucher was refused on-chain;
-  - a wallet that received a Genesis token on C-Chain after the snapshot got 403.
+  - a wallet that received a Genesis token on C-Chain after the snapshot got 403 (under live ownership this wallet is now eligible, §2).
 - **Public window:**
   - minting was refused before `claimEnd`;
   - 0.25 AVAX and 0.01 AVAX − 1 wei were rejected with no funds kept and no mint;

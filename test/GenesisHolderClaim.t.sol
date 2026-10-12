@@ -20,6 +20,7 @@ interface VmClaim {
     function expectPartialRevert(bytes4) external;
     function recordLogs() external;
     function getRecordedLogs() external returns (Log[] memory);
+    function etch(address, bytes calldata) external;
 }
 
 contract GenesisHolderClaimTest {
@@ -38,7 +39,9 @@ contract GenesisHolderClaimTest {
     bytes32 internal constant RELEASE_KEY = keccak256("genesis-holder-claim-test-release");
     bytes32 internal constant EDITION_ID = keccak256("genesis-holder-claim-test-edition");
     uint256 internal constant PRICE = 1;
-    bytes32 internal constant RULE = keccak256("test:genesis-snapshot-rule");
+    bytes32 internal constant RULE = keccak256(
+        "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0"
+    );
 
     VoidRelease1155V4 internal release;
     VoidPrimarySale internal sale;
@@ -92,6 +95,37 @@ contract GenesisHolderClaimTest {
         require(claimContract.claimedSupply() == 1, "reserved supply not recorded");
         require(claimContract.usedNonces(11), "nonce not consumed");
         _assertClaimEvent(vm.getRecordedLogs(), voucher, signature);
+    }
+
+    function testEligibilityRuleIsTheLiveOwnershipRule() public view {
+        require(claimContract.ELIGIBILITY_RULE() == RULE, "eligibility rule is not the live-ownership rule");
+    }
+
+    /// Genesis tokens only establish eligibility: a claim never calls the Genesis collection (here made
+    /// to revert on any call), and the only asset movement is the new release token minted to the claimant.
+    function testClaimMintsOnlyTheReleaseTokenToTheClaimantAndNeverTouchesGenesis() public {
+        address genesis = claimContract.GENESIS_CONTRACT();
+        vm.etch(genesis, hex"fe");
+        GenesisHolderClaim.ClaimVoucher memory voucher = _voucher(CLAIMANT, 12, 1, block.timestamp + 300);
+        bytes memory signature = _sign(claimContract, voucher, signerKey);
+        vm.recordLogs();
+        vm.prank(CLAIMANT);
+        claimContract.claim(voucher, signature);
+        require(release.balanceOf(CLAIMANT, tokenId) == 1, "release token not minted to claimant");
+        require(release.balanceOf(address(claimContract), tokenId) == 0, "claim contract holds release tokens");
+        VmClaim.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 transferSingle = keccak256("TransferSingle(address,address,address,uint256,uint256)");
+        uint256 transfers;
+        for (uint256 i = 0; i < logs.length; i++) {
+            require(logs[i].emitter != genesis, "Genesis collection emitted an event");
+            if (logs[i].topics.length == 4 && logs[i].topics[0] == transferSingle) {
+                transfers++;
+                require(logs[i].emitter == address(release), "transfer outside the release");
+                require(logs[i].topics[2] == bytes32(0), "not a mint");
+                require(logs[i].topics[3] == bytes32(uint256(uint160(CLAIMANT))), "not minted to the claimant");
+            }
+        }
+        require(transfers == 1, "expected exactly one mint");
     }
 
     function testInvalidSignerRejected() public {
@@ -285,7 +319,7 @@ contract GenesisHolderClaimTest {
 
     function _deploy(uint256 claimStart) internal returns (GenesisHolderClaim) {
         return new GenesisHolderClaim(
-            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, claimStart, 1 days, 7 days, PRICE, RULE, ADMIN, signer
+            address(release), address(sale), tokenId, GENESIS_ALLOCATION, PUBLIC_ALLOCATION, claimStart, 1 days, 7 days, PRICE, ADMIN, signer
         );
     }
 

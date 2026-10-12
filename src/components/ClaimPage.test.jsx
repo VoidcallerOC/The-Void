@@ -15,7 +15,7 @@ const target = (claimStart) => ({
   enabled: true, destinationChainId: 43113, releaseContract: "0x2222222222222222222222222222222222222222", primarySale: "0x3333333333333333333333333333333333333333",
   claimContract: "0x4444444444444444444444444444444444444444", tokenId: "77", allocation: "0", publicAllocation: "0",
   claimStart: String(claimStart), claimEnd: String(claimStart + 86_400), publicSaleEnd: String(claimStart + 8 * 86_400 - 1),
-  publicPriceWei: "250000000000000000", snapshotBlock: "97000000", snapshotBlockHash: `0x${"5a".repeat(32)}`,
+  publicPriceWei: "250000000000000000", eligibility: "live",
 });
 
 function renderClaim() {
@@ -39,12 +39,13 @@ describe("Genesis claim landing", () => {
     expect(container.textContent).not.toMatch(/Rehearsal/i);
   });
 
-  it("shows the verified target, the snapshot and the free claim during the Genesis window", async () => {
+  it("shows the verified target, live eligibility and the free claim during the Genesis window", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(target(NOW - 60));
     const { container } = renderClaim();
     expect(await screen.findByText(/Genesis holders can claim one copy for free/)).toBeTruthy();
     expect(container.textContent).toContain("0x2222222222222222222222222222222222222222");
-    expect(container.textContent).toContain("block 97000000");
+    expect(container.textContent).toContain("Currently holds Genesis token 0, 1, 2 or 3");
+    expect(container.textContent).not.toMatch(/snapshot/i);
     expect(container.textContent).toContain("Open edition · uncapped");
     expect(requestGenesisVoucher).not.toHaveBeenCalled();
   });

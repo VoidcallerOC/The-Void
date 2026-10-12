@@ -97,7 +97,7 @@ function ClaimSchedule({ target }) {
     <>
       <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
       <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.claimEnd)} → {instant(target.publicSaleEnd)}</InfoRow>
-      <InfoRow label="Eligibility">Held Genesis token 0, 1, 2 or 3 on Avalanche C-Chain at block {target.snapshotBlock}. Transfers after that block do not change eligibility.</InfoRow>
+      <InfoRow label="Eligibility">Currently holds Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, checked when you claim. Genesis tokens stay in your wallet.</InfoRow>
       <InfoRow label="Supply">{String(target.publicAllocation) === "0" && String(target.allocation) === "0" ? "Open edition · uncapped" : `Claim ${target.allocation} · public ${target.publicAllocation}`}</InfoRow>
     </>
   );
@@ -262,11 +262,11 @@ export function ClaimPage() {
         setEligibleTokenIds(result.eligibleTokenIds || []);
         if (!result.eligible) {
           setPhase(CLAIM_PHASES.ACCESS_DENIED);
-          setMessage("Access denied. This wallet did not hold Genesis token 0, 1, 2 or 3 at the snapshot block. Nothing was claimed.");
+          setMessage("Access denied. This wallet does not currently hold Genesis token 0, 1, 2 or 3 on Avalanche C-Chain. Nothing was claimed.");
           return;
         }
         setPhase(CLAIM_PHASES.ELIGIBLE);
-        setMessage(`Genesis ownership at the snapshot block verified for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one free claim.`);
+        setMessage(`Genesis ownership verified on Avalanche C-Chain for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one free claim.`);
       } catch (error) {
         if (!live) return;
         setPhase(classifyError(error));

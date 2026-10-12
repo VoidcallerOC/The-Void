@@ -29,15 +29,12 @@ export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_S
 }
 
 /**
- * Eligibility is fixed at one C-Chain block: a wallet qualifies only if it held token 0, 1, 2 or 3
- * at that block. Transfers after the snapshot neither add nor remove eligibility. The rule text
- * names the block and its hash, and the claim contract stores the rule's hash, so every voucher
- * is bound to this exact snapshot. Anyone can recompute it with balanceOf(wallet, id) at the block.
+ * Eligibility is live ownership: when a voucher is requested, the wallet must currently hold Genesis
+ * token 0, 1, 2 or 3 on C-Chain (latest block). The claim contract's ELIGIBILITY_RULE constant is the
+ * hash of this text, and every voucher names it. Genesis tokens are only read, never moved.
  */
-export function genesisEligibilityRule({ snapshotBlock, snapshotBlockHash }) {
-  const text = `the-void:genesis-eligibility:v2:chain=${GENESIS_CHAIN_ID}:contract=${GENESIS_CONTRACT.toLowerCase()}:block=${BigInt(snapshotBlock)}:hash=${String(snapshotBlockHash).toLowerCase()}:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0`;
-  return Object.freeze({ text, rule: id(text) });
-}
+export const ELIGIBILITY_RULE_TEXT = "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0";
+export const ELIGIBILITY_RULE = id(ELIGIBILITY_RULE_TEXT);
 
 const GENESIS_INTERFACE = new Interface(["function balanceOf(address account,uint256 id) view returns (uint256)"]);
 const CLAIM_ABI = [
@@ -125,12 +122,6 @@ function httpUrl(value, name) {
   }
 }
 
-function blockHash(value, name) {
-  const text = String(value || "").trim();
-  if (!/^0x[0-9a-fA-F]{64}$/.test(text)) throw new GenesisClaimConfigurationError(`${name} must be a 32-byte block hash.`);
-  return text.toLowerCase();
-}
-
 export function loadGenesisClaimConfig(env = process.env) {
   if (String(env.GENESIS_CLAIM_ENABLED || "").toLowerCase() !== "true") return null;
   const destinationChainId = productionChainId(env);
@@ -151,8 +142,6 @@ export function loadGenesisClaimConfig(env = process.env) {
   const publicAllocation = nonNegativeBigInt(env.GENESIS_PUBLIC_MINT_ALLOCATION, "GENESIS_PUBLIC_MINT_ALLOCATION");
   const claimStart = positiveBigInt(env.GENESIS_CLAIM_START, "GENESIS_CLAIM_START");
   const publicPriceWei = positiveBigInt(env.GENESIS_PUBLIC_PRICE_WEI, "GENESIS_PUBLIC_PRICE_WEI");
-  const snapshotBlock = positiveBigInt(env.GENESIS_SNAPSHOT_BLOCK, "GENESIS_SNAPSHOT_BLOCK");
-  const snapshotBlockHash = blockHash(env.GENESIS_SNAPSHOT_BLOCK_HASH, "GENESIS_SNAPSHOT_BLOCK_HASH");
   const { claimWindow, publicWindow } = claimSchedule({
     destinationChainId,
     claimWindow: env.GENESIS_CLAIM_WINDOW_SECONDS === undefined || env.GENESIS_CLAIM_WINDOW_SECONDS === "" ? CLAIM_WINDOW_SECONDS : positiveBigInt(env.GENESIS_CLAIM_WINDOW_SECONDS, "GENESIS_CLAIM_WINDOW_SECONDS"),
@@ -177,9 +166,7 @@ export function loadGenesisClaimConfig(env = process.env) {
     claimEnd: claimStart + claimWindow,
     publicSaleEnd: claimStart + claimWindow + publicWindow - 1n,
     publicPriceWei,
-    snapshotBlock,
-    snapshotBlockHash,
-    eligibilityRule: genesisEligibilityRule({ snapshotBlock, snapshotBlockHash }).rule,
+    eligibilityRule: ELIGIBILITY_RULE,
     privateKey,
   });
 }
@@ -192,8 +179,7 @@ function toPublicConfig(config) {
     genesisChainId: GENESIS_CHAIN_ID,
     tokenIds: GENESIS_TOKEN_IDS.map(String),
     eligibilityRule: config.eligibilityRule,
-    snapshotBlock: config.snapshotBlock.toString(),
-    snapshotBlockHash: config.snapshotBlockHash,
+    eligibility: "live",
     destinationChainId: config.destinationChainId,
     releaseContract: config.releaseContract,
     primarySale: config.primarySale,
@@ -273,16 +259,10 @@ export function createGenesisClaimService({
     }
   }
 
-  // The snapshot must be the exact C-Chain block the contract's rule commits to. A provider on another
-  // chain, or one that reports a different hash for that height, fails closed.
-  let snapshotVerified = false;
-  async function assertSnapshotBlock() {
-    if (snapshotVerified) return;
+  // Ownership is read from the latest C-Chain block. A provider on any other chain fails closed.
+  async function assertGenesisChain() {
     const network = await sourceProvider.getNetwork();
     if (Number(network.chainId) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
-    const block = await sourceProvider.getBlock(Number(config.snapshotBlock));
-    if (!block?.hash || String(block.hash).toLowerCase() !== config.snapshotBlockHash) throw new Error("Genesis snapshot block hash does not match.");
-    snapshotVerified = true;
   }
 
   async function checkEligibility(wallet) {
@@ -297,8 +277,8 @@ export function createGenesisClaimService({
           throw new Error("Eligibility reader returned an invalid Genesis token set.");
         }
       } else {
-        await assertSnapshotBlock();
-        const blockTag = Number(config.snapshotBlock);
+        await assertGenesisChain();
+        const blockTag = "latest";
         const balances = await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
           const data = GENESIS_INTERFACE.encodeFunctionData("balanceOf", [getAddress(wallet), tokenId]);
           return GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag }))[0];
@@ -313,7 +293,7 @@ export function createGenesisClaimService({
 
   async function issueVoucher(wallet) {
     const eligibility = await checkEligibility(wallet);
-    if (!eligibility.eligible) throw new ApiError(403, "ACCESS_DENIED", "This wallet did not hold Genesis token 0, 1, 2, or 3 at the snapshot block.");
+    if (!eligibility.eligible) throw new ApiError(403, "ACCESS_DENIED", "This wallet does not currently hold Genesis token 0, 1, 2, or 3 on Avalanche C-Chain.");
     const now = BigInt(clock());
     if (now < config.claimStart) throw new ApiError(409, "CLAIM_NOT_OPEN", "The Genesis claim window has not opened yet.");
     if (now >= config.claimEnd) throw new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
