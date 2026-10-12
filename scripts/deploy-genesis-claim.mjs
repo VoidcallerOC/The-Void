@@ -2,9 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, getAddress, getCreateAddress, isAddress } from "ethers";
+import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroHash, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
 import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
+import { MAINNET_DEPLOYER, SigningRequestError, assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
 import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT, PUBLIC_WINDOW_SECONDS, claimSchedule } from "../server/genesis-claim.js";
 
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
@@ -14,6 +15,10 @@ import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError,
 // and the edition must have no mints other than sale purchases. Everything is read-only until a
 // broadcast is explicitly confirmed; the default path is a dry run that simulates the constructor.
 // The script never grants roles, edits config/ or touches the API: those follow-ups are printed.
+// On mainnet it never signs or reads a key: the plan carries the exact unsigned creation transaction,
+// which the owner signs in Rabby with the defined deployer (scripts/mainnet-owner-signing.mjs), and
+// verifyClaimDeployment checks the mined claim from chain. The ISSUER_ROLE grant is prepared for the
+// release's verified DEFAULT_ADMIN_ROLE holder (the artist wallet), never the deployer.
 export const FUJI_CHAIN_ID = 43113;
 export const CLAIM_ARTIFACT_PATH = "out/GenesisHolderClaim.sol/GenesisHolderClaim.json";
 export const CLAIM_NETWORKS = Object.freeze({
@@ -33,6 +38,7 @@ const RELEASE = new Interface([
   "function hasRole(bytes32 role,address account) view returns (bool)",
   "function ISSUER_ROLE() view returns (bytes32)",
   "function grantRole(bytes32 role,address account)",
+  "function owner() view returns (address)",
 ]);
 const SALE = new Interface([
   "function releases() view returns (address)",
@@ -86,6 +92,18 @@ export function validateClaimDeploymentEnv(env = process.env) {
   const network = String(env.DEPLOY_NETWORK || "").trim().toLowerCase();
   const target = CLAIM_NETWORKS[network];
   if (!target) throw new DeploymentError('DEPLOY_NETWORK must be exactly "fuji" or "mainnet".');
+  if (network === "mainnet") {
+    // Mainnet never reads a key and never broadcasts from a script; the owner signs in Rabby.
+    try {
+      assertNoPrivateKeyInEnv(env, "The mainnet Genesis claim plan");
+      assertDefinedDeployer(env.EXPECTED_DEPLOYER_ADDRESS);
+    } catch (error) {
+      throw new DeploymentError(error.message);
+    }
+    if (String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes") {
+      throw new DeploymentError("Mainnet is never broadcast from this script. The owner signs the planned transaction in Rabby: npm run sign:mainnet (deploy/mainnet/OWNER-SIGNING.md).");
+    }
+  }
   const rpcUrl = httpUrl(env[target.rpcEnv], target.rpcEnv);
   const genesisRpcUrl = httpUrl(env.GENESIS_RPC_URL, "GENESIS_RPC_URL");
   // A dry run can plan from EXPECTED_DEPLOYER_ADDRESS alone, so the key reaches only an approved broadcast.
@@ -256,14 +274,118 @@ export function buildPlan(config, facts) {
   }, (_key, value) => text(value)));
 }
 
-async function loadArtifact() {
+/** The non-secret inputs that reproduce a mainnet plan, recorded in it so the signing tool can re-plan. */
+export function claimPlanInputs(config) {
+  return {
+    DEPLOY_NETWORK: config.network,
+    EXPECTED_DEPLOYER_ADDRESS: config.deployerAddress,
+    EXPECTED_DEPLOYER_NONCE: config.expectedDeployerNonce === null ? "" : String(config.expectedDeployerNonce),
+    GENESIS_CLAIM_RELEASE_CONTRACT: config.releaseContract,
+    GENESIS_CLAIM_PRIMARY_SALE: config.primarySale,
+    GENESIS_CLAIM_TOKEN_ID: config.tokenId.toString(),
+    GENESIS_CLAIM_START: config.claimStart.toString(),
+    GENESIS_CLAIM_WINDOW_SECONDS: config.claimWindow.toString(),
+    GENESIS_PUBLIC_WINDOW_SECONDS: config.publicWindow.toString(),
+    GENESIS_PUBLIC_PRICE_WEI: config.publicPriceWei.toString(),
+    GENESIS_CLAIM_ALLOCATION: config.allocation.toString(),
+    GENESIS_PUBLIC_MINT_ALLOCATION: config.publicAllocation.toString(),
+    GENESIS_EXPECT_OPEN_EDITION: config.expectOpenEdition ? "yes" : "no",
+    GENESIS_CLAIM_ADMIN: config.admin,
+    GENESIS_CLAIM_SIGNER_ADDRESS: config.signer,
+  };
+}
+
+/**
+ * Mainnet additions to a dry-run plan: the exact unsigned creation transaction for the owner to sign
+ * in Rabby, and the ISSUER_ROLE grant prepared for the account that actually holds the authority to
+ * make it (DEFAULT_ADMIN_ROLE on the release, which createRelease gives the calling artist). Refuses a
+ * release the artist wallet does not administer, or one the deployer or fee recipient administers.
+ */
+export async function mainnetSigningPlan(config, facts, plan, { provider, artifact }) {
+  const [releaseOwner] = await read(provider, RELEASE, config.releaseContract, "owner");
+  const owner = getAddress(releaseOwner);
+  const isAdmin = async (account) => (await read(provider, RELEASE, config.releaseContract, "hasRole", [ZeroHash, account]))[0];
+  if (owner !== getAddress(MAINNET_ARTIST_WALLET)) throw new DeploymentError(`The release ${config.releaseContract} is owned by ${owner}, not the artist wallet ${MAINNET_ARTIST_WALLET}. Releases are created by the artist, never the deployer.`);
+  if (!(await isAdmin(owner))) throw new DeploymentError(`The release owner ${owner} does not hold DEFAULT_ADMIN_ROLE, so it cannot grant ISSUER_ROLE.`);
+  if (await isAdmin(MAINNET_DEPLOYER)) throw new DeploymentError("The deployer holds DEFAULT_ADMIN_ROLE on the release; the deployer must hold no release authority.");
+  if (await isAdmin(MAINNET_FEE_RECIPIENT)) throw new DeploymentError("The passive fee recipient holds DEFAULT_ADMIN_ROLE on the release; it must hold no role.");
+  const data = `${artifact.bytecode.object}${AbiCoder.defaultAbiCoder().encode(CONSTRUCTOR_TYPES, facts.args).slice(2)}`;
+  const estimatedGas = await provider.estimateGas({ from: config.deployerAddress, data });
+  let request;
+  try {
+    request = creationRequest({ step: 1, contract: "GenesisHolderClaim", chainId: config.chainId, from: config.deployerAddress, nonce: facts.deployerNonce, data, estimatedGas, predictedAddress: facts.predictedClaim });
+  } catch (error) {
+    if (error instanceof SigningRequestError) throw new DeploymentError(error.message);
+    throw error;
+  }
+  return {
+    ...plan,
+    readyToSign: facts.pendingNonce === facts.deployerNonce && (config.expectedDeployerNonce === null || config.expectedDeployerNonce === facts.deployerNonce),
+    signingRequests: [request],
+    planInputs: claimPlanInputs(config),
+    followUps: {
+      ...plan.followUps,
+      issuerGrant: {
+        ...plan.followUps.issuerGrant,
+        from: owner,
+        authority: "DEFAULT_ADMIN_ROLE on the release, verified on chain",
+        note: "A separate artist operation after the claim is verified: the artist wallet signs this grant in its own wallet session before claimStart. Never the deployer and never either Ledger.",
+      },
+    },
+  };
+}
+
+/** Verifies the owner-signed claim deployment from chain against the reviewed mainnet plan. */
+export async function verifyClaimDeployment(provider, plan, hash, { timeoutMs } = {}) {
+  const request = plan.signingRequests?.[0];
+  if (!request) throw new DeploymentError("The plan has no signing request.");
+  let mined;
+  try {
+    mined = await verifyCreationTransaction(provider, request, hash, { timeoutMs });
+  } catch (error) {
+    if (error instanceof SigningRequestError) throw new DeploymentError(error.message);
+    throw error;
+  }
+  const expected = {
+    releaseContract: plan.target.releaseContract, primarySale: plan.target.primarySale, tokenId: plan.target.tokenId,
+    allocation: plan.supply.claimAllocation, publicAllocation: plan.supply.publicAllocation,
+    claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds,
+    claimEnd: plan.schedule.claimEnd, publicSaleEnd: plan.schedule.publicSaleEnd, publicPriceWei: plan.schedule.publicPriceWei,
+    ELIGIBILITY_RULE: plan.eligibility.rule, admin: plan.roles.admin, signer: plan.roles.signer,
+  };
+  const onchain = {};
+  for (const name of Object.keys(expected)) [onchain[name]] = await read(provider, CLAIM, mined.address, name);
+  const mismatched = Object.keys(expected).filter((name) => String(onchain[name]).toLowerCase() !== String(expected[name]).toLowerCase());
+  if (mismatched.length) throw new DeploymentError(`The mined claim does not match the reviewed parameters: ${mismatched.join(", ")}.`);
+  const [issuerRole] = await read(provider, RELEASE, plan.target.releaseContract, "ISSUER_ROLE");
+  const [issuerGranted] = await read(provider, RELEASE, plan.target.releaseContract, "hasRole", [issuerRole, mined.address]);
+  return { ...mined, parameters: expected, issuerGrant: issuerGranted ? "GRANTED" : "PENDING (artist operation)" };
+}
+
+/** The committed claim record, built only from a verified deployment. */
+export function buildClaimRecord(plan, verified, { sourceCommit = null, planDigest = null } = {}) {
+  return {
+    network: plan.network, chainId: plan.chainId,
+    signedBy: { deployer: plan.deployer, method: "owner-signed in Rabby; no private key left the wallet" },
+    plan: { sourceCommit, digest: planDigest },
+    claim: { name: "GenesisHolderClaim", address: verified.address, deploymentTransaction: verified.transaction, deploymentBlock: verified.block, deployer: plan.deployer, sourceCommit },
+    parameters: verified.parameters,
+    eligibility: { source: plan.eligibility.source, ruleText: plan.eligibility.ruleText },
+    issuerGrant: { status: verified.issuerGrant, ...plan.followUps.issuerGrant },
+  };
+}
+
+export async function loadClaimArtifact() {
   const artifact = JSON.parse(await readFile(resolve(ROOT, CLAIM_ARTIFACT_PATH), "utf8"));
   const inputs = artifact.abi?.find((item) => item.type === "constructor")?.inputs || [];
   if (!artifact.bytecode?.object || artifact.bytecode.object === "0x" || inputs.length !== CONSTRUCTOR_TYPES.length) throw new DeploymentError(`${CLAIM_ARTIFACT_PATH} is missing or is not the scheduled GenesisHolderClaim; run forge build.`);
   return artifact;
 }
 
-export async function broadcastClaim(config, provider, facts, { artifact, log = (value) => console.log(JSON.stringify(value, (_k, v) => text(v))), wallet = new Wallet(config.deployerPrivateKey, provider), writeRecord = writeRecordFile } = {}) {
+/** Fuji only. Mainnet is signed by the owner in Rabby and verified with verifyClaimDeployment. */
+export async function broadcastClaim(config, provider, facts, { artifact, log = (value) => console.log(JSON.stringify(value, (_k, v) => text(v))), wallet, writeRecord = writeRecordFile } = {}) {
+  if (config.network !== "fuji") throw new DeploymentError("Only Fuji is broadcast from this script; mainnet is signed by the owner in Rabby.");
+  wallet ??= new Wallet(config.deployerPrivateKey, provider);
   await assertRpcChainId(provider, config.chainId);
   const deployer = getAddress(await wallet.getAddress());
   if (deployer !== config.deployerAddress) throw new DeploymentError("The deployment signer does not match the validated DEPLOYER_PRIVATE_KEY address; nothing was broadcast.");
@@ -297,9 +419,10 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   const config = validateClaimDeploymentEnv(env);
   const provider = dependencies.provider || new JsonRpcProvider(config.rpcUrl, config.chainId, { staticNetwork: true });
   const genesisProvider = dependencies.genesisProvider || new JsonRpcProvider(config.genesisRpcUrl, GENESIS_CHAIN_ID, { staticNetwork: true });
-  const artifact = dependencies.artifact || await loadArtifact();
+  const artifact = dependencies.artifact || await loadClaimArtifact();
   const facts = await preflightClaimDeployment(config, { provider, genesisProvider, artifact });
-  const plan = buildPlan(config, facts);
+  let plan = buildPlan(config, facts);
+  if (config.network === "mainnet") plan = await mainnetSigningPlan(config, facts, plan, { provider, artifact });
   if (!config.broadcast) {
     console.log(JSON.stringify({ mode: "DRY_RUN", ...plan }, null, 2));
     // The workflow binds the approved broadcast to this exact plan (scripts/deployment-plan-binding.mjs).

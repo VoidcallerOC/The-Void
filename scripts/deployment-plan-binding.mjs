@@ -1,13 +1,34 @@
-// Binds a mainnet broadcast to the dry-run plan that was reviewed before the protected-environment
-// approval. The plan job writes a binding (commit + the plan fields that decide what will be signed);
-// the broadcast job re-plans without the key and refuses to reach the signing step unless the fresh
-// plan produces the identical binding on the same commit. Volatile fields (balance, gas price) are
-// excluded; the scripts re-check funding themselves at broadcast. Reads only local files; no keys.
+// Binds the owner's Rabby signing session to the dry-run plan that was reviewed. A binding is the
+// commit plus the plan fields that decide what will be signed, including the hash of every unsigned
+// creation transaction. The signing tool (scripts/mainnet-owner-signing.mjs) re-plans without any key
+// and refuses to hand a transaction to the wallet unless the fresh plan produces the identical binding
+// on the same commit. Volatile fields (balance, gas price, gas estimates) are excluded; funding and
+// the nonce are re-checked live before each signature. Reads only local files; no keys.
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
+import { requestBindingFields } from "./mainnet-signing-requests.mjs";
 
 export class BindingError extends Error {}
+
+/** Each request must agree with the plan it belongs to: same deployer, nonce and predicted address. */
+function consistent(requests, expected) {
+  requests.forEach((request, index) => {
+    const want = expected[index];
+    if (request.from !== lower(want.from) || request.nonce !== want.nonce || request.predictedAddress !== lower(want.predictedAddress)) {
+      throw new BindingError(`Signing request ${index + 1} disagrees with the plan's deployer, nonce or predicted address.`);
+    }
+  });
+  return requests;
+}
+
+function signingRequests(plan, count) {
+  if (!Array.isArray(plan.signingRequests) || plan.signingRequests.length !== count) throw new BindingError(`The plan must carry exactly ${count} unsigned signing request(s); name the fee recipient and re-plan.`);
+  return plan.signingRequests.map((request) => {
+    if (request.chainId !== 43114 || request.to !== null || String(request.value) !== "0") throw new BindingError("A signing request must be a zero-value contract creation on chain 43114.");
+    return requestBindingFields(request);
+  });
+}
 
 const lower = (value) => (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value) ? value.toLowerCase() : value);
 
@@ -15,7 +36,7 @@ const lower = (value) => (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(v
 export const BINDERS = Object.freeze({
   "release-per-contract-mainnet": (plan) => {
     if (plan.mode !== "DRY_RUN" || plan.network !== "mainnet" || plan.chainId !== 43114) throw new BindingError("Not a C-Chain mainnet dry-run plan.");
-    if (plan.readyToBroadcast !== true) throw new BindingError("The dry-run plan is not ready to broadcast.");
+    if (plan.readyToBroadcast !== true) throw new BindingError("The dry-run plan is not ready to sign (see its checks: funding, nonce, pending transactions, empty addresses).");
     return {
       chainId: plan.chainId,
       deployer: lower(plan.deployer?.address),
@@ -30,6 +51,7 @@ export const BINDERS = Object.freeze({
         predictedAddress: lower(tx.predictedAddress), predictedImplementation: lower(tx.predictedImplementation ?? null),
       })),
       constructorArgsEncoded: plan.constructorArgsEncoded,
+      signingRequests: consistent(signingRequests(plan, 2), (plan.transactions || []).map((tx) => ({ from: plan.deployer?.address, nonce: tx.nonce, predictedAddress: tx.predictedAddress }))),
     };
   },
   "genesis-claim-mainnet": (plan) => {
@@ -44,6 +66,8 @@ export const BINDERS = Object.freeze({
       supply: plan.supply,
       roles: { admin: lower(plan.roles?.admin), signer: lower(plan.roles?.signer) },
       eligibilityRule: plan.eligibility?.rule,
+      signingRequests: consistent(signingRequests(plan, 1), [{ from: plan.deployer, nonce: plan.deployerNonce, predictedAddress: plan.predictedClaimAddress }]),
+      issuerGrantFrom: lower(plan.followUps?.issuerGrant?.from),
     };
   },
 });

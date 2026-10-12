@@ -168,7 +168,7 @@ After the run, the deployer nonce is 71 (latest and pending) and the balance is 
 - **Passing this gate does not make mainnet ready.** The other steps in `deploy/mainnet/README.md`
   remain open:
   - owner approval of the royalty-contract review decision (Cursor CONDITIONAL PASS, scoped exception);
-  - the deployer-authority re-review;
+  - the deployer-authority open item O1 (copies of the deployer key outside Rabby; `DEPLOYMENT-AUTHORITY.md`);
   - the Nano S Plus address confirmed on the device screen;
   - deployer funding (0 AVAX at the last C-Chain dry run);
   - the owner's broadcast authorization.

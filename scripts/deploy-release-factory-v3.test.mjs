@@ -8,7 +8,7 @@ const KEY = `0x${"11".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
 const TREASURY = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
 const FUJI = { DEPLOY_NETWORK: "fuji", AVALANCHE_FUJI_RPC_URL: "https://api.avax-test.network/ext/bc/C/rpc", DEPLOYER_PRIVATE_KEY: KEY, BROADCAST_DEPLOYMENT: "no" };
-const MAINNET = { DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", DEPLOYER_PRIVATE_KEY: KEY, RELEASE_PLATFORM_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", BROADCAST_DEPLOYMENT: "no" };
+const MAINNET = { DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, RELEASE_PLATFORM_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a", BROADCAST_DEPLOYMENT: "no" };
 const v5Runtime = `0x${V5_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
 // getNetwork() always claims Fuji, like a staticNetwork provider; only eth_chainId reflects the node.
 const NONCE = 61;
@@ -56,7 +56,9 @@ describe("Factory V3 deployment preflight", () => {
     expect(() => validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes" })).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
     expect(() => validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: TREASURY })).toThrow(/does not belong/);
     expect(validateDeploymentEnv({ ...FUJI, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "61" }).broadcast).toBe(true);
-    expect(() => validateDeploymentEnv({ ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER })).toThrow(/CONFIRM_MAINNET_DEPLOY/);
+    // Mainnet never reads a key or broadcasts from this script; the owner signs mainnet in Rabby.
+    expect(() => validateDeploymentEnv({ ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes" })).toThrow(/signed by the owner in Rabby/);
+    expect(() => validateDeploymentEnv({ ...MAINNET, DEPLOYER_PRIVATE_KEY: KEY })).toThrow(/never reads a mainnet key/);
   });
 
   it("requires owner-named mainnet fee recipients and keeps the Fuji treasury fixed", () => {

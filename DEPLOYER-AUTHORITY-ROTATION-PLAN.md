@@ -12,11 +12,12 @@
 - PR #142 is not merged.
 - The Fuji archive/reconciliation gate still stands, and nothing here claims mainnet readiness.
 
-> **Update:** `deploy-release-v2-mainnet.yml` is removed. Every remaining workflow exposes
-> its deployer key only to its signing step. Mainnet broadcasts wait for the `mainnet-deployment`
-> environment and sign only with its environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`.
-> `DEPLOYER_PRIVATE_KEY` remains the Fuji key. See `deploy/mainnet/DEPLOYMENT-AUTHORITY.md`. The tables below
-> describe the state on 2026-10-09.
+> **Update:** `deploy-release-v2-mainnet.yml` is removed. Mainnet is never signed by a workflow:
+> the owner signs every mainnet deployment in Rabby with this same address, on their own machine, and
+> no mainnet key exists in GitHub, CI or any cloud service (`deploy/mainnet/OWNER-SIGNING.md`). Fuji
+> workflows still sign with the repository secret `DEPLOYER_PRIVATE_KEY`, only in their signing steps;
+> whether to remove that copy is the owner's open decision O1 in `deploy/mainnet/DEPLOYMENT-AUTHORITY.md`.
+> The tables below describe the state on 2026-10-09.
 
 **Subject (old authority):** `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`. This is the Fuji deployer and the cron key.
 

@@ -45,8 +45,10 @@ export function resolveMarketplaceConfig(env = process.env) {
     throw new DeploymentError(`Fuji canonical token must be ${target.canonicalToken}.`);
   }
 
-  if (network === "mainnet" && env.CONFIRM_MAINNET_DEPLOY !== "yes") {
-    throw new DeploymentError("Mainnet deployment requires CONFIRM_MAINNET_DEPLOY=yes.");
+  // The legacy MusicMarketplace signs with a key from the environment; that is never allowed for
+  // mainnet. Mainnet uses ReleaseMarketplaceV4, signed by the owner in Rabby (deploy/mainnet/OWNER-SIGNING.md).
+  if (network === "mainnet") {
+    throw new DeploymentError("The legacy MusicMarketplace is never deployed to mainnet from this script. Mainnet deployments are signed by the owner in Rabby.");
   }
 
   return {
