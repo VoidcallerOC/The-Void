@@ -66,52 +66,67 @@ is a separate treasury operation, outside the launch.
 
 ## Procedure: release infrastructure (factory, then marketplace)
 
-Prerequisites:
-- a clean checkout of the reviewed commit on `main`;
-- `npm ci`;
-- Foundry v1.3.1 and `forge build`;
-- Rabby in your browser, with the deployer account;
-- the deployer funded on C-Chain (the plan reports the amount).
+### Quick start from a clean checkout (the entry point)
 
-1. Read the fee recipient on the Nano S Plus screen (view only; the device signs nothing). It must be
-   `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`.
-2. Plan:
-   - **In GitHub:** Actions → *Plan release-per-contract infrastructure for C-Chain mainnet*, with:
-     - `expected_deployer_address` left at the default;
-     - `expected_deployer_nonce=0`;
-     - `platform_recipient=0xb65C…1ce4`.
+On your own machine, in the browser profile where Rabby holds the deployer:
 
-     Download the run's `plan.json` and `plan-binding.json`.
-   - **Or locally:**
-     ```
-     DEPLOY_NETWORK=mainnet EXPECTED_DEPLOYER_ADDRESS=0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174 \
-     EXPECTED_DEPLOYER_NONCE=0 RELEASE_PLATFORM_RECIPIENT=0xb65C575CaE01574296Fab6E620B9A15cC0121ce4 \
-     PLAN_OUTPUT_PATH=plan.json npm run deploy:release-per-contract:mainnet -- --dry-run
-     node scripts/deployment-plan-binding.mjs bind --kind release-per-contract-mainnet \
-       --plan plan.json --commit "$(git rev-parse HEAD)" --out plan-binding.json
-     ```
-3. Review the plan:
-   - every check is PASS, except the two recipient checks, which stay UNVERIFIED until step 4;
-   - the predicted factory is `0x262B…757b`, the implementation `0x8064…9006` and the marketplace
-     `0x0e77…F8f5` at nonces 0 and 1.
-4. Start the signing page:
+1. **Get the code and build it.**
    ```
-   npm run sign:mainnet -- --kind release-per-contract-mainnet --plan plan.json \
-     --binding plan-binding.json --recipient-verified-on-device <address you read on the Nano>
+   git clone https://github.com/VoidcallerOC/The-Void.git && cd The-Void
+   git checkout main && git pull
+   npm ci
+   foundryup --install v1.3.1      # Foundry v1.3.1, the version CI pins
+   forge build
    ```
-   Open the printed `http://127.0.0.1:…` link in the browser where Rabby is installed.
-5. **Connect Rabby.** Rabby must be on the deployer account and Avalanche C-Chain.
-6. **Step 1: factory.** Tick the review box. Send to Rabby. In Rabby, check:
-   - it is a **contract deployment**;
-   - from `0xaBd3…c174`;
-   - on Avalanche C-Chain;
-   - nonce 0;
-   - value 0.
+2. **Start the tool.**
+   ```
+   npm run owner:deploy
+   ```
+   It plans from the live chain without any key, for the defined deployer at its current nonce, with
+   the recorded fee recipient. It prints the next action and a link such as
+   `http://127.0.0.1:53817/s/<random>/`. Open that link. The HTML file cannot be opened directly;
+   without the tool it only shows how to start.
+3. **Follow the page.** The banner at the top always shows the stage and the single next action.
+   - **Stage: planning.** The page lists every plan check with PASS, FAIL or UNVERIFIED and its
+     reason. Nothing can be signed in this stage.
+     - If the deployer is unfunded, the next action names the exact minimum in AVAX. Fund the
+       deployer `0xaBd3…c174` on Avalanche C-Chain, then press **Re-check from the chain**.
+     - When every check passes, read the fee recipient on the Nano S Plus screen (view only; the
+       device signs nothing). Type it into the page, review the planned contracts and the two steps,
+       and press **Approve plan**. That binds this exact plan to the commit and saves `plan.json` and
+       `plan-binding.json` under `.owner-signing/`.
+   - **Stage: signing.**
+     1. Press **Connect Rabby**.
+     2. Before the first real signature, do the [Rabby check](#before-the-first-real-signature-rabby-check-sends-nothing) once.
+     3. **Step 1: factory.** Tick the review box and send it to Rabby. In Rabby, check:
+        - it is a **contract deployment**;
+        - from `0xaBd3…c174`;
+        - on Avalanche C-Chain;
+        - nonce 0;
+        - value 0.
 
-   Then approve. Wait for **verified**.
-7. **Step 2: marketplace.** The same, at nonce 1.
-8. Commit the written `deployments/release-per-contract-mainnet-<factory>.json` and fill
+        Then approve. Wait for **verified**.
+     4. **Step 2: marketplace.** The same, at nonce 1.
+4. **Record.** Commit the written `deployments/release-per-contract-mainnet-<factory>.json` and fill
    `config/mainnet-release-per-contract.json` in a record PR (README step 7).
+
+Expected plan: factory `0x262B…757b`, implementation `0x8064…9006` and marketplace `0x0e77…F8f5`, at
+nonces 0 and 1.
+
+### Alternative: a plan made in GitHub
+
+Actions → *Plan release-per-contract infrastructure for C-Chain mainnet*, with:
+- `expected_deployer_address` left at the default;
+- `expected_deployer_nonce=0`;
+- `platform_recipient=0xb65C…1ce4`.
+
+The run uploads `plan.json` and `plan-binding.json` once the plan is ready (funded). Then, on the same
+commit, after `forge build`:
+```
+npm run sign:mainnet -- --kind release-per-contract-mainnet --plan plan.json \
+  --binding plan-binding.json --recipient-verified-on-device <address you read on the Nano>
+```
+The page then starts directly in the signing stage.
 
 If you reject in Rabby, nothing is signed and the step can be offered again. If the page loses track
 after Rabby submitted, paste the hash from Rabby's history into the step. If verification fails, stop
@@ -120,10 +135,12 @@ and review: nothing further is offered.
 ## Before the first real signature: Rabby check (sends nothing)
 
 The page has been rehearsed only with a stand-in wallet. Do this check once with the real Rabby
-before approving anything. It needs a ready plan, so the deployer must already be funded (step 5 of
-the runbook).
+before approving anything in Rabby.
 
-1. Start the session (procedure step 4), open the link and click **Connect Rabby**.
+- **Part 1 (connection) works before funding.** Run it in the planning stage.
+- **Part 2 (the transaction preview)** needs the approved plan, so the deployer must be funded.
+
+1. Run `npm run owner:deploy`, open the link and click **Connect Rabby**.
    - **Pass:** Rabby asks to connect this site, and the page shows
      `Connected: Rabby, deployer 0xaBd3…c174, Avalanche C-Chain`.
    - **Fail:** *Rabby was not detected* (Rabby does not inject into `127.0.0.1`), or the wrong account
@@ -179,10 +196,16 @@ Only after this check passes, run step 1 for real.
 
    The plan refuses a release the artist wallet does not own and administer, and a release where the
    deployer or the fee recipient holds admin.
-3. Start the signing page and sign the single step in Rabby:
+3. Start the tool with the claim's inputs, approve the plan on the page, and sign the single step in Rabby:
    ```
-   npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding plan-binding.json
+   npm run owner:deploy -- --kind genesis-claim-mainnet \
+     --input GENESIS_CLAIM_RELEASE_CONTRACT=<release> --input GENESIS_CLAIM_PRIMARY_SALE=<sale> \
+     --input GENESIS_CLAIM_TOKEN_ID=<token> --input GENESIS_CLAIM_START=<T> \
+     --input GENESIS_PUBLIC_PRICE_WEI=250000000000000000 \
+     --input GENESIS_CLAIM_ADMIN=<admin> --input GENESIS_CLAIM_SIGNER_ADDRESS=<signer public address>
    ```
+   Or, with a plan made in GitHub:
+   `npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding plan-binding.json`.
 4. **Separate artist operation.** The plan's `followUps.issuerGrant` is the `grantRole(ISSUER_ROLE,
    <claim>)` call, prepared for the account that holds the authority: the release's `DEFAULT_ADMIN_ROLE`
    holder, verified on chain to be the artist wallet. The artist signs it in the artist wallet's own

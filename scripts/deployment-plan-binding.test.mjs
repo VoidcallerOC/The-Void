@@ -66,6 +66,9 @@ describe("deployment plan binding", () => {
     expect(() => verifyBinding(approved, "genesis-claim-mainnet", genesisPlan(), COMMIT)).toThrow(/approved binding is for/);
     expect(() => bindPlan("release-per-contract-mainnet", releasePlan({ chainId: 43113, network: "fuji" }), COMMIT)).toThrow(BindingError);
     expect(() => bindPlan("release-per-contract-mainnet", releasePlan({ readyToBroadcast: false }), COMMIT)).toThrow(/not ready/);
+    // The refusal names what blocks signing, so the operator knows to fund the deployer.
+    const unfunded = releasePlan({ readyToBroadcast: false, checks: [{ check: "chainId", status: "PASS" }, { check: "deployer funded with 50% headroom", status: "FAIL", value: { balanceAvax: "0.0", requiredAvax: "0.106" } }] });
+    expect(() => bindPlan("release-per-contract-mainnet", unfunded, COMMIT)).toThrow(/Failing: deployer funded with 50% headroom \{"balanceAvax":"0.0","requiredAvax":"0.106"\}/);
     expect(() => bindPlan("release-per-contract-mainnet", releasePlan(), "main")).toThrow(/commit SHA/);
     expect(() => bindPlan("unknown", releasePlan(), COMMIT)).toThrow(/Unknown plan kind/);
   });

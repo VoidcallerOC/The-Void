@@ -27,18 +27,23 @@
 <body>
 <main>
   <h1 id="title">The Void mainnet signing</h1>
-  <p class="muted">Each transaction below was planned without any private key and matched to the approved plan binding.
-  Rabby asks you to approve each one with the deployer. The key never leaves Rabby. Nothing is sent until you approve in Rabby.</p>
+  <p class="muted">Each transaction below is planned without any private key. You approve the plan here, then each transaction
+  in Rabby with the deployer. The key never leaves Rabby. Nothing is sent until you approve in Rabby.</p>
+
+  <div class="box" id="next"><span class="muted">Loading…</span></div>
 
   <div class="box" id="session">Loading the session…</div>
 
-  <h2>1. Connect Rabby</h2>
+  <h2>1. Plan: checks and approval</h2>
+  <div class="box" id="plan"></div>
+
+  <h2>2. Connect Rabby</h2>
   <div class="box">
     <p id="wallet" class="muted">Not connected.</p>
     <button id="connect">Connect Rabby</button>
   </div>
 
-  <h2>2. Review and sign, one step at a time</h2>
+  <h2>3. Review and sign, one step at a time</h2>
   <div id="steps"></div>
 
   <h2>Result</h2>
@@ -82,14 +87,38 @@ async function walletState() {
   return { account: accounts[0] || null, chainId: Number(BigInt(chainId)) };
 }
 
+const NO_SESSION = `<p class="bad">This page has no signing session.</p>
+  <p>It works only when served by the signing tool. From a clean checkout of <code>main</code> (see <code>deploy/mainnet/OWNER-SIGNING.md</code>):</p>
+  <pre><code>npm ci
+forge build
+npm run owner:deploy</code></pre>
+  <p>Then open the <code>http://127.0.0.1:…</code> link it prints, in the browser where Rabby holds the deployer. Opening this file directly cannot work.</p>`;
+
+function renderPlan() {
+  const checks = session.checks.map((c) => `<tr><td class="${c.status === "PASS" ? "ok" : c.status === "UNVERIFIED" ? "warn" : "bad"}">${esc(c.status)}</td><td>${esc(c.check)}${c.value !== null ? ` <code>${esc(typeof c.value === "object" ? JSON.stringify(c.value) : c.value)}</code>` : ""}${c.reason ? `<br><span class="muted">${esc(c.reason)}</span>` : ""}</td></tr>`).join("");
+  if (session.phase === "signing") {
+    $("plan").innerHTML = `<p class="ok">Plan approved and bound to commit <code>${esc(session.commit.slice(0, 12))}</code>, binding <code>${esc(session.digest)}</code>.</p>
+      ${session.planFiles ? `<p class="muted">Saved for the record and for <code>--resume</code>: <code>${esc(session.planFiles.plan)}</code>, <code>${esc(session.planFiles.binding)}</code></p>` : ""}`;
+    return;
+  }
+  const typed = $("device") ? $("device").value : "";
+  $("plan").innerHTML = `${session.planError ? `<p class="bad">${esc(session.planError)}</p>` : ""}
+    ${checks ? `<table>${checks}</table>` : ""}
+    <p><button id="recheck">Re-check from the chain</button></p>
+    ${session.needsDeviceConfirmation ? `<p><label>Fee recipient exactly as the Nano S Plus screen shows it (view only; the device signs nothing):<br><input type="text" id="device" placeholder="0x…" value="${esc(typed)}"></label></p>` : ""}
+    <p><button id="approve" ${session.readyToApprove ? "" : "disabled"}>Approve plan</button> <span class="muted">${session.readyToApprove ? "Binds this exact plan to the commit; then the steps below can be sent to Rabby." : "Available once every check passes."}</span></p>`;
+}
+
 function renderSession() {
   $("title").textContent = session.title;
+  $("next").innerHTML = `<p class="status">${session.phase === "planning" ? "Stage: planning (nothing can be signed yet)" : session.record ? "Stage: complete" : "Stage: signing"}</p><p><strong>Next:</strong> ${esc(session.nextAction)}</p>`;
+  renderPlan();
   $("session").innerHTML = `<table>
     <tr><td>Chain</td><td>Avalanche C-Chain (${session.chainId})</td></tr>
     <tr><td>Deployer (Rabby)</td><td><code>${esc(session.deployer)}</code></td></tr>
     <tr><td>Fee recipient</td><td><code>${esc(session.feeRecipient)}</code> <span class="muted">(passive; signs nothing)</span></td></tr>
     <tr><td>Reviewed commit</td><td><code>${esc(session.commit)}</code></td></tr>
-    <tr><td>Plan binding</td><td><code>${esc(session.digest)}</code></td></tr>
+    <tr><td>Plan binding</td><td><code>${esc(session.digest || "not approved yet")}</code></td></tr>
   </table>
   <details><summary>Planned contracts and constructor arguments</summary><pre><code>${esc(JSON.stringify(session.contracts, null, 2))}</code></pre></details>`;
   $("steps").innerHTML = session.steps.map((step) => {
@@ -126,6 +155,7 @@ async function refresh() {
 }
 
 async function connect() {
+  if (!session) { $("wallet").innerHTML = NO_SESSION; return; }
   rabby = findRabby();
   if (!rabby) { $("wallet").innerHTML = `<span class="bad">Rabby was not detected. Install or unlock the Rabby extension in this browser profile, then reload. Other wallets are not used.</span>`; return; }
   const accounts = await rabby.request({ method: "eth_requestAccounts" });
@@ -192,7 +222,20 @@ $("steps").addEventListener("click", (event) => {
   if (signButton) { signButton.disabled = true; sign(Number(signButton.dataset.sign)).catch(async (error) => { alert(error.message || error); await refresh(); }); }
   if (hashButton) { const n = Number(hashButton.dataset.hash); submit(n, $(`hash-${n}`).value.trim()).catch(async (error) => { alert(error.message || error); await refresh(); }); }
 });
-refresh().catch((error) => { $("session").innerHTML = `<span class="bad">${esc(error.message || error)}</span>`; });
+$("plan").addEventListener("click", (event) => {
+  const report = async (error) => { alert(error.message || error); await refresh(); };
+  if (event.target.id === "recheck") { event.target.disabled = true; api("recheck", {}).then(refresh).catch(report); }
+  if (event.target.id === "approve") {
+    event.target.disabled = true;
+    const device = $("device") ? $("device").value.trim() : undefined;
+    api("approve", { recipientVerifiedOnDevice: device }).then(refresh).catch(report);
+  }
+});
+refresh().catch(() => {
+  session = null;
+  $("next").innerHTML = `<p class="status bad">No signing session</p>`;
+  $("session").innerHTML = NO_SESSION;
+});
 </script>
 </body>
 </html>
