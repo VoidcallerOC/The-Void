@@ -1,0 +1,106 @@
+name: Deploy release-per-contract infrastructure to C-Chain mainnet
+
+# VoidReleaseFactoryV2 + ReleaseMarketplaceV3 on Avalanche C-Chain (43114), the architecture
+# validated on Fuji. The default path is a read-only dry run that needs no private key. A broadcast
+# needs every typed confirmation below; both contracts are ownerless and their fee recipient and
+# fee rate are immutable once mined.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_deployer_address:
+        description: Deployer address (0x...) the owner reviewed.
+        required: true
+        type: string
+      expected_deployer_nonce:
+        description: Deployer nonce from the reviewed dry run (the predicted addresses depend on it). Required for a broadcast.
+        required: false
+        type: string
+        default: ""
+      platform_recipient:
+        description: Primary and marketplace fee recipient. The physically verified Nano S Plus address only.
+        required: false
+        type: string
+        default: ""
+      recipient_verified_on_device:
+        description: Re-type the recipient exactly as read from the hardware wallet screen. Required for a broadcast.
+        required: false
+        type: string
+        default: ""
+      broadcast_deployment:
+        description: Set true only for the separately approved mainnet broadcast.
+        required: true
+        type: boolean
+        default: false
+      confirm_mainnet_deploy:
+        description: Type I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY only for the approved broadcast.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: void-release-per-contract-mainnet-deployment
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: mainnet
+  AVALANCHE_MAINNET_RPC_URL: ${{ secrets.AVALANCHE_MAINNET_RPC_URL }}
+  # The key is exposed to the job only for an approved broadcast; the dry run plans from the address.
+  DEPLOYER_PRIVATE_KEY: ${{ inputs.broadcast_deployment && secrets.DEPLOYER_PRIVATE_KEY || '' }}
+  EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
+  EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
+  RELEASE_PLATFORM_RECIPIENT: ${{ inputs.platform_recipient }}
+  RECIPIENT_VERIFIED_ON_DEVICE: ${{ inputs.recipient_verified_on_device }}
+  RELEASE_PLATFORM_FEE_BPS: "250"
+  RELEASE_MARKETPLACE_FEE_BPS: "250"
+  BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
+  CONFIRM_MAINNET_DEPLOY: ${{ inputs.confirm_mainnet_deploy == 'I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY' && 'yes' || 'no' }}
+
+jobs:
+  deploy:
+    name: Plan (and, only when approved, broadcast) the C-Chain deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build reviewed artifacts
+        run: forge build
+
+      - name: Run deployment workflow tests
+        run: npm test -- scripts/deploy-release-per-contract-mainnet.test.mjs scripts/deploy-release-per-contract-fuji.test.mjs
+
+      - name: Plan or broadcast
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
+            test "${CONFIRM_MAINNET_DEPLOY}" = "yes"
+            npm run deploy:release-per-contract:mainnet | tee deployment-output.log
+          else
+            npm run deploy:release-per-contract:mainnet -- --dry-run | tee deployment-output.log
+          fi
+
+      - name: Preserve deployment output and record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-per-contract-mainnet-${{ github.run_id }}
+          path: |
+            deployment-output.log
+            deployments/release-per-contract-mainnet-*.json
+          if-no-files-found: ignore

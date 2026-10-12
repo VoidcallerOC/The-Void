@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd ../.. && npm ci",
+  "buildCommand": "cd ../.. && VITE_RELEASE_NETWORK=mainnet npx vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
+  "outputDirectory": "dist",
+  "routes": [
+    { "src": "/assets/audio(?:/.*)?", "status": 404 },
+    { "src": "/assets/audio-preview/(?!.*-preview\\.mp3$).*", "status": 404 }
+  ],
+  "rewrites": [
+    { "source": "/assets/marketplace-heroes/:file", "destination": "https://the-void-api-mainnet.onrender.com/api/marketplace/heroes/:file" },
+    { "source": "/assets/artist-portfolio/:file", "destination": "https://the-void-api-mainnet.onrender.com/api/artists/portfolio/:file" },
+    { "source": "/api/:path*", "destination": "https://the-void-api-mainnet.onrender.com/api/:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/fonts/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+# The-Void Avalanche C-Chain (43114) runtime. A separate Render Blueprint (Blueprint path:
+# deploy/mainnet/render.mainnet.yaml), isolated from the Fuji services in render.yaml.
+# - Database: a NEW dedicated The-Void mainnet Supabase project. Never the Fuji database: the
+#   indexer lease, listings, ownership and auth sessions are per database.
+# - Both services deploy manually (autoDeployTrigger: off); merges to main never redeploy mainnet.
+# - The indexer is created only after the factory and marketplace are mined and recorded in
+#   config/mainnet-release-per-contract.json; its contract list comes from that manifest.
+# - Genesis claims stay disabled here; they are a separate launch phase.
+# Values marked sync: false are entered in the Render dashboard, never committed.
+
+services:
+  - type: web
+    name: the-void-api-mainnet
+    runtime: docker
+    plan: 0.5c-512mb
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8787"
+      - key: RELEASE_NETWORK
+        value: mainnet
+      - key: AUTH_ALLOWED_CHAIN_IDS
+        value: "43114"
+      # The dedicated mainnet Supabase connection string (session pooler, SSL).
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_POOL_MAX
+        value: "10"
+      - key: DATABASE_POOL_IDLE_TIMEOUT_MS
+        value: "30000"
+      - key: DATABASE_POOL_CONNECTION_TIMEOUT_MS
+        value: "5000"
+      # The mainnet web origin (the new Vercel mainnet project's domain). AUTH_* must share its host.
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: API_ALLOWED_ORIGINS
+        sync: false
+      - key: AUTH_DOMAIN
+        sync: false
+      - key: AUTH_URI
+        sync: false
+      - key: X_API_KEY
+        sync: false
+      - key: X_API_SECRET
+        sync: false
+      - key: X_ACCESS_TOKEN
+        sync: false
+      - key: X_ACCESS_TOKEN_SECRET
+        sync: false
+      - key: X_DM_RECIPIENT_USERNAME
+        value: voidcallerOC
+      - key: METADATA_STORAGE_DRIVER
+        value: pinata
+      - key: PINATA_JWT
+        sync: false
+      - key: MEDIA_STORAGE_DRIVER
+        value: pinata
+      - key: PINATA_GATEWAY_URL
+        value: https://fuchsia-labour-butterfly-445.mypinata.cloud
+      - key: MEDIA_OBJECT_URL_HOSTS
+        value: fuchsia-labour-butterfly-445.mypinata.cloud
+      # A new secret for mainnet; do not reuse the Fuji value.
+      - key: MEDIA_AUDIT_HASH_SECRET
+        sync: false
+      - key: MEDIA_GRANT_TTL_SECONDS
+        value: "300"
+      - key: MEDIA_SIGNED_URL_TTL_SECONDS
+        value: "60"
+      - key: MEDIA_MAX_BYTES
+        value: "104857600"
+      # C-Chain reads (ownership, publication receipts, legacy Voidcaller collection).
+      - key: INDEXER_RPC_URL
+        value: https://api.avax.network/ext/bc/C/rpc
+      - key: INDEXER_CHAIN_ID
+        value: "43114"
+      - key: INDEXER_CONFIRMATIONS
+        value: "12"
+      - key: INDEXER_POLL_INTERVAL_MS
+        value: "15000"
+      - key: MAINNET_RPC_URL
+        value: https://api.avax.network/ext/bc/C/rpc
+      - key: MARKETPLACE_CHAIN_ID
+        value: "43114"
+      # The mined ReleaseMarketplaceV3 address, entered only after the recorded deployment.
+      - key: MARKETPLACE_ADDRESS
+        sync: false
+      - key: GENESIS_CLAIM_ENABLED
+        value: "false"
+
+  - type: worker
+    name: the-void-indexer-mainnet
+    runtime: docker
+    plan: 0.5c-512mb
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: npm run start:indexer
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RELEASE_NETWORK
+        value: mainnet
+      # The same dedicated mainnet Supabase connection string as the API.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_POOL_MAX
+        value: "10"
+      - key: DATABASE_POOL_IDLE_TIMEOUT_MS
+        value: "30000"
+      - key: DATABASE_POOL_CONNECTION_TIMEOUT_MS
+        value: "5000"
+      - key: INDEXER_RPC_URL
+        value: https://api.avax.network/ext/bc/C/rpc
+      - key: INDEXER_CHAIN_ID
+        value: "43114"
+      - key: INDEXER_CONFIRMATIONS
+        value: "12"
+      - key: INDEXER_POLL_INTERVAL_MS
+        value: "15000"
+      # The mined factory (RELEASE_FACTORY) and marketplace (MARKETPLACE) with their deployment
+      # blocks; see deploy/mainnet/README.md. The recorded manifest is also injected automatically.
+      - key: INDEXER_CONTRACTS_JSON
+        sync: false
+      - key: MARKETPLACE_CHAIN_ID
+        value: "43114"
+      - key: MARKETPLACE_ADDRESS
+        sync: false
