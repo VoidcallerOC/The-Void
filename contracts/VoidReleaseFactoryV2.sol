@@ -46,7 +46,13 @@ contract VoidReleaseFactoryV2 {
     constructor(address platformRecipient_) {
         if (platformRecipient_ == address(0)) revert InvalidAddress();
         platformRecipient = platformRecipient_;
-        implementation = address(new VoidRelease1155V4());
+        implementation = _deployImplementation(platformRecipient_);
+    }
+
+    /// @dev Creates the clone implementation once, at construction. A subclass may deploy a
+    /// stricter VoidRelease1155V4 (see VoidReleaseFactoryV2Royalty); this factory deploys V4.
+    function _deployImplementation(address) internal virtual returns (address) {
+        return address(new VoidRelease1155V4());
     }
 
     /// @notice Creates the complete per-release infrastructure from the artist's wallet.

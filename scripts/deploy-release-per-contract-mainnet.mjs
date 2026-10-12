@@ -2,21 +2,32 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { AbiCoder, ContractFactory, JsonRpcProvider, Wallet, formatEther, getAddress, getCreateAddress, isAddress, keccak256 } from "ethers";
+import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, Wallet, formatEther, getAddress, getCreateAddress, id, isAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
 
-// C-Chain deployment of the release-per-contract architecture validated on Fuji: VoidReleaseFactoryV2
-// (which creates the VoidRelease1155V4 clone implementation in its constructor) followed by
-// ReleaseMarketplaceV3 bound to that factory. Both contracts are ownerless and their fee recipients
+// C-Chain deployment of the release-per-contract architecture validated on Fuji, with the artist
+// royalty enforced on chain: VoidReleaseFactoryV2Royalty (VoidReleaseFactoryV2 whose constructor
+// creates the VoidRelease1155V4Royalty clone implementation: every edition pays exactly 2.5% to an
+// artist wallet of its release, never to the fee recipient) followed by ReleaseMarketplaceV4 (V3 that
+// independently enforces the same royalty at listing and settlement). Both are ownerless and their fee recipients
 // and fee rates are immutable, so the recipient must be the owner's physically verified address.
 // The default path is a read-only dry run; nothing is signed or sent without every broadcast gate.
 export const MAINNET_CHAIN_ID = 43114;
 export const FEE_BPS = 250;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const FACTORY_ARTIFACT_PATH = "out/VoidReleaseFactoryV2.sol/VoidReleaseFactoryV2.json";
-export const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV3.sol/ReleaseMarketplaceV3.json";
-export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4.sol/VoidRelease1155V4.json";
+export const FACTORY_ARTIFACT_PATH = "out/VoidReleaseFactoryV2Royalty.sol/VoidReleaseFactoryV2Royalty.json";
+export const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV4.sol/ReleaseMarketplaceV4.json";
+export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4Royalty.sol/VoidRelease1155V4Royalty.json";
+export const ROYALTY_BPS = 250;
+// Runtime-bytecode markers of the royalty lock (Solidity dispatch PUSH4 of each selector).
+const IMPLEMENTATION_ROYALTY_SIGNATURES = Object.freeze(["REQUIRED_ROYALTY_BPS()", "platformFeeRecipient()"]);
+const MARKETPLACE_ROYALTY_SIGNATURES = Object.freeze(["REQUIRED_ROYALTY_BPS()", "REQUIRED_PLATFORM_FEE_BPS()"]);
+export function missingSelectors(runtimeBytecode, signatures) {
+  const code = String(runtimeBytecode || "").toLowerCase();
+  return signatures.filter((signature) => !code.includes(`63${id(signature).slice(2, 10)}`));
+}
+const ROYALTY_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const ZERO = "0x0000000000000000000000000000000000000000";
 // The single passive platform fee recipient (the owner's Nano S Plus) is recorded in the mainnet
@@ -116,6 +127,10 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
   if (network.chainId !== BigInt(MAINNET_CHAIN_ID)) throw new DeploymentError(`Refusing chain ${network.chainId}. Expected Avalanche C-Chain ${MAINNET_CHAIN_ID}.`);
   const [factoryArtifact, marketplaceArtifact, implementationArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(MARKETPLACE_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH)]);
   const missingAlbum = missingAlbumSelectors(implementationArtifact.deployedBytecode?.object);
+  const missingRoyaltyLock = [
+    ...missingSelectors(implementationArtifact.deployedBytecode?.object, IMPLEMENTATION_ROYALTY_SIGNATURES).map((signature) => `implementation ${signature}`),
+    ...missingSelectors(marketplaceArtifact.deployedBytecode?.object, MARKETPLACE_ROYALTY_SIGNATURES).map((signature) => `marketplace ${signature}`),
+  ];
   const deployer = config.deployerAddress;
   const [nonce, pendingNonce, balance, deployerCode, feeData] = await Promise.all([
     provider.getTransactionCount(deployer, "latest"), provider.getTransactionCount(deployer, "pending"),
@@ -157,6 +172,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     { check: "nonce matches EXPECTED_DEPLOYER_NONCE", status: config.expectedNonce === null ? "NOT PROVIDED" : config.expectedNonce === nonce ? "PASS" : "FAIL", value: config.expectedNonce },
     { check: "predicted addresses are empty", status: [factoryCode, implementationCode, marketplaceCode].every((code) => code === "0x") ? "PASS" : "FAIL" },
     { check: "implementation artifact is album-capable", status: missingAlbum.length ? "FAIL" : "PASS", value: missingAlbum },
+    { check: "artifacts enforce the 2.5% artist royalty on chain", status: missingRoyaltyLock.length ? "FAIL" : "PASS", value: missingRoyaltyLock },
     { check: "deployer funded with 50% headroom", status: balance >= requiredBalance ? "PASS" : "FAIL", value: { balanceAvax: formatEther(balance), requiredAvax: formatEther(requiredBalance) } },
     ...recipientChecks.map((item) => ({ check: `${item.name} verified`, status: item.status, value: item.address || null, reason: item.reason })),
   ];
@@ -172,8 +188,8 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
       marketplace: { path: MARKETPLACE_ARTIFACT_PATH, initCodeHash: keccak256(marketplaceArtifact.bytecode.object) },
     },
     transactions: [
-      { step: 1, nonce, contract: "VoidReleaseFactoryV2", constructor: { platformRecipient: config.platformRecipient || PENDING }, sealedInBytecode: { PLATFORM_FEE_BPS: FEE_BPS, RELEASE_VERSION: 2 }, predictedAddress: factoryAddress, predictedImplementation: implementationAddress, estimatedGas: factoryGas.toString() },
-      { step: 2, nonce: nonce + 1, contract: "ReleaseMarketplaceV3", constructor: { feeRecipient: config.marketplaceFeeRecipient || PENDING, platformFeeBps: config.marketplaceFeeBps, releaseFactory: factoryAddress }, predictedAddress: marketplaceAddress, estimatedGas: marketplaceGas.toString() },
+      { step: 1, nonce, contract: "VoidReleaseFactoryV2Royalty", constructor: { platformRecipient: config.platformRecipient || PENDING }, sealedInBytecode: { PLATFORM_FEE_BPS: FEE_BPS, RELEASE_VERSION: 2, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, implementation: "VoidRelease1155V4Royalty (royalty locked to 250 bps to an artist wallet of the release; platformFeeRecipient forbidden)", predictedAddress: factoryAddress, predictedImplementation: implementationAddress, estimatedGas: factoryGas.toString() },
+      { step: 2, nonce: nonce + 1, contract: "ReleaseMarketplaceV4", sealedInBytecode: { REQUIRED_PLATFORM_FEE_BPS: FEE_BPS, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, constructor: { feeRecipient: config.marketplaceFeeRecipient || PENDING, platformFeeBps: config.marketplaceFeeBps, releaseFactory: factoryAddress }, predictedAddress: marketplaceAddress, estimatedGas: marketplaceGas.toString() },
     ],
     constructorArgsEncoded: config.platformRecipient ? {
       factory: coder.encode(["address"], [config.platformRecipient]),
@@ -221,22 +237,25 @@ export async function broadcastDeployment(config, provider, plan, {
   const implementationAddress = getAddress(await factory.contract.implementation());
   const [onChainRecipient, onChainFee, onChainVersion] = await Promise.all([factory.contract.platformRecipient(), factory.contract.PLATFORM_FEE_BPS(), factory.contract.RELEASE_VERSION()]);
   const missingOnChain = missingAlbumSelectors(await provider.getCode(implementationAddress));
-  if (getAddress(onChainRecipient) !== config.platformRecipient || Number(onChainFee) !== FEE_BPS || Number(onChainVersion) !== 2 || missingOnChain.length) {
-    log({ step: "FACTORY_STATE_MISMATCH", implementationAddress, onChainRecipient, onChainFee: String(onChainFee), onChainVersion: String(onChainVersion), missingOnChain });
+  const implementationViews = new Contract(implementationAddress, ROYALTY_VIEWS, provider);
+  const [factoryRoyalty, implementationRoyalty, implementationForbidden] = await Promise.all([factory.contract.REQUIRED_ROYALTY_BPS(), implementationViews.REQUIRED_ROYALTY_BPS(), implementationViews.platformFeeRecipient()]);
+  const royaltyLocked = Number(factoryRoyalty) === ROYALTY_BPS && Number(implementationRoyalty) === ROYALTY_BPS && getAddress(implementationForbidden) === config.platformRecipient;
+  if (getAddress(onChainRecipient) !== config.platformRecipient || Number(onChainFee) !== FEE_BPS || Number(onChainVersion) !== 2 || missingOnChain.length || !royaltyLocked) {
+    log({ step: "FACTORY_STATE_MISMATCH", implementationAddress, onChainRecipient, onChainFee: String(onChainFee), onChainVersion: String(onChainVersion), missingOnChain, royaltyLocked });
     throw new DeploymentError("The mined factory does not match the reviewed configuration. The marketplace was not deployed.");
   }
   const marketplace = await deploy(marketplaceArtifact, [config.marketplaceFeeRecipient, config.marketplaceFeeBps, factory.address], signer);
   log({ step: "MARKETPLACE_MINED", marketplaceAddress: marketplace.address, transaction: marketplace.receipt.hash, block: marketplace.receipt.blockNumber });
-  const [registry, feeRecipient, platformFeeBps, deploymentChainId] = await Promise.all([marketplace.contract.registry(), marketplace.contract.feeRecipient(), marketplace.contract.platformFeeBps(), marketplace.contract.deploymentChainId()]);
-  if (marketplace.address !== marketplaceStep.predictedAddress || getAddress(registry) !== factory.address || getAddress(feeRecipient) !== config.marketplaceFeeRecipient || Number(platformFeeBps) !== config.marketplaceFeeBps || Number(deploymentChainId) !== MAINNET_CHAIN_ID) {
+  const [registry, feeRecipient, platformFeeBps, deploymentChainId, marketplaceRoyalty] = await Promise.all([marketplace.contract.registry(), marketplace.contract.feeRecipient(), marketplace.contract.platformFeeBps(), marketplace.contract.deploymentChainId(), marketplace.contract.REQUIRED_ROYALTY_BPS()]);
+  if (marketplace.address !== marketplaceStep.predictedAddress || getAddress(registry) !== factory.address || getAddress(feeRecipient) !== config.marketplaceFeeRecipient || Number(platformFeeBps) !== config.marketplaceFeeBps || Number(deploymentChainId) !== MAINNET_CHAIN_ID || Number(marketplaceRoyalty) !== ROYALTY_BPS) {
     throw new DeploymentError("The mined marketplace does not match the reviewed configuration. Record the logged addresses before any further action.");
   }
   const record = {
     network: "mainnet",
     chainId: MAINNET_CHAIN_ID,
     architecture: "release-per-contract",
-    factory: { address: factory.address, deploymentTransaction: factory.receipt.hash, deploymentBlock: factory.receipt.blockNumber, implementationAddress, implementationVersion: 2, implementationAlbumCapable: true, sourceCommit: process.env.GITHUB_SHA || null, platformRecipient: config.platformRecipient, platformFeeBps: FEE_BPS },
-    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.receipt.hash, deploymentBlock: marketplace.receipt.blockNumber, chainId: MAINNET_CHAIN_ID, factoryAddress: factory.address, feeRecipient: config.marketplaceFeeRecipient, feeBps: config.marketplaceFeeBps },
+    factory: { address: factory.address, deploymentTransaction: factory.receipt.hash, deploymentBlock: factory.receipt.blockNumber, implementationAddress, implementation: "VoidRelease1155V4Royalty", implementationVersion: 2, implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: "VoidReleaseFactoryV2Royalty", sourceCommit: process.env.GITHUB_SHA || null, platformRecipient: config.platformRecipient, platformFeeBps: FEE_BPS },
+    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.receipt.hash, deploymentBlock: marketplace.receipt.blockNumber, chainId: MAINNET_CHAIN_ID, factoryAddress: factory.address, feeRecipient: config.marketplaceFeeRecipient, feeBps: config.marketplaceFeeBps, requiredRoyaltyBps: ROYALTY_BPS, contract: "ReleaseMarketplaceV4" },
   };
   const recordPath = deploymentRecordPath(factory.address);
   log({ step: "RECORD", path: recordPath, record });

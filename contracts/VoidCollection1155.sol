@@ -261,8 +261,10 @@ contract VoidCollection1155 {
         return interfaceId == 0x01ffc9a7 || interfaceId == 0xd9b67a26 || interfaceId == 0x0e89341c || interfaceId == 0x2a55205a;
     }
 
+    /// @dev Every edition-creating entry point (both createEdition overloads and every subclass
+    /// path that calls them) reaches this function, so royalty policy overrides belong here.
     function _createEdition(bytes32 releaseId, bytes32 editionId, uint256 maxSupply, string calldata metadataUri, address payout, uint96 royaltyBps)
-        internal returns (uint256 tokenId)
+        internal virtual returns (uint256 tokenId)
     {
         if (releaseId == bytes32(0) || editionId == bytes32(0)) revert InvalidIdentifier();
         // maxSupply 0 is an open edition; positive values retain the finite cap.
@@ -278,6 +280,7 @@ contract VoidCollection1155 {
         emit URI(metadataUri, tokenId);
     }
 
+    function _hasRole(bytes32 role, address account) internal view returns (bool) { return _roles[role][account]; }
     function _grantRole(bytes32 role, address account) internal { if (!_roles[role][account]) { _roles[role][account] = true; emit RoleGranted(role, account, msg.sender); } }
     function _revokeRole(bytes32 role, address account) internal { if (_roles[role][account]) { _roles[role][account] = false; emit RoleRevoked(role, account, msg.sender); } }
     function _mint(address to, uint256 tokenId, uint256 amount, bytes calldata data) internal {

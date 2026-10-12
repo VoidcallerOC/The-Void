@@ -13,12 +13,12 @@ Every **[APPROVAL]** step needs the owner's explicit approval of that action and
 | --- | --- | --- | --- |
 | Primary sale platform fee | 2.5% | Nano S Plus | `VoidReleaseFactoryV2.PLATFORM_FEE_BPS` (bytecode) → each release's `VoidPrimarySale`. Credited on every purchase; the owner collects with a Ledger-signed `withdraw()` on each sale contract |
 | Primary sale remainder | 97.5% | The edition's artist payout (`payoutOf`) | `VoidPrimarySale` (pull balance) |
-| Secondary marketplace fee | 2.5% | Nano S Plus | `ReleaseMarketplaceV3.platformFeeBps` (immutable), paid directly on every resale; no signature needed |
-| Secondary artist royalty | 2.5% | The edition's own artist payout (ERC-2981 `royaltyInfo`) | Fixed per edition at creation. On mainnet, Studio sends only 250 bps to the artist's wallet, and the API refuses to publish an edition whose `RoyaltyConfigured` event differs or names a platform fee wallet |
-| Seller proceeds | 95% | Seller | `ReleaseMarketplaceV3.buy` |
+| Secondary marketplace fee | 2.5% | Nano S Plus | `ReleaseMarketplaceV4` (constructor refuses any fee but 250 bps; immutable), paid directly on every resale; no signature needed |
+| Secondary artist royalty | 2.5% | The edition's own artist payout | **On chain:** `VoidRelease1155V4Royalty._createEdition`, reached by every creation path, refuses any royalty but 250 bps and any payout that is the fee recipient or lacks `ARTIST_ROLE` on that release. `ReleaseMarketplaceV4` independently refuses listings and settlements unless `royaltyBpsOf` is 250, `payoutOf` is non-zero and not the fee recipient, and ERC-2981 `royaltyInfo` agrees; it pays the royalty it computes itself. **Off chain (extra layers):** Studio, the encoders and API publication enforce the same rule |
+| Seller proceeds | 95% | Seller | `ReleaseMarketplaceV4.buy` |
 
 A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.95 to the seller
-(`test/MainnetEconomics.t.sol`, `server/mainnet-economics.test.js`).
+(`test/MainnetEconomics.t.sol`, `test/RoyaltyEnforcement.t.sol`, `server/mainnet-economics.test.js`).
 
 ## Roles (always separate)
 
@@ -35,15 +35,24 @@ than the recorded Nano, and the signer as the fee recipient, admin, artist or de
 
 ## Contracts and predicted addresses
 
-`VoidReleaseFactoryV2` + `ReleaseMarketplaceV3` is the release-per-contract architecture validated on
-Fuji. These are fresh deployments; no Fuji state or address is reused. The deployer's nonces fix
-the addresses, so **the V2 deployment must be the deployer's first two transactions**:
+Mainnet deploys the release-per-contract architecture validated on Fuji, with the artist royalty
+enforced on chain:
+
+- `VoidReleaseFactoryV2Royalty` is `VoidReleaseFactoryV2` with one difference: its clone
+  implementation is `VoidRelease1155V4Royalty`. That is `VoidRelease1155V4` plus the royalty rule.
+- `ReleaseMarketplaceV4` is `ReleaseMarketplaceV3` plus independent royalty and fee checks.
+
+The Fuji contracts (`VoidReleaseFactoryV2`, `VoidRelease1155V4`, `ReleaseMarketplaceV3`) keep
+identical runtime bytecode, and the deployed Fuji contracts are untouched. No mainnet contract
+exists yet, so nothing deployed needs replacing; these sources take effect at the first mainnet
+deployment. These are fresh deployments; no Fuji state or address is reused. The deployer's nonces
+fix the addresses, so **the V2 deployment must be the deployer's first two transactions**:
 
 | Nonce | Contract | Predicted address |
 | --- | --- | --- |
-| 0 | VoidReleaseFactoryV2 | `0x262B774cf9a1949170B58E2d57F6189980FE757b` |
-| (inside the factory) | VoidRelease1155V4 implementation | `0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006` |
-| 1 | ReleaseMarketplaceV3 | `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` |
+| 0 | VoidReleaseFactoryV2Royalty | `0x262B774cf9a1949170B58E2d57F6189980FE757b` |
+| (inside the factory) | VoidRelease1155V4Royalty implementation | `0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006` |
+| 1 | ReleaseMarketplaceV4 | `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` |
 | 2 | GenesisHolderClaim | predicted by its own dry run at step 11 |
 
 The factory address equals the Fuji legacy V1 release address, because it is the same deployer's
@@ -66,8 +75,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.
    - Every check must be PASS, except the funding check (until step 5) and the recipient check, which
      stays UNVERIFIED until the re-typed device confirmation at broadcast.
-5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.069 AVAX at 10 gwei; the fork run
-   used 0.029) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
+5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.071 AVAX at 10 gwei; the fork run
+   used 0.030) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
    C-Chain today) for creating the release, the edition, the sale and the `ISSUER_ROLE` grant.
 6. **[APPROVAL] Broadcast V2** with:
    - `expected_deployer_nonce=0`;
@@ -75,12 +84,17 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - `broadcast_deployment=true`;
    - `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY`.
 
-   The script checks the predicted addresses, `platformRecipient`, the 250 bps fees,
-   `RELEASE_VERSION`, the album selectors, and the marketplace `registry`, `feeRecipient` and
-   `deploymentChainId`. It stops before the marketplace if the factory differs.
+   The script checks:
+   - the predicted addresses, `platformRecipient`, the 250 bps fees, `RELEASE_VERSION` and the
+     album selectors;
+   - the royalty lock: `REQUIRED_ROYALTY_BPS` is 250 on the factory, implementation and
+     marketplace, and the implementation's `platformFeeRecipient` is the Nano;
+   - the marketplace `registry`, `feeRecipient` and `deploymentChainId`.
+
+   It stops before the marketplace if the factory or implementation differs.
 7. **Record PR.** From the workflow's record artifact, fill `config/mainnet-release-per-contract.json`:
    - factory, implementation and marketplace addresses and their deployment blocks;
-   - `source: VoidReleaseFactoryV2`, `releaseVersion: 2`, `albumCapable: true`;
+   - `source: VoidReleaseFactoryV2Royalty`, `releaseVersion: 2`, `albumCapable: true`;
    - `deployed: true`, `provisioningEnabled: true`, `deploymentAuthorized: true`.
 
    Then commit `deployments/release-per-contract-mainnet-<factory>.json`.
@@ -107,7 +121,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - an open edition (no supply cap);
    - royalty fixed at 2.5% to the artist's wallet.
 
-   Publication fails closed unless the transaction records exactly that royalty. The Fuji `-28`
+   The release contract itself refuses any other royalty or payout, and publication fails closed
+   unless the transaction records exactly that royalty. The Fuji `-28`
    release is never a mainnet target.
 10. **[APPROVAL] Configure the sale and the claim signer.**
     - Choose `claimStart` (T, Unix seconds) at least 10 minutes after the claim deployment can be mined.
@@ -198,6 +213,11 @@ separately; none is created only to fill this list.
   dashboard before launch (UNVERIFIED).
 - **Marketplace** (ownerless, no pause): if a defect appears, hide trading in the website and API;
   on-chain listings remain the sellers' to cancel.
+- **Royalty rule:** it cannot be bypassed or relaxed after deployment. Every creation path of every
+  clone and every listing and sale of the marketplace enforces it. Changing the rate would require
+  new contracts. Releases from any other factory, Fuji's included, cannot be listed on the mainnet
+  marketplace. ERC-2981 is advisory on third-party marketplaces, but `royaltyInfo` of every mainnet
+  edition reports exactly 2.5% to its artist.
 - **No partial launch:** if any acceptance journey fails, the production domain stays on the Fuji
   project, claims stay disabled and nothing is announced. Fix, re-verify, and request activation
   again.

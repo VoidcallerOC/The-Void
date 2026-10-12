@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Wallet, getAddress, getCreateAddress, id } from "ethers";
+import { Interface, Wallet, getAddress, getCreateAddress, id } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
 import { DeploymentError, FEE_RECIPIENT, MAINNET_CHAIN_ID, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, run, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
 
@@ -9,7 +9,14 @@ const RECIPIENT = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
 const ARTIST = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 const BASE = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
 const BROADCAST = { ...BASE, DEPLOYER_PRIVATE_KEY: KEY, EXPECTED_DEPLOYER_NONCE: "0", RELEASE_PLATFORM_RECIPIENT: RECIPIENT, RECIPIENT_VERIFIED_ON_DEVICE: RECIPIENT, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes" };
-const albumRuntime = `0x${ALBUM_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
+const selectors = (signatures) => signatures.map((signature) => `63${id(signature).slice(2, 10)}`).join("");
+const albumRuntime = `0x${selectors(ALBUM_SIGNATURES)}${selectors(["REQUIRED_ROYALTY_BPS()", "platformFeeRecipient()"])}`;
+const marketplaceRuntime = `0x${selectors(["REQUIRED_ROYALTY_BPS()", "REQUIRED_PLATFORM_FEE_BPS()"])}`;
+const ROYALTY_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
+// eth_call answers for the mined implementation's royalty views.
+const royaltyCall = (forbidden) => async ({ data }) => (data.startsWith(ROYALTY_VIEWS.getFunction("REQUIRED_ROYALTY_BPS").selector)
+  ? ROYALTY_VIEWS.encodeFunctionResult("REQUIRED_ROYALTY_BPS", [250n])
+  : ROYALTY_VIEWS.encodeFunctionResult("platformFeeRecipient", [forbidden]));
 const CONSTRUCTORS = {
   Factory: [{ type: "constructor", inputs: [{ name: "platformRecipient_", type: "address" }], stateMutability: "nonpayable" }],
   Marketplace: [{ type: "constructor", inputs: [{ name: "feeRecipient_", type: "address" }, { name: "platformFeeBps_", type: "uint256" }, { name: "releaseFactory_", type: "address" }], stateMutability: "nonpayable" }],
@@ -17,7 +24,7 @@ const CONSTRUCTORS = {
 const artifacts = async (path) => ({
   abi: path.includes("Factory") ? CONSTRUCTORS.Factory : path.includes("Marketplace") ? CONSTRUCTORS.Marketplace : [],
   bytecode: { object: "0x6000" },
-  deployedBytecode: { object: path.includes("VoidRelease1155V4") ? albumRuntime : "0x6000" },
+  deployedBytecode: { object: path.includes("VoidRelease1155V4") ? albumRuntime : path.includes("Marketplace") ? marketplaceRuntime : "0x6000" },
 });
 
 function fakeProvider({ chainId = MAINNET_CHAIN_ID, nonce = 0, pendingNonce = nonce, balance = 10n ** 18n, code = {} } = {}) {
@@ -35,8 +42,8 @@ describe("release-per-contract mainnet deployment preflight", () => {
   it("plans a dry run from the deployer address alone and reports the missing recipient as BLOCKED", async () => {
     const plan = await buildDryRunPlan(validateDeploymentEnv(BASE), fakeProvider(), { load: artifacts });
     expect(plan).toMatchObject({ mode: "DRY_RUN", chainId: 43114, broadcasted: false, readyToBroadcast: false });
-    expect(plan.transactions[0]).toMatchObject({ contract: "VoidReleaseFactoryV2", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 0 }), sealedInBytecode: { PLATFORM_FEE_BPS: 250 } });
-    expect(plan.transactions[1]).toMatchObject({ contract: "ReleaseMarketplaceV3", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 1 }), constructor: { platformFeeBps: 250, releaseFactory: plan.transactions[0].predictedAddress } });
+    expect(plan.transactions[0]).toMatchObject({ contract: "VoidReleaseFactoryV2Royalty", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 0 }), sealedInBytecode: { PLATFORM_FEE_BPS: 250, REQUIRED_ROYALTY_BPS: 250 } });
+    expect(plan.transactions[1]).toMatchObject({ contract: "ReleaseMarketplaceV4", sealedInBytecode: { REQUIRED_ROYALTY_BPS: 250, REQUIRED_PLATFORM_FEE_BPS: 250 }, predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 1 }), constructor: { platformFeeBps: 250, releaseFactory: plan.transactions[0].predictedAddress } });
     expect(plan.transactions[0].predictedImplementation).toBe(getCreateAddress({ from: plan.transactions[0].predictedAddress, nonce: 1 }));
     expect(plan.checks.find((item) => item.check === "platformRecipient verified")).toMatchObject({ status: "BLOCKED" });
   });
@@ -94,17 +101,38 @@ describe("release-per-contract mainnet deployment preflight", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("refuses artifacts that do not enforce the 2.5% artist royalty on chain", async () => {
+    const unlocked = async (path) => ({ ...(await artifacts(path)), deployedBytecode: { object: path.includes("VoidRelease1155V4") ? `0x${selectors(ALBUM_SIGNATURES)}` : "0x6000" } });
+    const plan = await buildDryRunPlan(validateDeploymentEnv(BROADCAST), fakeProvider(), { load: unlocked });
+    expect(plan.checks.find((item) => item.check === "artifacts enforce the 2.5% artist royalty on chain")).toMatchObject({ status: "FAIL" });
+    expect(plan.readyToBroadcast).toBe(false);
+  });
+
+  it("stops before the marketplace when the mined implementation is not locked to the recorded recipient", async () => {
+    const config = validateDeploymentEnv(BROADCAST);
+    const plan = await buildDryRunPlan(config, fakeProvider(), { load: artifacts });
+    const [factoryStep] = plan.transactions;
+    const calls = [];
+    const deploy = async (_artifact, args) => {
+      calls.push(args);
+      return { address: factoryStep.predictedAddress, receipt: { hash: "0xf1", blockNumber: 10 }, contract: { implementation: async () => factoryStep.predictedImplementation, platformRecipient: async () => RECIPIENT, PLATFORM_FEE_BPS: async () => 250n, RELEASE_VERSION: async () => 2n, REQUIRED_ROYALTY_BPS: async () => 250n } };
+    };
+    const provider = { ...fakeProvider(), getCode: async () => albumRuntime, call: royaltyCall("0x00000000000000000000000000000000000000A9") };
+    await expect(broadcastDeployment(config, provider, plan, { load: artifacts, deploy, log: () => {}, signer: {} })).rejects.toThrow(/does not match the reviewed configuration/);
+    expect(calls).toHaveLength(1);
+  });
+
   it("verifies every immutable after mining and writes a mainnet record", async () => {
     const config = validateDeploymentEnv(BROADCAST);
     const plan = await buildDryRunPlan(config, fakeProvider(), { load: artifacts });
     const [factoryStep, marketplaceStep] = plan.transactions;
     const deploy = async (_artifact, args) => (args.length === 1
-      ? { address: factoryStep.predictedAddress, receipt: { hash: "0xf1", blockNumber: 10 }, contract: { implementation: async () => factoryStep.predictedImplementation, platformRecipient: async () => RECIPIENT, PLATFORM_FEE_BPS: async () => 250n, RELEASE_VERSION: async () => 2n } }
-      : { address: marketplaceStep.predictedAddress, receipt: { hash: "0xf2", blockNumber: 11 }, contract: { registry: async () => factoryStep.predictedAddress, feeRecipient: async () => RECIPIENT, platformFeeBps: async () => 250n, deploymentChainId: async () => 43114n } });
+      ? { address: factoryStep.predictedAddress, receipt: { hash: "0xf1", blockNumber: 10 }, contract: { implementation: async () => factoryStep.predictedImplementation, platformRecipient: async () => RECIPIENT, PLATFORM_FEE_BPS: async () => 250n, RELEASE_VERSION: async () => 2n, REQUIRED_ROYALTY_BPS: async () => 250n } }
+      : { address: marketplaceStep.predictedAddress, receipt: { hash: "0xf2", blockNumber: 11 }, contract: { registry: async () => factoryStep.predictedAddress, feeRecipient: async () => RECIPIENT, platformFeeBps: async () => 250n, deploymentChainId: async () => 43114n, REQUIRED_ROYALTY_BPS: async () => 250n } });
     const written = [];
-    const provider = { ...fakeProvider(), getCode: async () => albumRuntime };
+    const provider = { ...fakeProvider(), getCode: async () => albumRuntime, call: royaltyCall(RECIPIENT) };
     const record = await broadcastDeployment(config, provider, plan, { load: artifacts, deploy, log: () => {}, signer: {}, writeRecord: async (path, value) => written.push({ path, value }) });
-    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, factory: { address: factoryStep.predictedAddress, platformRecipient: getAddress(RECIPIENT), platformFeeBps: 250 }, marketplace: { address: marketplaceStep.predictedAddress, feeBps: 250, factoryAddress: factoryStep.predictedAddress } });
+    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, factory: { address: factoryStep.predictedAddress, contract: "VoidReleaseFactoryV2Royalty", implementation: "VoidRelease1155V4Royalty", requiredRoyaltyBps: 250, platformRecipient: getAddress(RECIPIENT), platformFeeBps: 250 }, marketplace: { address: marketplaceStep.predictedAddress, contract: "ReleaseMarketplaceV4", requiredRoyaltyBps: 250, feeBps: 250, factoryAddress: factoryStep.predictedAddress } });
     expect(written[0].path).toBe(deploymentRecordPath(factoryStep.predictedAddress));
     expect(written[0].path).toMatch(/^deployments\/release-per-contract-mainnet-0x/);
   });

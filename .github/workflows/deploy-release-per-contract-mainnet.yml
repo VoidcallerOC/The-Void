@@ -1,7 +1,8 @@
 name: Deploy release-per-contract infrastructure to C-Chain mainnet
 
-# VoidReleaseFactoryV2 + ReleaseMarketplaceV3 on Avalanche C-Chain (43114), the architecture
-# validated on Fuji. The default path is a read-only dry run that needs no private key. A broadcast
+# VoidReleaseFactoryV2Royalty + ReleaseMarketplaceV4 on Avalanche C-Chain (43114): the architecture
+# validated on Fuji with the 2.5% artist royalty enforced on chain by the release clones and,
+# independently, by the marketplace. The default path is a read-only dry run that needs no private key. A broadcast
 # needs every typed confirmation below; both contracts are ownerless and their fee recipient and
 # fee rate are immutable once mined.
 
@@ -78,8 +79,10 @@ jobs:
         with:
           version: v1.3.1
 
-      - name: Build reviewed artifacts
-        run: forge build
+      - name: Build reviewed artifacts and prove the on-chain royalty and fee rules
+        run: |
+          forge build
+          forge test --match-contract "RoyaltyEnforcementTest|MainnetEconomicsTest"
 
       - name: Run deployment workflow tests
         run: npm test -- scripts/deploy-release-per-contract-mainnet.test.mjs scripts/deploy-release-per-contract-fuji.test.mjs

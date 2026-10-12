@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {VoidReleaseFactoryV2} from "../contracts/VoidReleaseFactoryV2.sol";
+import {VoidReleaseFactoryV2Royalty} from "../contracts/VoidReleaseFactoryV2Royalty.sol";
 import {VoidRelease1155V4} from "../contracts/VoidRelease1155V4.sol";
 import {VoidPrimarySale} from "../contracts/VoidPrimarySale.sol";
-import {ReleaseMarketplaceV3} from "../contracts/ReleaseMarketplaceV3.sol";
+import {ReleaseMarketplaceV4} from "../contracts/ReleaseMarketplaceV4.sol";
 
 interface VmMainnetEconomics {
     function prank(address) external;
@@ -13,7 +13,7 @@ interface VmMainnetEconomics {
 }
 
 /// @notice The final mainnet economics on the exact contracts the mainnet workflow deploys
-/// (VoidReleaseFactoryV2 + ReleaseMarketplaceV3): one passive platform fee recipient takes 2.5% of
+/// (VoidReleaseFactoryV2Royalty + ReleaseMarketplaceV4): one passive platform fee recipient takes 2.5% of
 /// primary sales and 2.5% of resales; each release's own artist payout takes a 2.5% resale royalty;
 /// the seller keeps 95%. The artist royalty never reaches the platform fee recipient.
 contract MainnetEconomicsTest {
@@ -28,16 +28,16 @@ contract MainnetEconomicsTest {
     address internal constant STRANGER = address(0x5757);
     uint96 internal constant ROYALTY_BPS = 250;
 
-    VoidReleaseFactoryV2 internal factory;
-    ReleaseMarketplaceV3 internal market;
+    VoidReleaseFactoryV2Royalty internal factory;
+    ReleaseMarketplaceV4 internal market;
     VoidRelease1155V4 internal cloneA;
     VoidRelease1155V4 internal cloneB;
     uint256 internal tokenA;
     uint256 internal tokenB;
 
     function setUp() public {
-        factory = new VoidReleaseFactoryV2(PLATFORM);
-        market = new ReleaseMarketplaceV3(PLATFORM, 250, address(factory));
+        factory = new VoidReleaseFactoryV2Royalty(PLATFORM);
+        market = new ReleaseMarketplaceV4(PLATFORM, 250, address(factory));
     }
 
     function release(address artist, address payout, bytes32 appId, bytes32 editionId) internal returns (VoidRelease1155V4 clone, VoidPrimarySale sale, uint256 tokenId) {
@@ -46,6 +46,12 @@ contract MainnetEconomicsTest {
         (address releaseContract, address primarySale,) = factory.createRelease(appId, key, "Release", "REL", "ipfs://release");
         clone = VoidRelease1155V4(releaseContract);
         sale = VoidPrimarySale(primarySale);
+        // A payout other than the artist's own wallet must be an artist wallet of this release.
+        if (payout != artist) {
+            bytes32 artistRole = clone.ARTIST_ROLE();
+            vm.prank(artist);
+            clone.grantRole(artistRole, payout);
+        }
         vm.prank(artist);
         tokenId = clone.createEdition(key, editionId, 10, "ipfs://edition", payout, ROYALTY_BPS);
         vm.prank(artist);
@@ -128,8 +134,8 @@ contract MainnetEconomicsTest {
     function assertResaleSettled(uint256 listingA, uint256 listingB) internal view {
         require(cloneA.balanceOf(BUYER, tokenA) == 1 && cloneB.balanceOf(BUYER, tokenB) == 1, "ownership moves to the buyer");
         require(cloneA.balanceOf(COLLECTOR, tokenA) == 0 && cloneB.balanceOf(COLLECTOR, tokenB) == 0, "seller no longer owns");
-        require(uint8(market.listingStatus(listingA)) == uint8(ReleaseMarketplaceV3.Status.SOLD), "listing A sold");
-        require(uint8(market.listingStatus(listingB)) == uint8(ReleaseMarketplaceV3.Status.SOLD), "listing B sold");
+        require(uint8(market.listingStatus(listingA)) == uint8(ReleaseMarketplaceV4.Status.SOLD), "listing A sold");
+        require(uint8(market.listingStatus(listingB)) == uint8(ReleaseMarketplaceV4.Status.SOLD), "listing B sold");
     }
 
     function testInvalidListingsFailWithoutMovingFundsOrTokens() public {
