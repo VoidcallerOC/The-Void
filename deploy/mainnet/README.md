@@ -68,8 +68,15 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - The deployer-authority note in `DEPLOYER-AUTHORITY-ROTATION-PLAN.md` asks for a re-review before
      mainnet use of `DEPLOYER_PRIVATE_KEY`. Both V2 contracts are ownerless, so the deployer keeps no
      authority after deploying.
-   - The Cursor audit, if it is a launch gate.
-   - `LAUNCH-GATE.md` (NO-GO) covers the old shared-contract path, which this launch does not use.
+   - The review decision record for the royalty contracts (Cursor CONDITIONAL PASS, scoped exception
+     to the outside-reviewer standard), pending owner approval.
+   - **Fuji-first gate** (`deploy/mainnet/FUJI-FIRST-GATE.md`): the written policy requires the
+     marketplace and ERC-1155 contracts on Fuji before mainnet. **[APPROVAL]** Run *Fuji-first
+     rehearsal of the royalty-locked launch candidate*. It is an additive deployment at new
+     addresses, followed by release, edition, primary sale, resale and bypass checks. Commit its
+     record before step 6.
+   - `LAUNCH-GATE.md` (NO-GO) and `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` cover the old shared-contract
+     path, which this launch does not use.
 4. **Dry runs (no key, no transaction).**
    - Actions → *Deploy release-per-contract infrastructure to C-Chain mainnet*, with
      `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.

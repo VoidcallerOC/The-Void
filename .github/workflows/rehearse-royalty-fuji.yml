@@ -1,0 +1,97 @@
+name: Fuji-first rehearsal of the royalty-locked launch candidate
+
+# Additive Fuji deployment and on-chain rehearsal of the PR #171 mainnet launch candidate:
+# VoidReleaseFactoryV2Royalty + VoidRelease1155V4Royalty + ReleaseMarketplaceV4, from the deployer's
+# next nonces at new addresses. It then runs a release, a 2.5% edition, a primary sale, a resale
+# (2.5% fee / 2.5% royalty / 95% seller) and bypass attempts that must revert.
+# Existing Fuji contracts, config/ manifests, Render services and the database are never touched;
+# the record goes only to deployments/fuji-royalty-rehearsal-<factory>.json (a workflow artifact).
+# The default path is a read-only plan that needs no private key.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_deployer_address:
+        description: Deployer address (0x...) the owner reviewed.
+        required: true
+        type: string
+      expected_deployer_nonce:
+        description: Deployer nonce printed by the reviewed plan. Required for a broadcast.
+        required: false
+        type: string
+        default: ""
+      broadcast_rehearsal:
+        description: Set true only for the owner-approved Fuji rehearsal broadcast.
+        required: true
+        type: boolean
+        default: false
+      confirm_fuji_rehearsal:
+        description: Type I_CONFIRM_FUJI_ROYALTY_REHEARSAL only for the approved broadcast.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: void-fuji-royalty-rehearsal
+  cancel-in-progress: false
+
+env:
+  DEPLOY_NETWORK: fuji
+  AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
+  # The key is exposed to the job only for an approved broadcast; the plan needs only the address.
+  DEPLOYER_PRIVATE_KEY: ${{ inputs.broadcast_rehearsal && secrets.DEPLOYER_PRIVATE_KEY || '' }}
+  EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
+  EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
+  BROADCAST_REHEARSAL: ${{ inputs.broadcast_rehearsal && 'yes' || 'no' }}
+  CONFIRM_FUJI_REHEARSAL: ${{ inputs.confirm_fuji_rehearsal == 'I_CONFIRM_FUJI_ROYALTY_REHEARSAL' && 'yes' || 'no' }}
+
+jobs:
+  rehearse:
+    name: Plan (and, only when approved, run) the Fuji rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.3.1
+
+      - name: Build the launch candidate and prove its royalty, fee and Genesis rules locally
+        run: |
+          forge build
+          forge test --match-contract "RoyaltyEnforcementTest|MainnetEconomicsTest|GenesisHolderClaimRoyaltyReleaseTest"
+
+      - name: Run rehearsal script tests
+        run: npm test -- scripts/rehearse-royalty-fuji.test.mjs
+
+      - name: Plan or rehearse
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BROADCAST_REHEARSAL}" = "yes" ]; then
+            test "${CONFIRM_FUJI_REHEARSAL}" = "yes"
+            npm run rehearse:royalty:fuji | tee rehearsal-output.log
+          else
+            npm run rehearse:royalty:fuji -- --dry-run | tee rehearsal-output.log
+          fi
+
+      - name: Preserve rehearsal output and record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuji-royalty-rehearsal-${{ github.run_id }}
+          path: |
+            rehearsal-output.log
+            deployments/fuji-royalty-rehearsal-*.json
+          if-no-files-found: ignore

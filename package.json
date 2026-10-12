@@ -21,6 +21,7 @@
     "deploy:release-v2": "node scripts/deploy-release-v2-fuji.mjs",
     "deploy:release-per-contract:fuji": "node scripts/deploy-release-per-contract-fuji.mjs",
     "deploy:release-per-contract:mainnet": "node scripts/deploy-release-per-contract-mainnet.mjs",
+    "rehearse:royalty:fuji": "node scripts/rehearse-royalty-fuji.mjs",
     "deploy:release-factory-v3": "node scripts/deploy-release-factory-v3.mjs",
     "deploy:genesis-claim": "node scripts/deploy-genesis-claim.mjs",
     "deploy:release-v2-mainnet": "node scripts/deploy-release-v2-mainnet.mjs",
