@@ -71,10 +71,9 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - The review decision record for the royalty contracts (Cursor CONDITIONAL PASS, scoped exception
      to the outside-reviewer standard), pending owner approval.
    - **Fuji-first gate** (`deploy/mainnet/FUJI-FIRST-GATE.md`): the written policy requires the
-     marketplace and ERC-1155 contracts on Fuji before mainnet. **[APPROVAL]** Run *Fuji-first
-     rehearsal of the royalty-locked launch candidate*. It is an additive deployment at new
-     addresses, followed by release, edition, primary sale, resale and bypass checks. Commit its
-     record before step 6.
+     marketplace and ERC-1155 contracts on Fuji before mainnet. **SATISFIED 2026-10-12:** run
+     38252855896, all 14 checks PASS and independently re-verified. Record:
+     `deployments/fuji-royalty-rehearsal-0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338.json`.
    - `LAUNCH-GATE.md` (NO-GO) and `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` cover the old shared-contract
      path, which this launch does not use.
 4. **Dry runs (no key, no transaction).**
