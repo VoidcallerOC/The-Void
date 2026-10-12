@@ -11,7 +11,7 @@ Every **[APPROVAL]** step needs the owner's explicit approval of that action and
 
 | Flow | Rate | Recipient | Enforced by |
 | --- | --- | --- | --- |
-| Primary sale platform fee | 2.5% | Nano S Plus | `VoidReleaseFactoryV2.PLATFORM_FEE_BPS` (bytecode) → each release's `VoidPrimarySale`. Credited on every purchase; the owner collects with a Ledger-signed `withdraw()` on each sale contract |
+| Primary sale platform fee | 2.5% | Nano S Plus | `VoidReleaseFactoryV2.PLATFORM_FEE_BPS` (bytecode) → each release's `VoidPrimarySale`. Credited on every purchase to the sale contract; collecting it later is a separate treasury operation, outside the launch |
 | Primary sale remainder | 97.5% | The edition's artist payout (`payoutOf`) | `VoidPrimarySale` (pull balance) |
 | Secondary marketplace fee | 2.5% | Nano S Plus | `ReleaseMarketplaceV4` (constructor refuses any fee but 250 bps; immutable), paid directly on every resale; no signature needed |
 | Secondary artist royalty | 2.5% | The edition's own artist payout | **On chain:** `VoidRelease1155V4Royalty._createEdition`, reached by every creation path, refuses any royalty but 250 bps and any payout that is the fee recipient or lacks `ARTIST_ROLE` on that release. `ReleaseMarketplaceV4` independently refuses listings and settlements unless `royaltyBpsOf` is 250, `payoutOf` is non-zero and not the fee recipient, and ERC-2981 `royaltyInfo` agrees; it pays the royalty it computes itself. **Off chain (extra layers):** Studio, the encoders and API publication enforce the same rule |
@@ -24,14 +24,15 @@ A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.
 
 | Role | Address | Never used as |
 | --- | --- | --- |
-| Platform fee recipient (passive) | Nano S Plus `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`, recorded in `config/mainnet-release-per-contract.json` | deployer, signer, contract admin, artist |
-| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` today, which is also the Fuji deployer. A separate mainnet key is recommended (`DEPLOYMENT-AUTHORITY.md` §6). Mainnet signs only with the `mainnet-deployment` environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`. | fee recipient, signer |
+| Platform fee recipient (passive) | Nano S Plus `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`, recorded in `config/mainnet-release-per-contract.json`. Signs nothing in the launch. | deployer, signer, contract admin, artist |
+| Deployer: Rabby (gas only; deploys contracts only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`, fixed. The owner signs every mainnet deployment in Rabby on their own machine; the key is never in GitHub, CI, a cloud service or a script ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)). | fee recipient, signer, release creator |
 | Artist (release admin, edition payout) | `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` | fee recipient, signer |
 | Genesis voucher signer | A new dedicated key, generated offline by the owner; only its public address leaves the device | anything else |
 | Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer |
 
 The deploy scripts refuse any overlap: the fee recipient as the artist, deployer or anything other
-than the recorded Nano, and the signer as the fee recipient, admin, artist or deployer.
+than the recorded Nano, and the signer as the fee recipient, admin, artist or deployer. Neither Ledger
+signs anything in the launch, and the Ledger X has no role.
 
 ## Contracts and predicted addresses
 
@@ -60,9 +61,10 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
 
 ## Steps
 
-1. **Owner: confirm the Nano S Plus address on the device screen.** Open the Avalanche C-Chain/EVM
-   account. The address shown must be exactly `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`. If it
-   differs, stop: the manifest and this runbook must be corrected first.
+1. **Owner: read the Nano S Plus address on the device screen** (view only; the device signs
+   nothing). Open the Avalanche C-Chain/EVM account. The address shown must be exactly
+   `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`. If it differs, stop: the manifest and this runbook
+   must be corrected first.
 2. **[APPROVAL] Review and merge the code PR(s).** The Fuji site redeploys with no behaviour change.
 3. **Owner: resolve the existing gates.**
    - The deployer-authority note in `DEPLOYER-AUTHORITY-ROTATION-PLAN.md` asks for a re-review before
@@ -76,41 +78,34 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      `deployments/fuji-royalty-rehearsal-0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338.json`.
    - `LAUNCH-GATE.md` (NO-GO) and `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` cover the old shared-contract
      path, which this launch does not use. Its workflow and script are removed.
-   - **Deployment authority** (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`). Before step 6:
-     - create the protected `mainnet-deployment` environment, with required reviewers and `main` only;
-     - add the mainnet deployer key as the environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`, never
-       at repository level (the mainnet workflows fail closed otherwise);
-     - decide whether mainnet gets a new deployer key, separate from the Fuji `DEPLOYER_PRIVATE_KEY`.
-       This is recommended (section 6 of that file); a new key changes the predicted addresses.
-
-     These are GitHub settings, not code; check them in GitHub.
+   - **Deployment authority** (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`). Mainnet is signed in Rabby
+     by the owner; no key goes into GitHub. Resolve its open item O1 (existing copies of the deployer
+     key outside Rabby) before funding the deployer.
 4. **Dry runs (no key, no transaction).**
-   - Actions → *Deploy release-per-contract infrastructure to C-Chain mainnet*, with
-     `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.
-   - Every check must be PASS, except the funding check (until step 5) and the recipient check, which
-     stays UNVERIFIED until the re-typed device confirmation at broadcast.
+   - Actions → *Plan release-per-contract infrastructure for C-Chain mainnet*, with
+     `expected_deployer_address=0xaBd3…c174` (the default), `expected_deployer_nonce=0` and
+     `platform_recipient=0xb65C…1ce4`. Or run the same plan locally ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)).
+   - Every check must be PASS, except the funding check (until step 5) and the two recipient checks,
+     which stay UNVERIFIED until the device confirmation is typed into the signing tool.
 5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.071 AVAX at 10 gwei; the fork run
    used 0.030) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
    C-Chain today) for creating the release, the edition, the sale and the `ISSUER_ROLE` grant.
-6. **[APPROVAL] Broadcast V2** with:
-   - `expected_deployer_nonce=0`;
-   - `recipient_verified_on_device` = the address re-typed from the device;
-   - `broadcast_deployment=true`;
-   - `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY`.
+6. **[APPROVAL] Owner signs V2 in Rabby** ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)):
+   - re-plan at the funded state (nonce 0) and bind it, then run `npm run sign:mainnet` with the
+     address read from the Nano screen as `--recipient-verified-on-device`;
+   - in Rabby, with the deployer account, approve step 1 (factory, nonce 0) and, after it is verified,
+     step 2 (marketplace, nonce 1).
 
-   The script checks:
+   The tool verifies from chain:
+   - each transaction against the reviewed unsigned request;
    - the predicted addresses, `platformRecipient`, the 250 bps fees, `RELEASE_VERSION` and the
      album selectors;
    - the royalty lock: `REQUIRED_ROYALTY_BPS` is 250 on the factory, implementation and
      marketplace, and the implementation's `platformFeeRecipient` is the Nano;
-   - the marketplace `registry`, `feeRecipient` and `deploymentChainId`.
+   - the marketplace `registry`, `feeRecipient` and `deploymentChainId`;
+   - the runtime code of all three against the compiled artifacts.
 
-   It stops before the marketplace if the factory or implementation differs.
-
-   The run first completes the key-less `plan` job. Review its `…-plan-<run id>` artifact (the dry
-   run and `plan-binding.json`), then approve the `mainnet-deployment` environment. The `broadcast`
-   job re-plans without the key. It signs only if the fresh plan matches the approved binding on the
-   same commit.
+   It does not offer the marketplace if the factory or implementation differs.
 7. **Record PR.** From the workflow's record artifact, fill `config/mainnet-release-per-contract.json`:
    - factory, implementation and marketplace addresses and their deployment blocks;
    - `source: VoidReleaseFactoryV2Royalty`, `releaseVersion: 2`, `albumCapable: true`;
@@ -136,7 +131,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      - `/api/indexer/health?chainId=43114` shows the factory and marketplace checkpoints advancing;
      - the site's wallet prompt asks for chain 43114;
      - `/api/releases` returns no Fuji data.
-9. **Artist: create the mainnet Forgive & Forget release** in the mainnet Studio:
+9. **Artist: create the mainnet Forgive & Forget release** in the mainnet Studio, with the artist
+   wallet (never the deployer):
    - an open edition (no supply cap);
    - royalty fixed at 2.5% to the artist's wallet.
 
@@ -149,21 +145,24 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
       on the release's `VoidPrimarySale`. This makes the public phase open at the claim's end, run
       7 days, cost 0.25 AVAX and have no cap.
     - The owner generates the dedicated signer key offline and provides only its public address.
-11. **[APPROVAL] Deploy the Genesis claim.**
-    - Actions → *Deploy Genesis holder claim to C-Chain mainnet*. Inputs:
+11. **[APPROVAL] Deploy the Genesis claim** (a separate plan and a separate Rabby signature).
+    - Actions → *Plan the Genesis holder claim for C-Chain mainnet*. Inputs:
       - `release_contract`, `primary_sale`, `token_id` from step 9;
       - `claim_start=T`;
       - `claim_admin` (the approved admin);
       - `claim_signer_address`;
-      - `expected_deployer_address=0xaBd3…c174`.
-    - Dry run first. Then broadcast with `expected_deployer_nonce` from the dry run and
-      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`. As in step 6, approve the
-      `mainnet-deployment` environment only after reviewing the plan artifact.
-    - The script verifies the release, the sale schedule, the Genesis collection and the mined
-      parameters.
+      - `expected_deployer_address=0xaBd3…c174`;
+      - `expected_deployer_nonce`.
+    - The plan verifies the release, the sale schedule and the Genesis collection. It refuses a release
+      that the artist wallet does not own and administer.
+    - The owner signs the single step in Rabby:
+      `npm run sign:mainnet -- --kind genesis-claim-mainnet …`. The tool verifies the mined parameters.
 12. **[APPROVAL] Authorize the claim to mint.**
-    - The artist (release admin) sends the `grantRole(ISSUER_ROLE, <claim>)` calldata printed by the
-      dry run.
+    - The artist sends the `grantRole(ISSUER_ROLE, <claim>)` call from the plan's
+      `followUps.issuerGrant`, signed in the artist wallet's own session. The plan verified on chain
+      that the artist wallet holds the release's `DEFAULT_ADMIN_ROLE`; neither the deployer nor either
+      Ledger holds it. Then `npm run verify:mainnet -- --kind genesis-claim-mainnet …` must report
+      `issuerGrant: GRANTED`.
     - Enter the `GENESIS_CLAIM_*` values and `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` on
       `the-void-api-mainnet`. Keep `GENESIS_CLAIM_ENABLED=false`.
     - The API refuses to serve the claim (503 `CLAIM_BINDING_MISMATCH`) until the claim holds
@@ -220,8 +219,10 @@ separately; none is created only to fill this list.
   changed. Do not record them. Deploy a new pair from the deployer's next nonces after a new dry run,
   and record only the correct pair. The predicted-address and device-confirmation gates exist to
   prevent this.
-- **Partial V2 broadcast** (factory mined, marketplace not): the logged factory address is kept. Run
-  a new dry run and deploy the marketplace bound to that factory only after review.
+- **Partial V2 deployment** (factory signed and verified, marketplace not): keep the verified factory.
+  If the marketplace step was only rejected in Rabby, re-offer it in the same session. Otherwise the
+  signing tool cannot yet produce a marketplace-only plan bound to an existing factory, so that
+  recovery needs a reviewed code change before anything more is signed.
 - **Claim problems before or during the window:**
   - set `GENESIS_CLAIM_ENABLED=false` to stop new vouchers;
   - the claim admin can `pause()` the claim and `setSigner()` to rotate a compromised signer key;

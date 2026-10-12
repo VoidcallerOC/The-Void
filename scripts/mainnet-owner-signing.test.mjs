@@ -56,7 +56,7 @@ describe("owner signing session: refuses before anything reaches the wallet", ()
 
   it("refuses when the live chain no longer matches the reviewed plan (the nonce moved)", async () => {
     // The moved nonce fails the fresh plan's own check, so it cannot even be bound.
-    await expect(setup({ live: fakeChain({ nonce: 1 }) })).rejects.toThrow(/not ready to broadcast/);
+    await expect(setup({ live: fakeChain({ nonce: 1 }) })).rejects.toThrow(/not ready to sign/);
   });
 
   it("refuses when the live plan is not ready to sign (unfunded)", async () => {
@@ -118,7 +118,7 @@ describe("owner signing session: one step at a time, verified from chain", () =>
 
   it("re-matches a fresh plan to the approval before the first signature", async () => {
     const { session, live } = await setup();
-    await expect(prepareStep(session, 1, { provider: live, replan: () => planOn(fakeChain({ nonce: 3 })) })).rejects.toThrow(/not ready to broadcast|differs from the approved plan/);
+    await expect(prepareStep(session, 1, { provider: live, replan: () => planOn(fakeChain({ nonce: 3 })) })).rejects.toThrow(/not ready to sign|differs from the approved plan/);
     // A ready fresh plan that differs from the approval (another nonce) is refused by the comparison.
     await expect(prepareStep(session, 1, { provider: live, replan: () => planOn(fakeChain({ nonce: 3 }), { ...INPUTS, EXPECTED_DEPLOYER_NONCE: "3" }) })).rejects.toThrow(/differs from the approved plan/);
     expect(session.steps[0].status).toBe("pending");

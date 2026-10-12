@@ -36,7 +36,7 @@ const lower = (value) => (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(v
 export const BINDERS = Object.freeze({
   "release-per-contract-mainnet": (plan) => {
     if (plan.mode !== "DRY_RUN" || plan.network !== "mainnet" || plan.chainId !== 43114) throw new BindingError("Not a C-Chain mainnet dry-run plan.");
-    if (plan.readyToBroadcast !== true) throw new BindingError("The dry-run plan is not ready to broadcast.");
+    if (plan.readyToBroadcast !== true) throw new BindingError("The dry-run plan is not ready to sign (see its checks: funding, nonce, pending transactions, empty addresses).");
     return {
       chainId: plan.chainId,
       deployer: lower(plan.deployer?.address),
