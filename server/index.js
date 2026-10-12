@@ -26,6 +26,7 @@ import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./pro
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
+import { createGenesisClaimReservationStore } from "./genesis-claim-store.js";
 import { primarySaleStateReaderFromEnv } from "./primary-sale-state.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
@@ -71,7 +72,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
   let genesisClaim = null;
   try {
-    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env) });
+    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env), reservationStore: createGenesisClaimReservationStore(pool) });
   } catch (error) {
     logger.error?.("genesis.claim.disabled", { error: error.message });
   }

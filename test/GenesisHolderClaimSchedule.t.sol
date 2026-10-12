@@ -26,7 +26,7 @@ contract GenesisHolderClaimScheduleTest {
     address internal constant CLAIMANT = address(0xCA11);
     address internal constant COLLECTOR = address(0xC011);
     bytes32 internal constant RULE = keccak256(
-        "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0"
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
     );
     uint256 internal constant T0 = 1_800_000_000;
     uint256 internal constant START = T0 + 10 minutes;

@@ -11,6 +11,7 @@ import {
   LEGACY_FUJI_SINGLETON,
   loadGenesisClaimConfig,
 } from "./genesis-claim.js";
+import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const RELEASE = "0x2222222222222222222222222222222222222222";
@@ -41,104 +42,267 @@ const ENV = Object.freeze({
   GENESIS_CLAIM_SIGNER_PRIVATE_KEY: `0x${"11".repeat(32)}`,
 });
 
-const genesisIface = new Interface(["function balanceOf(address account,uint256 id) view returns (uint256)"]);
+const genesisIface = new Interface([
+  "function balanceOf(address account,uint256 id) view returns (uint256)",
+  "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)",
+  "event TransferBatch(address indexed operator, address indexed from, address indexed to, uint256[] ids, uint256[] values)",
+]);
+const ZERO = "0x0000000000000000000000000000000000000000";
+const A = "0x1111111111111111111111111111111111111111";
+const B = "0x6666666666666666666666666666666666666666";
+const C = "0x7777777777777777777777777777777777777777";
+const D = "0x8888888888888888888888888888888888888888";
 
 /**
- * A C-Chain provider with live balances: `holdings` maps `${wallet}:${tokenId}` to a balance and can be
- * changed between calls to model transfers.
+ * A simulated C-Chain Genesis collection. Every mint or transfer is mined in its own block and emits the
+ * real ERC-1155 TransferSingle/TransferBatch log; balanceOf honours the block tag.
  */
 function genesisChain(holdings = {}, { chainId = GENESIS_CHAIN_ID } = {}) {
+  const events = [];
+  let head = 1_000;
   const calls = [];
-  return {
+  const balanceAt = (wallet, id, block) => events.filter((event) => event.block <= block).reduce((sum, event) => sum
+    + event.pairs.reduce((acc, [eid, amount]) => acc + (eid === id ? (event.to === wallet ? amount : 0n) - (event.from === wallet ? amount : 0n) : 0n), 0n), 0n);
+  const mine = (from, to, pairs, batch = false) => {
+    head += 1;
+    events.push({ block: head, from: from.toLowerCase(), to: to.toLowerCase(), pairs: pairs.map(([id, amount]) => [BigInt(id), BigInt(amount)]), batch });
+    return head;
+  };
+  for (const [key, amount] of Object.entries(holdings)) {
+    const [wallet, id] = key.split(":");
+    mine(ZERO, wallet, [[id, amount]]);
+  }
+  const chain = {
     calls,
-    holdings,
+    get head() { return head; },
+    balanceAt: (wallet, id, block) => balanceAt(wallet.toLowerCase(), BigInt(id), block),
+    transfer: (from, to, id, amount = 1n) => mine(from, to, [[id, amount]]),
+    batchTransfer: (from, to, pairs) => mine(from, to, pairs, true),
+    idle: () => { head += 1; return head; },
     getNetwork: vi.fn(async () => ({ chainId: BigInt(chainId) })),
+    getBlockNumber: vi.fn(async () => head),
     call: vi.fn(async ({ to, data, blockTag }) => {
       calls.push({ to, blockTag });
       const [wallet, tokenId] = genesisIface.decodeFunctionData("balanceOf", data);
-      return genesisIface.encodeFunctionResult("balanceOf", [holdings[`${wallet.toLowerCase()}:${tokenId}`] || 0n]);
+      const block = blockTag === "latest" ? head : Number(blockTag);
+      return genesisIface.encodeFunctionResult("balanceOf", [balanceAt(wallet.toLowerCase(), BigInt(tokenId), block)]);
     }),
+    getLogs: vi.fn(async ({ address, fromBlock, toBlock }) => {
+      expect(getAddress(address)).toBe(GENESIS_CONTRACT);
+      return events.filter((event) => event.block >= fromBlock && event.block <= toBlock).map((event) => {
+        const encoded = event.batch
+          ? genesisIface.encodeEventLog("TransferBatch", [event.from, event.from, event.to, event.pairs.map(([id]) => id), event.pairs.map(([, amount]) => amount)])
+          : genesisIface.encodeEventLog("TransferSingle", [event.from, event.from, event.to, event.pairs[0][0], event.pairs[0][1]]);
+        return { ...encoded, blockNumber: event.block, index: 0, address: GENESIS_CONTRACT };
+      });
+    }),
+  };
+  return chain;
+}
+
+/** Destination-chain claim state: which wallets redeemed, claimed supply, and chain time. */
+function destination({ now = NOW, claimedSupply = 0n, claimed = [] } = {}) {
+  const state = { now, claimedSupply, claimed: new Set(claimed.map((wallet) => getAddress(wallet))) };
+  return {
+    state,
+    redeem(wallet) { state.claimed.add(getAddress(wallet)); state.claimedSupply += 1n; },
+    claimStateReader: vi.fn(async (wallet) => ({ alreadyClaimed: state.claimed.has(getAddress(wallet)), claimedSupply: state.claimedSupply })),
+    destinationClock: () => state.now,
   };
 }
 
-function service({ eligible, alreadyClaimed = false, claimedSupply = 0n, env = {}, clock = NOW, ...overrides } = {}) {
+function service({ holdings = { [`${WALLET}:0`]: 1n }, alreadyClaimed = false, claimedSupply = 0n, env = {}, clock = NOW, chain = null, dest = null, store = null, ...overrides } = {}) {
   const signTypedData = vi.fn().mockResolvedValue(TEST_SIGNATURE);
   const bindingReader = vi.fn().mockResolvedValue(undefined);
-  const claimStateReader = vi.fn().mockResolvedValue({ alreadyClaimed, claimedSupply });
+  const genesis = chain || genesisChain(holdings);
+  const target = dest || destination({ claimedSupply, claimed: alreadyClaimed ? [WALLET] : [] });
+  const reservations = store || createMemoryGenesisClaimReservationStore();
+  let counter = 987654321n;
   const instance = createGenesisClaimService({
     config: loadGenesisClaimConfig({ ...ENV, ...env }),
     signer: { signTypedData, address: SIGNER },
-    ...(eligible ? { eligibilityReader: vi.fn().mockResolvedValue(eligible.map(String)) } : {}),
+    genesisProvider: genesis,
+    reservationStore: reservations,
     bindingReader,
-    claimStateReader,
+    claimStateReader: target.claimStateReader,
+    destinationClock: target.destinationClock,
     clock: () => clock,
-    nonce: () => 987654321n,
+    nonce: () => counter++,
     ...overrides,
   });
-  return { instance, signTypedData, bindingReader, claimStateReader };
+  return { instance, signTypedData, bindingReader, claimStateReader: target.claimStateReader, chain: genesis, dest: target, store: reservations };
 }
 
 describe("Genesis eligibility from live C-Chain ownership", () => {
-  it.each([0, 1, 2, 3])("accepts a wallet that currently holds Genesis token %i", async (tokenId) => {
+  it.each([0, 1, 2, 3])("accepts a wallet that currently holds Genesis token %i, read at the current head", async (tokenId) => {
     const chain = genesisChain({ [`${WALLET}:${tokenId}`]: 1n });
-    const { instance } = service({ genesisProvider: chain });
-    await expect(instance.checkEligibility(WALLET)).resolves.toEqual({ eligible: true, eligibleTokenIds: [String(tokenId)] });
+    const { instance } = service({ chain });
+    await expect(instance.checkEligibility(WALLET)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: [String(tokenId)], holdingUsed: false });
     expect(chain.calls).toHaveLength(4);
-    expect(chain.calls.every((call) => call.blockTag === "latest" && call.to === GENESIS_CONTRACT)).toBe(true);
+    expect(chain.calls.every((call) => call.blockTag === chain.head && call.to === GENESIS_CONTRACT)).toBe(true);
   });
 
   it("denies a wallet that holds no Genesis token now", async () => {
-    const { instance, signTypedData } = service({ genesisProvider: genesisChain() });
-    await expect(instance.checkEligibility(WALLET)).resolves.toEqual({ eligible: false, eligibleTokenIds: [] });
+    const { instance, signTypedData } = service({ holdings: {} });
+    await expect(instance.checkEligibility(WALLET)).resolves.toMatchObject({ eligible: false, eligibleTokenIds: [], holdingUsed: false });
     await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 403, code: "ACCESS_DENIED" });
     expect(signTypedData).not.toHaveBeenCalled();
   });
 
-  it("follows the current owner: eligibility moves with the Genesis token", async () => {
-    const SECOND = "0x6666666666666666666666666666666666666666";
-    const chain = genesisChain({ [`${WALLET}:1`]: 1n });
-    const { instance } = service({ genesisProvider: chain });
-    await expect(instance.checkEligibility(WALLET)).resolves.toMatchObject({ eligible: true });
-    await expect(instance.checkEligibility(SECOND)).resolves.toMatchObject({ eligible: false });
-    chain.holdings[`${WALLET}:1`] = 0n;
-    chain.holdings[`${SECOND}:1`] = 1n;
-    await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 403, code: "ACCESS_DENIED" });
-    await expect(instance.issueVoucher(SECOND)).resolves.toMatchObject({ voucher: { claimant: getAddress(SECOND) } });
-  });
-
-  it("refuses a wallet that already claimed even while it still holds Genesis", async () => {
-    const { instance, signTypedData } = service({ genesisProvider: genesisChain({ [`${WALLET}:0`]: 4n }), alreadyClaimed: true });
-    await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
-    expect(signTypedData).not.toHaveBeenCalled();
-  });
-
-  it("fails closed on a provider that is not C-Chain, or on a failed or malformed balance read", async () => {
+  it("fails closed on a provider that is not C-Chain, or on a failed or malformed read", async () => {
     const holder = { [`${WALLET}:0`]: 1n };
     const failing = { ...genesisChain(holder), call: vi.fn().mockRejectedValue(new Error("rpc offline")) };
     const malformed = { ...genesisChain(holder), call: vi.fn().mockResolvedValue("0x") };
-    for (const chain of [genesisChain(holder, { chainId: 43113 }), failing, malformed]) {
-      const { instance, signTypedData } = service({ genesisProvider: chain });
+    const noHead = { ...genesisChain(holder), getBlockNumber: vi.fn().mockRejectedValue(new Error("rpc offline")) };
+    for (const chain of [genesisChain(holder, { chainId: 43113 }), failing, malformed, noHead]) {
+      const { instance, signTypedData } = service({ chain });
       await expect(instance.checkEligibility(WALLET)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
       await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
       expect(signTypedData).not.toHaveBeenCalled();
     }
   });
 
-  it("reports an RPC failure as eligibility-unavailable, not as ineligible", async () => {
-    const { instance } = service({ eligibilityReader: vi.fn().mockRejectedValue(new Error("rpc offline")) });
-    await expect(instance.checkEligibility(WALLET)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
-  });
-
-  it("names the contract's live-ownership rule and needs no snapshot configuration", () => {
-    expect(ELIGIBILITY_RULE_TEXT).toBe("the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0");
+  it("names the contract's rule and needs no snapshot configuration", () => {
+    expect(ELIGIBILITY_RULE_TEXT).toBe("the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers");
     expect(ELIGIBILITY_RULE).toBe(id(ELIGIBILITY_RULE_TEXT));
     expect(loadGenesisClaimConfig(ENV)).not.toHaveProperty("snapshotBlock");
+  });
+
+  it("refuses to run without the reservation store", () => {
+    expect(() => createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), signer: { address: SIGNER } })).toThrow(/reservation store/);
+  });
+});
+
+describe("Genesis holding cannot be reused across wallets (adversarial)", () => {
+  it("denies the next wallet when a claimed holding is passed on, and the one after it", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:1`]: 1n } });
+    await expect(instance.issueVoucher(A)).resolves.toMatchObject({ voucher: { claimant: getAddress(A) } });
+    dest.redeem(A);
+    chain.transfer(A, B, 1n);
+    await expect(instance.checkEligibility(B)).resolves.toMatchObject({ eligible: false, holdingUsed: true });
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+    chain.transfer(B, C, 1n);
+    await expect(instance.issueVoucher(C)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("denies the receiver while the sender's voucher is issued but not yet redeemed", async () => {
+    const { instance, chain } = service({ holdings: { [`${A}:3`]: 1n } });
+    await instance.issueVoucher(A);
+    chain.transfer(A, B, 3n);
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("serializes simultaneous requests: a holding passed on mid-issuance backs only the first voucher", async () => {
+    const chain = genesisChain({ [`${A}:0`]: 1n });
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let readStarted;
+    const started = new Promise((resolve) => { readStarted = resolve; });
+    const balanceReader = async (wallet, block) => {
+      if (getAddress(wallet) === getAddress(A)) { readStarted(); await gate; }
+      return Object.fromEntries(["0", "1", "2", "3"].map((tokenId) => [tokenId, chain.balanceAt(wallet, tokenId, block)]));
+    };
+    const { instance } = service({ chain, balanceReader });
+    const first = instance.issueVoucher(A);
+    await started;
+    chain.transfer(A, B, 0n);
+    const second = instance.issueVoucher(B);
+    release();
+    await expect(first).resolves.toMatchObject({ voucher: { claimant: getAddress(A) } });
+    await expect(second).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("uses every unit and every ID in the claiming wallet: one claim, and none of them qualifies anyone after", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 4n, [`${A}:1`]: 2n, [`${A}:3`]: 21n } });
+    await expect(instance.checkEligibility(A)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["0", "1", "3"] });
+    const issued = await instance.issueVoucher(A);
+    expect(issued.voucher.quantity).toBe("1");
+    dest.redeem(A);
+    chain.transfer(A, B, 0n, 1n);
+    chain.batchTransfer(A, C, [[1n, 2n], [3n, 10n]]);
+    chain.transfer(A, D, 3n, 11n);
+    for (const wallet of [B, C, D]) await expect(instance.issueVoucher(wallet)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+  });
+
+  it("returns the same voucher to a repeat request, and refuses the wallet once it has claimed", async () => {
+    const { instance, dest, signTypedData } = service({ holdings: { [`${A}:2`]: 1n } });
+    const first = await instance.issueVoucher(A);
+    const again = await instance.issueVoucher(A);
+    expect(again.voucher).toEqual(first.voucher);
+    expect(again.signature).toBe(first.signature);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    dest.redeem(A);
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+  });
+
+  it("keeps independent holders eligible, including one that also received a used unit", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:1`]: 1n, [`${B}:1`]: 1n, [`${C}:0`]: 2n } });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(A, B, 1n);
+    await expect(instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
+    await expect(instance.issueVoucher(B)).resolves.toMatchObject({ voucher: { claimant: getAddress(B) } });
+    await expect(instance.issueVoucher(C)).resolves.toMatchObject({ voucher: { claimant: getAddress(C) } });
+  });
+
+  it("moves used units first: a buyer from a claimed wallet gets a used unit, a later buyer of fresh units does not", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:3`]: 1n, [`${D}:3`]: 1n } });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(D, A, 3n);
+    chain.transfer(A, B, 3n);
+    chain.transfer(A, C, 3n);
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ code: "GENESIS_HOLDING_ALREADY_USED" });
+    await expect(instance.issueVoucher(C)).resolves.toMatchObject({ voucher: { claimant: getAddress(C) } });
+  });
+
+  it("releases the holding when a voucher expires unredeemed, and only then", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 1n } });
+    const issued = await instance.issueVoucher(A);
+    chain.transfer(A, B, 0n);
+    dest.state.now = Number(issued.voucher.deadline) + 120;
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ code: "GENESIS_HOLDING_ALREADY_USED" });
+    dest.state.now = Number(issued.voucher.deadline) + 121;
+    await expect(instance.issueVoucher(B)).resolves.toMatchObject({ voucher: { claimant: getAddress(B) } });
+  });
+
+  it("keeps an expired voucher's holding used when it was redeemed in time", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 1n } });
+    const issued = await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(A, B, 0n);
+    dest.state.now = Number(issued.voucher.deadline) + 10_000;
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("fails closed when the transfer history cannot be read", async () => {
+    const chain = genesisChain({ [`${A}:0`]: 1n, [`${B}:0`]: 1n });
+    const { instance } = service({ chain });
+    await instance.issueVoucher(A);
+    chain.idle();
+    chain.getLogs.mockRejectedValueOnce(new Error("rpc offline"));
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+  });
+
+  it("fails closed when the C-Chain provider is behind the ledger", async () => {
+    const chain = genesisChain({ [`${A}:0`]: 1n, [`${B}:0`]: 1n });
+    const { instance } = service({ chain });
+    await instance.issueVoucher(A);
+    chain.getBlockNumber.mockResolvedValueOnce(chain.head - 1).mockResolvedValueOnce(chain.head - 1);
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+  });
+
+  it("issues no voucher after the free-claim window, even to an unused holder", async () => {
+    const { instance, signTypedData } = service({ holdings: { [`${A}:0`]: 1n }, clock: CLAIM_END });
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+    expect(signTypedData).not.toHaveBeenCalled();
   });
 });
 
 describe("Genesis claim vouchers", () => {
-  it("issues one quantity-one voucher bound to the live-ownership rule, target and claim window", async () => {
-    const { instance, signTypedData } = service({ eligible: [0, 2, 3] });
+  it("issues one quantity-one voucher bound to the eligibility rule, target and claim window", async () => {
+    const { instance, signTypedData } = service({ holdings: { [`${WALLET}:0`]: 1n, [`${WALLET}:2`]: 3n, [`${WALLET}:3`]: 1n } });
     const issued = await instance.issueVoucher(WALLET);
     expect(issued.voucher).toMatchObject({
       claimant: getAddress(WALLET),
@@ -171,21 +335,21 @@ describe("Genesis claim vouchers", () => {
 
   it("refuses vouchers before the window opens and from the second it closes", async () => {
     for (const [clock, code] of [[CLAIM_START - 1, "CLAIM_NOT_OPEN"], [CLAIM_END, "CLAIM_WINDOW_CLOSED"], [CLAIM_END + 1, "CLAIM_WINDOW_CLOSED"]]) {
-      const { instance, signTypedData } = service({ eligible: [1], clock });
+      const { instance, signTypedData } = service({ clock });
       await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code });
       expect(signTypedData).not.toHaveBeenCalled();
     }
-    const { instance } = service({ eligible: [1], clock: CLAIM_START });
+    const { instance } = service({ clock: CLAIM_START });
     await expect(instance.issueVoucher(WALLET)).resolves.toMatchObject({ voucher: { claimant: getAddress(WALLET) } });
   });
 
   it("issues distinct 256-bit random nonces by default", async () => {
-    const instance = createGenesisClaimService({
+    const make = (wallet) => createGenesisClaimService({
       config: loadGenesisClaimConfig(ENV), signer: { signTypedData: vi.fn().mockResolvedValue(TEST_SIGNATURE), address: SIGNER },
-      eligibilityReader: vi.fn().mockResolvedValue(["0"]), bindingReader: vi.fn().mockResolvedValue(undefined),
-      claimStateReader: vi.fn().mockResolvedValue({ alreadyClaimed: false, claimedSupply: 0n }), clock: () => NOW,
+      genesisProvider: genesisChain({ [`${wallet}:0`]: 1n }), reservationStore: createMemoryGenesisClaimReservationStore(), bindingReader: vi.fn().mockResolvedValue(undefined),
+      claimStateReader: vi.fn().mockResolvedValue({ alreadyClaimed: false, claimedSupply: 0n }), destinationClock: () => NOW, clock: () => NOW,
     });
-    const [first, second] = await Promise.all([instance.issueVoucher(WALLET), instance.issueVoucher(WALLET)]);
+    const [first, second] = await Promise.all([make(A).issueVoucher(A), make(B).issueVoucher(B)]);
     for (const { voucher } of [first, second]) {
       expect(voucher.nonce).toMatch(/^[0-9]+$/);
       expect(BigInt(voucher.nonce) < 2n ** 256n).toBe(true);
@@ -194,27 +358,26 @@ describe("Genesis claim vouchers", () => {
   });
 
   it("never issues a voucher that outlives the claim window", async () => {
-    const { instance } = service({ eligible: [2], clock: CLAIM_END - 10 });
+    const { instance } = service({ clock: CLAIM_END - 10 });
     const issued = await instance.issueVoucher(WALLET);
     expect(issued.voucher.deadline).toBe(String(CLAIM_END - 1));
   });
 
   it("rejects already-claimed wallets on the destination contract", async () => {
-    const { instance, signTypedData } = service({ eligible: [1], alreadyClaimed: true });
+    const { instance, signTypedData } = service({ alreadyClaimed: true });
     await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
     expect(signTypedData).not.toHaveBeenCalled();
   });
 
   it("has no allocation cap on an open edition, but still enforces a finite one when configured", async () => {
-    const open = service({ eligible: [0], claimedSupply: 10_000n });
+    const open = service({ claimedSupply: 10_000n });
     await expect(open.instance.issueVoucher(WALLET)).resolves.toMatchObject({ voucher: { allocation: "0" } });
-    const finite = service({ eligible: [0], claimedSupply: 25n, env: { GENESIS_CLAIM_ALLOCATION: "25" } });
+    const finite = service({ claimedSupply: 25n, env: { GENESIS_CLAIM_ALLOCATION: "25" } });
     await expect(finite.instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code: "CLAIM_ALLOCATION_EXHAUSTED" });
   });
 
   it("fails closed if live contract bindings do not match the configured target", async () => {
     const { instance, signTypedData } = service({
-      eligible: [3],
       bindingReader: vi.fn().mockRejectedValue(new ApiError(503, "CLAIM_BINDING_MISMATCH", "The claim target differs.")),
     });
     await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ code: "CLAIM_BINDING_MISMATCH", status: 503 });
@@ -271,7 +434,7 @@ function fujiChain(drift = {}) {
 }
 
 describe("live claim binding verification", () => {
-  const bindings = (chain) => createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW });
+  const bindings = (chain) => createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW });
 
   it("accepts an uncapped open edition whose sale is exactly the scheduled public phase", async () => {
     await expect(bindings(fujiChain()).verifyContractBindings()).resolves.toBeUndefined();
@@ -298,7 +461,7 @@ describe("live claim binding verification", () => {
 describe("GET /api/claims/config with the real claim service", () => {
   const responseDouble = () => ({ status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } });
   const requestDouble = () => ({ method: "GET", url: "/api/claims/config", headers: {}, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() {} });
-  const handlerFor = (chain) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW }) });
+  const handlerFor = (chain) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW }) });
 
   it("returns 200 with the exact validated target and no secret", async () => {
     const response = responseDouble();

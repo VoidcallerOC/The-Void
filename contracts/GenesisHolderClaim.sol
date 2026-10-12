@@ -42,8 +42,8 @@ interface IGenesisClaimSale {
 /// another price.
 /// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
 /// claim and fails closed if it drifts. Eligibility is live Genesis ownership: the server reads the
-/// claimant's current C-Chain balances of Genesis token IDs 0-3 when it signs a voucher, under the
-/// rule ELIGIBILITY_RULE names. Genesis tokens are never moved; the claim mints only the release
+/// claimant's current C-Chain balances of Genesis token IDs 0-3 when it signs a voucher and subtracts
+/// units already used by earlier claims, under the rule ELIGIBILITY_RULE names. Genesis tokens are never moved; the claim mints only the release
 /// token, directly to the claimant.
 contract GenesisHolderClaim {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
@@ -53,10 +53,11 @@ contract GenesisHolderClaim {
     uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
     uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
-    /// @notice The live-ownership rule every voucher must name: the claimant currently holds Genesis
-    /// token 0, 1, 2 or 3 on C-Chain when the voucher is signed.
+    /// @notice The rule every voucher must name: when the voucher is signed, the claimant holds at least
+    /// one Genesis unit (IDs 0-3, C-Chain) that no earlier claim used. A claim uses every unit the
+    /// claimant holds, and used units stay used through later transfers (server ledger).
     bytes32 public constant ELIGIBILITY_RULE = keccak256(
-        "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0"
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
     );
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");

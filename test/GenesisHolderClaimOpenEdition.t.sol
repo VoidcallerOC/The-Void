@@ -33,7 +33,7 @@ contract GenesisHolderClaimOpenEditionTest {
     bytes32 internal constant RELEASE_KEY = keccak256("open-claim-release");
     bytes32 internal constant EDITION_ID = keccak256("open-claim-edition");
     bytes32 internal constant RULE = keccak256(
-        "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0"
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
     );
     uint256 internal constant PRICE = 0.25 ether;
     uint256 internal constant T0 = 1_800_000_000;
@@ -130,6 +130,35 @@ contract GenesisHolderClaimOpenEditionTest {
         _claim(CLAIMANT, 6);
         _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 7, 1), GenesisHolderClaim.AlreadyClaimed.selector);
         _expectClaimRevert(CLAIMANT_TWO, _voucher(CLAIMANT_TWO, 6, 1), GenesisHolderClaim.Replay.selector);
+    }
+
+    /// The same signed voucher submitted twice, and the claimant's voucher used from another wallet, are
+    /// refused; after the free-claim window nobody gets a free mint, while the public mint is open to all.
+    function testNoSecondFreeMintAndPublicMintAfterTheWindow() public {
+        vm.warp(CLAIM_START);
+        GenesisHolderClaim.ClaimVoucher memory voucher = _voucher(CLAIMANT, 31, 1);
+        bytes memory signature = _sign(voucher);
+        vm.prank(CLAIMANT);
+        claimContract.claim(voucher, signature);
+        vm.expectPartialRevert(GenesisHolderClaim.AlreadyClaimed.selector);
+        vm.prank(CLAIMANT);
+        claimContract.claim(voucher, signature);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidVoucher.selector);
+        vm.prank(CLAIMANT_TWO);
+        claimContract.claim(voucher, signature);
+
+        vm.warp(CLAIM_END);
+        _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 32, 1), GenesisHolderClaim.ClaimWindowClosed.selector);
+        _expectClaimRevert(CLAIMANT_TWO, _voucher(CLAIMANT_TWO, 33, 1), GenesisHolderClaim.ClaimWindowClosed.selector);
+        vm.deal(CLAIMANT, PRICE);
+        vm.prank(CLAIMANT);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        vm.deal(COLLECTOR, PRICE * 3);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: PRICE * 3}(tokenId, 3);
+        require(release.balanceOf(CLAIMANT, tokenId) == 2, "claimant: one free + one bought");
+        require(release.balanceOf(COLLECTOR, tokenId) == 3, "public mint is ungated and uncapped");
+        require(claimContract.claimedSupply() == 1, "only one free mint");
     }
 
     function testInvalidSignerStillFails() public {

@@ -40,7 +40,7 @@ contract GenesisHolderClaimTest {
     bytes32 internal constant EDITION_ID = keccak256("genesis-holder-claim-test-edition");
     uint256 internal constant PRICE = 1;
     bytes32 internal constant RULE = keccak256(
-        "the-void:genesis-eligibility:v1:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0"
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
     );
 
     VoidRelease1155V4 internal release;
