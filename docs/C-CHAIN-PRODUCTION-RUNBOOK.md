@@ -4,6 +4,9 @@
 > The mainnet launch uses the release-per-contract architecture (`VoidReleaseFactoryV2Royalty`,
 > `ReleaseMarketplaceV4`, Genesis claim). See [`deploy/mainnet/README.md`](../deploy/mainnet/README.md)
 > and [`deploy/mainnet/FUJI-FIRST-GATE.md`](../deploy/mainnet/FUJI-FIRST-GATE.md). Kept for history.
+> **Retired:** `scripts/deploy-release-v2-mainnet.mjs`, `npm run deploy:release-v2-mainnet` and
+> `.github/workflows/deploy-release-v2-mainnet.yml` are removed. The commands below no longer exist.
+> See [`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`](../deploy/mainnet/DEPLOYMENT-AUTHORITY.md).
 
 This runbook is for the **V2 release path only**:
 

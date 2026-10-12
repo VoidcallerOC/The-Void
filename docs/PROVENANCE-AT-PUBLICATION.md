@@ -129,5 +129,5 @@ Open owner decisions before mainnet:
 
 - `config/mainnet-release.json` records `platformFeeBps: 500`. Factory V3 seals the primary fee at
   **250** bps in bytecode, like Factory V2. Confirm 250 for mainnet, or the contract needs a change.
-- `scripts/deploy-release-v2-mainnet.mjs` and its workflow still deploy the legacy shared
-  `VoidRelease1155V2` architecture. If the mainnet launch uses Factory V3, retire them.
+- `scripts/deploy-release-v2-mainnet.mjs` and its workflow, which deployed the legacy shared
+  `VoidRelease1155V2` architecture, are retired (removed).

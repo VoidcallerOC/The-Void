@@ -3,7 +3,7 @@ name: Deploy Genesis holder claim to Fuji
 # GenesisHolderClaim for one existing Fuji release token: free Genesis claims for claim_window_seconds
 # from claim_start, then the token's own primary sale (already configured as the public phase) runs for
 # public_window_seconds. Fuji may use accelerated test windows (minimum 60 s); mainnet production
-# windows (24 h / 7 days at 0.25 AVAX) are enforced by the contract and script, not by this workflow. The default path is a read-only dry run that verifies the release, sale, schedule and
+# windows (24 h / 7 days at 0.25 AVAX) are enforced by the contract and script, not by this workflow. DEPLOYER_PRIVATE_KEY reaches only the signing step of a confirmed broadcast from main. The default path is a read-only dry run that verifies the release, sale, schedule and
 # the C-Chain Genesis collection (eligibility is live ownership, read when vouchers are signed) and
 # simulates the constructor. No run grants roles, edits config/ or enables the
 # API claim; those follow-ups are printed for the owner.
@@ -61,10 +61,9 @@ on:
         type: string
         default: ""
       expected_deployer_address:
-        description: Deployer address the owner reviewed. Required for a broadcast.
-        required: false
+        description: Deployer address the owner reviewed. The dry run plans from it; a broadcast from a different key is refused.
+        required: true
         type: string
-        default: ""
       expected_deployer_nonce:
         description: deployerNonce printed by the reviewed dry run. Required for a broadcast.
         required: false
@@ -82,7 +81,6 @@ env:
   DEPLOY_NETWORK: fuji
   AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
   GENESIS_RPC_URL: https://api.avax.network/ext/bc/C/rpc
-  DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
   GENESIS_CLAIM_RELEASE_CONTRACT: ${{ inputs.release_contract }}
   GENESIS_CLAIM_PRIMARY_SALE: ${{ inputs.primary_sale }}
   GENESIS_CLAIM_TOKEN_ID: ${{ inputs.token_id }}
@@ -96,7 +94,6 @@ env:
   GENESIS_CLAIM_ADMIN: ${{ inputs.claim_admin }}
   GENESIS_CLAIM_SIGNER_ADDRESS: ${{ inputs.claim_signer_address }}
   CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY' && 'yes' || 'no' }}
-  BROADCAST_DEPLOYMENT: ${{ inputs.broadcast_deployment && 'yes' || 'no' }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
   EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
 
@@ -109,6 +106,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Install Node dependencies
@@ -127,15 +125,28 @@ jobs:
       - name: Run claim service and deployment script tests
         run: npm test -- scripts/deploy-genesis-claim.test.mjs server/genesis-claim.test.js
 
-      - name: Run Genesis claim deployment preflight
+      - name: Dry run (no key)
+        if: ${{ !inputs.broadcast_deployment }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${BROADCAST_DEPLOYMENT}" = "yes" ]; then
-            npm run deploy:genesis-claim | tee deployment-output.log
-          else
-            npm run deploy:genesis-claim -- --dry-run | tee deployment-output.log
-          fi
+          npm run deploy:genesis-claim -- --dry-run | tee deployment-output.log
+
+      - name: Refuse a broadcast without confirmation or off main
+        if: inputs.broadcast_deployment && (github.ref != 'refs/heads/main' || inputs.confirm_fuji_deploy != 'I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY')
+        run: |
+          echo "A Fuji broadcast needs the exact confirmation string and a dispatch from main. Nothing was signed." >&2
+          exit 1
+
+      - name: Sign and broadcast (the only step with the key)
+        if: inputs.broadcast_deployment && github.ref == 'refs/heads/main' && inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY'
+        shell: bash
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BROADCAST_DEPLOYMENT: "yes"
+        run: |
+          set -euo pipefail
+          npm run deploy:genesis-claim | tee deployment-output.log
 
       - name: Preserve deployment output and record
         if: always()

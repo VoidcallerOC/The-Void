@@ -162,6 +162,6 @@ This gate is based on the repository implementation and local validation results
 
 ## C-Chain continuation status (PR #127)
 
-The release-network continuation adds a fail-closed C-Chain selection path, mainnet-specific provenance selection, catalog isolation, and a manual deployment workflow at `.github/workflows/deploy-release-v2-mainnet.yml`. The evidence-driven operator procedure is [docs/C-CHAIN-PRODUCTION-RUNBOOK.md](docs/C-CHAIN-PRODUCTION-RUNBOOK.md).
+The release-network continuation adds a fail-closed C-Chain selection path, mainnet-specific provenance selection, catalog isolation, and a manual deployment workflow at `.github/workflows/deploy-release-v2-mainnet.yml`. That workflow and its script have since been removed; the mainnet path is `deploy/mainnet/README.md`, gated as described in `deploy/mainnet/DEPLOYMENT-AUTHORITY.md`. The evidence-driven operator procedure is [docs/C-CHAIN-PRODUCTION-RUNBOOK.md](docs/C-CHAIN-PRODUCTION-RUNBOOK.md).
 
 **Current decision remains NO-GO.** `config/mainnet-release.json` intentionally contains no deployment evidence. The source-level `VoidPrimarySale` blocker is resolved by a minimal owner-authorized, non-zero `transferOwnership(address)` path; the existing Fuji deployment remains unchanged. C-Chain deployment is still intentionally unperformed until the updated artifact passes Solidity validation and the real Safe handoff is verified. Fuji remains separate and is not used as C-Chain provenance evidence.

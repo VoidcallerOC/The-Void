@@ -24,7 +24,6 @@
     "rehearse:royalty:fuji": "node scripts/rehearse-royalty-fuji.mjs",
     "deploy:release-factory-v3": "node scripts/deploy-release-factory-v3.mjs",
     "deploy:genesis-claim": "node scripts/deploy-genesis-claim.mjs",
-    "deploy:release-v2-mainnet": "node scripts/deploy-release-v2-mainnet.mjs",
     "deploy:role-granter": "node scripts/deploy-role-granter-fuji.mjs",
     "deploy:marketplace": "node scripts/deploy-marketplace.mjs"
   },

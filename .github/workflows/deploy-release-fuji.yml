@@ -16,16 +16,19 @@ env:
 
 jobs:
   deploy-and-verify:
+    # Every dispatch of this legacy workflow signs, so it runs only from main. DEPLOYER_PRIVATE_KEY is
+    # exposed only to the deploy and smoke-test steps that sign; build, test and preflight never see it.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
-      DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
       RELEASE_ADMIN_ADDRESS: ${{ secrets.RELEASE_ADMIN_ADDRESS }}
     steps:
       - name: Check out certified commit
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Confirm certified source scope
@@ -52,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          required=(AVALANCHE_FUJI_RPC_URL DEPLOYER_PRIVATE_KEY RELEASE_ADMIN_ADDRESS)
+          required=(AVALANCHE_FUJI_RPC_URL RELEASE_ADMIN_ADDRESS)
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
               echo "Missing required secret: ${name}" >&2
@@ -72,16 +75,13 @@ jobs:
             echo "Refusing non-Fuji chain: ${chain_id}" >&2
             exit 1
           fi
-          deployer="$(cast wallet address --private-key "${DEPLOYER_PRIVATE_KEY}")"
-          deployer_lc="$(printf '%s' "${deployer}" | tr '[:upper:]' '[:lower:]')"
           # The current workflow has one signer. The contract grants all initial
           # roles only to the constructor admin, so the funded signer must equal
           # RELEASE_ADMIN_ADDRESS for the requested role-protected smoke test.
-          admin_lc="$(printf '%s' "${RELEASE_ADMIN_ADDRESS}" | tr '[:upper:]' '[:lower:]')"
-          if [ "${deployer_lc}" != "${admin_lc}" ]; then
-            echo "RELEASE_ADMIN_ADDRESS must match the funded deployer for the role-protected smoke test" >&2
-            exit 1
-          fi
+          # The key is not available here; scripts/deploy-release.mjs and
+          # scripts/verify-release-fuji.mjs check that it controls this address
+          # inside the signing steps.
+          deployer="${RELEASE_ADMIN_ADDRESS}"
           balance_wei="$(cast balance "${deployer}" --rpc-url "${AVALANCHE_FUJI_RPC_URL}")"
           if ! [[ "${balance_wei}" =~ ^[0-9]+$ ]] || [ "${balance_wei}" -le 0 ]; then
             echo "Deployer has zero or unreadable Fuji AVAX balance" >&2
@@ -94,6 +94,8 @@ jobs:
 
       - name: Deploy only VoidRelease1155 to Fuji
         id: deploy
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           export DEPLOY_RESULT_FILE="$RUNNER_TEMP/voidrelease1155-deployment.json"
@@ -101,6 +103,8 @@ jobs:
           test -s "$DEPLOY_RESULT_FILE"
 
       - name: Independently verify deployment and run Fuji smoke test
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           node scripts/verify-release-fuji.mjs "$RUNNER_TEMP/voidrelease1155-deployment.json"

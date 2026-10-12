@@ -25,7 +25,7 @@ A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.
 | Role | Address | Never used as |
 | --- | --- | --- |
 | Platform fee recipient (passive) | Nano S Plus `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`, recorded in `config/mainnet-release-per-contract.json` | deployer, signer, contract admin, artist |
-| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` (`DEPLOYER_PRIVATE_KEY` secret) | fee recipient, signer |
+| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` today, which is also the Fuji deployer. A separate mainnet key is recommended (`DEPLOYMENT-AUTHORITY.md` §6). Mainnet signs only with the `mainnet-deployment` environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`. | fee recipient, signer |
 | Artist (release admin, edition payout) | `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` | fee recipient, signer |
 | Genesis voucher signer | A new dedicated key, generated offline by the owner; only its public address leaves the device | anything else |
 | Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer |
@@ -75,7 +75,15 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      38252855896, all 14 checks PASS and independently re-verified. Record:
      `deployments/fuji-royalty-rehearsal-0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338.json`.
    - `LAUNCH-GATE.md` (NO-GO) and `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` cover the old shared-contract
-     path, which this launch does not use.
+     path, which this launch does not use. Its workflow and script are removed.
+   - **Deployment authority** (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`). Before step 6:
+     - create the protected `mainnet-deployment` environment, with required reviewers and `main` only;
+     - add the mainnet deployer key as the environment secret `MAINNET_DEPLOYER_PRIVATE_KEY`, never
+       at repository level (the mainnet workflows fail closed otherwise);
+     - decide whether mainnet gets a new deployer key, separate from the Fuji `DEPLOYER_PRIVATE_KEY`.
+       This is recommended (section 6 of that file); a new key changes the predicted addresses.
+
+     These are GitHub settings, not code; check them in GitHub.
 4. **Dry runs (no key, no transaction).**
    - Actions → *Deploy release-per-contract infrastructure to C-Chain mainnet*, with
      `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.
@@ -98,6 +106,11 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    - the marketplace `registry`, `feeRecipient` and `deploymentChainId`.
 
    It stops before the marketplace if the factory or implementation differs.
+
+   The run first completes the key-less `plan` job. Review its `…-plan-<run id>` artifact (the dry
+   run and `plan-binding.json`), then approve the `mainnet-deployment` environment. The `broadcast`
+   job re-plans without the key. It signs only if the fresh plan matches the approved binding on the
+   same commit.
 7. **Record PR.** From the workflow's record artifact, fill `config/mainnet-release-per-contract.json`:
    - factory, implementation and marketplace addresses and their deployment blocks;
    - `source: VoidReleaseFactoryV2Royalty`, `releaseVersion: 2`, `albumCapable: true`;
@@ -144,7 +157,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
       - `claim_signer_address`;
       - `expected_deployer_address=0xaBd3…c174`.
     - Dry run first. Then broadcast with `expected_deployer_nonce` from the dry run and
-      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`.
+      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`. As in step 6, approve the
+      `mainnet-deployment` environment only after reviewing the plan artifact.
     - The script verifies the release, the sale schedule, the Genesis collection and the mined
       parameters.
 12. **[APPROVAL] Authorize the claim to mint.**

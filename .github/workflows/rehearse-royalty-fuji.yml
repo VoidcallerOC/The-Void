@@ -6,7 +6,8 @@ name: Fuji-first rehearsal of the royalty-locked launch candidate
 # (2.5% fee / 2.5% royalty / 95% seller) and bypass attempts that must revert.
 # Existing Fuji contracts, config/ manifests, Render services and the database are never touched;
 # the record goes only to deployments/fuji-royalty-rehearsal-<factory>.json (a workflow artifact).
-# The default path is a read-only plan that needs no private key.
+# The default path is a read-only plan that needs no private key. DEPLOYER_PRIVATE_KEY reaches only
+# the signing step of a confirmed broadcast from main; build and test steps never see it.
 
 on:
   workflow_dispatch:
@@ -41,11 +42,8 @@ concurrency:
 env:
   DEPLOY_NETWORK: fuji
   AVALANCHE_FUJI_RPC_URL: ${{ secrets.AVALANCHE_FUJI_RPC_URL }}
-  # The key is exposed to the job only for an approved broadcast; the plan needs only the address.
-  DEPLOYER_PRIVATE_KEY: ${{ inputs.broadcast_rehearsal && secrets.DEPLOYER_PRIVATE_KEY || '' }}
   EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}
   EXPECTED_DEPLOYER_NONCE: ${{ inputs.expected_deployer_nonce }}
-  BROADCAST_REHEARSAL: ${{ inputs.broadcast_rehearsal && 'yes' || 'no' }}
   CONFIRM_FUJI_REHEARSAL: ${{ inputs.confirm_fuji_rehearsal == 'I_CONFIRM_FUJI_ROYALTY_REHEARSAL' && 'yes' || 'no' }}
 
 jobs:
@@ -57,6 +55,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Install Node dependencies
@@ -75,16 +74,28 @@ jobs:
       - name: Run rehearsal script tests
         run: npm test -- scripts/rehearse-royalty-fuji.test.mjs
 
-      - name: Plan or rehearse
+      - name: Plan (no key)
+        if: ${{ !inputs.broadcast_rehearsal }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${BROADCAST_REHEARSAL}" = "yes" ]; then
-            test "${CONFIRM_FUJI_REHEARSAL}" = "yes"
-            npm run rehearse:royalty:fuji | tee rehearsal-output.log
-          else
-            npm run rehearse:royalty:fuji -- --dry-run | tee rehearsal-output.log
-          fi
+          npm run rehearse:royalty:fuji -- --dry-run | tee rehearsal-output.log
+
+      - name: Refuse a broadcast without confirmation or off main
+        if: inputs.broadcast_rehearsal && (github.ref != 'refs/heads/main' || inputs.confirm_fuji_rehearsal != 'I_CONFIRM_FUJI_ROYALTY_REHEARSAL')
+        run: |
+          echo "A Fuji rehearsal broadcast needs the exact confirmation string and a dispatch from main. Nothing was signed." >&2
+          exit 1
+
+      - name: Sign and rehearse (the only step with the key)
+        if: inputs.broadcast_rehearsal && github.ref == 'refs/heads/main' && inputs.confirm_fuji_rehearsal == 'I_CONFIRM_FUJI_ROYALTY_REHEARSAL'
+        shell: bash
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BROADCAST_REHEARSAL: "yes"
+        run: |
+          set -euo pipefail
+          npm run rehearse:royalty:fuji | tee rehearsal-output.log
 
       - name: Preserve rehearsal output and record
         if: always()

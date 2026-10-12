@@ -91,8 +91,8 @@ export function validateDeploymentEnv(env = process.env) {
   if (!target) throw new DeploymentError('DEPLOY_NETWORK must be exactly "fuji" or "mainnet".');
   const rpcUrl = required(env[target.rpcEnv], target.rpcEnv);
   if (!/^https?:\/\//i.test(rpcUrl) || /@/.test(rpcUrl)) throw new DeploymentError(`${target.rpcEnv} must be an HTTP(S) URL without embedded credentials.`);
-  const deployerPrivateKey = required(env.DEPLOYER_PRIVATE_KEY, "DEPLOYER_PRIVATE_KEY");
-  if (!/^0x[0-9a-fA-F]{64}$/.test(deployerPrivateKey)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
+  const deployerPrivateKey = String(env.DEPLOYER_PRIVATE_KEY ?? "").trim() || null;
+  if (deployerPrivateKey && !/^0x[0-9a-fA-F]{64}$/.test(deployerPrivateKey)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
   // Fuji keeps the read-verified existing treasury. Mainnet has no default: the owner names it.
   const platformRecipient = address(network === "fuji" ? (env.RELEASE_PLATFORM_RECIPIENT || fujiV2.platformRecipient) : env.RELEASE_PLATFORM_RECIPIENT, "RELEASE_PLATFORM_RECIPIENT");
   const marketplaceFeeRecipient = address(network === "fuji" ? (env.RELEASE_MARKETPLACE_FEE_RECIPIENT || fujiV2.marketplaceFeeRecipient) : env.RELEASE_MARKETPLACE_FEE_RECIPIENT, "RELEASE_MARKETPLACE_FEE_RECIPIENT");
@@ -102,9 +102,12 @@ export function validateDeploymentEnv(env = process.env) {
   const broadcast = String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes";
   const confirmed = String(env[target.confirmEnv] || "").trim() === "yes";
   if (broadcast && !confirmed) throw new DeploymentError(`Broadcast requires ${target.confirmEnv}=yes.`);
-  const deployerAddress = new Wallet(deployerPrivateKey).address;
+  // A dry run plans from the reviewed address alone, so the key reaches only an approved broadcast.
   const expectedText = String(env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
+  if (broadcast && !deployerPrivateKey) throw new DeploymentError("Broadcast requires DEPLOYER_PRIVATE_KEY.");
   if (broadcast && !expectedText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
+  if (!deployerPrivateKey && !expectedText) throw new DeploymentError("EXPECTED_DEPLOYER_ADDRESS (or DEPLOYER_PRIVATE_KEY) is required to plan the deployment.");
+  const deployerAddress = deployerPrivateKey ? new Wallet(deployerPrivateKey).address : address(expectedText, "EXPECTED_DEPLOYER_ADDRESS");
   if (expectedText && address(expectedText, "EXPECTED_DEPLOYER_ADDRESS") !== deployerAddress) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
   // The nonce the reviewed dry run printed. It fixes the predicted CREATE addresses, so a broadcast
   // whose deployer nonce has moved since that review is refused instead of landing elsewhere.

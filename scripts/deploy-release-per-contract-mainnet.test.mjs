@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Interface, Wallet, getAddress, getCreateAddress, id } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
 import { DeploymentError, FEE_RECIPIENT, MAINNET_CHAIN_ID, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, run, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
@@ -39,6 +42,19 @@ function fakeProvider({ chainId = MAINNET_CHAIN_ID, nonce = 0, pendingNonce = no
 }
 
 describe("release-per-contract mainnet deployment preflight", () => {
+  it("writes the dry-run plan for the workflow's plan binding, without a key", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "void-plan-")), "plan.json");
+    const plan = { mode: "DRY_RUN", chainId: MAINNET_CHAIN_ID, readyToBroadcast: false };
+    const quiet = console.log;
+    console.log = () => {};
+    try {
+      await run(["--dry-run"], { ...BASE, PLAN_OUTPUT_PATH: path }, { provider: {}, buildDryRunPlan: async (config) => { expect(config.deployerPrivateKey).toBeNull(); return plan; } });
+    } finally {
+      console.log = quiet;
+    }
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(plan);
+  });
+
   it("plans a dry run from the deployer address alone and reports the missing recipient as BLOCKED", async () => {
     const plan = await buildDryRunPlan(validateDeploymentEnv(BASE), fakeProvider(), { load: artifacts });
     expect(plan).toMatchObject({ mode: "DRY_RUN", chainId: 43114, broadcasted: false, readyToBroadcast: false });

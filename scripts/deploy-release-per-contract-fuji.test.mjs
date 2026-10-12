@@ -134,14 +134,22 @@ describe("release-per-contract Fuji deployment preflight", () => {
     expect(validateDeploymentEnv(BASE)).toMatchObject({ broadcast: false, deployerAddress: DEPLOYER });
   });
 
+  it("plans a dry run from the reviewed address alone and requires the key only to broadcast", () => {
+    const { DEPLOYER_PRIVATE_KEY: _omitted, ...keyless } = BASE;
+    expect(validateDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER })).toMatchObject({ broadcast: false, deployerAddress: DEPLOYER, deployerPrivateKey: null });
+    expect(() => validateDeploymentEnv(keyless)).toThrow(/EXPECTED_DEPLOYER_ADDRESS/);
+    expect(() => validateDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes" })).toThrow(/requires DEPLOYER_PRIVATE_KEY/);
+  });
+
   it("exposes the expected deployer input and checks it, with the nonce, before any broadcast step", async () => {
     const workflow = await readFile(resolve(import.meta.dirname, "..", ".github/workflows/deploy-release-per-contract-fuji.yml"), "utf8");
     const dispatch = workflow.slice(workflow.indexOf("workflow_dispatch:"), workflow.indexOf("permissions:"));
     expect(dispatch).toContain("expected_deployer_address:");
     expect(workflow).toContain("EXPECTED_DEPLOYER_ADDRESS: ${{ inputs.expected_deployer_address }}");
-    const validation = workflow.slice(workflow.indexOf("Validate deployer credential without broadcasting"), workflow.indexOf("Install pinned Foundry toolchain"));
-    for (const line of ["deployer_nonce=", "deployer_pending_nonce=", "deployer_matches_expected=", "A broadcast requires expected_deployer_address.", "refusing to broadcast"]) expect(validation).toContain(line);
-    expect(workflow.indexOf("Validate deployer credential without broadcasting")).toBeLessThan(workflow.indexOf("npm run deploy:release-per-contract:fuji"));
+    const validation = workflow.slice(workflow.indexOf("Report deployer state without the key"), workflow.indexOf("Install pinned Foundry toolchain"));
+    for (const line of ["deployer_nonce=", "deployer_pending_nonce=", "A broadcast requires expected_deployer_address.", "refusing to broadcast"]) expect(validation).toContain(line);
+    expect(validation).not.toContain("DEPLOYER_PRIVATE_KEY");
+    expect(workflow.indexOf("Report deployer state without the key")).toBeLessThan(workflow.indexOf("npm run deploy:release-per-contract:fuji"));
   });
 
   it("keeps the mined record in the log when writing the record file fails", async () => {
