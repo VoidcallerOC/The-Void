@@ -23,6 +23,7 @@ import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VID
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings } from "../lib/sale-earnings.js";
 import { StudioEarnings } from "./StudioEarnings.jsx";
+import { ARTIST_ROYALTY_POLICY } from "../../config/release-network.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
 const field = { width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 12px", minHeight: 44, color: "var(--vc-bone)", background: "var(--vc-pit)", border: "1px solid var(--vc-ash)", fontFamily: "var(--font-body)", fontSize: 16 };
@@ -727,8 +728,8 @@ export function ArtistStudioPage() {
       if (metadata.provenanceAtCreation === true && !metadata.provenanceRootBytes32) throw new Error("This release records provenance at publication, but the server did not return the provenance root. Nothing was sent.");
       const provenanceRoot = metadata.provenanceAtCreation === true ? metadata.provenanceRootBytes32 : null;
       const encoded = form.releaseType === "ALBUM"
-        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, single: form.albumSingle, mintEnd, provenanceRoot })
-        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: form.royaltyBps || 0, provenanceRoot });
+        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, single: form.albumSingle, mintEnd, provenanceRoot })
+        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, provenanceRoot });
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
@@ -1234,7 +1235,9 @@ export function ArtistStudioPage() {
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>Limited or open</h2>
           <TextField title="How many copies?" value={form.quantity} onChange={(value) => set("quantity", value)} placeholder="Leave empty for open" />
           <TextField title="Price (AVAX)" value={form.priceWei} onChange={(value) => set("priceWei", value)} placeholder="0.01" />
-          <TextField title="Your cut on a resale (0 to 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />
+          {ARTIST_ROYALTY_POLICY
+            ? <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>Your cut on every resale: {ARTIST_ROYALTY_POLICY.royaltyBps / 100}%, paid straight to your wallet.</p>
+            : <TextField title="Your cut on a resale (0 to 1000)" value={form.royaltyBps} onChange={(value) => set("royaltyBps", value)} />}
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>Type a number if only that many should ever exist. Leave it empty if people should be able to keep getting one until the sale ends. You cannot change this after you publish. 1000 on the resale cut means 10%.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("experience")}>Back</button>

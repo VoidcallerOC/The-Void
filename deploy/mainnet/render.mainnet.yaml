@@ -5,7 +5,11 @@
 # - Both services deploy manually (autoDeployTrigger: off); merges to main never redeploy mainnet.
 # - The indexer is created only after the factory and marketplace are mined and recorded in
 #   config/mainnet-release-per-contract.json; its contract list comes from that manifest.
-# - Genesis claims stay disabled here; they are a separate launch phase.
+# - Genesis claims ship in the same launch. The claim stays disabled (GENESIS_CLAIM_ENABLED=false)
+#   until the owner approves coordinated activation; its contract values are entered after the
+#   mainnet Forgive & Forget release, sale and claim are deployed and verified.
+# - Region ohio: the existing The-Void services run there (render.yaml's "oregon" is stale) and it is
+#   the closest Render region to a us-east-2 (Ohio) Supabase project.
 # Values marked sync: false are entered in the Render dashboard, never committed.
 
 services:
@@ -13,7 +17,7 @@ services:
     name: the-void-api-mainnet
     runtime: docker
     plan: 0.5c-512mb
-    region: oregon
+    region: ohio
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
@@ -92,14 +96,46 @@ services:
       # The mined ReleaseMarketplaceV3 address, entered only after the recorded deployment.
       - key: MARKETPLACE_ADDRESS
         sync: false
+      # Genesis claim (production schedule enforced by contract, API and deploy script). Both
+      # allocations are 0, which means uncapped: the open edition has no free-claim or public cap.
+      # Never set a finite GENESIS_CLAIM_ALLOCATION.
+      - key: GENESIS_CLAIM_ALLOCATION
+        value: "0"
+      - key: GENESIS_PUBLIC_MINT_ALLOCATION
+        value: "0"
       - key: GENESIS_CLAIM_ENABLED
         value: "false"
+      - key: GENESIS_RPC_URL
+        value: https://api.avax.network/ext/bc/C/rpc
+      - key: GENESIS_DESTINATION_RPC_URL
+        value: https://api.avax.network/ext/bc/C/rpc
+      - key: GENESIS_CLAIM_WINDOW_SECONDS
+        value: "86400"
+      - key: GENESIS_PUBLIC_WINDOW_SECONDS
+        value: "604800"
+      - key: GENESIS_PUBLIC_PRICE_WEI
+        value: "250000000000000000"
+      # The mined claim and the mainnet Forgive & Forget release, sale and token it is bound to.
+      - key: GENESIS_CLAIM_CONTRACT
+        sync: false
+      - key: GENESIS_CLAIM_RELEASE_CONTRACT
+        sync: false
+      - key: GENESIS_CLAIM_PRIMARY_SALE
+        sync: false
+      - key: GENESIS_CLAIM_TOKEN_ID
+        sync: false
+      - key: GENESIS_CLAIM_START
+        sync: false
+      # The dedicated voucher signer key, generated offline by the owner and entered only here. It is
+      # never the fee recipient, the claim admin, the artist or the deployer.
+      - key: GENESIS_CLAIM_SIGNER_PRIVATE_KEY
+        sync: false
 
   - type: worker
     name: the-void-indexer-mainnet
     runtime: docker
     plan: 0.5c-512mb
-    region: oregon
+    region: ohio
     dockerfilePath: ./Dockerfile
     dockerContext: .
     dockerCommand: npm run start:indexer

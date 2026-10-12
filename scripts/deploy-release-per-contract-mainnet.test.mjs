@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Wallet, getAddress, getCreateAddress, id } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
-import { DeploymentError, MAINNET_CHAIN_ID, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, run, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
+import { DeploymentError, FEE_RECIPIENT, MAINNET_CHAIN_ID, broadcastDeployment, buildDryRunPlan, deploymentRecordPath, run, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
 
 const KEY = `0x${"22".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
-const RECIPIENT = "0x00000000000000000000000000000000000000A1";
-const TREASURY = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
+const RECIPIENT = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
+const ARTIST = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 const BASE = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
 const BROADCAST = { ...BASE, DEPLOYER_PRIVATE_KEY: KEY, EXPECTED_DEPLOYER_NONCE: "0", RELEASE_PLATFORM_RECIPIENT: RECIPIENT, RECIPIENT_VERIFIED_ON_DEVICE: RECIPIENT, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes" };
 const albumRuntime = `0x${ALBUM_SIGNATURES.map((signature) => `63${id(signature).slice(2, 10)}`).join("")}`;
@@ -46,8 +46,10 @@ describe("release-per-contract mainnet deployment preflight", () => {
     expect(() => validateDeploymentEnv({ ...BASE, DEPLOY_NETWORK: "fuji" })).toThrow(/mainnet/);
   });
 
-  it("refuses the unverified treasury, the deployer, a split recipient, and any fee other than 250 bps", () => {
-    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: TREASURY })).toThrow(/Fuji treasury/);
+  it("accepts only the recorded Nano S Plus for both fees and refuses the artist, the deployer, any other address, a split, and any fee other than 250 bps", () => {
+    expect(FEE_RECIPIENT).toBe(getAddress(RECIPIENT));
+    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: ARTIST })).toThrow(/artist wallet/);
+    expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: "0x00000000000000000000000000000000000000A1" })).toThrow(/Nano S Plus recorded/);
     expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: DEPLOYER })).toThrow(/deployer/);
     expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_RECIPIENT: RECIPIENT, RELEASE_MARKETPLACE_FEE_RECIPIENT: "0x00000000000000000000000000000000000000A2" })).toThrow(/one recipient/);
     expect(() => validateDeploymentEnv({ ...BASE, RELEASE_PLATFORM_FEE_BPS: "500" })).toThrow(/exactly 250/);

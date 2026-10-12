@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
+import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT, PUBLIC_WINDOW_SECONDS, claimSchedule } from "../server/genesis-claim.js";
 
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
@@ -20,6 +21,8 @@ export const CLAIM_NETWORKS = Object.freeze({
   mainnet: Object.freeze({ chainId: GENESIS_CHAIN_ID, rpcEnv: "AVALANCHE_MAINNET_RPC_URL", confirmEnv: "CONFIRM_MAINNET_DEPLOY" }),
 });
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// The Genesis collection owner and Forgive & Forget artist wallet.
+const MAINNET_ARTIST_WALLET = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 // Seconds a broadcast needs before claims open: to be mined and for the artist to grant ISSUER_ROLE.
 export const MINIMUM_LEAD_SECONDS = 600n;
 
@@ -68,14 +71,26 @@ function httpUrl(value, name) {
   return text;
 }
 
+// Mainnet keeps the deployer, artist, claim signer and the passive platform fee recipient (the
+// owner's Nano S Plus) as separate roles: the fee recipient is never a claim admin or signer, and the
+// automated voucher signer is a dedicated key used for nothing else.
+export const MAINNET_FEE_RECIPIENT = getAddress(mainnetReleaseManifest.platformRecipient);
+export function assertMainnetClaimRoles({ admin, signer, deployer }) {
+  if (admin === MAINNET_FEE_RECIPIENT || signer === MAINNET_FEE_RECIPIENT) throw new DeploymentError("The platform fee recipient is a passive wallet; it may not be the claim admin or the voucher signer.");
+  if (signer === admin) throw new DeploymentError("The voucher signer must be a dedicated key, not the claim admin.");
+  if (signer === deployer) throw new DeploymentError("The voucher signer must be a dedicated key, not the deployer.");
+  if (signer === getAddress(MAINNET_ARTIST_WALLET)) throw new DeploymentError("The voucher signer must be a dedicated key, not the artist wallet.");
+}
+
 export function validateClaimDeploymentEnv(env = process.env) {
   const network = String(env.DEPLOY_NETWORK || "").trim().toLowerCase();
   const target = CLAIM_NETWORKS[network];
   if (!target) throw new DeploymentError('DEPLOY_NETWORK must be exactly "fuji" or "mainnet".');
   const rpcUrl = httpUrl(env[target.rpcEnv], target.rpcEnv);
   const genesisRpcUrl = httpUrl(env.GENESIS_RPC_URL, "GENESIS_RPC_URL");
-  const deployerPrivateKey = required(env.DEPLOYER_PRIVATE_KEY, "DEPLOYER_PRIVATE_KEY");
-  if (!/^0x[0-9a-fA-F]{64}$/.test(deployerPrivateKey)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
+  // A dry run can plan from EXPECTED_DEPLOYER_ADDRESS alone, so the key reaches only an approved broadcast.
+  const deployerPrivateKey = String(env.DEPLOYER_PRIVATE_KEY ?? "").trim() || null;
+  if (deployerPrivateKey && !/^0x[0-9a-fA-F]{64}$/.test(deployerPrivateKey)) throw new DeploymentError("DEPLOYER_PRIVATE_KEY must be a 32-byte hex private key.");
   const releaseContract = address(env.GENESIS_CLAIM_RELEASE_CONTRACT, "GENESIS_CLAIM_RELEASE_CONTRACT");
   if (releaseContract === getAddress(LEGACY_FUJI_SINGLETON)) throw new DeploymentError("The legacy Fuji V2 singleton may not be the claim release target.");
   const primarySale = address(env.GENESIS_CLAIM_PRIMARY_SALE, "GENESIS_CLAIM_PRIMARY_SALE");
@@ -98,13 +113,18 @@ export function validateClaimDeploymentEnv(env = process.env) {
   }
   const broadcast = String(env.BROADCAST_DEPLOYMENT || "").trim().toLowerCase() === "yes";
   if (broadcast && String(env[target.confirmEnv] || "").trim() !== "yes") throw new DeploymentError(`Broadcast requires ${target.confirmEnv}=yes.`);
-  const deployerAddress = new Wallet(deployerPrivateKey).address;
   const expectedText = String(env.EXPECTED_DEPLOYER_ADDRESS || "").trim();
+  if (broadcast && !deployerPrivateKey) throw new DeploymentError("DEPLOYER_PRIVATE_KEY is required to broadcast.");
   if (broadcast && !expectedText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_ADDRESS, the deployer address the owner reviewed.");
+  if (!deployerPrivateKey && !expectedText) throw new DeploymentError("DEPLOYER_PRIVATE_KEY or EXPECTED_DEPLOYER_ADDRESS is required.");
+  const deployerAddress = deployerPrivateKey ? new Wallet(deployerPrivateKey).address : address(expectedText, "EXPECTED_DEPLOYER_ADDRESS");
   if (expectedText && address(expectedText, "EXPECTED_DEPLOYER_ADDRESS") !== deployerAddress) throw new DeploymentError("DEPLOYER_PRIVATE_KEY does not belong to EXPECTED_DEPLOYER_ADDRESS.");
   const nonceText = String(env.EXPECTED_DEPLOYER_NONCE ?? "").trim();
   if (nonceText && !/^(0|[1-9][0-9]{0,15})$/.test(nonceText)) throw new DeploymentError("EXPECTED_DEPLOYER_NONCE must be a non-negative whole number.");
   if (broadcast && !nonceText) throw new DeploymentError("Broadcast requires EXPECTED_DEPLOYER_NONCE, the deployer nonce printed by the reviewed dry run.");
+  const admin = address(env.GENESIS_CLAIM_ADMIN, "GENESIS_CLAIM_ADMIN");
+  const signer = address(env.GENESIS_CLAIM_SIGNER_ADDRESS, "GENESIS_CLAIM_SIGNER_ADDRESS");
+  if (network === "mainnet") assertMainnetClaimRoles({ admin, signer, deployer: deployerAddress });
   return Object.freeze({
     network,
     chainId: target.chainId,
@@ -125,8 +145,8 @@ export function validateClaimDeploymentEnv(env = process.env) {
     publicSaleEnd: claimStart + schedule.claimWindow + schedule.publicWindow - 1n,
     publicPriceWei,
     expectOpenEdition: openText === "yes",
-    admin: address(env.GENESIS_CLAIM_ADMIN, "GENESIS_CLAIM_ADMIN"),
-    signer: address(env.GENESIS_CLAIM_SIGNER_ADDRESS, "GENESIS_CLAIM_SIGNER_ADDRESS"),
+    admin,
+    signer,
     broadcast,
     expectedDeployerNonce: nonceText ? Number(nonceText) : null,
   });

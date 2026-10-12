@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
-import { FUJI_RELEASE_PER_CONTRACT, RELEASE_PER_CONTRACT, releaseDeploymentForFactory } from "../../config/release-network.js";
+import { ARTIST_ROYALTY_POLICY, FUJI_RELEASE_PER_CONTRACT, RELEASE_PER_CONTRACT, releaseDeploymentForFactory, releaseRoyaltyPolicyViolation } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 import { STANDALONE_EDITIONS_EXIST_MESSAGE } from "./release-lifecycle.js";
 
@@ -388,12 +388,15 @@ export function releaseProvenanceRoot(value) {
   return `0x${hash}`;
 }
 
-export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null }) {
+// On mainnet the artist resale royalty is fixed (ARTIST_ROYALTY_POLICY: 2.5% to the artist's own wallet).
+export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for this release.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
+  if (policyViolation) throw new Error(policyViolation);
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);
@@ -410,12 +413,14 @@ export function encodeCreateReleaseAlbum({ releaseKey }) {
   return { data: v4AlbumIface.encodeFunctionData("createAlbum", [releaseKey]) };
 }
 
-export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null }) {
+export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album tracks.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
   const bps = BigInt(royaltyBps ?? 0);
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
+  const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
+  if (policyViolation) throw new Error(policyViolation);
   const edition = bytes32(editionId, "editionId");
   const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
   const tokenId = BigInt(digest);

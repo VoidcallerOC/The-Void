@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
-import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory } from "../config/release-network.js";
+import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory, releaseRoyaltyPolicyForChain, releaseRoyaltyPolicyViolation } from "../config/release-network.js";
 import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
@@ -98,6 +98,24 @@ function legacySharedContract() {
   return CERTIFIED_CONTRACT;
 }
 export const EDITION_ABI = "function edition(uint256) view returns (tuple(bytes32 releaseId, bytes32 editionId, address artist, uint256 maxSupply, uint256 mintedSupply, string metadataUri, bool exists))";
+const ROYALTY_CONFIGURED_IFACE = new ethers.Interface(["event RoyaltyConfigured(uint256 indexed tokenId, address indexed receiver, uint96 royaltyBps)"]);
+
+/**
+ * Where the network has a royalty policy (mainnet: 2.5% to the artist's own wallet), the edition's
+ * creation transaction must carry the release contract's RoyaltyConfigured event for this token with
+ * exactly that rate and a receiver that is not a platform fee wallet. The royalty cannot change after
+ * creation, so a non-compliant edition is never published. No policy (Fuji): nothing is checked.
+ */
+export function assertEditionRoyaltyPolicy({ receipt, publicationContract, tokenId, policy }) {
+  if (!policy) return;
+  const configured = (receipt?.logs || []).filter((log) => String(log.address || "").toLowerCase() === String(publicationContract).toLowerCase())
+    .map((log) => { try { return ROYALTY_CONFIGURED_IFACE.parseLog(log); } catch { return null; } })
+    .find((parsed) => parsed?.name === "RoyaltyConfigured" && parsed.args.tokenId === BigInt(tokenId));
+  if (!configured) throw new ApiError(409, "ROYALTY_POLICY_MISMATCH", "The edition transaction does not record its artist royalty.");
+  const violation = releaseRoyaltyPolicyViolation(policy, { receiver: configured.args.receiver, royaltyBps: configured.args.royaltyBps });
+  if (violation) throw new ApiError(409, "ROYALTY_POLICY_MISMATCH", `${violation} This edition cannot be published.`);
+}
+
 // VoidRelease1155V5 (Factory V3) records the provenance root inside the edition-creating
 // transaction and is its own anchor; the event signature matches VoidProvenanceAnchor's.
 export const RELEASE_PROVENANCE_ABI = Object.freeze([
@@ -605,6 +623,7 @@ export class ArtistStudioService {
       if (creator !== String(event.args.artist || "").toLowerCase()) throw new Error("on-chain edition creator does not match the publication event");
       const creatorOwns = await this.db.query("SELECT 1 FROM artist_owners WHERE artist_id=$1 AND lower(owner_wallet)=$2 LIMIT 1", [release.artist_id, creator]);
       if (!creatorOwns.rows[0]) throw new ApiError(403, "EDITION_CREATED_BY_ANOTHER_ARTIST", "The on-chain edition was not created by a wallet of this artist.");
+      if (binding) assertEditionRoyaltyPolicy({ receipt, publicationContract, tokenId: expectedTokenId, policy: releaseRoyaltyPolicyForChain(publicationChainId) });
       const provenanceAtCreation = bindingAnchorsAtCreation(binding);
       const onChainProvenance = provenanceAtCreation
         ? await this.verifyProvenanceAtCreation({ receipt, provider, publicationContract, releaseId: expectedReleaseId, editionId: expectedEditionId, tokenId: expectedTokenId, artist: creator, provenanceRoot: provenance.root })

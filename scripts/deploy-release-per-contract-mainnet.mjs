@@ -19,9 +19,12 @@ export const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV3.sol/ReleaseMa
 export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4.sol/VoidRelease1155V4.json";
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const ZERO = "0x0000000000000000000000000000000000000000";
-// The Fuji treasury is not the owner's verified mainnet recipient; using it requires a separate decision.
+// The single passive platform fee recipient (the owner's Nano S Plus) is recorded in the mainnet
+// manifest; both fees must go to exactly that address. Other roles never double as the recipient.
+export const FEE_RECIPIENT = getAddress(mainnetManifest.platformRecipient);
+if (getAddress(mainnetManifest.marketplaceFeeRecipient) !== FEE_RECIPIENT) throw new Error("The mainnet manifest must name one platform fee recipient for both fees.");
 export const REFUSED_RECIPIENTS = Object.freeze({
-  "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4": "the Fuji treasury, which is not the physically verified mainnet recipient",
+  "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a": "the artist wallet; artist and platform fee recipient are separate roles",
   "0xD1B4367dd9f235f9ee61878019d66E31511E98eE": "the Genesis collection contract",
 });
 // Gas headroom required over the estimate before a broadcast (percent).
@@ -71,8 +74,9 @@ export function validateDeploymentEnv(env = process.env) {
   const marketplaceFeeRecipient = marketplaceInput || platformRecipient;
   for (const [name, value] of [["RELEASE_PLATFORM_RECIPIENT", platformRecipient], ["RELEASE_MARKETPLACE_FEE_RECIPIENT", marketplaceFeeRecipient]]) {
     if (!value) continue;
-    if (REFUSED_RECIPIENTS[value]) throw new DeploymentError(`${name} is ${REFUSED_RECIPIENTS[value]}. Use the physically verified Nano S Plus address.`);
+    if (REFUSED_RECIPIENTS[value]) throw new DeploymentError(`${name} is ${REFUSED_RECIPIENTS[value]}.`);
     if (value === deployerAddress) throw new DeploymentError(`${name} must not be the deployer.`);
+    if (value !== FEE_RECIPIENT) throw new DeploymentError(`${name} must be the owner's Nano S Plus recorded in config/mainnet-release-per-contract.json (${FEE_RECIPIENT}).`);
   }
   const platformFeeBps = feeBps(env.RELEASE_PLATFORM_FEE_BPS, "RELEASE_PLATFORM_FEE_BPS");
   const marketplaceFeeBps = feeBps(env.RELEASE_MARKETPLACE_FEE_BPS, "RELEASE_MARKETPLACE_FEE_BPS");
@@ -142,7 +146,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     if (!value) { recipientChecks.push({ name, status: "BLOCKED", reason: "Not provided: awaiting the physically verified Nano S Plus address." }); continue; }
     const code = await provider.getCode(value);
     recipientChecks.push(code === "0x"
-      ? { name, address: value, status: "UNVERIFIED", reason: "Externally owned account on C-Chain. Physical device verification is still required before broadcast." }
+      ? { name, address: value, status: "UNVERIFIED", reason: "Externally owned account on C-Chain; receives fees passively and never signs a deployment. Physical device verification is still required before broadcast." }
       : { name, address: value, status: "BLOCKED", reason: "Has contract code on C-Chain; a hardware-wallet recipient must be an EOA." });
   }
 

@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       platform_recipient:
-        description: Primary and marketplace fee recipient. The physically verified Nano S Plus address only.
+        description: Primary and marketplace fee recipient. Only the Nano S Plus recorded in config/mainnet-release-per-contract.json, confirmed on the device.
         required: false
         type: string
         default: ""

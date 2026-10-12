@@ -77,11 +77,37 @@ export function releasePerContractManifestFor(network) {
   return manifest;
 }
 
+// Secondary-sale artist royalty policy of a network's release-per-contract manifest. On mainnet every
+// edition must pay exactly artistRoyaltyBps (2.5%) through ERC-2981 to the artist's own payout
+// wallet, never to a platform fee wallet. The royalty is fixed per edition at creation, so this is
+// enforced where editions are encoded (web) and published (API). Fuji has no policy (unchanged).
+export function releaseRoyaltyPolicy(manifest) {
+  if (!Number.isSafeInteger(manifest?.artistRoyaltyBps)) return null;
+  const forbidden = [manifest.platformRecipient, manifest.marketplaceFeeRecipient].filter(Boolean).map((value) => String(value).toLowerCase());
+  return Object.freeze({ chainId: Number(manifest.chainId), royaltyBps: manifest.artistRoyaltyBps, forbiddenReceivers: Object.freeze([...new Set(forbidden)]) });
+}
+
+export function releaseRoyaltyPolicyForChain(chainId) {
+  const manifest = Object.values(RELEASE_PER_CONTRACT_MANIFESTS).find((candidate) => Number(candidate.chainId) === Number(chainId));
+  return manifest ? releaseRoyaltyPolicy(manifest) : null;
+}
+
+/** The reason an edition's royalty breaks the policy, or null when it complies (or there is no policy). */
+export function releaseRoyaltyPolicyViolation(policy, { receiver, royaltyBps }) {
+  if (!policy) return null;
+  if (BigInt(royaltyBps ?? -1) !== BigInt(policy.royaltyBps)) return `The artist resale royalty must be exactly ${policy.royaltyBps} basis points (${policy.royaltyBps / 100}%).`;
+  const wallet = String(receiver || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(wallet) || /^0x0{40}$/.test(wallet)) return "The artist royalty must be paid to the artist's own wallet.";
+  if (policy.forbiddenReceivers.includes(wallet)) return "The artist royalty may not be paid to the platform fee wallet.";
+  return null;
+}
+
 export const RELEASE_NETWORK = requestedNetwork();
 export const RELEASE_DEPLOYMENT = releaseDeploymentFor(RELEASE_NETWORK);
 export const IS_MAINNET_RELEASE = RELEASE_DEPLOYMENT.chainId === 43114;
 // The release-per-contract manifest of the selected network: Fuji's V2 factory by default, the
 // mainnet manifest with RELEASE_NETWORK=mainnet / VITE_RELEASE_NETWORK=mainnet.
 export const RELEASE_PER_CONTRACT = releasePerContractManifestFor(RELEASE_NETWORK);
+export const ARTIST_ROYALTY_POLICY = releaseRoyaltyPolicy(RELEASE_PER_CONTRACT);
 // Deployments of the selected network only.
 export const ACTIVE_RELEASE_PER_CONTRACT_DEPLOYMENTS = Object.freeze(RELEASE_PER_CONTRACT_DEPLOYMENTS.filter((deployment) => deployment.chainId === Number(RELEASE_PER_CONTRACT.chainId)));

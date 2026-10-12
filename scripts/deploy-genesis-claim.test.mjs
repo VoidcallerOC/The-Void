@@ -130,6 +130,25 @@ describe("Genesis claim deployment: environment schedule", () => {
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" })).toThrow(/0.25 AVAX/);
   });
 
+  it("plans a dry run from the reviewed deployer address alone and needs the key only to broadcast", () => {
+    const keyless = { ...MAINNET, DEPLOYER_PRIVATE_KEY: "", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
+    expect(validateClaimDeploymentEnv(keyless)).toMatchObject({ deployerAddress: DEPLOYER, deployerPrivateKey: null, broadcast: false });
+    expect(() => validateClaimDeploymentEnv({ ...keyless, EXPECTED_DEPLOYER_ADDRESS: "" })).toThrow(/DEPLOYER_PRIVATE_KEY or EXPECTED_DEPLOYER_ADDRESS/);
+    expect(() => validateClaimDeploymentEnv({ ...keyless, BROADCAST_DEPLOYMENT: "yes", CONFIRM_MAINNET_DEPLOY: "yes", EXPECTED_DEPLOYER_NONCE: "2" })).toThrow(/DEPLOYER_PRIVATE_KEY is required to broadcast/);
+  });
+
+  it("keeps the fee recipient, voucher signer, claim admin, artist and deployer separate on mainnet", () => {
+    const NANO = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: NANO })).toThrow(/passive wallet/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: NANO })).toThrow(/passive wallet/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toThrow(/not the claim admin/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: DEPLOYER })).toThrow(/not the deployer/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ARTIST })).toThrow(/not the artist wallet/);
+    expect(validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: ARTIST })).toMatchObject({ admin: ARTIST, signer: SIGNER });
+    // Fuji keeps its existing rules.
+    expect(validateClaimDeploymentEnv({ ...ENV, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toMatchObject({ network: "fuji" });
+  });
+
   it("needs the mainnet confirmation, not the Fuji one, to broadcast on mainnet", () => {
     const broadcast = { ...MAINNET, BROADCAST_DEPLOYMENT: "yes", CONFIRM_FUJI_DEPLOY: "yes", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0" };
     expect(() => validateClaimDeploymentEnv(broadcast)).toThrow(/CONFIRM_MAINNET_DEPLOY=yes/);

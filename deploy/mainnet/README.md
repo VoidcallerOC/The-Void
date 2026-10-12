@@ -1,91 +1,210 @@
-# Mainnet (Avalanche C-Chain, 43114) launch runbook — core marketplace
+# The Void — coordinated Avalanche C-Chain (43114) launch runbook
 
-Release-per-contract architecture validated on Fuji: `VoidReleaseFactoryV2` (creates the
-album-capable `VoidRelease1155V4` clone implementation) and `ReleaseMarketplaceV3` bound to it.
-Fresh mainnet deployments; no Fuji state or address is reused. Genesis claims are a separate,
-later phase and stay disabled here.
+One launch with three mandatory parts: **primary sales**, **secondary sales** and the **Forgive &
+Forget Genesis claim**. Nothing is announced or activated until all three have real C-Chain evidence.
+A partial public launch is not a fallback. Fuji stays operational and unchanged. The old C-Chain
+Voidcaller collection is out of scope.
 
-Both contracts are **ownerless**. The fee recipient and fee rate are **immutable** once mined.
+Every **[APPROVAL]** step needs the owner's explicit approval of that action and its exact parameters.
 
-| Item | Value |
-| --- | --- |
-| Primary fee | 250 bps, sealed in the factory bytecode (credited per release sale contract; the recipient calls `withdraw()` on each sale contract to collect) |
-| Secondary fee | 250 bps, marketplace constructor (paid to the recipient on every sale) |
-| Fee recipient | The owner's Nano S Plus address, **physically verified on the device**. One address for both fees. The Fuji treasury `0xb65C…1ce4` is refused by the script. |
-| Deployer | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` (existing `DEPLOYER_PRIVATE_KEY` secret). Holds no role or ownership after deployment. |
-| Predicted addresses (deployer nonce 0/1) | Factory `0x262B774cf9a1949170B58E2d57F6189980FE757b`, implementation `0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006`, marketplace `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` |
-| Funding | ≥ 0.15 AVAX on the deployer (estimate 0.069 AVAX at 10 gwei; fork rehearsal used 0.029 AVAX) |
+## Economics (final)
 
-The factory address equals the Fuji legacy V1 release address because it is the same deployer's
-nonce-0 address on another chain. The code scopes the Fuji V1 address to chain 43113 only.
+| Flow | Rate | Recipient | Enforced by |
+| --- | --- | --- | --- |
+| Primary sale platform fee | 2.5% | Nano S Plus | `VoidReleaseFactoryV2.PLATFORM_FEE_BPS` (bytecode) → each release's `VoidPrimarySale`. Credited on every purchase; the owner collects with a Ledger-signed `withdraw()` on each sale contract |
+| Primary sale remainder | 97.5% | The edition's artist payout (`payoutOf`) | `VoidPrimarySale` (pull balance) |
+| Secondary marketplace fee | 2.5% | Nano S Plus | `ReleaseMarketplaceV3.platformFeeBps` (immutable), paid directly on every resale; no signature needed |
+| Secondary artist royalty | 2.5% | The edition's own artist payout (ERC-2981 `royaltyInfo`) | Fixed per edition at creation. On mainnet, Studio sends only 250 bps to the artist's wallet, and the API refuses to publish an edition whose `RoyaltyConfigured` event differs or names a platform fee wallet |
+| Seller proceeds | 95% | Seller | `ReleaseMarketplaceV3.buy` |
 
-## Order (each **[APPROVAL]** step is a separate owner approval)
+A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.95 to the seller
+(`test/MainnetEconomics.t.sol`, `server/mainnet-economics.test.js`).
 
-1. **Merge the network-selection PR** (Fuji unchanged; mainnet selectable and inert).
-2. **Owner: verify the Nano S Plus receive address on the device screen** (Avalanche C-Chain / EVM account).
-3. **Dry run** (no key, no transaction): Actions → *Deploy release-per-contract infrastructure to
-   C-Chain mainnet* → `expected_deployer_address=0xaBd3…c174`, `platform_recipient=<verified>`,
-   broadcast off. Every check must be PASS except the deployer-funding check before the deployer is
-   funded, and the recipient checks, which stay UNVERIFIED until the device confirmation at broadcast.
-4. **[APPROVAL] Fund the deployer** with 0.15 AVAX, sent from an owner wallet.
-5. Re-run the dry run with `expected_deployer_nonce=0`; `readyToBroadcast` must be `true`.
-6. **[APPROVAL] Broadcast:** the same inputs, plus `recipient_verified_on_device=<re-typed>`,
-   `broadcast_deployment=true` and `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY`.
-   The script verifies the predicted addresses, `platformRecipient`, the 250 bps fee,
-   `RELEASE_VERSION`, the album selectors, the marketplace `registry`/`feeRecipient`/`platformFeeBps`
-   and `deploymentChainId=43114`. The record is uploaded as a workflow artifact.
-7. **Record PR:** fill `config/mainnet-release-per-contract.json` from the record:
-   addresses, blocks, recipients, `source: VoidReleaseFactoryV2`, `releaseVersion: 2`,
-   `albumCapable: true`, `deployed: true`, `provisioningEnabled: true`, `deploymentAuthorized: true`.
-   Commit `deployments/release-per-contract-mainnet-<factory>.json`.
-8. **[APPROVAL] Create the mainnet Supabase project** (below). The API applies migrations 001–039 at start.
-9. **[APPROVAL] Create the Render Blueprint** from `deploy/mainnet/render.mainnet.yaml` and enter its
-   `sync: false` values. Deploy the API, then the indexer.
-10. **[APPROVAL] Create the Vercel mainnet project** (below) and verify its preview end to end.
-11. **[APPROVAL] Point the production domain** at the mainnet project, only after proof of the core journey (below).
+## Roles (always separate)
 
-## Resources to create (isolated from Fuji)
+| Role | Address | Never used as |
+| --- | --- | --- |
+| Platform fee recipient (passive) | Nano S Plus `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`, recorded in `config/mainnet-release-per-contract.json` | deployer, signer, contract admin, artist |
+| Deployer (gas only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` (`DEPLOYER_PRIVATE_KEY` secret) | fee recipient, signer |
+| Artist (release admin, edition payout) | `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` | fee recipient, signer |
+| Genesis voucher signer | A new dedicated key, generated offline by the owner; only its public address leaves the device | anything else |
+| Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer |
 
-**Supabase**: a new project `The-Void-Mainnet` in the existing organization (Pro plan; adds one
-compute instance). Do not reuse `qobyzszcydznuutqqhmf` (Fuji). Use the session-pooler connection
-string as `DATABASE_URL` on both mainnet Render services.
+The deploy scripts refuse any overlap: the fee recipient as the artist, deployer or anything other
+than the recorded Nano, and the signer as the fee recipient, admin, artist or deployer.
 
-**Render** (Blueprint path `deploy/mainnet/render.mainnet.yaml`):
+## Contracts and predicted addresses
 
-- `the-void-api-mainnet`: a web service with auto-deploy off.
-- `the-void-indexer-mainnet`: a worker with auto-deploy off.
+`VoidReleaseFactoryV2` + `ReleaseMarketplaceV3` is the release-per-contract architecture validated on
+Fuji. These are fresh deployments; no Fuji state or address is reused. The deployer's nonces fix
+the addresses, so **the V2 deployment must be the deployer's first two transactions**:
 
-If Render assigns the API a different hostname than `the-void-api-mainnet.onrender.com`, update
-`deploy/vercel-mainnet/vercel.json`. Dashboard values:
+| Nonce | Contract | Predicted address |
+| --- | --- | --- |
+| 0 | VoidReleaseFactoryV2 | `0x262B774cf9a1949170B58E2d57F6189980FE757b` |
+| (inside the factory) | VoidRelease1155V4 implementation | `0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006` |
+| 1 | ReleaseMarketplaceV3 | `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` |
+| 2 | GenesisHolderClaim | predicted by its own dry run at step 11 |
+
+The factory address equals the Fuji legacy V1 release address, because it is the same deployer's
+nonce-0 address on another chain. The code scopes that Fuji address to chain 43113.
+
+## Steps
+
+1. **Owner: confirm the Nano S Plus address on the device screen.** Open the Avalanche C-Chain/EVM
+   account. The address shown must be exactly `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`. If it
+   differs, stop: the manifest and this runbook must be corrected first.
+2. **[APPROVAL] Review and merge the code PR(s).** The Fuji site redeploys with no behaviour change.
+3. **Owner: resolve the existing gates.**
+   - The deployer-authority note in `DEPLOYER-AUTHORITY-ROTATION-PLAN.md` asks for a re-review before
+     mainnet use of `DEPLOYER_PRIVATE_KEY`. Both V2 contracts are ownerless, so the deployer keeps no
+     authority after deploying.
+   - The Cursor audit, if it is a launch gate.
+   - `LAUNCH-GATE.md` (NO-GO) covers the old shared-contract path, which this launch does not use.
+4. **Dry runs (no key, no transaction).**
+   - Actions → *Deploy release-per-contract infrastructure to C-Chain mainnet*, with
+     `expected_deployer_address=0xaBd3…c174` and `platform_recipient=0xb65C…1ce4`, broadcast off.
+   - Every check must be PASS, except the funding check (until step 5) and the recipient check, which
+     stays UNVERIFIED until the re-typed device confirmation at broadcast.
+5. **[APPROVAL] Fund the deployer** with 0.15 AVAX (V2 estimate 0.069 AVAX at 10 gwei; the fork run
+   used 0.029) plus 0.05 AVAX for the claim deployment. Also fund the artist wallet (0 AVAX on
+   C-Chain today) for creating the release, the edition, the sale and the `ISSUER_ROLE` grant.
+6. **[APPROVAL] Broadcast V2** with:
+   - `expected_deployer_nonce=0`;
+   - `recipient_verified_on_device` = the address re-typed from the device;
+   - `broadcast_deployment=true`;
+   - `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_RELEASE_PER_CONTRACT_DEPLOY`.
+
+   The script checks the predicted addresses, `platformRecipient`, the 250 bps fees,
+   `RELEASE_VERSION`, the album selectors, and the marketplace `registry`, `feeRecipient` and
+   `deploymentChainId`. It stops before the marketplace if the factory differs.
+7. **Record PR.** From the workflow's record artifact, fill `config/mainnet-release-per-contract.json`:
+   - factory, implementation and marketplace addresses and their deployment blocks;
+   - `source: VoidReleaseFactoryV2`, `releaseVersion: 2`, `albumCapable: true`;
+   - `deployed: true`, `provisioningEnabled: true`, `deploymentAuthorized: true`.
+
+   Then commit `deployments/release-per-contract-mainnet-<factory>.json`.
+8. **[APPROVAL] Provision the isolated mainnet infrastructure** (paid):
+   - **Supabase:** a new project `The-Void-Mainnet`, region `us-east-2`, in the existing organization.
+     Never reuse `qobyzszcydznuutqqhmf` (Fuji).
+   - **Render:** create a Blueprint from `deploy/mainnet/render.mainnet.yaml`. It defines
+     `the-void-api-mainnet` and `the-void-indexer-mainnet`, both in region ohio with manual deploys.
+     Enter its `sync: false` values (table below). Deploy the API, which applies migrations 001–039,
+     then the indexer.
+   - **Vercel:** a new project from this repository, Root Directory `deploy/vercel-mainnet`. Set:
+     - `VITE_MARKETPLACE_CHAIN_ID=43114`
+     - `VITE_MARKETPLACE_ADDRESS=<marketplace>`
+     - `VITE_MARKETPLACE_FEE_BPS=250`
+
+     If Render's hostname differs from `the-void-api-mainnet.onrender.com`, update the project's
+     `vercel.json`.
+   - **Check:**
+     - `/api/health` and `/api/health/ready` return 200;
+     - `/api/indexer/health?chainId=43114` shows the factory and marketplace checkpoints advancing;
+     - the site's wallet prompt asks for chain 43114;
+     - `/api/releases` returns no Fuji data.
+9. **Artist: create the mainnet Forgive & Forget release** in the mainnet Studio:
+   - an open edition (no supply cap);
+   - royalty fixed at 2.5% to the artist's wallet.
+
+   Publication fails closed unless the transaction records exactly that royalty. The Fuji `-28`
+   release is never a mainnet target.
+10. **[APPROVAL] Configure the sale and the claim signer.**
+    - Choose `claimStart` (T, Unix seconds) at least 10 minutes after the claim deployment can be mined.
+    - The artist signs `configureSale(tokenId, 250000000000000000, 0, 0, T + 86400, T + 86400 + 604800 - 1, false)`
+      on the release's `VoidPrimarySale`. This makes the public phase open at the claim's end, run
+      7 days, cost 0.25 AVAX and have no cap.
+    - The owner generates the dedicated signer key offline and provides only its public address.
+11. **[APPROVAL] Deploy the Genesis claim.**
+    - Actions → *Deploy Genesis holder claim to C-Chain mainnet*. Inputs:
+      - `release_contract`, `primary_sale`, `token_id` from step 9;
+      - `claim_start=T`;
+      - `claim_admin` (the approved admin);
+      - `claim_signer_address`;
+      - `expected_deployer_address=0xaBd3…c174`.
+    - Dry run first. Then broadcast with `expected_deployer_nonce` from the dry run and
+      `confirm_mainnet_deploy=I_CONFIRM_CCHAIN_GENESIS_CLAIM_DEPLOY`.
+    - The script verifies the release, the sale schedule, the Genesis collection and the mined
+      parameters.
+12. **[APPROVAL] Authorize the claim to mint.**
+    - The artist (release admin) sends the `grantRole(ISSUER_ROLE, <claim>)` calldata printed by the
+      dry run.
+    - Enter the `GENESIS_CLAIM_*` values and `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` on
+      `the-void-api-mainnet`. Keep `GENESIS_CLAIM_ENABLED=false`.
+    - The API refuses to serve the claim (503 `CLAIM_BINDING_MISMATCH`) until the claim holds
+      `ISSUER_ROLE`, its signer matches the key and its schedule matches the sale.
+13. **[APPROVAL] Real-mainnet acceptance** (below), then **[APPROVAL] coordinated public
+    activation**: set `GENESIS_CLAIM_ENABLED=true` at T, point the production domain at the mainnet
+    Vercel project, and announce.
+
+### Sync-false values (Render dashboard)
 
 | Key | Service | Value |
 | --- | --- | --- |
-| `DATABASE_URL` | both | mainnet Supabase connection string |
-| `PUBLIC_APP_URL`, `AUTH_DOMAIN`, `AUTH_URI`, `API_ALLOWED_ORIGINS` | API | the mainnet web origin; `AUTH_URI` = `<origin>/reliquary` |
-| `PINATA_JWT`, `X_*` | API | same accounts as Fuji |
-| `MEDIA_AUDIT_HASH_SECRET` | API | a **new** random secret (≥ 24 characters) |
-| `MARKETPLACE_ADDRESS` | both | mined marketplace |
-| `INDEXER_CONTRACTS_JSON` | indexer | `[{"address":"<factory>","contractType":"RELEASE_FACTORY","startBlock":<factory block>},{"address":"<marketplace>","contractType":"MARKETPLACE","startBlock":<marketplace block>,"platformFeeBps":250}]` |
+| `DATABASE_URL` | both | Mainnet Supabase session-pooler URL |
+| `PUBLIC_APP_URL`, `AUTH_DOMAIN`, `AUTH_URI`, `API_ALLOWED_ORIGINS` | API | Mainnet web origin; `AUTH_URI` = `<origin>/reliquary` |
+| `PINATA_JWT`, `X_*` | API | Same accounts as Fuji |
+| `MEDIA_AUDIT_HASH_SECRET` | API | A **new** random secret (≥ 24 characters) |
+| `MARKETPLACE_ADDRESS` | both | Mined marketplace |
+| `INDEXER_CONTRACTS_JSON` | indexer | `[{"address":"<factory>","contractType":"RELEASE_FACTORY","startBlock":<block>},{"address":"<marketplace>","contractType":"MARKETPLACE","startBlock":<block>,"platformFeeBps":250}]` |
+| `GENESIS_CLAIM_CONTRACT`, `GENESIS_CLAIM_RELEASE_CONTRACT`, `GENESIS_CLAIM_PRIMARY_SALE`, `GENESIS_CLAIM_TOKEN_ID`, `GENESIS_CLAIM_START` | API | From steps 9–11 |
+| `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` | API | The dedicated signer key (entered by the owner only) |
 
-**Vercel**: a new project from this repository, with Root Directory `deploy/vercel-mainnet`. It uses
-the build, install and routing settings in its `vercel.json`, which is the Fuji routing with only
-the API host changed. Environment variables:
+## Real-mainnet acceptance gate
 
-- `VITE_MARKETPLACE_CHAIN_ID=43114`
-- `VITE_MARKETPLACE_ADDRESS=<mined marketplace>`
-- `VITE_MARKETPLACE_FEE_BPS=250`
+Every item needs C-Chain transaction hashes plus matching API, database and website state. Unit
+tests, fork rehearsals and Fuji transactions do not count. Each test transaction is approved
+separately; none is created only to fill this list.
 
-`VITE_RELEASE_NETWORK=mainnet` is set by the build command. The live Fuji project and
-`vercel.json` stay unchanged.
+1. **Primary sale.**
+   - The artist creates a release, edition and sale; a second wallet buys.
+   - The sale contract credits exactly 2.5% to the Nano S Plus and 97.5% to the edition payout.
+   - The purchase, ownership and release appear in `/api/releases` and on the website.
+   - Proposed vehicle: a small, separately approved verification release, because the Forgive &
+     Forget public sale opens only after its claim window.
+2. **Secondary sale.**
+   - The buyer lists; a third wallet buys.
+   - Receipt balances show 2.5% to the artist payout, 2.5% to the Nano S Plus and 95% to the seller.
+   - `ListingSold` amounts match; the listing is `SOLD` and ownership has moved in the indexer, API
+     and website.
+3. **Genesis claim.**
+   - An eligible holder connects; the voucher is issued from live ownership; the claim is redeemed.
+   - The Forgive & Forget token is minted directly to the claimant, and the ledger row is `REDEEMED`.
+   - A repeat claim and a transfer of the used unit are both rejected.
+   - The first real claim can only happen once the claim window opens at T. So this journey is proven
+     in a **quiet open**: enable at T, the owner's own Genesis wallet claims and is verified, then the
+     public announcement. Before T, rehearse the exact deployed contracts on a C-Chain fork. The owner
+     approves this sequencing at step 10.
+4. **Cross-system consistency.** The website, API, database, indexer and contracts agree on chain
+   43114, the recorded addresses, ownership, listings, sales, fee and royalty recipients, and claim
+   state. No Fuji address or chain appears in mainnet responses.
 
-## Proof required before calling the core product live
+## Failure handling, rollback and recovery
 
-All of the following on C-Chain, with real transactions and the explorer links recorded:
+- **Wrong immutable value in V2** (recipient, fee): the contracts are ownerless and cannot be
+  changed. Do not record them. Deploy a new pair from the deployer's next nonces after a new dry run,
+  and record only the correct pair. The predicted-address and device-confirmation gates exist to
+  prevent this.
+- **Partial V2 broadcast** (factory mined, marketplace not): the logged factory address is kept. Run
+  a new dry run and deploy the marketplace bound to that factory only after review.
+- **Claim problems before or during the window:**
+  - set `GENESIS_CLAIM_ENABLED=false` to stop new vouchers;
+  - the claim admin can `pause()` the claim and `setSigner()` to rotate a compromised signer key;
+  - the artist can pause the public sale (`configureSale(..., paused=true)`).
 
-- An artist creates a release through the mainnet factory, then creates an edition.
-- The artist configures a sale; a buyer purchases.
-- The indexer shows the purchase and ownership.
-- The buyer lists the edition; a second buyer purchases it on the mainnet marketplace.
-- The fee recipient receives 2.5% of the secondary sale and withdraws 2.5% of the primary sale.
+  Genesis tokens are only read, never moved, so there is nothing to unwind on the Genesis collection.
+- **Backend:** Render deploys are manual. Roll back by redeploying the previous deploy. Database
+  recovery relies on Supabase backups; the plan's PITR and backup schedule must be confirmed in the
+  dashboard before launch (UNVERIFIED).
+- **Marketplace** (ownerless, no pause): if a defect appears, hide trading in the website and API;
+  on-chain listings remain the sellers' to cancel.
+- **No partial launch:** if any acceptance journey fails, the production domain stays on the Fuji
+  project, claims stay disabled and nothing is announced. Fix, re-verify, and request activation
+  again.
 
-A dry run, green CI or a fork rehearsal is not a live deployment.
+## Monitoring (owner to confirm before activation)
+
+- Render `notifyOnFail` for both services, and health checks on `/api/health`.
+- Watch `/api/health/ready` and `/api/indexer/health?chainId=43114` (checkpoint lag).
+- Snowtrace watch on the factory, marketplace, claim and the Nano S Plus.
+- Supabase backups and PITR status (UNVERIFIED).
