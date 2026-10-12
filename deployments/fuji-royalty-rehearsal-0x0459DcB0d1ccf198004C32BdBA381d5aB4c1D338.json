@@ -1,0 +1,157 @@
+{
+  "network": "fuji",
+  "chainId": 43113,
+  "purpose": "Fuji-first rehearsal of the PR #171 royalty-locked launch candidate (additive; not an app deployment)",
+  "sourceCommit": "60b71f0f8534fbf2abaaed7ebd1fec5f19ba2ee4",
+  "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+  "royaltyPayout": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
+  "deployments": {
+    "factory": {
+      "address": "0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338",
+      "transaction": "0x95da5bf691a0e448d4fb6763212206b175a99e3fd53cbda2c3a50e35e6d0826a",
+      "block": 59339210,
+      "implementation": "0x5f37D51D3Df38aDd259DD2d6b9952c2CecA259A5"
+    },
+    "marketplace": {
+      "address": "0x717cf06380e36176728e351f4dabC48cF5ef3158",
+      "transaction": "0x621909e562a362fe053a252371ff811088bc4c519ab620f1407909e899b20f03",
+      "block": 59339214
+    }
+  },
+  "journey": {
+    "release": "0x907e69C9A071af8c5dacD91a274754543A4c72c4",
+    "primarySale": "0xC543c0cFB75C691d1323b79678780cdc8CDee818",
+    "tokenId": "84026992876935293129461311765730796602827834126141230889592570711341986260400",
+    "listingId": "1",
+    "priceWei": "10000000000000000",
+    "primaryPurchase": "0xdf595241edded1e1ef5f738466ab37ea29d584965e0b70415147895808ac7140",
+    "resale": "0x1e43d0d8b7d49586b921113bf9bb2f856b7967798db3c2af21502ececd5c071c",
+    "platformFeeWei": "250000000000000",
+    "royaltyWei": "250000000000000",
+    "sellerProceedsWei": "9500000000000000"
+  },
+  "bypass": {
+    "royalty500Bps": {
+      "reverted": true,
+      "reason": "RoyaltyPolicyViolation"
+    },
+    "royalty0Bps": {
+      "reverted": true,
+      "reason": "RoyaltyPolicyViolation"
+    },
+    "platformPayout": {
+      "reverted": true,
+      "reason": "UnauthorizedRoyaltyRecipient"
+    },
+    "unauthorizedPayout": {
+      "reverted": true,
+      "reason": "UnauthorizedRoyaltyRecipient"
+    },
+    "existingFujiReleaseListing": {
+      "reverted": true,
+      "reason": "UnsupportedRelease"
+    }
+  },
+  "checks": [
+    {
+      "check": "factory at the planned address",
+      "status": "PASS",
+      "value": "0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338"
+    },
+    {
+      "check": "factory immutables: recipient, 250 bps fee, 250 bps royalty, version 2",
+      "status": "PASS",
+      "value": "0x0459DcB0d1ccf198004C32BdBA381d5aB4c1D338"
+    },
+    {
+      "check": "implementation is royalty-locked to the same recipient",
+      "status": "PASS",
+      "value": "0x5f37D51D3Df38aDd259DD2d6b9952c2CecA259A5"
+    },
+    {
+      "check": "marketplace at the planned address",
+      "status": "PASS",
+      "value": "0x717cf06380e36176728e351f4dabC48cF5ef3158"
+    },
+    {
+      "check": "marketplace registry, recipient, 250 bps fee and royalty",
+      "status": "PASS",
+      "value": "0x717cf06380e36176728e351f4dabC48cF5ef3158"
+    },
+    {
+      "check": "every bypass attempt reverts with the enforcing error",
+      "status": "PASS",
+      "value": {
+        "royalty500Bps": {
+          "reverted": true,
+          "reason": "RoyaltyPolicyViolation"
+        },
+        "royalty0Bps": {
+          "reverted": true,
+          "reason": "RoyaltyPolicyViolation"
+        },
+        "platformPayout": {
+          "reverted": true,
+          "reason": "UnauthorizedRoyaltyRecipient"
+        },
+        "unauthorizedPayout": {
+          "reverted": true,
+          "reason": "UnauthorizedRoyaltyRecipient"
+        },
+        "existingFujiReleaseListing": {
+          "reverted": true,
+          "reason": "UnsupportedRelease"
+        }
+      }
+    },
+    {
+      "check": "edition royalty is 2.5% to the authorized artist payout",
+      "status": "PASS",
+      "value": {
+        "royaltyReceiver": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
+        "royaltyAmount": "250000000000000"
+      }
+    },
+    {
+      "check": "primary sale credits 2.5% / 97.5%",
+      "status": "PASS",
+      "value": {
+        "feeCredit": "250000000000000",
+        "payoutCredit": "9750000000000000"
+      }
+    },
+    {
+      "check": "buyer owns the purchased token",
+      "status": "PASS",
+      "value": "84026992876935293129461311765730796602827834126141230889592570711341986260400"
+    },
+    {
+      "check": "ListingSold records 2.5% fee and 2.5% royalty",
+      "status": "PASS",
+      "value": {
+        "platformFee": "250000000000000",
+        "royalty": "250000000000000"
+      }
+    },
+    {
+      "check": "platform recipient received exactly 2.5%",
+      "status": "PASS",
+      "value": "250000000000000"
+    },
+    {
+      "check": "artist payout received exactly 2.5%",
+      "status": "PASS",
+      "value": "250000000000000"
+    },
+    {
+      "check": "seller received 95% (buyer = seller: net -5% minus gas)",
+      "status": "PASS",
+      "value": "500000000000000"
+    },
+    {
+      "check": "listing settled",
+      "status": "PASS",
+      "value": "1"
+    }
+  ]
+}
