@@ -2,6 +2,7 @@ import process from "node:process";
 import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
+import { GENESIS_TOKEN_ID_SET, TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC, decodeGenesisTransfers, replayUsedUnits, unitToUse, unusedUnits } from "./genesis-claim-ledger.js";
 
 export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_CHAIN_ID = 43114;
@@ -29,15 +30,13 @@ export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_S
 }
 
 /**
- * Eligibility is fixed at one C-Chain block: a wallet qualifies only if it held token 0, 1, 2 or 3
- * at that block. Transfers after the snapshot neither add nor remove eligibility. The rule text
- * names the block and its hash, and the claim contract stores the rule's hash, so every voucher
- * is bound to this exact snapshot. Anyone can recompute it with balanceOf(wallet, id) at the block.
+ * Eligibility is live ownership minus used units: when a voucher is requested, the wallet must hold, at
+ * the current C-Chain block, at least one Genesis unit (IDs 0-3) that no earlier claim used (see
+ * genesis-claim-ledger.js). The claim contract's ELIGIBILITY_RULE constant is the hash of this text, and
+ * every voucher names it. Genesis tokens are only read, never moved or locked.
  */
-export function genesisEligibilityRule({ snapshotBlock, snapshotBlockHash }) {
-  const text = `the-void:genesis-eligibility:v2:chain=${GENESIS_CHAIN_ID}:contract=${GENESIS_CONTRACT.toLowerCase()}:block=${BigInt(snapshotBlock)}:hash=${String(snapshotBlockHash).toLowerCase()}:balanceOf(wallet,0)>0|balanceOf(wallet,1)>0|balanceOf(wallet,2)>0|balanceOf(wallet,3)>0`;
-  return Object.freeze({ text, rule: id(text) });
-}
+export const ELIGIBILITY_RULE_TEXT = "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers";
+export const ELIGIBILITY_RULE = id(ELIGIBILITY_RULE_TEXT);
 
 const GENESIS_INTERFACE = new Interface(["function balanceOf(address account,uint256 id) view returns (uint256)"]);
 const CLAIM_ABI = [
@@ -125,12 +124,6 @@ function httpUrl(value, name) {
   }
 }
 
-function blockHash(value, name) {
-  const text = String(value || "").trim();
-  if (!/^0x[0-9a-fA-F]{64}$/.test(text)) throw new GenesisClaimConfigurationError(`${name} must be a 32-byte block hash.`);
-  return text.toLowerCase();
-}
-
 export function loadGenesisClaimConfig(env = process.env) {
   if (String(env.GENESIS_CLAIM_ENABLED || "").toLowerCase() !== "true") return null;
   const destinationChainId = productionChainId(env);
@@ -151,8 +144,6 @@ export function loadGenesisClaimConfig(env = process.env) {
   const publicAllocation = nonNegativeBigInt(env.GENESIS_PUBLIC_MINT_ALLOCATION, "GENESIS_PUBLIC_MINT_ALLOCATION");
   const claimStart = positiveBigInt(env.GENESIS_CLAIM_START, "GENESIS_CLAIM_START");
   const publicPriceWei = positiveBigInt(env.GENESIS_PUBLIC_PRICE_WEI, "GENESIS_PUBLIC_PRICE_WEI");
-  const snapshotBlock = positiveBigInt(env.GENESIS_SNAPSHOT_BLOCK, "GENESIS_SNAPSHOT_BLOCK");
-  const snapshotBlockHash = blockHash(env.GENESIS_SNAPSHOT_BLOCK_HASH, "GENESIS_SNAPSHOT_BLOCK_HASH");
   const { claimWindow, publicWindow } = claimSchedule({
     destinationChainId,
     claimWindow: env.GENESIS_CLAIM_WINDOW_SECONDS === undefined || env.GENESIS_CLAIM_WINDOW_SECONDS === "" ? CLAIM_WINDOW_SECONDS : positiveBigInt(env.GENESIS_CLAIM_WINDOW_SECONDS, "GENESIS_CLAIM_WINDOW_SECONDS"),
@@ -177,9 +168,7 @@ export function loadGenesisClaimConfig(env = process.env) {
     claimEnd: claimStart + claimWindow,
     publicSaleEnd: claimStart + claimWindow + publicWindow - 1n,
     publicPriceWei,
-    snapshotBlock,
-    snapshotBlockHash,
-    eligibilityRule: genesisEligibilityRule({ snapshotBlock, snapshotBlockHash }).rule,
+    eligibilityRule: ELIGIBILITY_RULE,
     privateKey,
   });
 }
@@ -192,8 +181,7 @@ function toPublicConfig(config) {
     genesisChainId: GENESIS_CHAIN_ID,
     tokenIds: GENESIS_TOKEN_IDS.map(String),
     eligibilityRule: config.eligibilityRule,
-    snapshotBlock: config.snapshotBlock.toString(),
-    snapshotBlockHash: config.snapshotBlockHash,
+    eligibility: "live",
     destinationChainId: config.destinationChainId,
     releaseContract: config.releaseContract,
     primarySale: config.primarySale,
@@ -210,19 +198,31 @@ function toPublicConfig(config) {
   });
 }
 
+export const VOUCHER_LIFETIME_SECONDS = 300;
+// Seconds past a voucher's deadline before an unredeemed issuance is released (destination-chain time).
+export const RESERVATION_EXPIRY_GRACE_SECONDS = 120n;
+// Block span per eth_getLogs request for Genesis transfers (public C-Chain RPC limit).
+export const TRANSFER_LOG_CHUNK_BLOCKS = 2048;
+
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,
   destinationProvider = null,
   signer = null,
-  eligibilityReader = null,
+  reservationStore = null,
+  balanceReader = null,
+  transferLogReader = null,
   bindingReader = null,
   claimStateReader = null,
+  destinationClock = null,
   clock = () => Math.floor(Date.now() / 1000),
   // 256 random bits. ethers' randomBytes returns a Uint8Array, so it must be hex-encoded explicitly.
   nonce = () => BigInt(hexlify(randomBytes(32))),
 } = {}) {
   if (!config) return null;
+  // The used-unit ledger is what stops one Genesis unit from qualifying wallet after wallet; without
+  // shared, durable storage for it the claim must not run.
+  if (!reservationStore) throw new GenesisClaimConfigurationError("The Genesis claim requires the reservation store (migration 039).");
   const sourceProvider = genesisProvider || new JsonRpcProvider(config.genesisRpcUrl);
   const targetProvider = destinationProvider || new JsonRpcProvider(config.destinationRpcUrl);
   const claimSigner = signer || new Wallet(config.privateKey);
@@ -273,84 +273,196 @@ export function createGenesisClaimService({
     }
   }
 
-  // The snapshot must be the exact C-Chain block the contract's rule commits to. A provider on another
-  // chain, or one that reports a different hash for that height, fails closed.
-  let snapshotVerified = false;
-  async function assertSnapshotBlock() {
-    if (snapshotVerified) return;
+  // Ownership is read from C-Chain only. A provider on any other chain fails closed.
+  async function assertGenesisChain() {
     const network = await sourceProvider.getNetwork();
     if (Number(network.chainId) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
-    const block = await sourceProvider.getBlock(Number(config.snapshotBlock));
-    if (!block?.hash || String(block.hash).toLowerCase() !== config.snapshotBlockHash) throw new Error("Genesis snapshot block hash does not match.");
-    snapshotVerified = true;
   }
 
-  async function checkEligibility(wallet) {
+  async function readHead() {
+    await assertGenesisChain();
+    const head = Number(await sourceProvider.getBlockNumber());
+    if (!Number.isSafeInteger(head) || head <= 0) throw new Error("Invalid C-Chain block number.");
+    return head;
+  }
+
+  /** Balances of Genesis IDs 0-3 at one C-Chain block, as decimal strings keyed by ID. */
+  async function readBalances(wallet, block) {
+    const raw = balanceReader
+      ? await balanceReader(wallet, block)
+      : Object.fromEntries(await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
+        const data = GENESIS_INTERFACE.encodeFunctionData("balanceOf", [wallet, tokenId]);
+        return [tokenId.toString(), GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block }))[0]];
+      })));
+    return Object.freeze(Object.fromEntries(GENESIS_TOKEN_ID_SET.map((id) => {
+      const value = BigInt(raw?.[id] ?? 0);
+      if (value < 0n) throw new Error("Negative Genesis balance.");
+      return [id, value.toString()];
+    })));
+  }
+
+  // Genesis TransferSingle/TransferBatch logs, cached by contiguous block range. Avalanche blocks are
+  // final, so a fetched range never changes.
+  let logCache = { from: 0, to: -1, logs: [] };
+  async function fetchLogs(fromBlock, toBlock) {
+    if (transferLogReader) return transferLogReader(fromBlock, toBlock);
+    const logs = [];
+    for (let start = fromBlock; start <= toBlock; start += TRANSFER_LOG_CHUNK_BLOCKS) {
+      const end = Math.min(toBlock, start + TRANSFER_LOG_CHUNK_BLOCKS - 1);
+      logs.push(...await sourceProvider.getLogs({ address: GENESIS_CONTRACT, topics: [[TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]], fromBlock: start, toBlock: end }));
+    }
+    return logs;
+  }
+  async function transfersBetween(fromBlock, toBlock) {
+    if (toBlock < fromBlock) return [];
+    if (logCache.to < logCache.from || fromBlock < logCache.from || fromBlock > logCache.to + 1) {
+      logCache = { from: fromBlock, to: toBlock, logs: await fetchLogs(fromBlock, toBlock) };
+    } else if (toBlock > logCache.to) {
+      logCache = { from: logCache.from, to: toBlock, logs: [...logCache.logs, ...await fetchLogs(logCache.to + 1, toBlock)] };
+    }
+    return decodeGenesisTransfers(logCache.logs).filter((transfer) => transfer.block >= fromBlock && transfer.block <= toBlock);
+  }
+
+  async function readClaimState(wallet) {
+    return claimStateReader
+      ? claimStateReader(wallet)
+      : Promise.all([claim.hasClaimed(wallet), claim.claimedSupply()]).then(([alreadyClaimed, claimedSupply]) => ({ alreadyClaimed, claimedSupply }));
+  }
+
+  async function destinationNow() {
+    if (destinationClock) return BigInt(await destinationClock());
+    const block = await targetProvider.getBlock("latest");
+    return BigInt(block.timestamp);
+  }
+
+  /**
+   * Issuances that still use Genesis units: REDEEMED ones, and PENDING ones whose voucher can still be
+   * redeemed. A PENDING issuance past its deadline (plus grace) on the destination chain is settled
+   * from hasClaimed: REDEEMED, or EXPIRED and released. `tx` persists settlements when present.
+   */
+  async function activeReservations(records, tx = null) {
+    const pendingExpired = records.filter((record) => record.status === "PENDING");
+    const now = pendingExpired.length ? await destinationNow() : 0n;
+    const active = [];
+    for (const record of records) {
+      if (record.status === "EXPIRED") continue;
+      if (record.status === "REDEEMED" || BigInt(record.deadline) + RESERVATION_EXPIRY_GRACE_SECONDS >= now) {
+        active.push(record);
+        continue;
+      }
+      const { alreadyClaimed } = await readClaimState(record.wallet);
+      const status = alreadyClaimed ? "REDEEMED" : "EXPIRED";
+      if (tx) await tx.setStatus(record.wallet, status);
+      if (alreadyClaimed) active.push({ ...record, status });
+    }
+    return active;
+  }
+
+  /** The wallet's balances and unused units at the current C-Chain head, given the active issuances. */
+  async function ledgerPosition(wallet, active) {
+    const head = await readHead();
+    const latestIssued = active.reduce((max, record) => Math.max(max, Number(record.block)), 0);
+    if (latestIssued > head) throw new Error("C-Chain provider is behind the claim ledger.");
+    const earliestIssued = active.reduce((min, record) => Math.min(min, Number(record.block)), Infinity);
+    const transfers = Number.isFinite(earliestIssued) ? await transfersBetween(earliestIssued + 1, head) : [];
+    const used = replayUsedUnits({ reservations: active, transfers, throughBlock: head });
+    const balances = await readBalances(wallet, head);
+    return { head, balances, unused: unusedUnits(wallet, balances, used) };
+  }
+
+  const heldIds = (units) => GENESIS_TOKEN_ID_SET.filter((id) => BigInt(units[id]) > 0n);
+
+  function assertWallet(wallet) {
     if (!isAddress(wallet) || getAddress(wallet) === "0x0000000000000000000000000000000000000000") {
       throw new ApiError(400, "INVALID_WALLET", "A non-zero claimant wallet address is required.");
     }
+    return getAddress(wallet);
+  }
+
+  async function checkEligibility(walletInput) {
+    const wallet = assertWallet(walletInput);
     try {
-      let eligibleTokenIds;
-      if (eligibilityReader) {
-        eligibleTokenIds = await eligibilityReader(getAddress(wallet));
-        if (!Array.isArray(eligibleTokenIds) || eligibleTokenIds.some((value) => !GENESIS_TOKEN_IDS.some((idValue) => idValue.toString() === String(value)))) {
-          throw new Error("Eligibility reader returned an invalid Genesis token set.");
-        }
-      } else {
-        await assertSnapshotBlock();
-        const blockTag = Number(config.snapshotBlock);
-        const balances = await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
-          const data = GENESIS_INTERFACE.encodeFunctionData("balanceOf", [getAddress(wallet), tokenId]);
-          return GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag }))[0];
-        }));
-        eligibleTokenIds = balances.flatMap((balance, index) => BigInt(balance) > 0n ? [GENESIS_TOKEN_IDS[index].toString()] : []);
-      }
-      return Object.freeze({ eligible: eligibleTokenIds.length > 0, eligibleTokenIds });
-    } catch {
+      return await reservationStore.withLock(config.claimContract, async (tx) => {
+        const records = await tx.list();
+        const active = await activeReservations(records);
+        const own = active.find((record) => getAddress(record.wallet) === wallet);
+        if (own) return Object.freeze({ eligible: own.status === "PENDING", eligibleTokenIds: heldIds(own.balances), holdingUsed: false, claimIssued: true });
+        const { balances, unused } = await ledgerPosition(wallet, active);
+        const eligibleTokenIds = heldIds(unused);
+        return Object.freeze({ eligible: eligibleTokenIds.length > 0, eligibleTokenIds, holdingUsed: heldIds(balances).length > 0 && eligibleTokenIds.length === 0, claimIssued: false });
+      });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
       throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
     }
   }
 
-  async function issueVoucher(wallet) {
-    const eligibility = await checkEligibility(wallet);
-    if (!eligibility.eligible) throw new ApiError(403, "ACCESS_DENIED", "This wallet did not hold Genesis token 0, 1, 2, or 3 at the snapshot block.");
+  async function issueVoucher(walletInput) {
+    const wallet = assertWallet(walletInput);
     const now = BigInt(clock());
     if (now < config.claimStart) throw new ApiError(409, "CLAIM_NOT_OPEN", "The Genesis claim window has not opened yet.");
     if (now >= config.claimEnd) throw new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
     try {
       if (bindingReader) await bindingReader();
       else await verifyContractBindings();
-      const { alreadyClaimed, claimedSupply } = claimStateReader
-        ? await claimStateReader(getAddress(wallet))
-        : await Promise.all([claim.hasClaimed(getAddress(wallet)), claim.claimedSupply()]).then(([alreadyClaimed, claimedSupply]) => ({ alreadyClaimed, claimedSupply }));
-      if (alreadyClaimed) throw new ApiError(409, "ALREADY_CLAIMED", "This wallet has already claimed its Genesis allocation.");
-      if (config.allocation !== 0n && BigInt(claimedSupply) >= config.allocation) throw new ApiError(409, "CLAIM_ALLOCATION_EXHAUSTED", "The reserved Genesis claim allocation has been exhausted.");
-      const voucher = Object.freeze({
-        claimant: getAddress(wallet),
-        genesisContract: GENESIS_CONTRACT,
-        genesisChainId: GENESIS_CHAIN_ID,
-        eligibilityRule: config.eligibilityRule,
-        destinationChainId: config.destinationChainId,
-        releaseContract: config.releaseContract,
-        tokenId: config.tokenId.toString(),
-        quantity: "1",
-        allocation: config.allocation.toString(),
-        nonce: nonce().toString(),
-        // Short-lived, and never past the claim window.
-        deadline: String(BigInt(Math.min(clock() + 300, Number(config.claimEnd) - 1))),
-      });
-      const domain = {
-        name: "The Void Genesis Holder Claim",
-        version: "1",
-        chainId: config.destinationChainId,
-        verifyingContract: config.claimContract,
-      };
-      const signature = await claimSigner.signTypedData(domain, VOUCHER_TYPES, voucher);
-      return Object.freeze({ voucher, signature, target: toPublicConfig(config) });
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
     }
+    // One issuance at a time per claim contract: the holding a wallet is judged on cannot be judged for
+    // another wallet until this issuance is recorded.
+    return reservationStore.withLock(config.claimContract, async (tx) => {
+      let active;
+      let position;
+      let claimState;
+      try {
+        const records = await tx.list();
+        active = await activeReservations(records, tx);
+        claimState = await readClaimState(wallet);
+        const own = active.find((record) => getAddress(record.wallet) === wallet);
+        if (claimState.alreadyClaimed || own?.status === "REDEEMED") throw new ApiError(409, "ALREADY_CLAIMED", "This wallet has already claimed its Genesis allocation.");
+        // A wallet that already holds an unexpired voucher gets the same voucher back: same nonce, so it
+        // can be redeemed at most once.
+        if (own) return Object.freeze({ voucher: own.voucher, signature: own.signature, target: toPublicConfig(config) });
+        position = await ledgerPosition(wallet, active);
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
+      }
+      if (!heldIds(position.balances).length) throw new ApiError(403, "ACCESS_DENIED", "This wallet does not currently hold Genesis token 0, 1, 2, or 3 on Avalanche C-Chain.");
+      const usedTokenId = unitToUse(position.unused);
+      if (usedTokenId === null) throw new ApiError(403, "GENESIS_HOLDING_ALREADY_USED", "Every Genesis unit in this wallet was already used for a free claim by a previous holder.");
+      if (config.allocation !== 0n && BigInt(claimState.claimedSupply) >= config.allocation) throw new ApiError(409, "CLAIM_ALLOCATION_EXHAUSTED", "The reserved Genesis claim allocation has been exhausted.");
+      try {
+        const voucher = Object.freeze({
+          claimant: wallet,
+          genesisContract: GENESIS_CONTRACT,
+          genesisChainId: GENESIS_CHAIN_ID,
+          eligibilityRule: config.eligibilityRule,
+          destinationChainId: config.destinationChainId,
+          releaseContract: config.releaseContract,
+          tokenId: config.tokenId.toString(),
+          quantity: "1",
+          allocation: config.allocation.toString(),
+          nonce: nonce().toString(),
+          // Short-lived, and never past the claim window.
+          deadline: String(BigInt(Math.min(clock() + VOUCHER_LIFETIME_SECONDS, Number(config.claimEnd) - 1))),
+        });
+        const domain = {
+          name: "The Void Genesis Holder Claim",
+          version: "1",
+          chainId: config.destinationChainId,
+          verifyingContract: config.claimContract,
+        };
+        const signature = await claimSigner.signTypedData(domain, VOUCHER_TYPES, voucher);
+        // Off-chain accounting only: one unused Genesis unit (lowest ID) counts as used by this claim. No
+        // Genesis token is moved, burned, locked or approved; the wallet's other units stay unused.
+        await tx.upsert({ claimContract: config.claimContract, wallet, block: position.head, usedTokenId, balances: position.balances, deadline: BigInt(voucher.deadline), status: "PENDING", voucher, signature });
+        return Object.freeze({ voucher, signature, target: toPublicConfig(config) });
+      } catch {
+        throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
+      }
+    });
   }
 
   return Object.freeze({

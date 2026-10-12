@@ -4,7 +4,8 @@ name: Deploy Genesis holder claim to Fuji
 # from claim_start, then the token's own primary sale (already configured as the public phase) runs for
 # public_window_seconds. Fuji may use accelerated test windows (minimum 60 s); mainnet production
 # windows (24 h / 7 days at 0.25 AVAX) are enforced by the contract and script, not by this workflow. The default path is a read-only dry run that verifies the release, sale, schedule and
-# C-Chain snapshot and simulates the constructor. No run grants roles, edits config/ or enables the
+# the C-Chain Genesis collection (eligibility is live ownership, read when vouchers are signed) and
+# simulates the constructor. No run grants roles, edits config/ or enables the
 # API claim; those follow-ups are printed for the owner.
 
 on:
@@ -41,14 +42,6 @@ on:
         required: true
         type: string
         default: "10000000000000000"
-      snapshot_block:
-        description: C-Chain block number for Genesis eligibility.
-        required: true
-        type: string
-      snapshot_block_hash:
-        description: Hash of that C-Chain block.
-        required: true
-        type: string
       claim_admin:
         description: Claim admin (pause, signer rotation).
         required: true
@@ -100,8 +93,6 @@ env:
   GENESIS_CLAIM_WINDOW_SECONDS: ${{ inputs.claim_window_seconds }}
   GENESIS_PUBLIC_WINDOW_SECONDS: ${{ inputs.public_window_seconds }}
   GENESIS_PUBLIC_PRICE_WEI: ${{ inputs.public_price_wei }}
-  GENESIS_SNAPSHOT_BLOCK: ${{ inputs.snapshot_block }}
-  GENESIS_SNAPSHOT_BLOCK_HASH: ${{ inputs.snapshot_block_hash }}
   GENESIS_CLAIM_ADMIN: ${{ inputs.claim_admin }}
   GENESIS_CLAIM_SIGNER_ADDRESS: ${{ inputs.claim_signer_address }}
   CONFIRM_FUJI_DEPLOY: ${{ inputs.confirm_fuji_deploy == 'I_CONFIRM_FUJI_GENESIS_CLAIM_DEPLOY' && 'yes' || 'no' }}

@@ -25,7 +25,9 @@ contract GenesisHolderClaimScheduleTest {
     address internal constant ADMIN = address(0xAD01);
     address internal constant CLAIMANT = address(0xCA11);
     address internal constant COLLECTOR = address(0xC011);
-    bytes32 internal constant RULE = keccak256("test:genesis-snapshot-rule");
+    bytes32 internal constant RULE = keccak256(
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
+    );
     uint256 internal constant T0 = 1_800_000_000;
     uint256 internal constant START = T0 + 10 minutes;
 
@@ -53,7 +55,7 @@ contract GenesisHolderClaimScheduleTest {
     }
 
     function _deploy(uint256 price, uint256 claimWindow, uint256 publicWindow) internal returns (GenesisHolderClaim claim) {
-        claim = new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, claimWindow, publicWindow, price, RULE, ADMIN, signer);
+        claim = new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, claimWindow, publicWindow, price, ADMIN, signer);
         bytes32 issuerRole = release.ISSUER_ROLE();
         vm.prank(ARTIST);
         release.grantRole(issuerRole, address(claim));
@@ -64,7 +66,7 @@ contract GenesisHolderClaimScheduleTest {
         returns (GenesisHolderClaim.ClaimVoucher memory voucher, bytes memory signature)
     {
         voucher = GenesisHolderClaim.ClaimVoucher({
-            claimant: CLAIMANT, genesisContract: claim.GENESIS_CONTRACT(), genesisChainId: 43114, eligibilityRule: RULE,
+            claimant: CLAIMANT, genesisContract: claim.GENESIS_CONTRACT(), genesisChainId: 43114, eligibilityRule: claim.ELIGIBILITY_RULE(),
             destinationChainId: block.chainid, releaseContract: address(release), tokenId: tokenId, quantity: 1, allocation: 0,
             nonce: nonce, deadline: block.timestamp + 60
         });
@@ -115,25 +117,25 @@ contract GenesisHolderClaimScheduleTest {
         _setUpChain(43113);
         _configure(0.01 ether, 59, 10 minutes);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 59, 10 minutes, 0.01 ether, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 59, 10 minutes, 0.01 ether, ADMIN, signer);
     }
 
     function testMainnetRefusesAcceleratedWindows() public {
         _setUpChain(43114);
         _configure(0.25 ether, 5 minutes, 10 minutes);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 5 minutes, 10 minutes, 0.25 ether, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 5 minutes, 10 minutes, 0.25 ether, ADMIN, signer);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days + 1, 0.25 ether, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days + 1, 0.25 ether, ADMIN, signer);
     }
 
     function testMainnetRefusesAnyPriceOtherThanProduction() public {
         _setUpChain(43114);
         _configure(0.01 ether, 1 days, 7 days);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.01 ether, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.01 ether, ADMIN, signer);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.25 ether + 1, RULE, ADMIN, signer);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 1 days, 7 days, 0.25 ether + 1, ADMIN, signer);
     }
 
     function testMainnetAcceptsOnlyTheProductionSchedule() public {

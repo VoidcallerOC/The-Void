@@ -41,8 +41,10 @@ interface IGenesisClaimSale {
 /// 0.25 AVAX price; only Fuji may use shorter test windows (never below MINIMUM_TEST_WINDOW) and
 /// another price.
 /// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
-/// claim and fails closed if it drifts. Eligibility is fixed at a C-Chain snapshot block that the
-/// immutable ELIGIBILITY_RULE commits to; the server signs vouchers only for snapshot holders.
+/// claim and fails closed if it drifts. Eligibility is live Genesis ownership: the server reads the
+/// claimant's current C-Chain balances of Genesis token IDs 0-3 when it signs a voucher and subtracts
+/// units already used by earlier claims, under the rule ELIGIBILITY_RULE names. Genesis tokens are never moved; the claim mints only the release
+/// token, directly to the claimant.
 contract GenesisHolderClaim {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     uint256 public constant GENESIS_CHAIN_ID = 43114;
@@ -51,6 +53,13 @@ contract GenesisHolderClaim {
     uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
     uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
+    /// @notice The rule every voucher must name: when the voucher is signed, the claimant holds at least
+    /// one Genesis unit (IDs 0-3, C-Chain) that no earlier claim used. Each claim uses exactly one unit,
+    /// and a used unit stays used through later transfers. This is the server's off-chain eligibility
+    /// ledger: this contract never calls the Genesis collection, and no Genesis token is moved or burned.
+    bytes32 public constant ELIGIBILITY_RULE = keccak256(
+        "the-void:genesis-eligibility:v3:live-balanceOf(wallet,0..3)-minus-units-used-by-earlier-claims>0;used-units-follow-transfers"
+    );
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant NAME_HASH = keccak256("The Void Genesis Holder Claim");
@@ -79,7 +88,7 @@ contract GenesisHolderClaim {
     address public immutable primarySale;
     uint256 public immutable destinationChainId;
     uint256 public immutable tokenId;
-    /// @notice Reserved claim cap; 0 means uncapped (open editions only: one claim per snapshot wallet).
+    /// @notice Reserved claim cap; 0 means uncapped (open editions only: one claim per eligible wallet).
     uint256 public immutable allocation;
     /// @notice Must equal the sale's maxSupply; 0 means the open-edition sale is uncapped.
     uint256 public immutable publicAllocation;
@@ -92,8 +101,6 @@ contract GenesisHolderClaim {
     /// so endTime = claimEnd + publicWindow - 1 gives a public window of exactly publicWindow.
     uint256 public immutable publicSaleEnd;
     uint256 public immutable publicPriceWei;
-    /// @notice Commitment to the snapshot eligibility rule (chain, collection, block, block hash, token IDs).
-    bytes32 public immutable ELIGIBILITY_RULE;
 
     address public admin;
     address public signer;
@@ -148,14 +155,13 @@ contract GenesisHolderClaim {
         uint256 claimWindow_,
         uint256 publicWindow_,
         uint256 publicPriceWei_,
-        bytes32 eligibilityRule_,
         address admin_,
         address signer_
     ) {
         if (
             releaseContract_ == address(0) || primarySale_ == address(0) || admin_ == address(0)
                 || signer_ == address(0) || releaseContract_ == LEGACY_FUJI_SINGLETON
-                || eligibilityRule_ == bytes32(0) || publicPriceWei_ == 0 || claimStart_ < block.timestamp
+                || publicPriceWei_ == 0 || claimStart_ < block.timestamp
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         if (block.chainid == GENESIS_CHAIN_ID) {
@@ -175,7 +181,7 @@ contract GenesisHolderClaim {
             }
         }
         // An open edition (maxSupply 0) may leave both allocations at 0: no supply cap exists, and
-        // each snapshot wallet can still claim only once (hasClaimed).
+        // each eligible wallet can still claim only once (hasClaimed).
         releaseContract = releaseContract_;
         primarySale = primarySale_;
         destinationChainId = block.chainid;
@@ -188,7 +194,6 @@ contract GenesisHolderClaim {
         claimEnd = claimStart_ + claimWindow_;
         publicSaleEnd = claimStart_ + claimWindow_ + publicWindow_ - 1;
         publicPriceWei = publicPriceWei_;
-        ELIGIBILITY_RULE = eligibilityRule_;
         admin = admin_;
         signer = signer_;
         _assertPublicAllocation();

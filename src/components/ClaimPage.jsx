@@ -70,7 +70,7 @@ function sameAddress(left, right) {
 
 function classifyError(error) {
   if (error?.code === "ELIGIBILITY_UNAVAILABLE") return CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE;
-  if (error?.code === "ACCESS_DENIED") return CLAIM_PHASES.ACCESS_DENIED;
+  if (error?.code === "ACCESS_DENIED" || error?.code === "GENESIS_HOLDING_ALREADY_USED") return CLAIM_PHASES.ACCESS_DENIED;
   if (error?.code === "ALREADY_CLAIMED") return CLAIM_PHASES.ALREADY_CLAIMED;
   if (error?.code === "INVALID_RELEASE_BINDING" || error?.code === "CLAIM_BINDING_MISMATCH") return CLAIM_PHASES.INVALID_BINDING;
   if (error?.code === "CLAIM_UNAVAILABLE" || error?.code === "CLAIM_AUTHORIZATION_UNAVAILABLE") return CLAIM_PHASES.CLAIM_UNAVAILABLE;
@@ -97,7 +97,7 @@ function ClaimSchedule({ target }) {
     <>
       <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
       <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.claimEnd)} → {instant(target.publicSaleEnd)}</InfoRow>
-      <InfoRow label="Eligibility">Held Genesis token 0, 1, 2 or 3 on Avalanche C-Chain at block {target.snapshotBlock}. Transfers after that block do not change eligibility.</InfoRow>
+      <InfoRow label="Eligibility">Currently holds Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, checked when you claim. One free claim per wallet, and each claim uses one Genesis unit's eligibility; a used unit does not qualify again after a transfer. Your Genesis tokens are never moved, burned or locked.</InfoRow>
       <InfoRow label="Supply">{String(target.publicAllocation) === "0" && String(target.allocation) === "0" ? "Open edition · uncapped" : `Claim ${target.allocation} · public ${target.publicAllocation}`}</InfoRow>
     </>
   );
@@ -262,11 +262,13 @@ export function ClaimPage() {
         setEligibleTokenIds(result.eligibleTokenIds || []);
         if (!result.eligible) {
           setPhase(CLAIM_PHASES.ACCESS_DENIED);
-          setMessage("Access denied. This wallet did not hold Genesis token 0, 1, 2 or 3 at the snapshot block. Nothing was claimed.");
+          setMessage(result.holdingUsed
+            ? "Access denied. Every Genesis unit in this wallet was already used for a free claim by a previous holder. Nothing was claimed."
+            : "Access denied. This wallet does not currently hold Genesis token 0, 1, 2 or 3 on Avalanche C-Chain. Nothing was claimed.");
           return;
         }
         setPhase(CLAIM_PHASES.ELIGIBLE);
-        setMessage(`Genesis ownership at the snapshot block verified for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one free claim.`);
+        setMessage(`Genesis ownership verified on Avalanche C-Chain for token${result.eligibleTokenIds.length === 1 ? "" : "s"} ${result.eligibleTokenIds.join(", ")}. This grants one free claim.`);
       } catch (error) {
         if (!live) return;
         setPhase(classifyError(error));

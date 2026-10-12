@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { AbiCoder, Interface, Wallet, getAddress, getCreateAddress, id } from "ethers";
 import { CLAIM_ARTIFACT_PATH, broadcastClaim, buildPlan, preflightClaimDeployment, run, validateClaimDeploymentEnv } from "./deploy-genesis-claim.mjs";
-import { genesisEligibilityRule } from "../server/genesis-claim.js";
+import { ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT } from "../server/genesis-claim.js";
 
 const KEY = `0x${"11".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
@@ -18,11 +18,9 @@ const CLAIM_START = NOW + 3600;
 const CLAIM_END = CLAIM_START + 86_400;
 const PUBLIC_END = CLAIM_END + 7 * 86_400 - 1;
 const PRICE = 250_000_000_000_000_000n;
-const SNAPSHOT_BLOCK = 97_000_000;
-const SNAPSHOT_HASH = `0x${"5a".repeat(32)}`;
 const NONCE = 61;
 const PREDICTED = getCreateAddress({ from: DEPLOYER, nonce: NONCE });
-const ARTIFACT = { abi: [{ type: "constructor", inputs: new Array(12).fill({ type: "uint256" }) }], bytecode: { object: "0x6080" } };
+const ARTIFACT = { abi: [{ type: "constructor", inputs: new Array(11).fill({ type: "uint256" }) }], bytecode: { object: "0x6080" } };
 
 const ENV = Object.freeze({
   DEPLOY_NETWORK: "fuji",
@@ -34,8 +32,6 @@ const ENV = Object.freeze({
   GENESIS_CLAIM_TOKEN_ID: TOKEN.toString(),
   GENESIS_CLAIM_START: String(CLAIM_START),
   GENESIS_PUBLIC_PRICE_WEI: PRICE.toString(),
-  GENESIS_SNAPSHOT_BLOCK: String(SNAPSHOT_BLOCK),
-  GENESIS_SNAPSHOT_BLOCK_HASH: SNAPSHOT_HASH,
   GENESIS_CLAIM_ADMIN: ADMIN,
   GENESIS_CLAIM_SIGNER_ADDRESS: SIGNER,
   BROADCAST_DEPLOYMENT: "no",
@@ -87,9 +83,9 @@ function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE,
     },
   };
 }
-const cChain = ({ chainId = 43114n, hash = SNAPSHOT_HASH } = {}) => ({
+const cChain = ({ chainId = 43114n, genesisCode = "0x6080" } = {}) => ({
   send: async () => `0x${chainId.toString(16)}`,
-  getBlock: async (number) => ({ number, hash }),
+  getCode: async (address) => (address.toLowerCase() === GENESIS_CONTRACT.toLowerCase() ? genesisCode : "0x"),
 });
 const preflight = (env = ENV, provider = fuji(), genesisProvider = cChain()) => preflightClaimDeployment(validateClaimDeploymentEnv(env), { provider, genesisProvider, artifact: ARTIFACT });
 
@@ -104,7 +100,6 @@ describe("Genesis claim deployment: environment", () => {
     [{ GENESIS_CLAIM_RELEASE_CONTRACT: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6" }, /legacy Fuji V2 singleton/],
     [{ GENESIS_CLAIM_PRIMARY_SALE: RELEASE }, /must differ/],
     [{ GENESIS_PUBLIC_PRICE_WEI: "0" }, /GENESIS_PUBLIC_PRICE_WEI must be a positive/],
-    [{ GENESIS_SNAPSHOT_BLOCK_HASH: "0x12" }, /32-byte block hash/],
     [{ GENESIS_CLAIM_SIGNER_ADDRESS: "" }, /GENESIS_CLAIM_SIGNER_ADDRESS is required/],
     [{ AVALANCHE_FUJI_RPC_URL: "https://user:pass@rpc.example" }, /without embedded credentials/],
   ])("refuses %o", (override, message) => {
@@ -156,15 +151,14 @@ describe("Genesis claim deployment: read-only preflight", () => {
     expect(facts).toMatchObject({ deployerNonce: NONCE, predictedClaim: PREDICTED, edition: { maxSupply: 0n, mintedSupply: 0n, artist: ARTIST, mintEnd: BigInt(PUBLIC_END) } });
     const simulation = provider.calls.find((call) => !call.to);
     expect(simulation.from).toBe(DEPLOYER);
-    const rule = genesisEligibilityRule({ snapshotBlock: SNAPSHOT_BLOCK, snapshotBlockHash: SNAPSHOT_HASH }).rule;
-    const encoded = AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "bytes32", "address", "address"], [RELEASE, SALE, TOKEN, 0n, 0n, BigInt(CLAIM_START), 86_400n, 604_800n, PRICE, rule, ADMIN, SIGNER]);
+    const encoded = AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "address", "address"], [RELEASE, SALE, TOKEN, 0n, 0n, BigInt(CLAIM_START), 86_400n, 604_800n, PRICE, ADMIN, SIGNER]);
     expect(simulation.data).toBe(`0x6080${encoded.slice(2)}`);
   });
 
   it.each([
     ["Fuji RPC on another chain", { provider: fuji({ chainId: 43114n }) }, /eth_chainId must be 43113/],
     ["C-Chain RPC on another chain", { genesisProvider: cChain({ chainId: 43113n }) }, /eth_chainId must be 43114/],
-    ["a different snapshot block hash", { genesisProvider: cChain({ hash: `0x${"00".repeat(32)}` }) }, /snapshot hash/],
+    ["a Genesis collection without code on C-Chain", { genesisProvider: cChain({ genesisCode: "0x" }) }, /live ownership cannot be verified/],
     ["a release without code", { provider: fuji({ codeless: [RELEASE] }) }, /release .* has no code/],
     ["a token that does not exist", { provider: fuji({ missingToken: true }) }, /does not exist/],
     ["a capped edition", { provider: fuji({ maxSupply: 100n }) }, /capped edition/],
@@ -182,17 +176,18 @@ describe("Genesis claim deployment: read-only preflight", () => {
     await expect(preflight(ENV, provider, genesisProvider)).rejects.toThrow(message);
   });
 
-  it("prints a plan with the schedule, snapshot and the follow-ups it does not perform", async () => {
+  it("prints a plan with the schedule, live eligibility and the follow-ups it does not perform", async () => {
     const config = validateClaimDeploymentEnv(ENV);
     const plan = buildPlan(config, await preflight());
     expect(plan).toMatchObject({
       predictedClaimAddress: PREDICTED,
       schedule: { claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleOpens: String(CLAIM_END), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() },
       supply: { claimAllocation: "0", publicAllocation: "0", meaning: expect.stringMatching(/uncapped/) },
-      snapshot: { chainId: 43114, block: String(SNAPSHOT_BLOCK), blockHash: SNAPSHOT_HASH },
+      eligibility: { chainId: 43114, genesisContract: GENESIS_CONTRACT, source: expect.stringMatching(/live/), ruleText: ELIGIBILITY_RULE_TEXT, rule: ELIGIBILITY_RULE },
       followUps: { issuerGrant: { from: ARTIST, to: RELEASE, note: expect.stringMatching(/never does/) }, apiConfiguration: { GENESIS_CLAIM_CONTRACT: PREDICTED, note: expect.stringMatching(/owner authorization/) } },
     });
     expect(JSON.stringify(plan)).not.toContain(KEY.slice(2));
+    expect(JSON.stringify(plan)).not.toMatch(/snapshot/i);
   });
 
   it("dry-run mode never deploys", async () => {
@@ -226,10 +221,10 @@ describe("Genesis claim deployment: broadcast guards", () => {
 
 describe("compiled GenesisHolderClaim artifact", () => {
   const path = resolve(process.cwd(), CLAIM_ARTIFACT_PATH);
-  it.skipIf(!existsSync(path))("has the scheduled twelve-argument constructor and the phase getters", () => {
+  it.skipIf(!existsSync(path))("has the scheduled eleven-argument constructor and the phase getters", () => {
     const artifact = JSON.parse(readFileSync(path, "utf8"));
     const constructor = artifact.abi.find((item) => item.type === "constructor");
-    expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "eligibilityRule_", "admin_", "signer_"]);
+    expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
     for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });

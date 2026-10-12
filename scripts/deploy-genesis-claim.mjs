@@ -4,7 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
-import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, PUBLIC_WINDOW_SECONDS, claimSchedule, genesisEligibilityRule } from "../server/genesis-claim.js";
+import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT, PUBLIC_WINDOW_SECONDS, claimSchedule } from "../server/genesis-claim.js";
 
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
 // C-Chain mainnet (production 24 hours / 7 days at 0.25 AVAX only, enforced here, by the API and
@@ -42,7 +42,7 @@ const CLAIM = new Interface([
   "function claimWindow() view returns (uint256)", "function publicWindow() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)", "function admin() view returns (address)", "function signer() view returns (address)",
 ]);
-const CONSTRUCTOR_TYPES = ["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "bytes32", "address", "address"];
+const CONSTRUCTOR_TYPES = ["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "address", "address"];
 
 function required(value, name) {
   const text = String(value ?? "").trim();
@@ -80,8 +80,6 @@ export function validateClaimDeploymentEnv(env = process.env) {
   if (releaseContract === getAddress(LEGACY_FUJI_SINGLETON)) throw new DeploymentError("The legacy Fuji V2 singleton may not be the claim release target.");
   const primarySale = address(env.GENESIS_CLAIM_PRIMARY_SALE, "GENESIS_CLAIM_PRIMARY_SALE");
   if (primarySale === releaseContract) throw new DeploymentError("GENESIS_CLAIM_PRIMARY_SALE must differ from the release contract.");
-  const snapshotHash = required(env.GENESIS_SNAPSHOT_BLOCK_HASH, "GENESIS_SNAPSHOT_BLOCK_HASH");
-  if (!/^0x[0-9a-fA-F]{64}$/.test(snapshotHash)) throw new DeploymentError("GENESIS_SNAPSHOT_BLOCK_HASH must be a 32-byte block hash.");
   const openText = String(env.GENESIS_EXPECT_OPEN_EDITION ?? "yes").trim().toLowerCase();
   if (openText !== "yes" && openText !== "no") throw new DeploymentError("GENESIS_EXPECT_OPEN_EDITION must be yes or no.");
   const claimStart = whole(env.GENESIS_CLAIM_START, "GENESIS_CLAIM_START", { positive: true });
@@ -126,8 +124,6 @@ export function validateClaimDeploymentEnv(env = process.env) {
     claimEnd: claimStart + schedule.claimWindow,
     publicSaleEnd: claimStart + schedule.claimWindow + schedule.publicWindow - 1n,
     publicPriceWei,
-    snapshotBlock: whole(env.GENESIS_SNAPSHOT_BLOCK, "GENESIS_SNAPSHOT_BLOCK", { positive: true }),
-    snapshotBlockHash: snapshotHash.toLowerCase(),
     expectOpenEdition: openText === "yes",
     admin: address(env.GENESIS_CLAIM_ADMIN, "GENESIS_CLAIM_ADMIN"),
     signer: address(env.GENESIS_CLAIM_SIGNER_ADDRESS, "GENESIS_CLAIM_SIGNER_ADDRESS"),
@@ -136,8 +132,8 @@ export function validateClaimDeploymentEnv(env = process.env) {
   });
 }
 
-export function constructorArgs(config, eligibilityRule) {
-  return [config.releaseContract, config.primarySale, config.tokenId, config.allocation, config.publicAllocation, config.claimStart, config.claimWindow, config.publicWindow, config.publicPriceWei, eligibilityRule, config.admin, config.signer];
+export function constructorArgs(config) {
+  return [config.releaseContract, config.primarySale, config.tokenId, config.allocation, config.publicAllocation, config.claimStart, config.claimWindow, config.publicWindow, config.publicPriceWei, config.admin, config.signer];
 }
 
 async function read(provider, iface, to, name, args = []) {
@@ -152,9 +148,10 @@ async function read(provider, iface, to, name, args = []) {
 export async function preflightClaimDeployment(config, { provider, genesisProvider, artifact }) {
   await assertRpcChainId(provider, config.chainId);
   await assertRpcChainId(genesisProvider, GENESIS_CHAIN_ID);
-  const snapshot = await genesisProvider.getBlock(Number(config.snapshotBlock));
-  if (!snapshot?.hash || String(snapshot.hash).toLowerCase() !== config.snapshotBlockHash) throw new DeploymentError(`C-Chain block ${config.snapshotBlock} does not have the configured snapshot hash; refusing.`);
-  const eligibility = genesisEligibilityRule({ snapshotBlock: config.snapshotBlock, snapshotBlockHash: config.snapshotBlockHash });
+  // Eligibility is read live from the Genesis collection when vouchers are signed; it must be reachable.
+  const genesisCode = await genesisProvider.getCode(GENESIS_CONTRACT);
+  if (!genesisCode || genesisCode === "0x") throw new DeploymentError(`The Genesis collection ${GENESIS_CONTRACT} has no code on C-Chain; live ownership cannot be verified.`);
+  const eligibility = Object.freeze({ text: ELIGIBILITY_RULE_TEXT, rule: ELIGIBILITY_RULE, source: "live balanceOf on C-Chain at voucher request" });
 
   for (const [name, target] of [["release", config.releaseContract], ["primary sale", config.primarySale]]) {
     const code = await provider.getCode(target);
@@ -190,7 +187,7 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
 
   const [issuerRole] = await read(provider, RELEASE, config.releaseContract, "ISSUER_ROLE");
   const predictedClaim = getCreateAddress({ from: config.deployerAddress, nonce: deployerNonce });
-  const args = constructorArgs(config, eligibility.rule);
+  const args = constructorArgs(config);
   // The constructor reads the release and sale and reverts on any mismatch; simulate it now.
   const initcode = `${artifact.bytecode.object}${AbiCoder.defaultAbiCoder().encode(CONSTRUCTOR_TYPES, args).slice(2)}`;
   try {
@@ -223,8 +220,8 @@ export function buildPlan(config, facts) {
     predictedClaimAddress: facts.predictedClaim,
     target: { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, edition: facts.edition, sale: facts.sale },
     schedule: { claimStart: config.claimStart, claimWindowSeconds: config.claimWindow, claimEnd: config.claimEnd, publicSaleOpens: config.claimEnd, publicWindowSeconds: config.publicWindow, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, sale: `configureSale(tokenId, ${config.publicPriceWei}, ${config.publicAllocation}, 0, ${config.claimEnd}, ${config.publicSaleEnd}, false)` },
-    supply: { claimAllocation: config.allocation, publicAllocation: config.publicAllocation, meaning: config.allocation === 0n && config.publicAllocation === 0n ? "uncapped open edition: one claim per snapshot wallet, no sale cap" : "finite allocations" },
-    snapshot: { chainId: GENESIS_CHAIN_ID, block: config.snapshotBlock, blockHash: config.snapshotBlockHash, ruleText: facts.eligibility.text, rule: facts.eligibility.rule },
+    supply: { claimAllocation: config.allocation, publicAllocation: config.publicAllocation, meaning: config.allocation === 0n && config.publicAllocation === 0n ? "uncapped open edition: one claim per eligible wallet, no sale cap" : "finite allocations" },
+    eligibility: { chainId: GENESIS_CHAIN_ID, genesisContract: GENESIS_CONTRACT, source: facts.eligibility.source, ruleText: facts.eligibility.text, rule: facts.eligibility.rule },
     roles: { admin: config.admin, signer: config.signer },
     constructorSimulation: "passed (eth_call from the deployer)",
     followUps: {
@@ -233,8 +230,7 @@ export function buildPlan(config, facts) {
         GENESIS_CLAIM_RELEASE_CONTRACT: config.releaseContract, GENESIS_CLAIM_PRIMARY_SALE: config.primarySale, GENESIS_CLAIM_CONTRACT: facts.predictedClaim,
         GENESIS_CLAIM_TOKEN_ID: config.tokenId, GENESIS_CLAIM_ALLOCATION: config.allocation, GENESIS_PUBLIC_MINT_ALLOCATION: config.publicAllocation,
         GENESIS_CLAIM_START: config.claimStart, GENESIS_CLAIM_WINDOW_SECONDS: config.claimWindow, GENESIS_PUBLIC_WINDOW_SECONDS: config.publicWindow,
-        GENESIS_PUBLIC_PRICE_WEI: config.publicPriceWei, GENESIS_SNAPSHOT_BLOCK: config.snapshotBlock, RELEASE_NETWORK: config.network,
-        GENESIS_SNAPSHOT_BLOCK_HASH: config.snapshotBlockHash, note: "Plus GENESIS_RPC_URL, GENESIS_DESTINATION_RPC_URL and the server-only GENESIS_CLAIM_SIGNER_PRIVATE_KEY for the signer above. GENESIS_CLAIM_ENABLED=true only with owner authorization.",
+        GENESIS_PUBLIC_PRICE_WEI: config.publicPriceWei, RELEASE_NETWORK: config.network, note: "Plus GENESIS_RPC_URL, GENESIS_DESTINATION_RPC_URL and the server-only GENESIS_CLAIM_SIGNER_PRIVATE_KEY for the signer above. GENESIS_CLAIM_ENABLED=true only with owner authorization.",
       },
     },
   }, (_key, value) => text(value)));
@@ -265,7 +261,7 @@ export async function broadcastClaim(config, provider, facts, { artifact, log = 
   const mismatched = Object.keys(expected).filter((name) => String(onchain[name]).toLowerCase() !== String(expected[name]).toLowerCase());
   if (mismatched.length) throw new DeploymentError(`The mined claim does not match the reviewed parameters: ${mismatched.join(", ")}.`);
   const recordPath = `deployments/genesis-claim-${config.network}-${claimAddress}.json`;
-  const record = { network: config.network, chainId: config.chainId, claim: { name: "GenesisHolderClaim", address: claimAddress, deploymentTransaction: receipt.hash, deploymentBlock: receipt.blockNumber, deployer, sourceCommit: process.env.GITHUB_SHA || null }, parameters: expected, snapshot: { block: config.snapshotBlock, blockHash: config.snapshotBlockHash, ruleText: facts.eligibility.text }, issuerGrantPending: true };
+  const record = { network: config.network, chainId: config.chainId, claim: { name: "GenesisHolderClaim", address: claimAddress, deploymentTransaction: receipt.hash, deploymentBlock: receipt.blockNumber, deployer, sourceCommit: process.env.GITHUB_SHA || null }, parameters: expected, eligibility: { source: facts.eligibility.source, ruleText: facts.eligibility.text }, issuerGrantPending: true };
   log({ step: "RECORD", path: recordPath, record });
   try { await writeRecord(recordPath, record); } catch (error) { log({ step: "RECORD_WRITE_FAILED", path: recordPath, error: error.message }); }
   return record;
