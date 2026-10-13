@@ -18,7 +18,7 @@ setting changed. Manifest `config/mainnet-release-per-contract.json` stays at `d
 | Predicted implementation `0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006` empty | PASS | recomputed `CREATE(factory, 1)` |
 | Predicted marketplace `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` empty | PASS | recomputed `CREATE(deployer, 1)` |
 | Fee recipient is the Nano S Plus | PASS | `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4` in both constructors; no code on C-Chain |
-| Fee recipient confirmed on the device screen | UNVERIFIED | owner's physical check (view only; the device signs nothing) |
+| Fee recipient confirmed on the device screen | PASS (owner-confirmed, 2026-10-13) | The owner reports the Ledger Nano S Plus shows `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4` on its own screen (view only; nothing signed). Not independently verifiable by Claude. |
 | Platform fee 250 bps | PASS | factory `PLATFORM_FEE_BPS` 250 sealed; marketplace `platformFeeBps` 250 and `REQUIRED_PLATFORM_FEE_BPS` 250 |
 | Royalty 250 bps locked to an artist wallet | PASS | `REQUIRED_ROYALTY_BPS` 250 in implementation and marketplace; implementation forbids the fee recipient as royalty payee |
 | Clean rebuild with pinned Foundry | PASS | forge 1.3.1 (`08d3a4a`), solc 0.8.24, `forge clean && forge build`, the same version as CI |
