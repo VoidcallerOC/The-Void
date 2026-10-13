@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroHash, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
 import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
+import { checkClaimState } from "./claim-onchain-checks.mjs";
 import { MAINNET_DEPLOYER, SigningRequestError, assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
 import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT, PUBLIC_WINDOW_SECONDS, claimSchedule } from "../server/genesis-claim.js";
 
@@ -296,12 +297,12 @@ export function claimPlanInputs(config) {
 }
 
 /**
- * Mainnet additions to a dry-run plan: the exact unsigned creation transaction for the owner to sign
+ * Signing additions to a dry-run plan (mainnet, and the Fuji Rabby test path): the exact unsigned creation transaction for the owner to sign
  * in Rabby, and the ISSUER_ROLE grant prepared for the account that actually holds the authority to
  * make it (DEFAULT_ADMIN_ROLE on the release, which createRelease gives the calling artist). Refuses a
  * release the artist wallet does not administer, or one the deployer or fee recipient administers.
  */
-export async function mainnetSigningPlan(config, facts, plan, { provider, artifact }) {
+export async function claimSigningPlan(config, facts, plan, { provider, artifact }) {
   const [releaseOwner] = await read(provider, RELEASE, config.releaseContract, "owner");
   const owner = getAddress(releaseOwner);
   const isAdmin = async (account) => (await read(provider, RELEASE, config.releaseContract, "hasRole", [ZeroHash, account]))[0];
@@ -335,7 +336,9 @@ export async function mainnetSigningPlan(config, facts, plan, { provider, artifa
   };
 }
 
-/** Verifies the owner-signed claim deployment from chain against the reviewed mainnet plan. */
+export const mainnetSigningPlan = claimSigningPlan;
+
+/** Verifies the owner-signed claim deployment from chain against the reviewed plan. */
 export async function verifyClaimDeployment(provider, plan, hash, { timeoutMs } = {}) {
   const request = plan.signingRequests?.[0];
   if (!request) throw new DeploymentError("The plan has no signing request.");
@@ -346,19 +349,10 @@ export async function verifyClaimDeployment(provider, plan, hash, { timeoutMs } 
     if (error instanceof SigningRequestError) throw new DeploymentError(error.message);
     throw error;
   }
-  const expected = {
-    releaseContract: plan.target.releaseContract, primarySale: plan.target.primarySale, tokenId: plan.target.tokenId,
-    allocation: plan.supply.claimAllocation, publicAllocation: plan.supply.publicAllocation,
-    claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds,
-    claimEnd: plan.schedule.claimEnd, publicSaleEnd: plan.schedule.publicSaleEnd, publicPriceWei: plan.schedule.publicPriceWei,
-    ELIGIBILITY_RULE: plan.eligibility.rule, admin: plan.roles.admin, signer: plan.roles.signer,
-  };
-  const onchain = {};
-  for (const name of Object.keys(expected)) [onchain[name]] = await read(provider, CLAIM, mined.address, name);
-  const mismatched = Object.keys(expected).filter((name) => String(onchain[name]).toLowerCase() !== String(expected[name]).toLowerCase());
-  if (mismatched.length) throw new DeploymentError(`The mined claim does not match the reviewed parameters: ${mismatched.join(", ")}.`);
-  const [issuerRole] = await read(provider, RELEASE, plan.target.releaseContract, "ISSUER_ROLE");
-  const [issuerGranted] = await read(provider, RELEASE, plan.target.releaseContract, "hasRole", [issuerRole, mined.address]);
+  const { problems, facts } = await checkClaimState(provider, plan, mined.address);
+  if (problems.length) throw new DeploymentError(`The mined claim does not match the reviewed parameters: ${problems.map((item) => item.split(" is ")[0]).join(", ")}.`);
+  const expected = facts.parameters;
+  const issuerGranted = facts.issuerGrant === "GRANTED";
   return { ...mined, parameters: expected, issuerGrant: issuerGranted ? "GRANTED" : "PENDING (artist operation)" };
 }
 

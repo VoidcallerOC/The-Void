@@ -3,6 +3,7 @@ import { bindPlan } from "./plan-binding-core.mjs";
 import { MAINNET_FEE_RECIPIENT } from "./mainnet-signing-requests.mjs";
 import { profileFor } from "./network-profiles.mjs";
 import { PROBE_CONTRACT, PROBE_LABEL } from "./fuji-rabby-probe.mjs";
+import { FUJI_CLAIM_ARTIST, FUJI_PLACEHOLDER_SIGNER } from "./fuji-genesis-claim.mjs";
 
 // An approved plan is a key-less dry-run plan and its binding, committed under
 // deploy/mainnet/approved-plans/ through a reviewed PR. Merging that PR is the owner's approval of the
@@ -16,7 +17,7 @@ export const APPROVED_KINDS = profileFor("mainnet").kinds;
 export class ApprovedPlanError extends Error {}
 const fail = (message) => { throw new ApprovedPlanError(message); };
 
-const deployerOf = (kind, plan) => (kind === "genesis-claim-mainnet" ? plan.deployer : plan.deployer?.address);
+const deployerOf = (kind, plan) => (kind.startsWith("genesis-claim") ? plan.deployer : plan.deployer?.address);
 
 /** Throws unless the entry is internally consistent, bound, for the network's chain and the defined deployer. */
 export function validateApprovedPlan(entry, network = "mainnet") {
@@ -41,6 +42,13 @@ export function validateApprovedPlan(entry, network = "mainnet") {
   if (kind === "release-per-contract-mainnet") {
     if (getAddress(plan.transactions[0].constructor.platformRecipient) !== MAINNET_FEE_RECIPIENT || getAddress(plan.transactions[1].constructor.feeRecipient) !== MAINNET_FEE_RECIPIENT) fail("The fee recipient is not the recorded Nano S Plus.");
     if (getAddress(plan.transactions[1].constructor.releaseFactory) !== getAddress(requests[0].predictedAddress)) fail("The marketplace is not bound to the factory of step 1.");
+  }
+  if (kind === "genesis-claim-fuji") {
+    if (getAddress(plan.roles.admin) !== FUJI_CLAIM_ARTIST) fail(`The Fuji claim admin must be the artist wallet ${FUJI_CLAIM_ARTIST}, not ${plan.roles.admin}.`);
+    if (getAddress(plan.roles.signer) !== FUJI_PLACEHOLDER_SIGNER) fail(`This Fuji claim plan deploys the placeholder voucher signer ${FUJI_PLACEHOLDER_SIGNER}, not ${plan.roles.signer}. The real signer is set later by the artist.`);
+    if (plan.supply.claimAllocation !== "0" || plan.supply.publicAllocation !== "0") fail("The Fuji claim must be an uncapped open edition (both allocations 0).");
+    if (getAddress(plan.followUps?.issuerGrant?.from) !== FUJI_CLAIM_ARTIST) fail("The ISSUER_ROLE grant must come from the artist wallet.");
+    if (getAddress(plan.predictedClaimAddress) !== getAddress(requests[0].predictedAddress)) fail("The claim address disagrees with its transaction.");
   }
   if (kind === "rabby-probe-fuji") {
     if (plan.probe.contract !== PROBE_CONTRACT || plan.probe.label !== PROBE_LABEL) fail("The Fuji plan is not the RabbySigningProbe test.");

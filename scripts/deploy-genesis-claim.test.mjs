@@ -257,7 +257,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const { DEPLOYER_PRIVATE_KEY: _unused, ...KEYLESS_ENV } = ENV;
   const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST };
   const roles = new Interface(["function owner() view returns (address)", "function hasRole(bytes32 role,address account) view returns (bool)"]);
-  const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)"]));
+  const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 
   /** C-Chain holding the artist's release; owner and DEFAULT_ADMIN_ROLE holders are configurable. */
   function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [] } = {}) {
@@ -281,7 +281,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
         }
         if (tx.to && state.claim && getAddress(tx.to) === state.claim) {
           const fn = claimViews.parseTransaction({ data: tx.data }).name;
-          return claimViews.encodeFunctionResult(fn, [state.claimValues[fn]]);
+          return claimViews.encodeFunctionResult(fn, [fn === "paused" ? false : state.claimValues[fn]]);
         }
         return base.call(tx);
       },
