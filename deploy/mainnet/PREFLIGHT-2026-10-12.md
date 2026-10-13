@@ -36,7 +36,7 @@ setting changed. Manifest `config/mainnet-release-per-contract.json` stays at `d
 | Deployer key never held outside Rabby | **FAIL (historical)** | Repository records show the Fuji workflows' `DEPLOYER_PRIVATE_KEY` secret signed as this address; the last such run (`rehearse-royalty-fuji.yml`, run 38252855896) succeeded on 2026-10-12 13:01 UTC. Deleting the secret cannot undo this. See below. |
 | `DEPLOYER_PRIVATE_KEY` repository secret present now | PASS (owner-confirmed, 2026-10-13) | The owner inspected Settings → Secrets and variables → Actions → Repository secrets; their screenshot shows `DEPLOYER_PRIVATE_KEY` absent. Not independently verified by Claude (secrets API 403). Environment-level secrets, other repositories, local copies and the deleted Render cron's former environment were not checked. |
 | Deployer address retained | Owner decision (2026-10-13) | The owner keeps `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`, accepting the historical exposure above. Custody: the key stays in Rabby only. No replacement wallet. |
-| Real Rabby path proven | UNVERIFIED | only stand-in wallets so far; the Fuji Rabby test (`deploy/fuji/RABBY-TEST.md`) is not yet authorized |
+| Real Rabby path proven | PASS on Fuji (2026-10-13) | owner-signed Fuji test `0x2822…7782`, verified from the public Fuji RPC (`deploy/fuji/RABBY-TEST.md`). Mainnet itself remains unsigned; C-Chain deployer nonce still 0. |
 
 ## Legacy key-based workflows (owner cleanup)
 

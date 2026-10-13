@@ -1,7 +1,7 @@
 # Fuji Rabby test of the owner-signing page
 
-**Status: prepared, NOT authorized.** Nothing in this document has been signed or sent. The owner's
-explicit approval of the exact transaction below is required before Rabby is asked to sign anything.
+**Status: PASSED on 2026-10-13** (real Rabby, Fuji). The owner signed the transaction below in Rabby; the result was verified
+from the public Fuji RPC (see the last table row). The plan is now spent: the deployer's Fuji nonce is 72.
 
 ## What it proves
 
@@ -94,4 +94,4 @@ an error other than a rejection. Before anything else, check Rabby's activity fo
 | Local forge | `test/RabbySigningProbe.t.sol`: label, creator, refuses value. |
 | Fuji read-only | The plan was built from the live Fuji state above. The built page, in Chromium with a stand-in wallet, read live Fuji: readiness all PASS, the connection check refused the artist account and chain 43114, and a rejection returned to Prepared. Nothing was sent. |
 | Local Fuji fork | The same page against an anvil fork of Fuji (fork transactions only, never sent to Fuji): the stand-in wallet sent the exact transaction and the page verified it (`0xac00…5829`, gas used 103,088, label, creator, balance 0). The confirmation survived a reload. The wallet methods used were `eth_requestAccounts`, `eth_accounts`, `eth_chainId` and `eth_sendTransaction`; there was no network switch. |
-| Real Rabby on Fuji | NOT STARTED: awaits the owner's authorization. |
+| Real Rabby on Fuji | **PASS.** Transaction `0x282223a35fdf9c5318c4b14078d901495e9dee09120c3cc8bf153d704d817782`, Fuji block 59,361,831 (2026-10-13 01:02:27 UTC), signed by the owner in Rabby; the page showed "Fuji test passed". Re-read independently from the public Fuji RPC: chain 43113, from `0xaBd3…c174`, nonce 71, no recipient, value 0, creation-data hash `0x792d…8d6a`, status 1, gas used 103,088 (Rabby set its own gas limit, 156,120; gas is not bound), fee 19,792,896 wei of test AVAX; created `0xac001c79672A266Fa53931553697161400715829` with code, `label()` = `0xbdf8…ccea`, `creator()` = the deployer, balance 0. Deployer nonce after: Fuji 72; C-Chain still 0. |
