@@ -87,6 +87,48 @@ contract GenesisHolderClaimRoyaltyReleaseTest {
         (ok,) = address(claimContract).call(abi.encodeCall(GenesisHolderClaim.claim, (v, abi.encodePacked(r, s, sv))));
     }
 
+    /// Nobody but the release admin (the artist) can grant or revoke a release role, nobody but the claim
+    /// admin can pause, re-sign or hand over the claim, and only issuers can mint. The deployer, the
+    /// fee recipient, a claimant and the claim signer each fail.
+    function testUnauthorizedRoleChangesAreRejected() public {
+        bytes32 issuerRole = release.ISSUER_ROLE();
+        bytes32 adminRole = release.DEFAULT_ADMIN_ROLE();
+        address[4] memory outsiders = [address(this), NANO, CLAIMANT, vm.addr(SIGNER_KEY)];
+        for (uint256 i = 0; i < outsiders.length; i++) {
+            address outsider = outsiders[i];
+            if (outsider == address(this)) {
+                require(!release.hasRole(adminRole, outsider), "deployer holds the release admin role");
+            }
+            vm.prank(outsider);
+            (bool ok,) = address(release).call(abi.encodeCall(release.grantRole, (issuerRole, outsider)));
+            require(!ok, "outsider granted ISSUER_ROLE");
+            vm.prank(outsider);
+            (ok,) = address(release).call(abi.encodeCall(release.grantRole, (adminRole, outsider)));
+            require(!ok, "outsider granted the admin role");
+            vm.prank(outsider);
+            (ok,) = address(release).call(abi.encodeCall(release.revokeRole, (issuerRole, address(claimContract))));
+            require(!ok, "outsider revoked the claim's ISSUER_ROLE");
+            vm.prank(outsider);
+            (ok,) = address(release).call(abi.encodeCall(release.mint, (outsider, tokenId, 1, "")));
+            require(!ok, "outsider minted");
+            vm.prank(outsider);
+            (ok,) = address(claimContract).call(abi.encodeCall(GenesisHolderClaim.setSigner, (outsider)));
+            require(!ok, "outsider rotated the signer");
+            vm.prank(outsider);
+            (ok,) = address(claimContract).call(abi.encodeCall(GenesisHolderClaim.transferAdmin, (outsider)));
+            require(!ok, "outsider took the claim admin");
+            vm.prank(outsider);
+            (ok,) = address(claimContract).call(abi.encodeCall(GenesisHolderClaim.pause, ()));
+            require(!ok, "outsider paused the claim");
+            vm.prank(outsider);
+            (ok,) = address(sale).call(abi.encodeCall(sale.configureSale, (tokenId, 0, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false)));
+            require(!ok, "outsider reconfigured the sale");
+        }
+        require(release.hasRole(issuerRole, address(claimContract)), "claim lost ISSUER_ROLE");
+        require(release.hasRole(adminRole, ARTIST), "artist is not the release admin");
+        require(!release.hasRole(adminRole, address(factory)), "factory kept the admin role");
+    }
+
     function testEditionCarriesTheLockedRoyaltyAndTheClaimIsBoundToIt() public view {
         require(release.royaltyBpsOf(tokenId) == 250 && release.payoutOf(tokenId) == ARTIST, "2.5% royalty to the artist");
         require(release.maxSupplyOf(tokenId) == 0, "open edition");

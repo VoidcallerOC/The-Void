@@ -1,0 +1,77 @@
+{
+  "kind": "rabby-probe-fuji",
+  "plan": {
+    "mode": "DRY_RUN",
+    "network": "fuji",
+    "chainId": 43113,
+    "purpose": "TEST ONLY: validates the Rabby owner-signing page on Fuji. Deploys nothing the platform uses.",
+    "observedAt": {
+      "time": "2026-10-12T19:38:51.768Z",
+      "block": 59350867
+    },
+    "deployer": {
+      "address": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+      "nonce": 71,
+      "balanceWei": "477017023460267550"
+    },
+    "probe": {
+      "contract": "RabbySigningProbe",
+      "label": "0xbdf8a15ab5353c6209f6966ef3267734599a9558c9c7df338e4e05537575ccea",
+      "labelText": "the-void/fuji-rabby-probe/v1",
+      "predictedAddress": "0xac001c79672A266Fa53931553697161400715829",
+      "initCodeHash": "0xb9498991f33ddc70498e0b71f3bb198abc71bb7f4ad4fd5b54e003c0b58dc051",
+      "runtimeCodeHash": "0x438a4888bfdc63cc1f111937ce78f646f9579357acc470dcf6ea584d10f31233"
+    },
+    "cost": {
+      "estimatedGas": "104080",
+      "gasLimit": "124896",
+      "maxFeePerGasWei": "170",
+      "maxCostWei": "21232320"
+    },
+    "signingRequests": [
+      {
+        "step": 1,
+        "contract": "RabbySigningProbe",
+        "chainId": 43113,
+        "from": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+        "to": null,
+        "nonce": 71,
+        "value": "0",
+        "data": "0x60c060405234801561000f575f80fd5b5060405161014e38038061014e83398101604081905261002e9161003a565b6080523360a052610051565b5f6020828403121561004a575f80fd5b5051919050565b60805160a05160e061006e5f395f603801525f607b015260e05ff3fe6080604052348015600e575f80fd5b50600436106030575f3560e01c806302d05d3f146034578063cb4774c4146077575b5f80fd5b605a7f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b0390911681526020015b60405180910390f35b609d7f000000000000000000000000000000000000000000000000000000000000000081565b604051908152602001606e56fea2646970667358221220ab4bf25759a97c7307ecf79993bcbf47e90e2120b8cfa0b77b82656541d9e23264736f6c63430008180033bdf8a15ab5353c6209f6966ef3267734599a9558c9c7df338e4e05537575ccea",
+        "dataHash": "0x792db3538a6af4a16fec5547386b055d0c36cbbc8818128f93e3c5572b198d6a",
+        "gasLimit": "124896",
+        "predictedAddress": "0xac001c79672A266Fa53931553697161400715829"
+      }
+    ]
+  },
+  "binding": {
+    "kind": "rabby-probe-fuji",
+    "sourceCommit": "ed7c41adcf4548e286a68bff1676002093e88b75",
+    "digest": "2a9b11d33e69edfe6b227ed457b879cc1a5138bc1d1c39a379cf595b54b561f1",
+    "fields": {
+      "chainId": 43113,
+      "deployer": "0xabd3746e8b852f55be52fc44fab6cab908b1c174",
+      "deployerNonce": 71,
+      "probe": {
+        "contract": "RabbySigningProbe",
+        "label": "0xbdf8a15ab5353c6209f6966ef3267734599a9558c9c7df338e4e05537575ccea",
+        "predictedAddress": "0xac001c79672a266fa53931553697161400715829",
+        "initCodeHash": "0xb9498991f33ddc70498e0b71f3bb198abc71bb7f4ad4fd5b54e003c0b58dc051",
+        "runtimeCodeHash": "0x438a4888bfdc63cc1f111937ce78f646f9579357acc470dcf6ea584d10f31233"
+      },
+      "signingRequests": [
+        {
+          "step": 1,
+          "contract": "RabbySigningProbe",
+          "chainId": 43113,
+          "from": "0xabd3746e8b852f55be52fc44fab6cab908b1c174",
+          "to": null,
+          "nonce": 71,
+          "value": "0",
+          "dataHash": "0x792db3538a6af4a16fec5547386b055d0c36cbbc8818128f93e3c5572b198d6a",
+          "predictedAddress": "0xac001c79672a266fa53931553697161400715829"
+        }
+      ]
+    }
+  }
+}
