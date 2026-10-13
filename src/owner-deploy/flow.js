@@ -4,6 +4,12 @@ import { checkFactoryState, checkMarketplaceState } from "../../scripts/mainnet-
 import { NotMinedYetError, assertReadyToSign, verifyCreationTransaction, walletTransaction } from "../../scripts/mainnet-signing-requests.mjs";
 import { NETWORK_PROFILES, profileFor, profileOfKind } from "../../scripts/network-profiles.mjs";
 import { PROBE_KIND, checkProbeState } from "../../scripts/fuji-rabby-probe.mjs";
+import { checkClaimState } from "../../scripts/claim-onchain-checks.mjs";
+import { FUJI_CLAIM_KIND, FUJI_PLACEHOLDER_SIGNER } from "../../scripts/fuji-genesis-claim.mjs";
+
+// Seconds of lead the claim start needs over the latest block at signing time (the constructor reverts once it has passed).
+export const CLAIM_START_MARGIN_SECONDS = 120;
+const isClaimKind = (kind) => kind === "genesis-claim-mainnet" || kind === FUJI_CLAIM_KIND;
 
 // The owner deployment page's logic, without the DOM. Every check reuses the modules the Node tools
 // use. Nothing here holds a key or sends a transaction: the page hands one transaction at a time to
@@ -99,6 +105,14 @@ export async function readiness(provider, entry, state, n) {
   add(`Deployer nonce is ${request.nonce}`, latest === request.nonce, `latest ${latest}`);
   add("No pending deployer transaction", latest === pending, `pending ${pending}`);
   for (const target of emptyBefore(entry, n)) add(`Nothing deployed yet at ${target}`, (await provider.getCode(target)) === "0x", target);
+  if (isClaimKind(entry.kind)) {
+    const latestBlock = await provider.getBlock("latest");
+    const ahead = BigInt(entry.plan.schedule.claimStart) - BigInt(latestBlock.timestamp);
+    add(`Claim start is at least ${CLAIM_START_MARGIN_SECONDS}s ahead of the chain`, ahead >= BigInt(CLAIM_START_MARGIN_SECONDS), `${ahead}s ahead; the plan goes stale when this passes`);
+    let simulation;
+    try { await provider.call({ from: deployer, data: request.data }); simulation = "passed"; } catch (error) { simulation = `reverted${error?.shortMessage ? ` (${error.shortMessage})` : ""}`; }
+    add("Claim constructor simulation passes (release, sale and schedule still match)", simulation === "passed", simulation);
+  }
   const remaining = state.steps.slice(n - 1).reduce((sum, item) => sum + BigInt(item.request.gasLimit), 0n);
   const price = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
   const needed = remaining * price;
@@ -147,6 +161,10 @@ export async function confirmStep(provider, entry, state, n, { timeoutMs = 120_0
       const result = n === 1 ? await checkFactoryState(provider, entry.plan, mined.address) : await checkMarketplaceState(provider, entry.plan, mined.address);
       if (result.problems.length) throw new Error(`The mined contract does not match the approved plan: ${result.problems.join("; ")}.`);
       facts = result.facts;
+    } else if (isClaimKind(entry.kind)) {
+      const result = await checkClaimState(provider, entry.plan, mined.address);
+      if (result.problems.length) throw new Error(`The mined claim does not match the approved plan: ${result.problems.join("; ")}.`);
+      facts = result.facts;
     } else if (entry.kind === PROBE_KIND) {
       const result = await checkProbeState(provider, entry.plan, mined.address);
       if (result.problems.length) throw new Error(`The mined probe does not match the approved plan: ${result.problems.join("; ")}.`);
@@ -169,6 +187,7 @@ export function nextAction(entry, state, { connected, ready }) {
   if (failed) return `Stop. Step ${failed.request.step} failed verification: ${failed.error}`;
   const profile = profileOfKind(entry.kind);
   const current = state.steps.find((step) => step.status !== "confirmed");
+  if (!current && entry.kind === FUJI_CLAIM_KIND) return `Claim deployed and verified on ${profile.name}. Send the transaction hash below to Claude. It is NOT usable yet: the voucher signer is the placeholder ${FUJI_PLACEHOLDER_SIGNER}, so every claim is refused, and the artist's ISSUER_ROLE grant and the real signer are separate, later steps.`;
   if (!current && profile.network !== "mainnet") return `Test passed: every step is confirmed and verified on ${profile.name}. Send the transaction hash below to Claude for the test record. This proves nothing on mainnet by itself.`;
   if (!current) return `All steps are confirmed. Run the GitHub verification (${VERIFY_WORKFLOW_URL}) with the transaction hashes below, then send them to Claude for the record PR.`;
   const n = current.request.step;

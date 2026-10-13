@@ -24,7 +24,7 @@ export const NETWORK_PROFILES = Object.freeze({
     rpc: "https://api.avax-test.network/ext/bc/C/rpc",
     explorer: "https://testnet.snowtrace.io",
     deployer: MAINNET_DEPLOYER,
-    kinds: Object.freeze(["rabby-probe-fuji"]),
+    kinds: Object.freeze(["rabby-probe-fuji", "genesis-claim-fuji"]),
     plansDir: "deploy/fuji/approved-plans",
   }),
 });

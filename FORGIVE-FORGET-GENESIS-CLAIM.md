@@ -9,7 +9,7 @@
 | Uncapped open edition on the mainnet implementation (`VoidRelease1155V4Royalty` via `VoidReleaseFactoryV2Royalty`) | Local tests | PASS: `GenesisHolderClaimRoyaltyRelease.t.sol` (`maxSupply 0`, allocations 0, 250 bps locked royalty, claim, public sale, resale on `ReleaseMarketplaceV4`). Not exercised on any live chain. |
 | Uncapped open edition on Fuji Factory V2 implementation `0x45c3…E452` | Fuji on-chain record (read-only) | PASS: release ‑28 is a live open edition (`maxSupply 0`) on a clone of this implementation (§1b). Not re-read in this session. |
 | Recorded Fuji target `0x12Ff…0Fe6` / `0x3671…5aFD` / token `1` | Fuji read-only | BLOCKED: its implementation reverts `maxSupply 0` (§1). Resolution: the separate plan in §4a. |
-| Live claim, public mint and closure on Fuji | Fuji transactions | NOT STARTED: needs the §4a plan approved and signed by the artist wallet. |
+| Live claim, public mint and closure on Fuji | Fuji transactions | NOT STARTED: needs the §4a plan approved and signed by the artist wallet. Step 4 (deploying the claim in Rabby with a placeholder signer) is built and fork-rehearsed; no plan exists and nothing is authorized (`deploy/fuji/GENESIS-CLAIM-DEPLOY.md`). |
 | Mainnet release, edition, sale, claim, `ISSUER_ROLE`, activation | Mainnet | NOT STARTED and not authorized (§7). The claim UI is still bound to Fuji (`src/lib/claim-state.js`). |
 
 > **2026-10-12: eligibility changed from a fixed snapshot to live ownership, with an off-chain used-unit ledger: each free claim uses one Genesis unit's eligibility, and a used unit cannot qualify again after resale (§2). Genesis tokens are never moved or burned.** The owner replaced the
@@ -232,7 +232,7 @@ Every step below is a transaction or a production change. **None is authorized b
 1. Artist: `createRelease` (new release; never ‑26's `0x12Ff…`).
 2. Artist: `createEditionWithMintEnd(…, 0, …, mintEnd = T + claimWindow + publicWindow − 1)`.
 3. Artist: `configureSale(tokenId, 0.01 AVAX, 0, 0, T + claimWindow, T + claimWindow + publicWindow − 1, false)`.
-4. Deployer: the claim, via `Deploy Genesis holder claim to Fuji` dry run first.
+4. Deployer (Rabby, on `/fuji-rabby-test`; admin = artist, voucher signer = placeholder `0x…dEaD` until step 6): the claim. Procedure, placeholder checks and evidence: `deploy/fuji/GENESIS-CLAIM-DEPLOY.md`. The old `Deploy Genesis holder claim to Fuji` workflow signed with the deleted `DEPLOYER_PRIVATE_KEY` secret and is not used.
 5. Artist: `grantRole(ISSUER_ROLE, claim)`.
 6. Render configuration and enablement (a production change; separate authorization).
 Each step needs the owner's explicit approval of its exact calldata, prepared as an unsigned plan for the artist wallet in Rabby. The artist steps are not yet available on the owner-signing page, which today offers contract creations only. That extension is a follow-up, and must keep the artist and deployer accounts separate.

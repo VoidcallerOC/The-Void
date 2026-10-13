@@ -29,7 +29,9 @@ try {
   $("next").innerHTML = `<p class="bad">${esc(error.message)}</p>`;
 }
 const provider = rpc ? new JsonRpcProvider(rpc.url, profile.chainId, { staticNetwork: true, cacheTimeout: -1, batchMaxCount: 1 }) : null;
-const usable = plans.find((item) => !item.error);
+// A Fuji page may hold the spent probe plan next to the claim plan: offer the claim plan first.
+const PLAN_PREFERENCE = ["genesis-claim-fuji"];
+const usable = [...plans].sort((a, b) => PLAN_PREFERENCE.indexOf(b.entry?.kind) - PLAN_PREFERENCE.indexOf(a.entry?.kind)).find((item) => !item.error);
 const entry = usable?.entry ?? null;
 const storageKey = entry ? `the-void-owner-deploy:${network}:${entry.binding.digest}` : null;
 const loadHashes = () => { try { return JSON.parse(window.localStorage.getItem(storageKey) || "{}"); } catch { return {}; } };
@@ -54,18 +56,24 @@ function renderPlan() {
     return;
   }
   const { plan, binding } = entry;
-  const rows = (plan.transactions || [{ step: 1, contract: plan.probe.contract, predictedAddress: plan.probe.predictedAddress, nonce: plan.deployer.nonce, constructor: { label: plan.probe.label } }]).map((tx) => `<tr><td>Step ${tx.step}</td><td>${esc(tx.contract)} at <code>${esc(tx.predictedAddress)}</code> (nonce ${tx.nonce})<br><span class="muted">constructor ${esc(JSON.stringify(tx.constructor))}</span></td></tr>`).join("");
+  const isClaim = entry.kind.startsWith("genesis-claim");
+  const rows = (plan.transactions || (isClaim
+    ? [{ step: 1, contract: "GenesisHolderClaim", predictedAddress: plan.predictedClaimAddress, nonce: plan.deployerNonce, constructor: { release: plan.target.releaseContract, sale: plan.target.primarySale, tokenId: plan.target.tokenId, admin: plan.roles.admin, signer: plan.roles.signer } }]
+    : [{ step: 1, contract: plan.probe.contract, predictedAddress: plan.probe.predictedAddress, nonce: plan.deployer.nonce, constructor: { label: plan.probe.label } }])).map((tx) => `<tr><td>Step ${tx.step}</td><td>${esc(tx.contract)} at <code>${esc(tx.predictedAddress)}</code> (nonce ${tx.nonce})<br><span class="muted">constructor ${esc(JSON.stringify(tx.constructor))}</span></td></tr>`).join("");
   $("plan").innerHTML = `<p class="ok">Plan prepared and approved in GitHub; its binding was re-checked in this browser.</p>
     <table>
       <tr><td>Kind</td><td>${esc(entry.kind)}</td></tr>
       <tr><td>Chain</td><td>${esc(profile.name)} (${profile.chainId})</td></tr>
       <tr><td>Deployer (Rabby)</td><td><code>${esc(profile.deployer)}</code></td></tr>
       ${MAINNET ? `<tr><td>Fee recipient</td><td><code>${esc(MAINNET_FEE_RECIPIENT)}</code> <span class="muted">(Nano S Plus; passive, signs nothing)</span></td></tr>` : `<tr><td>Purpose</td><td class="warn">${esc(plan.purpose)}</td></tr>
-      <tr><td>Maximum cost</td><td>${esc(plan.cost.maxCostWei)} wei of Fuji test AVAX (no real value)</td></tr>`}
+      <tr><td>Maximum cost</td><td>${esc(plan.cost.maxCostWei)} wei of Fuji test AVAX (no real value)</td></tr>${isClaim ? `<tr><td>Claim admin</td><td><code>${esc(plan.roles.admin)}</code> <span class="muted">(the artist wallet; can pause the claim and rotate the signer)</span></td></tr>
+      <tr><td>Voucher signer</td><td class="warn"><code>${esc(plan.roles.signer)}</code> PLACEHOLDER: no key exists for it, so no claim can succeed until the artist sets a real signer</td></tr>
+      <tr><td>Schedule</td><td>claim opens ${esc(new Date(Number(plan.schedule.claimStart) * 1000).toISOString())} for ${esc(plan.schedule.claimWindowSeconds)}s, then public sale for ${esc(plan.schedule.publicWindowSeconds)}s at ${esc(plan.schedule.publicPriceWei)} wei</td></tr>
+      <tr><td>Not done by this step</td><td>The artist's ISSUER_ROLE grant to the claim, the real signer, the Render configuration and activation.</td></tr>` : ""}`}
       <tr><td>Planned on commit</td><td><code>${esc(binding.sourceCommit)}</code></td></tr>
       <tr><td>Binding</td><td><code>${esc(binding.digest)}</code></td></tr>
       ${rows}
-      <tr><td>Artifacts</td><td><code>${esc(JSON.stringify(plan.artifacts ?? { initCodeHash: plan.probe?.initCodeHash, runtimeCodeHash: plan.probe?.runtimeCodeHash }))}</code></td></tr>
+      <tr><td>Artifacts</td><td><code>${esc(JSON.stringify(plan.artifacts ?? (isClaim ? { creationDataHash: plan.signingRequests[0].dataHash } : { initCodeHash: plan.probe?.initCodeHash, runtimeCodeHash: plan.probe?.runtimeCodeHash })))}</code></td></tr>
     </table>`;
 }
 
@@ -108,7 +116,7 @@ function renderResult() {
   if (!done.length) return;
   const hashes = state.steps.map((s) => s.hash).filter(Boolean).join(",");
   $("result").innerHTML = done.length === state.steps.length && !MAINNET
-    ? `<p class="ok">Fuji test passed: confirmed and verified in this browser.</p><p>Send this hash to Claude for the test record:</p><pre>${esc(hashes)}</pre>`
+    ? `<p class="ok">${entry.kind === "genesis-claim-fuji" ? "Fuji claim deployment confirmed and verified in this browser. It cannot issue a valid claim yet (placeholder signer)." : "Fuji test passed: confirmed and verified in this browser."}</p><p>Send this hash to Claude for the record:</p><pre>${esc(hashes)}</pre>`
     : done.length === state.steps.length
     ? `<p class="ok">All steps confirmed and verified in this browser.</p>
       <p>Final check in GitHub (no key; re-checks the deployed code against the compiled source): open <a href="${VERIFY_WORKFLOW_URL}" target="_blank" rel="noreferrer">Verify mainnet deployment</a>, press <strong>Run workflow</strong>, choose kind <code>${esc(entry.kind)}</code> and paste these hashes:</p>
