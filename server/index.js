@@ -25,7 +25,7 @@ import { createPinataArtworkUploader } from "./artwork-storage.js";
 import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./provenance-anchor.js";
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
-import { createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
+import { checkGenesisSignerConfig, createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
 import { createGenesisClaimReservationStore } from "./genesis-claim-store.js";
 import { primarySaleStateReaderFromEnv } from "./primary-sale-state.js";
 
@@ -70,6 +70,9 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });
+  // Reports the dedicated voucher signer even while the claim is disabled: public address and status only.
+  const signerCheck = checkGenesisSignerConfig(process.env);
+  logger[signerCheck.status === "MATCH" || signerCheck.status === "ABSENT" ? "info" : "error"]?.("genesis.signer.check", signerCheck);
   let genesisClaim = null;
   try {
     genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env), reservationStore: createGenesisClaimReservationStore(pool) });

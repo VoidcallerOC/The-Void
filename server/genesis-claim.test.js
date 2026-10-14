@@ -9,6 +9,7 @@ import {
   GENESIS_CONTRACT,
   GENESIS_CHAIN_ID,
   LEGACY_FUJI_SINGLETON,
+  checkGenesisSignerConfig,
   loadGenesisClaimConfig,
 } from "./genesis-claim.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
@@ -618,5 +619,41 @@ describe("Genesis claim configuration", () => {
     ["GENESIS_CLAIM_SIGNER_ADDRESS", "0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47", /does not derive GENESIS_CLAIM_SIGNER_ADDRESS/],
   ])("rejects a missing or malformed %s", (name, value, message) => {
     expect(() => loadGenesisClaimConfig({ ...ENV, [name]: value })).toThrow(message);
+  });
+});
+
+describe("startup signer check while GENESIS_CLAIM_ENABLED is unset", () => {
+  const address = new Wallet(TEST_SIGNER_KEY).address;
+  const base = { GENESIS_CLAIM_SIGNER_PRIVATE_KEY: TEST_SIGNER_KEY, GENESIS_CLAIM_SIGNER_ADDRESS: address };
+
+  it("reports MATCH with the derived public address, case-insensitively, without enabling claims", () => {
+    expect(checkGenesisSignerConfig(base)).toEqual({ status: "MATCH", derivedAddress: address });
+    expect(checkGenesisSignerConfig({ ...base, GENESIS_CLAIM_SIGNER_ADDRESS: address.toLowerCase() })).toMatchObject({ status: "MATCH" });
+    expect(loadGenesisClaimConfig(base)).toBeNull();
+  });
+
+  it("reports MISMATCH when the address is not the one the secret derives", () => {
+    const result = checkGenesisSignerConfig({ ...base, GENESIS_CLAIM_SIGNER_ADDRESS: "0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47" });
+    expect(result).toMatchObject({ status: "MISMATCH", derivedAddress: address, reason: expect.stringMatching(/does not derive/) });
+  });
+
+  it("reports MISMATCH for a malformed key, a malformed address, and the dead placeholder, without a derived address", () => {
+    expect(checkGenesisSignerConfig({ ...base, GENESIS_CLAIM_SIGNER_PRIVATE_KEY: "0x1234" })).toEqual({ status: "MISMATCH", reason: expect.stringMatching(/32-byte hex secret/) });
+    expect(checkGenesisSignerConfig({ ...base, GENESIS_CLAIM_SIGNER_ADDRESS: "nope" })).toMatchObject({ status: "MISMATCH", reason: expect.stringMatching(/non-zero EVM address/) });
+    expect(checkGenesisSignerConfig({ ...base, GENESIS_CLAIM_SIGNER_ADDRESS: "0x000000000000000000000000000000000000dEaD" })).toMatchObject({ status: "MISMATCH", reason: expect.stringMatching(/dead placeholder/) });
+  });
+
+  it("never returns or embeds the secret", () => {
+    const secret = TEST_SIGNER_KEY.slice(2);
+    for (const env of [base, { ...base, GENESIS_CLAIM_SIGNER_ADDRESS: "0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47" }, { ...base, GENESIS_CLAIM_SIGNER_ADDRESS: "bad" }]) {
+      expect(JSON.stringify(checkGenesisSignerConfig(env))).not.toContain(secret);
+    }
+  });
+
+  it("stays ABSENT or INCOMPLETE without throwing when variables are missing", () => {
+    expect(checkGenesisSignerConfig({})).toEqual({ status: "ABSENT" });
+    expect(checkGenesisSignerConfig({ GENESIS_CLAIM_SIGNER_PRIVATE_KEY: TEST_SIGNER_KEY })).toMatchObject({ status: "INCOMPLETE" });
+    expect(checkGenesisSignerConfig({ GENESIS_CLAIM_SIGNER_ADDRESS: address })).toMatchObject({ status: "INCOMPLETE" });
+    expect(loadGenesisClaimConfig({})).toBeNull();
   });
 });
