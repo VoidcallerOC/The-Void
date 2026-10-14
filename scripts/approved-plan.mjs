@@ -3,7 +3,7 @@ import { bindPlan } from "./plan-binding-core.mjs";
 import { MAINNET_FEE_RECIPIENT } from "./mainnet-signing-requests.mjs";
 import { profileFor } from "./network-profiles.mjs";
 import { PROBE_CONTRACT, PROBE_LABEL } from "./fuji-rabby-probe.mjs";
-import { FUJI_CLAIM_ARTIST, FUJI_PLACEHOLDER_SIGNER } from "./fuji-genesis-claim.mjs";
+import { FUJI_CLAIM_ARTIST, FUJI_GENESIS_VOUCHER_SIGNER } from "./fuji-genesis-claim.mjs";
 
 // An approved plan is a key-less dry-run plan and its binding, committed under
 // deploy/mainnet/approved-plans/ through a reviewed PR. Merging that PR is the owner's approval of the
@@ -45,7 +45,7 @@ export function validateApprovedPlan(entry, network = "mainnet") {
   }
   if (kind === "genesis-claim-fuji") {
     if (getAddress(plan.roles.admin) !== FUJI_CLAIM_ARTIST) fail(`The Fuji claim admin must be the artist wallet ${FUJI_CLAIM_ARTIST}, not ${plan.roles.admin}.`);
-    if (getAddress(plan.roles.signer) !== FUJI_PLACEHOLDER_SIGNER) fail(`This Fuji claim plan deploys the placeholder voucher signer ${FUJI_PLACEHOLDER_SIGNER}, not ${plan.roles.signer}. The real signer is set later by the artist.`);
+    if (getAddress(plan.roles.signer) !== FUJI_GENESIS_VOUCHER_SIGNER) fail(`This Fuji claim plan must deploy the dedicated voucher signer ${FUJI_GENESIS_VOUCHER_SIGNER}, not ${plan.roles.signer}.`);
     if (plan.supply.claimAllocation !== "0" || plan.supply.publicAllocation !== "0") fail("The Fuji claim must be an uncapped open edition (both allocations 0).");
     if (getAddress(plan.followUps?.issuerGrant?.from) !== FUJI_CLAIM_ARTIST) fail("The ISSUER_ROLE grant must come from the artist wallet.");
     if (getAddress(plan.predictedClaimAddress) !== getAddress(requests[0].predictedAddress)) fail("The claim address disagrees with its transaction.");

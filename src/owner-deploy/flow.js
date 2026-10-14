@@ -5,7 +5,7 @@ import { NotMinedYetError, assertReadyToSign, verifyCreationTransaction, walletT
 import { NETWORK_PROFILES, profileFor, profileOfKind } from "../../scripts/network-profiles.mjs";
 import { PROBE_KIND, checkProbeState } from "../../scripts/fuji-rabby-probe.mjs";
 import { checkClaimState } from "../../scripts/claim-onchain-checks.mjs";
-import { FUJI_CLAIM_KIND, FUJI_PLACEHOLDER_SIGNER } from "../../scripts/fuji-genesis-claim.mjs";
+import { FUJI_CLAIM_KIND, FUJI_GENESIS_VOUCHER_SIGNER } from "../../scripts/fuji-genesis-claim.mjs";
 
 // Seconds of lead the claim start needs over the latest block at signing time (the constructor reverts once it has passed).
 export const CLAIM_START_MARGIN_SECONDS = 120;
@@ -187,7 +187,7 @@ export function nextAction(entry, state, { connected, ready }) {
   if (failed) return `Stop. Step ${failed.request.step} failed verification: ${failed.error}`;
   const profile = profileOfKind(entry.kind);
   const current = state.steps.find((step) => step.status !== "confirmed");
-  if (!current && entry.kind === FUJI_CLAIM_KIND) return `Claim deployed and verified on ${profile.name}. Send the transaction hash below to Claude. It is NOT usable yet: the voucher signer is the placeholder ${FUJI_PLACEHOLDER_SIGNER}, so every claim is refused, and the artist's ISSUER_ROLE grant and the real signer are separate, later steps.`;
+  if (!current && entry.kind === FUJI_CLAIM_KIND) return `Claim deployed and verified on ${profile.name}. Send the transaction hash below to Claude. It is NOT usable yet: the voucher signer is the dedicated ${FUJI_GENESIS_VOUCHER_SIGNER}, but the artist's ISSUER_ROLE grant, the server signing secret and owner-authorized activation are separate, later steps.`;
   if (!current && profile.network !== "mainnet") return `Test passed: every step is confirmed and verified on ${profile.name}. Send the transaction hash below to Claude for the test record. This proves nothing on mainnet by itself.`;
   if (!current) return `All steps are confirmed. Run the GitHub verification (${VERIFY_WORKFLOW_URL}) with the transaction hashes below, then send them to Claude for the record PR.`;
   const n = current.request.step;

@@ -67,9 +67,9 @@ function renderPlan() {
       <tr><td>Deployer (Rabby)</td><td><code>${esc(profile.deployer)}</code></td></tr>
       ${MAINNET ? `<tr><td>Fee recipient</td><td><code>${esc(MAINNET_FEE_RECIPIENT)}</code> <span class="muted">(Nano S Plus; passive, signs nothing)</span></td></tr>` : `<tr><td>Purpose</td><td class="warn">${esc(plan.purpose)}</td></tr>
       <tr><td>Maximum cost</td><td>${esc(plan.cost.maxCostWei)} wei of Fuji test AVAX (no real value)</td></tr>${isClaim ? `<tr><td>Claim admin</td><td><code>${esc(plan.roles.admin)}</code> <span class="muted">(the artist wallet; can pause the claim and rotate the signer)</span></td></tr>
-      <tr><td>Voucher signer</td><td class="warn"><code>${esc(plan.roles.signer)}</code> PLACEHOLDER: no key exists for it, so no claim can succeed until the artist sets a real signer</td></tr>
+      <tr><td>Voucher signer</td><td><code>${esc(plan.roles.signer)}</code> <span class="muted">(dedicated Genesis voucher signer; signs vouchers on the server only)</span></td></tr>
       <tr><td>Schedule</td><td>claim opens ${esc(new Date(Number(plan.schedule.claimStart) * 1000).toISOString())} for ${esc(plan.schedule.claimWindowSeconds)}s, then public sale for ${esc(plan.schedule.publicWindowSeconds)}s at ${esc(plan.schedule.publicPriceWei)} wei</td></tr>
-      <tr><td>Not done by this step</td><td>The artist's ISSUER_ROLE grant to the claim, the real signer, the Render configuration and activation.</td></tr>` : ""}`}
+      <tr><td>Not done by this step</td><td>The artist's ISSUER_ROLE grant to the claim, the server signing secret, the Render configuration and activation.</td></tr>` : ""}`}
       <tr><td>Planned on commit</td><td><code>${esc(binding.sourceCommit)}</code></td></tr>
       <tr><td>Binding</td><td><code>${esc(binding.digest)}</code></td></tr>
       ${rows}
@@ -116,7 +116,7 @@ function renderResult() {
   if (!done.length) return;
   const hashes = state.steps.map((s) => s.hash).filter(Boolean).join(",");
   $("result").innerHTML = done.length === state.steps.length && !MAINNET
-    ? `<p class="ok">${entry.kind === "genesis-claim-fuji" ? "Fuji claim deployment confirmed and verified in this browser. It cannot issue a valid claim yet (placeholder signer)." : "Fuji test passed: confirmed and verified in this browser."}</p><p>Send this hash to Claude for the record:</p><pre>${esc(hashes)}</pre>`
+    ? `<p class="ok">${entry.kind === "genesis-claim-fuji" ? "Fuji claim deployment confirmed and verified in this browser. It cannot issue a valid claim yet (issuer grant, server secret and activation are pending)." : "Fuji test passed: confirmed and verified in this browser."}</p><p>Send this hash to Claude for the record:</p><pre>${esc(hashes)}</pre>`
     : done.length === state.steps.length
     ? `<p class="ok">All steps confirmed and verified in this browser.</p>
       <p>Final check in GitHub (no key; re-checks the deployed code against the compiled source): open <a href="${VERIFY_WORKFLOW_URL}" target="_blank" rel="noreferrer">Verify mainnet deployment</a>, press <strong>Run workflow</strong>, choose kind <code>${esc(entry.kind)}</code> and paste these hashes:</p>

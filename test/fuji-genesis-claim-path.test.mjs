@@ -4,7 +4,7 @@ import { Interface, getAddress, getCreateAddress, id } from "ethers";
 import { describe, expect, it } from "vitest";
 import { validateApprovedPlan } from "../scripts/approved-plan.mjs";
 import { CLAIM_INTERFACE, expectedClaimParameters } from "../scripts/claim-onchain-checks.mjs";
-import { FUJI_CLAIM_ARTIST, FUJI_CLAIM_KIND, FUJI_PLACEHOLDER_SIGNER } from "../scripts/fuji-genesis-claim.mjs";
+import { FUJI_CLAIM_ARTIST, FUJI_CLAIM_KIND, FUJI_GENESIS_VOUCHER_SIGNER, FORBIDDEN_PLACEHOLDER_SIGNER } from "../scripts/fuji-genesis-claim.mjs";
 import { buildFujiClaimEntry } from "../scripts/fuji-genesis-claim-plan.mjs";
 import { NETWORK_PROFILES, profileOfKind } from "../scripts/network-profiles.mjs";
 import { bindPlan } from "../scripts/plan-binding-core.mjs";
@@ -77,19 +77,19 @@ function claimViews(chain, plan, overrides = {}) {
 const mainnetPlan = JSON.parse(readFileSync(resolve(ROOT, "deploy/mainnet/approved-plans/release-per-contract-mainnet.json"), "utf8"));
 
 describe("Fuji claim plan", () => {
-  it("is one zero-value claim creation from the Rabby deployer, with the artist as admin and the placeholder as voucher signer", async () => {
+  it("is one zero-value claim creation from the Rabby deployer, with the artist as admin and the dedicated Genesis voucher signer", async () => {
     const { plan, kind } = await build();
     expect(kind).toBe(FUJI_CLAIM_KIND);
     const [request] = plan.signingRequests;
     expect(request).toMatchObject({ chainId: 43113, from: DEPLOYER, to: null, nonce: NONCE, value: "0", predictedAddress: PREDICTED });
     expect(plan).toMatchObject({ network: "fuji", chainId: 43113, deployer: DEPLOYER, predictedClaimAddress: PREDICTED });
-    expect(plan.roles).toEqual({ admin: FUJI_CLAIM_ARTIST, signer: FUJI_PLACEHOLDER_SIGNER });
+    expect(plan.roles).toEqual({ admin: FUJI_CLAIM_ARTIST, signer: FUJI_GENESIS_VOUCHER_SIGNER });
     expect(plan.supply).toMatchObject({ claimAllocation: "0", publicAllocation: "0" });
     expect(plan.followUps.issuerGrant.from).toBe(ARTIST);
     expect(plan.schedule).toMatchObject({ claimStart: String(CLAIM_START), claimWindowSeconds: "300", publicWindowSeconds: "600", publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() });
     expect(BigInt(plan.cost.maxCostWei)).toBe(BigInt(request.gasLimit) * 10_000_000_000n);
     // The deployer and artist stay separate; neither the Nano nor the placeholder holds any role.
-    expect(new Set([DEPLOYER, ARTIST, RECIPIENT, FUJI_PLACEHOLDER_SIGNER]).size).toBe(4);
+    expect(new Set([DEPLOYER, ARTIST, RECIPIENT, FUJI_GENESIS_VOUCHER_SIGNER]).size).toBe(4);
     expect(plan.roles.admin).not.toBe(DEPLOYER);
   });
 
@@ -141,7 +141,7 @@ describe("chain separation, both directions", () => {
       [(e) => { e.plan.signingRequests[0].data = `${e.plan.signingRequests[0].data}00`; }, /does not hash/, false],
       [(e) => { e.plan.schedule.claimStart = "1"; }, /changed after approval/, false],
       [(e) => { e.plan.roles.admin = DEPLOYER; }, /admin must be the artist wallet/, true],
-      [(e) => { e.plan.roles.signer = getAddress("0x5555555555555555555555555555555555555555"); }, /placeholder voucher signer/, true],
+      [(e) => { e.plan.roles.signer = getAddress("0x5555555555555555555555555555555555555555"); }, /must deploy the dedicated voucher signer/, true],
       [(e) => { e.plan.supply.claimAllocation = "10"; }, /uncapped open edition/, true],
       [(e) => { e.plan.followUps.issuerGrant.from = DEPLOYER; }, /grant must come from the artist/, true],
     ];
@@ -152,10 +152,12 @@ describe("chain separation, both directions", () => {
   });
 });
 
-describe("placeholder voucher signer", () => {
-  it("is the dead address: not the deployer, artist, Nano, or any wallet role", () => {
-    expect(FUJI_PLACEHOLDER_SIGNER).toBe("0x000000000000000000000000000000000000dEaD");
-    for (const wallet of [DEPLOYER, ARTIST, RECIPIENT]) expect(wallet).not.toBe(FUJI_PLACEHOLDER_SIGNER);
+describe("dedicated voucher signer", () => {
+  it("is 0x3C7c…4E47: distinct from the deployer, artist and fee recipient, and never the dead placeholder", () => {
+    expect(FUJI_GENESIS_VOUCHER_SIGNER).toBe("0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47");
+    expect(FORBIDDEN_PLACEHOLDER_SIGNER).toBe("0x000000000000000000000000000000000000dEaD");
+    expect(FUJI_GENESIS_VOUCHER_SIGNER).not.toBe(FORBIDDEN_PLACEHOLDER_SIGNER);
+    for (const wallet of [DEPLOYER, ARTIST, RECIPIENT]) expect(wallet).not.toBe(FUJI_GENESIS_VOUCHER_SIGNER);
   });
 });
 
@@ -182,8 +184,8 @@ describe("Fuji claim deployment through the page flow", () => {
     recordSubmitted(state, 1, mine(chain, entry, state));
     await confirmStep(chain, entry, state, 1, { timeoutMs: 50 });
     expect(state.steps[0].status).toBe("confirmed");
-    expect(state.steps[0].verified).toMatchObject({ address: PREDICTED, admin: ARTIST, signer: FUJI_PLACEHOLDER_SIGNER, paused: false, issuerGrant: "PENDING (artist operation)" });
-    expect(nextAction(entry, state, { connected: true })).toMatch(/NOT usable yet.*placeholder.*every claim is refused/);
+    expect(state.steps[0].verified).toMatchObject({ address: PREDICTED, admin: ARTIST, signer: FUJI_GENESIS_VOUCHER_SIGNER, paused: false, issuerGrant: "PENDING (artist operation)" });
+    expect(nextAction(entry, state, { connected: true })).toMatch(/NOT usable yet.*dedicated.*0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47/);
   });
 
   it("goes stale instead of wasting gas: too close to the claim start, a failing constructor, a moved nonce, another chain", async () => {
@@ -250,9 +252,9 @@ describe("Fuji claim deployment through the page flow", () => {
 
 describe("the Fuji page serves claim plans without any key", () => {
   const read = (path) => readFileSync(resolve(ROOT, path), "utf8");
-  it("shows the placeholder and the deferred steps, and the generator refuses any private key", () => {
-    expect(read("src/owner-deploy/page.js")).toMatch(/PLACEHOLDER: no key exists for it/);
-    expect(read("src/owner-deploy/page.js")).toMatch(/ISSUER_ROLE grant to the claim, the real signer, the Render configuration and activation/);
+  it("shows the dedicated signer and the deferred steps, and the generator refuses any private key", () => {
+    expect(read("src/owner-deploy/page.js")).toMatch(/dedicated Genesis voucher signer/);
+    expect(read("src/owner-deploy/page.js")).toMatch(/ISSUER_ROLE grant to the claim, the server signing secret, the Render configuration and activation/);
     expect(read("scripts/fuji-genesis-claim-plan.mjs")).toMatch(/assertNoPrivateKeyInEnv\(process\.env, "Fuji claim planning"\)/);
     expect(read("scripts/fuji-genesis-claim-plan.mjs")).not.toMatch(/new Wallet|sendTransaction|signTransaction/);
   });
