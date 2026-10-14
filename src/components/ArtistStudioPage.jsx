@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
@@ -50,7 +50,7 @@ function DayTimeField({ title, value, onChange, required = false }) {
   return (
     <label style={label}>
       {title}
-      <input type="datetime-local" required={required} value={value} onChange={(event) => onChange(event.target.value)} style={{ ...field, colorScheme: "dark" }} />
+      <input type="datetime-local" step="1" required={required} value={value} onChange={(event) => onChange(event.target.value)} style={{ ...field, colorScheme: "dark" }} />
     </label>
   );
 }
@@ -187,6 +187,7 @@ export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, d
   const [errors, setErrors] = useState([]);
   const [pending, setPending] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const sending = useRef(false);
   const target = useMemo(() => ({ ...releaseAsset, tokenId }), [releaseAsset, tokenId]);
 
   useEffect(() => {
@@ -238,6 +239,9 @@ export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, d
   };
 
   const send = async () => {
+    // A second click in the same tick would run before `busy` re-renders; one configureSale per confirmation.
+    if (sending.current) return;
+    sending.current = true;
     const { values } = pending;
     setBusy("sale"); onNotice(""); onTxEvidence(null);
     try {
@@ -264,6 +268,7 @@ export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, d
       onNotice(explainConfigureSaleError(error).message);
       onTxEvidence(transactionEvidenceForOutcome({ status: "failure", error, fallbackExplorerUrl: error?.transactionHash ? fujiExplorerUrl("tx", error.transactionHash) : null }));
     } finally {
+      sending.current = false;
       setBusy("");
     }
   };

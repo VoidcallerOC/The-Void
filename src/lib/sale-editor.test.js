@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSaleChange, claimGuardErrors, describeSaleWindow, formatDuration, saleStatus, saleWindowWarning } from "./sale-editor.js";
+import { buildSaleChange, claimGuardErrors, describeSaleWindow, formatDuration, saleStatus, saleWindowWarning, toLocalInputValue } from "./sale-editor.js";
 
 const NOW = 1_791_660_000; // 2026-10-10T19:20:00Z
 const sale = (overrides = {}) => ({ priceWei: 10n ** 16n, maxSupply: 0n, sold: 0n, perWalletLimit: 1n, startTime: 0n, endTime: 0n, paused: false, configured: true, ...overrides });
@@ -51,5 +51,32 @@ describe("sale editor", () => {
     expect(claimGuardErrors({ ...values, startTime: 0n, priceWei: 1n }, { ...claim, live: false })).toEqual([]);
     expect(claimGuardErrors(values, { state: "unknown", message: "offline" })[0]).toMatch(/could not be checked: offline/);
     expect(claimGuardErrors(values, { state: "none" })).toEqual([]);
+  });
+
+  // Genesis open edition schedule: claim window, then a public window of T+300 → T+899.
+  // 300 and 899 are not both multiples of 60, so a minute-resolution input cannot express it.
+  describe("second-precision schedule (Genesis open edition)", () => {
+    const T = NOW + 3600 + 1; // not minute aligned on purpose
+    const open = (overrides = {}) => form({ price: "0.01", maxSupply: "", perWalletLimit: "", start: toLocalInputValue(T + 300), end: toLocalInputValue(T + 899), ...overrides });
+
+    it("round-trips whole seconds through the datetime-local value", () => {
+      // 300 and 899 differ by 599, which is not a multiple of 60: at most one bound can sit on a whole minute.
+      expect([T + 300, T + 899].filter((bound) => bound % 60 !== 0).length).toBeGreaterThan(0);
+      expect(toLocalInputValue(T + 300)).toMatch(/T\d{2}:\d{2}:01$/);
+      expect(toLocalInputValue(NOW)).toMatch(/T\d{2}:\d{2}$/); // minute-aligned values keep the short form
+      expect(buildSaleChange({ form: open(), editionMaxSupply: 0n, nowSec: NOW }).values).toMatchObject({ startTime: BigInt(T + 300), endTime: BigInt(T + 899) });
+    });
+
+    it("prepares the exact configureSale values for the open edition", () => {
+      const { values, errors } = buildSaleChange({ form: open(), editionMaxSupply: 0n, nowSec: NOW });
+      expect(errors).toEqual([]);
+      expect(values).toEqual({ priceWei: 10_000_000_000_000_000n, maxSupply: 0n, perWalletLimit: 0n, startTime: BigInt(T + 300), endTime: BigInt(T + 899), paused: false, openEdition: true });
+    });
+
+    it("shows seconds in the window description so T+899 can be checked before signing", () => {
+      const text = describeSaleWindow({ startTime: BigInt(T + 300), endTime: BigInt(T + 899), nowSec: NOW });
+      expect(text).toContain("Sale runs for 9 minutes 59 seconds");
+      expect(text).toMatch(/:\d{2}:\d{2}/);
+    });
   });
 });

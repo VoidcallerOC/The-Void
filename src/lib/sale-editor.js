@@ -24,19 +24,32 @@ function pad(value) {
   return String(value).padStart(2, "0");
 }
 
-/** Unix seconds → a datetime-local input value in the browser's time zone ("" for 0). */
+/**
+ * Unix seconds → a datetime-local input value in the browser's time zone ("" for 0).
+ * Whole minutes keep the short form; any other value keeps its seconds so an on-chain
+ * bound such as T+899 is never silently rounded to the minute.
+ */
 export function toLocalInputValue(seconds) {
   const value = Number(seconds || 0);
   if (!value) return "";
   const date = new Date(value * 1000);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const base = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return date.getSeconds() ? `${base}:${pad(date.getSeconds())}` : base;
 }
 
-export function formatLocalTime(seconds, options = { dateStyle: "medium", timeStyle: "short" }) {
+const MINUTE_STYLE = Object.freeze({ dateStyle: "medium", timeStyle: "short" });
+const SECOND_STYLE = Object.freeze({ dateStyle: "medium", timeStyle: "medium" });
+
+/** Seconds-resolution time style when any of the given bounds is not on a whole minute. */
+function timeStyleFor(...bounds) {
+  return bounds.some((bound) => Number(bound || 0) % 60 !== 0) ? SECOND_STYLE : MINUTE_STYLE;
+}
+
+export function formatLocalTime(seconds, options = MINUTE_STYLE) {
   return new Intl.DateTimeFormat(undefined, options).format(new Date(Number(seconds) * 1000));
 }
 
-export function formatUtcTime(seconds, options = { dateStyle: "medium", timeStyle: "short" }) {
+export function formatUtcTime(seconds, options = MINUTE_STYLE) {
   return `${new Intl.DateTimeFormat("en-GB", { ...options, timeZone: "UTC", hourCycle: "h23" }).format(new Date(Number(seconds) * 1000))} UTC`;
 }
 
@@ -44,14 +57,15 @@ export function formatUtcTime(seconds, options = { dateStyle: "medium", timeStyl
 export function formatSaleInstant(seconds) {
   const value = Number(seconds || 0);
   if (!value) return null;
-  return { local: formatLocalTime(value), utc: formatUtcTime(value) };
+  const style = timeStyleFor(value);
+  return { local: formatLocalTime(value, style), utc: formatUtcTime(value, style) };
 }
 
 export function formatDuration(totalSeconds) {
   let seconds = Math.max(0, Math.round(Number(totalSeconds)));
   if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
   const parts = [];
-  for (const [unit, size] of [["day", 86_400], ["hour", 3600], ["minute", 60]]) {
+  for (const [unit, size] of [["day", 86_400], ["hour", 3600], ["minute", 60], ["second", 1]]) {
     const count = Math.floor(seconds / size);
     seconds -= count * size;
     if (count) parts.push(`${count} ${unit}${count === 1 ? "" : "s"}`);
@@ -180,9 +194,10 @@ export function describeSaleWindow({ startTime, endTime, nowSec = nowSeconds() }
   const start = Number(startTime || 0);
   const end = Number(endTime || 0);
   const from = start || nowSec;
-  const time = { timeStyle: "short" };
+  const withSeconds = timeStyleFor(start, end).timeStyle;
+  const time = { timeStyle: withSeconds };
   const sameDay = end && new Date(from * 1000).toDateString() === new Date(end * 1000).toDateString();
-  const style = sameDay ? time : { dateStyle: "medium", timeStyle: "short" };
+  const style = sameDay ? time : { dateStyle: "medium", timeStyle: withSeconds };
   const localFrom = start ? formatLocalTime(from, style) : "now";
   const utcFrom = start ? formatUtcTime(from, style).replace(/ UTC$/, "") : "now";
   if (!end) return `Sale starts ${start ? `${localFrom} your time (${formatUtcTime(from, style)})` : "now"} and has no end time.`;
