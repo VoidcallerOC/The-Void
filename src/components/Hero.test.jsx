@@ -14,9 +14,13 @@ function renderHero() {
 describe("homepage Hero accessibility", () => {
   it("exposes a single meaningful document h1 for VOIDCALLER without extra visible heading text", () => {
     const html = renderHero();
-    const matches = [...html.matchAll(/<h1\b[^>]*>/g)];
-    expect(matches).toHaveLength(1);
-    expect(html).toMatch(/<h1\b[^>]*>[\s\S]*alt="VOIDCALLER"/);
-    expect(html).not.toMatch(/<h1\b[^>]*>[\s\S]*Four tracks/);
+    const open = html.indexOf("<h1");
+    const close = html.indexOf("</h1>");
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(close).toBeGreaterThan(open);
+    expect(html.indexOf("<h1", open + 1)).toBe(-1);
+    const h1Block = html.slice(open, close);
+    expect(h1Block).toContain('alt="VOIDCALLER"');
+    expect(h1Block).not.toContain("Four tracks");
   });
 });
