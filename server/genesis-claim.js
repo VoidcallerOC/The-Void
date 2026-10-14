@@ -126,6 +126,45 @@ function httpUrl(value, name) {
   }
 }
 
+/**
+ * The signer rules shared by claim activation and the startup check: a 32-byte hex secret, a valid
+ * non-placeholder public address, and the address must be the one the secret derives. Messages never
+ * contain the secret or the derived address.
+ */
+function validateGenesisSignerConfig(env) {
+  const privateKey = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY || "").trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY must be a server-side 32-byte hex secret.");
+  // The intended voucher signer is a public address configured beside the secret. Fail closed unless it
+  // is valid, is not the dead placeholder, and is exactly the address the secret derives. The claim
+  // contract's own signer() is then compared with it at service start (binding check).
+  const signerAddress = configuredAddress(env.GENESIS_CLAIM_SIGNER_ADDRESS, "GENESIS_CLAIM_SIGNER_ADDRESS");
+  if (signerAddress.toLowerCase() === PLACEHOLDER_SIGNER.toLowerCase()) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_ADDRESS may not be the dead placeholder address; no key exists for it.");
+  if (new Wallet(privateKey).address.toLowerCase() !== signerAddress.toLowerCase()) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY does not derive GENESIS_CLAIM_SIGNER_ADDRESS.");
+  return { privateKey, signerAddress };
+}
+
+/**
+ * Startup diagnostic that works while GENESIS_CLAIM_ENABLED is unset. It never throws, never enables
+ * claims, and returns only a status, the derived PUBLIC address (when the secret is well formed) and a
+ * fixed reason string. ABSENT: neither variable is set. INCOMPLETE: only one is set.
+ */
+export function checkGenesisSignerConfig(env = process.env) {
+  const hasKey = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY || "").trim() !== "";
+  const hasAddress = String(env.GENESIS_CLAIM_SIGNER_ADDRESS || "").trim() !== "";
+  if (!hasKey && !hasAddress) return { status: "ABSENT" };
+  if (hasKey !== hasAddress) return { status: "INCOMPLETE", reason: hasKey ? "GENESIS_CLAIM_SIGNER_ADDRESS is not set." : "GENESIS_CLAIM_SIGNER_PRIVATE_KEY is not set." };
+  let derivedAddress = null;
+  try {
+    const key = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY).trim();
+    if (/^0x[0-9a-fA-F]{64}$/.test(key)) derivedAddress = new Wallet(key).address;
+    validateGenesisSignerConfig(env);
+    return { status: "MATCH", derivedAddress };
+  } catch (error) {
+    const reason = error instanceof GenesisClaimConfigurationError ? error.message : "Signer configuration could not be evaluated.";
+    return { status: "MISMATCH", ...(derivedAddress ? { derivedAddress } : {}), reason };
+  }
+}
+
 export function loadGenesisClaimConfig(env = process.env) {
   if (String(env.GENESIS_CLAIM_ENABLED || "").toLowerCase() !== "true") return null;
   const destinationChainId = productionChainId(env);
@@ -152,14 +191,7 @@ export function loadGenesisClaimConfig(env = process.env) {
     publicWindow: env.GENESIS_PUBLIC_WINDOW_SECONDS === undefined || env.GENESIS_PUBLIC_WINDOW_SECONDS === "" ? PUBLIC_WINDOW_SECONDS : positiveBigInt(env.GENESIS_PUBLIC_WINDOW_SECONDS, "GENESIS_PUBLIC_WINDOW_SECONDS"),
     publicPriceWei,
   });
-  const privateKey = String(env.GENESIS_CLAIM_SIGNER_PRIVATE_KEY || "").trim();
-  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY must be a server-side 32-byte hex secret.");
-  // The intended voucher signer is a public address configured beside the secret. Fail closed unless it
-  // is valid, is not the dead placeholder, and is exactly the address the secret derives. The claim
-  // contract's own signer() is then compared with it at service start (binding check).
-  const signerAddress = configuredAddress(env.GENESIS_CLAIM_SIGNER_ADDRESS, "GENESIS_CLAIM_SIGNER_ADDRESS");
-  if (signerAddress.toLowerCase() === PLACEHOLDER_SIGNER.toLowerCase()) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_ADDRESS may not be the dead placeholder address; no key exists for it.");
-  if (new Wallet(privateKey).address.toLowerCase() !== signerAddress.toLowerCase()) throw new GenesisClaimConfigurationError("GENESIS_CLAIM_SIGNER_PRIVATE_KEY does not derive GENESIS_CLAIM_SIGNER_ADDRESS.");
+  const { privateKey, signerAddress } = validateGenesisSignerConfig(env);
   return Object.freeze({
     destinationChainId,
     genesisRpcUrl: httpUrl(env.GENESIS_RPC_URL, "GENESIS_RPC_URL"),
