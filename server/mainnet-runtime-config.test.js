@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Wallet } from "ethers";
 import { describe, expect, it } from "vitest";
 import { loadIndexerConfig, loadServerConfig } from "./config.js";
 import { loadGenesisClaimConfig } from "./genesis-claim.js";
@@ -49,7 +50,7 @@ describe("mainnet runtime configuration", () => {
     expect(loadGenesisClaimConfig(api.env)).toBeNull();
     const entered = {
       ...api.env, GENESIS_CLAIM_ENABLED: "true", GENESIS_CLAIM_CONTRACT: "0x00000000000000000000000000000000000000c1", GENESIS_CLAIM_RELEASE_CONTRACT: "0x00000000000000000000000000000000000000c2",
-      GENESIS_CLAIM_PRIMARY_SALE: "0x00000000000000000000000000000000000000c3", GENESIS_CLAIM_TOKEN_ID: "7", GENESIS_CLAIM_START: "1900000000", GENESIS_CLAIM_SIGNER_PRIVATE_KEY: `0x${"5a".repeat(32)}`,
+      GENESIS_CLAIM_PRIMARY_SALE: "0x00000000000000000000000000000000000000c3", GENESIS_CLAIM_TOKEN_ID: "7", GENESIS_CLAIM_START: "1900000000", GENESIS_CLAIM_SIGNER_PRIVATE_KEY: `0x${"5a".repeat(32)}`, GENESIS_CLAIM_SIGNER_ADDRESS: new Wallet(`0x${"5a".repeat(32)}`).address,
     };
     expect(loadGenesisClaimConfig(entered)).toMatchObject({ destinationChainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicPriceWei: 250_000_000_000_000_000n, allocation: 0n, publicAllocation: 0n });
     expect(() => loadGenesisClaimConfig({ ...entered, GENESIS_CLAIM_WINDOW_SECONDS: "300" })).toThrow(/24-hour/);

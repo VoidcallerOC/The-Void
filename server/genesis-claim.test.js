@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Interface, getAddress, id } from "ethers";
+import { Interface, Wallet, getAddress, id, verifyTypedData } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { createApiHandler } from "./api-http.js";
 import {
@@ -18,6 +18,8 @@ const RELEASE = "0x2222222222222222222222222222222222222222";
 const SALE = "0x3333333333333333333333333333333333333333";
 const CLAIM = "0x4444444444444444444444444444444444444444";
 const SIGNER = "0x5555555555555555555555555555555555555555";
+// Test-only key; it holds nothing and protects nothing.
+const TEST_SIGNER_KEY = `0x${"11".repeat(32)}`;
 const TEST_SIGNATURE = `0x${"ab".repeat(65)}`;
 const NOW = 1_800_000_000;
 const CLAIM_START = NOW - 60;
@@ -39,7 +41,8 @@ const ENV = Object.freeze({
   GENESIS_PUBLIC_MINT_ALLOCATION: "0",
   GENESIS_CLAIM_START: String(CLAIM_START),
   GENESIS_PUBLIC_PRICE_WEI: PRICE.toString(),
-  GENESIS_CLAIM_SIGNER_PRIVATE_KEY: `0x${"11".repeat(32)}`,
+  GENESIS_CLAIM_SIGNER_PRIVATE_KEY: TEST_SIGNER_KEY,
+  GENESIS_CLAIM_SIGNER_ADDRESS: new Wallet(TEST_SIGNER_KEY).address,
 });
 
 const genesisIface = new Interface([
@@ -392,6 +395,21 @@ describe("Genesis claim vouchers", () => {
     expect(signTypedData.mock.calls[0][1].ClaimVoucher).toHaveLength(11);
   });
 
+  it("signs with the configured server key and the voucher recovers to the configured signer address", async () => {
+    // No injected signer: the service builds its own Wallet from the server secret (test key only).
+    const { instance } = service({ signer: null });
+    const issued = await instance.issueVoucher(WALLET);
+    const domain = { name: "The Void Genesis Holder Claim", version: "1", chainId: 43113, verifyingContract: getAddress(CLAIM) };
+    const types = { ClaimVoucher: [
+      { name: "claimant", type: "address" }, { name: "genesisContract", type: "address" }, { name: "genesisChainId", type: "uint256" },
+      { name: "eligibilityRule", type: "bytes32" }, { name: "destinationChainId", type: "uint256" }, { name: "releaseContract", type: "address" },
+      { name: "tokenId", type: "uint256" }, { name: "quantity", type: "uint256" }, { name: "allocation", type: "uint256" },
+      { name: "nonce", type: "uint256" }, { name: "deadline", type: "uint256" },
+    ] };
+    expect(verifyTypedData(domain, types, issued.voucher, issued.signature)).toBe(loadGenesisClaimConfig(ENV).signerAddress);
+    expect(JSON.stringify(issued)).not.toContain(TEST_SIGNER_KEY.slice(2));
+  });
+
   it("refuses vouchers before the window opens and from the second it closes", async () => {
     for (const [clock, code] of [[CLAIM_START - 1, "CLAIM_NOT_OPEN"], [CLAIM_END, "CLAIM_WINDOW_CLOSED"], [CLAIM_END + 1, "CLAIM_WINDOW_CLOSED"]]) {
       const { instance, signTypedData } = service({ clock });
@@ -593,6 +611,11 @@ describe("Genesis claim configuration", () => {
     ["GENESIS_CLAIM_TOKEN_ID", "not-a-number", /non-negative integer/],
     ["GENESIS_CLAIM_RELEASE_CONTRACT", LEGACY_FUJI_SINGLETON, /legacy Fuji V2 singleton/],
     ["GENESIS_CLAIM_SIGNER_PRIVATE_KEY", "0x1234", /server-side 32-byte hex secret/],
+    ["GENESIS_CLAIM_SIGNER_PRIVATE_KEY", "", /server-side 32-byte hex secret/],
+    ["GENESIS_CLAIM_SIGNER_ADDRESS", "", /GENESIS_CLAIM_SIGNER_ADDRESS must be a non-zero EVM address/],
+    ["GENESIS_CLAIM_SIGNER_ADDRESS", "0x1234", /GENESIS_CLAIM_SIGNER_ADDRESS must be a non-zero EVM address/],
+    ["GENESIS_CLAIM_SIGNER_ADDRESS", "0x000000000000000000000000000000000000dEaD", /dead placeholder/],
+    ["GENESIS_CLAIM_SIGNER_ADDRESS", "0x3C7c9Ac6dD2F2138FD403a62ee283C1c1C2f4E47", /does not derive GENESIS_CLAIM_SIGNER_ADDRESS/],
   ])("rejects a missing or malformed %s", (name, value, message) => {
     expect(() => loadGenesisClaimConfig({ ...ENV, [name]: value })).toThrow(message);
   });

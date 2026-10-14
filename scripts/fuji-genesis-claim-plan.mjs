@@ -14,7 +14,7 @@ import { JsonRpcProvider } from "ethers";
 import { claimSigningPlan, loadClaimArtifact, preflightClaimDeployment, buildPlan, validateClaimDeploymentEnv } from "./deploy-genesis-claim.mjs";
 import { assertNoPrivateKeyInEnv } from "./mainnet-signing-requests.mjs";
 import { NETWORK_PROFILES } from "./network-profiles.mjs";
-import { FUJI_CLAIM_ARTIST, FUJI_CLAIM_KIND, FUJI_CLAIM_WINDOW_SECONDS, FUJI_PLACEHOLDER_SIGNER, FUJI_PUBLIC_PRICE_WEI, FUJI_PUBLIC_WINDOW_SECONDS } from "./fuji-genesis-claim.mjs";
+import { FUJI_CLAIM_ARTIST, FUJI_CLAIM_KIND, FUJI_CLAIM_WINDOW_SECONDS, FUJI_GENESIS_VOUCHER_SIGNER, FUJI_PUBLIC_PRICE_WEI, FUJI_PUBLIC_WINDOW_SECONDS } from "./fuji-genesis-claim.mjs";
 import { bindPlan } from "./plan-binding-core.mjs";
 import { validateApprovedPlan } from "./approved-plan.mjs";
 
@@ -30,7 +30,7 @@ export async function buildFujiClaimEntry({ release, sale, token, claimStart, co
     GENESIS_CLAIM_RELEASE_CONTRACT: release, GENESIS_CLAIM_PRIMARY_SALE: sale, GENESIS_CLAIM_TOKEN_ID: String(token),
     GENESIS_CLAIM_START: String(claimStart), GENESIS_CLAIM_WINDOW_SECONDS: String(FUJI_CLAIM_WINDOW_SECONDS), GENESIS_PUBLIC_WINDOW_SECONDS: String(FUJI_PUBLIC_WINDOW_SECONDS),
     GENESIS_PUBLIC_PRICE_WEI: FUJI_PUBLIC_PRICE_WEI, GENESIS_CLAIM_ALLOCATION: "0", GENESIS_PUBLIC_MINT_ALLOCATION: "0", GENESIS_EXPECT_OPEN_EDITION: "yes",
-    GENESIS_CLAIM_ADMIN: FUJI_CLAIM_ARTIST, GENESIS_CLAIM_SIGNER_ADDRESS: FUJI_PLACEHOLDER_SIGNER,
+    GENESIS_CLAIM_ADMIN: FUJI_CLAIM_ARTIST, GENESIS_CLAIM_SIGNER_ADDRESS: FUJI_GENESIS_VOUCHER_SIGNER,
   });
   provider ??= new JsonRpcProvider(config.rpcUrl, config.chainId, { staticNetwork: true, cacheTimeout: -1 });
   genesisProvider ??= new JsonRpcProvider(config.genesisRpcUrl, 43114, { staticNetwork: true, cacheTimeout: -1 });
@@ -44,7 +44,7 @@ export async function buildFujiClaimEntry({ release, sale, token, claimStart, co
   const entryPlan = {
     mode: "DRY_RUN",
     ...plan,
-    purpose: "TEST ONLY (Fuji): deploys the Genesis claim with the artist as admin and a PLACEHOLDER voucher signer. No voucher can be valid until the artist sets a real signer.",
+    purpose: "TEST ONLY (Fuji): deploys the Genesis claim with the artist as admin and the dedicated Genesis voucher signer. Claims also need the artist ISSUER_ROLE grant, the server signing secret and owner-authorized activation.",
     observedAt: { time: new Date().toISOString(), block: facts.fujiBlock },
     cost: { gasLimit: request.gasLimit, maxFeePerGasWei: price.toString(), maxCostWei: (BigInt(request.gasLimit) * price).toString() },
   };
@@ -62,7 +62,7 @@ async function main() {
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, `${JSON.stringify(entry, null, 2)}\n`);
   const { plan, binding } = entry;
-  console.log(`Wrote ${out}\nbinding ${binding.digest}\nnonce ${plan.deployerNonce}, creates ${plan.predictedClaimAddress}, max cost ${plan.cost.maxCostWei} wei (Fuji test AVAX)\nclaim opens ${plan.schedule.claimStart}; admin ${plan.roles.admin}; placeholder signer ${plan.roles.signer}`);
+  console.log(`Wrote ${out}\nbinding ${binding.digest}\nnonce ${plan.deployerNonce}, creates ${plan.predictedClaimAddress}, max cost ${plan.cost.maxCostWei} wei (Fuji test AVAX)\nclaim opens ${plan.schedule.claimStart}; admin ${plan.roles.admin}; voucher signer ${plan.roles.signer}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main().catch((error) => { console.error(error.message); process.exit(1); });
