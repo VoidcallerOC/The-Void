@@ -24,11 +24,18 @@ export function WalletButton({ compact }) {
   };
 
   const label = w.authenticating ? "AUTHENTICATING" : w.connected ? (w.authenticated ? shortAddr(w.account) : "AUTH REQUIRED") : "CONNECT";
+  const accessibleName = w.authenticating
+    ? "Authenticating wallet"
+    : w.connected
+      ? (w.authenticated ? `Disconnect wallet ${shortAddr(w.account)}` : "Authenticate wallet")
+      : "Connect wallet";
 
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        type="button"
         onClick={onClick}
+        aria-label={accessibleName}
         title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : "Connect wallet"}
         style={{
           fontFamily: "var(--font-mono)",
@@ -52,9 +59,9 @@ export function WalletButton({ compact }) {
         onMouseLeave={(e) => { if (!w.connected) { e.currentTarget.style.borderColor = "var(--vc-smoke)"; e.currentTarget.style.color = "var(--vc-bone-dim)"; } }}
       >
         {w.connected
-          ? w.authenticated ? <LogOut size={14} strokeWidth={1.75} /> : <Wallet size={14} strokeWidth={1.75} />
-          : <Wallet size={14} strokeWidth={1.75} />}
-        {label}
+          ? w.authenticated ? <LogOut size={14} strokeWidth={1.75} aria-hidden="true" /> : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />
+          : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />}
+        <span aria-hidden="true">{label}</span>
       </button>
 
       {open && !w.connected && (

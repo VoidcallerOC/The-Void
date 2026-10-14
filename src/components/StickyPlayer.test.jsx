@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { MASTER_VOLUME_STORAGE_KEY, VC_AUDIO } from "../lib/audio.js";
 
@@ -78,5 +78,35 @@ describe("sticky player master volume", () => {
 
     expect(screen.getByText("00:05 / 01:00")).toBeTruthy();
     expect(screen.getByText("BEARER")).toBeTruthy();
+  });
+});
+
+describe("sticky player seek accessibility", () => {
+  it("exposes a labeled Seek slider with valuetext and keyboard-driven seeking", () => {
+    const track = { n: "1", title: "Stranger Things", time: "03:00" };
+    VC_AUDIO.queue = [track];
+    VC_AUDIO.queueId = "self-titled";
+    const element = { currentTime: 15, duration: 60 };
+    VC_AUDIO.el = element;
+    const seekFrac = vi.spyOn(VC_AUDIO, "seekFrac");
+
+    render(<StickyPlayer />);
+
+    const seek = screen.getByRole("slider", { name: "Seek" });
+    expect(seek.getAttribute("aria-valuetext")).toBe("00:15 of 01:00");
+    expect(seek.min).toBe("0");
+    expect(seek.max).toBe("1000");
+    expect(Number(seek.value)).toBe(250);
+
+    fireEvent.change(seek, { target: { value: "500" } });
+    expect(seekFrac).toHaveBeenCalledWith(0.5);
+  });
+
+  it("keeps Play transport controls alongside the Seek slider", () => {
+    VC_AUDIO.el = { currentTime: 0, duration: 120 };
+    render(<StickyPlayer />);
+    expect(screen.getByRole("slider", { name: "Seek" })).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "Master volume" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
   });
 });

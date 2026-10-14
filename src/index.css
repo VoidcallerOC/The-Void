@@ -128,6 +128,54 @@ body { padding-bottom: 72px; }
   cursor: pointer;
 }
 
+/* Seek: native range for keyboard/AT; visual fill stays on the ash/crimson track. */
+.vc-sticky-seek-input {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  accent-color: var(--vc-crimson);
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.vc-sticky-seek-input:focus-visible {
+  outline: 1px solid var(--vc-crimson);
+  outline-offset: 3px;
+}
+.vc-sticky-seek-input::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.vc-sticky-seek-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 0;
+  background: var(--vc-crimson);
+  border: 1px solid var(--vc-bone);
+}
+.vc-sticky-seek-input::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+.vc-sticky-seek-input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--vc-crimson);
+  border: 1px solid var(--vc-bone);
+}
+.vc-sticky-seek-input:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 /* ============================================================
    RESPONSIVE OVERRIDES
    ============================================================ */

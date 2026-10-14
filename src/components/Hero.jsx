@@ -94,7 +94,9 @@ export function Hero() {
         }}
       />
       <div style={{ position: "relative", zIndex: 2, maxWidth: 1100, display: "flex", flexDirection: "column", gap: 28 }}>
-        <WordmarkGlitch />
+        <h1 style={{ margin: 0, padding: 0, border: 0, font: "inherit", color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+          <WordmarkGlitch />
+        </h1>
         <div style={{ marginTop: -8 }}>
           <span style={{
             display: "inline-block",

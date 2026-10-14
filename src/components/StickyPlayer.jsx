@@ -54,10 +54,11 @@ export function StickyPlayer() {
   // Pick eyebrow label from queueId
   const label = audio.queueLabel || (audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION");
   const art = cur?.art || (audio.queueId === "self-titled" ? "/assets/voidcaller_ep_cover.webp" : VC_DATA.featuredEP.art);
-  const onSeek = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const f = (e.clientX - rect.left) / rect.width;
-    audio.seekFrac(f);
+  const seekMax = 1000;
+  const seekValue = Math.round(Math.max(0, Math.min(1, frac)) * seekMax);
+  const seekValueText = `${fmt(t)} of ${total}`;
+  const onSeekInput = (e) => {
+    audio.seekFrac(Number(e.target.value) / seekMax);
   };
   return (
     <div
@@ -96,10 +97,26 @@ export function StickyPlayer() {
       </div>
       <div
         className="vc-sticky-seek"
-        onClick={onSeek}
-        style={{ flex: 1, height: 4, background: "var(--vc-ash)", maxWidth: 260, marginLeft: 24, position: "relative", cursor: "pointer" }}
+        style={{ flex: 1, height: 16, maxWidth: 260, marginLeft: 24, position: "relative", display: "flex", alignItems: "center" }}
       >
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)", boxShadow: "none" }} />
+        <div
+          aria-hidden="true"
+          style={{ position: "absolute", left: 0, right: 0, height: 4, background: "var(--vc-ash)", pointerEvents: "none" }}
+        >
+          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${frac * 100}%`, background: "var(--vc-crimson)" }} />
+        </div>
+        <input
+          type="range"
+          className="vc-sticky-seek-input"
+          min={0}
+          max={seekMax}
+          step={1}
+          value={seekValue}
+          aria-label="Seek"
+          aria-valuetext={seekValueText}
+          disabled={!dur}
+          onChange={onSeekInput}
+        />
       </div>
       <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {total}</span>
       <div className="vc-sticky-controls" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
