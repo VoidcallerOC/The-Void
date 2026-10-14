@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Interface } from "ethers";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletCtx } from "../lib/wallet-context.js";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG } from "../lib/fuji-release.js";
 
@@ -42,6 +42,8 @@ vi.mock("../lib/primary-sale.js", async (importOriginal) => ({
   readReleasePrimarySale: (...args) => readReleasePrimarySale(...args),
   simulateReleaseSaleConfigure: (...args) => simulateReleaseSaleConfigure(...args),
 }));
+const verifyReleaseSaleBinding = vi.fn(async (_provider, binding) => binding);
+vi.mock("../lib/release-sale-binding.js", async (importOriginal) => ({ ...(await importOriginal()), verifyReleaseSaleBinding: (...args) => verifyReleaseSaleBinding(...args) }));
 vi.mock("../lib/genesis-claim.js", async (importOriginal) => ({ ...(await importOriginal()), readGenesisClaimSaleGuard: (...args) => readGenesisClaimSaleGuard(...args) }));
 const { ArtistStudioPage } = await import("./ArtistStudioPage.jsx");
 
@@ -274,6 +276,54 @@ function decodeSent() {
 function problems() {
   return screen.getByRole("alert", { name: "Sale problems" }).textContent;
 }
+
+describe("Artist Studio sale resolution from the published catalog", () => {
+  const BLOCKER = /no confirmed, dedicated primary sale/;
+  beforeEach(() => verifyReleaseSaleBinding.mockClear());
+  const FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
+  const binding = (overrides = {}) => ({ release_id: "rel-out", chain_id: CHAIN_ID, release_contract_address: CLONE, primary_sale_address: SALE, factory_address: FACTORY, artist_wallet: wallet.account, ...overrides });
+  // The edition row carries no sale address, exactly as /studio/catalog returned it before the fix.
+  function renderResumed({ releaseBindings, editionOverrides = {} } = {}) {
+    const catalog = { ...publishedCatalog({ releaseType: "SINGLE" }), ...(releaseBindings ? { releaseBindings } : {}) };
+    Object.assign(catalog.editions[0], editionOverrides);
+    studioFetch.mockResolvedValue(catalog);
+    readReleasePrimarySale.mockResolvedValue({ configured: false, priceWei: 0n, maxSupply: 0n, sold: 0n, perWalletLimit: 0n, startTime: 0n, endTime: 0n, paused: false, purchased: 0n, remaining: null });
+    readReleaseEdition.mockResolvedValue({ exists: true, artist: wallet.account, maxSupply: 0n, mintedSupply: 0n });
+    return renderStudio("rel-out");
+  }
+
+  it("offers the sale form when the release binding is chain-verified", async () => {
+    renderResumed({ releaseBindings: [binding()] });
+    expect(await screen.findByText(/This is the public sale/)).toBeTruthy();
+    expect(screen.queryByText(BLOCKER)).toBeNull();
+    expect(verifyReleaseSaleBinding).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ releaseContractAddress: CLONE, primarySaleAddress: SALE, factoryAddress: FACTORY, chainId: CHAIN_ID }));
+  });
+
+  it("uses the edition's own sale address when the catalog supplies it", async () => {
+    renderResumed({ editionOverrides: { primary_sale_address: SALE, factory_address: FACTORY } });
+    expect(await screen.findByText(/This is the public sale/)).toBeTruthy();
+  });
+
+  it("stays blocked when no binding names a sale", async () => {
+    renderResumed();
+    expect(await screen.findByText(BLOCKER)).toBeTruthy();
+    expect(verifyReleaseSaleBinding).not.toHaveBeenCalled();
+  });
+
+  it("stays blocked when the only binding names a different clone", async () => {
+    renderResumed({ releaseBindings: [binding({ release_contract_address: "0x9999999999999999999999999999999999999999" })] });
+    expect(await screen.findByText(BLOCKER)).toBeTruthy();
+    expect(verifyReleaseSaleBinding).not.toHaveBeenCalled();
+  });
+
+  it("stays blocked when the chain check rejects the binding", async () => {
+    verifyReleaseSaleBinding.mockRejectedValueOnce(new Error("The sale contract does not belong to this release."));
+    renderResumed({ releaseBindings: [binding()] });
+    expect(await screen.findByText(BLOCKER)).toBeTruthy();
+    expect(await screen.findByText(/could not be verified on-chain/)).toBeTruthy();
+    expect(screen.queryByText(/This is the public sale/)).toBeNull();
+  });
+});
 
 describe("Artist Studio live primary sale", () => {
   it("shows the configured on-chain sale with local and UTC times and its status", async () => {

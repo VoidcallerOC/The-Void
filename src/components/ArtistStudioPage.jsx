@@ -14,6 +14,7 @@ import { SALE_DURATION_PRESETS, SALE_STATUS_LABELS, applyDurationPreset, buildSa
 import { normalizeSaleTimeToUnixSeconds } from "../lib/sale-time.js";
 import { readGenesisClaimSaleGuard } from "../lib/genesis-claim.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
+import { resolveCatalogSaleBinding, verifyReleaseSaleBinding } from "../lib/release-sale-binding.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
 import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readCurrentReleaseEditions, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
@@ -373,6 +374,7 @@ export function ArtistStudioPage() {
   const wallet = useWallet();
   const [params] = useSearchParams();
   const [ownedStudioCatalog, setOwnedStudioCatalog] = useState(null);
+  const saleBindingAttempt = useRef(0);
   const createIntent = params.get("create") === "track" ? "track" : "release";
   const [workflow, setWorkflow] = useState(createIntent === "track" ? "mint" : "catalog");
   const [form, setForm] = useState(initialState);
@@ -435,7 +437,15 @@ export function ArtistStudioPage() {
     setPublishedTokenId(resumed.tokenId);
     setOnChainProvenance(null);
     const boundEdition = (catalog?.editions || []).find((item) => item.id === resumed.editionId);
-    setActiveReleaseAsset(boundEdition?.contractAddress && boundEdition?.primarySaleAddress ? { chainId: Number(boundEdition.chainId), releaseContractAddress: boundEdition.contractAddress, primarySaleAddress: boundEdition.primarySaleAddress, tokenId: resumed.tokenId } : null);
+    // Fail closed: the sale is offered only after the persisted binding is chain-verified.
+    setActiveReleaseAsset(null);
+    const binding = resolveCatalogSaleBinding(catalog, { releaseId: resumed.releaseId, edition: boundEdition, chainId: FUJI_RELEASE_FACTORY_V2_CONFIG.chainId });
+    const attempt = ++saleBindingAttempt.current;
+    if (binding) {
+      verifyReleaseSaleBinding(createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), binding)
+        .then((verified) => { if (saleBindingAttempt.current === attempt) setActiveReleaseAsset({ chainId: verified.chainId, releaseContractAddress: verified.releaseContractAddress, primarySaleAddress: verified.primarySaleAddress, tokenId: resumed.tokenId }); })
+        .catch((error) => { if (saleBindingAttempt.current === attempt) setNotice(`${resumed.title}: the recorded sale could not be verified on-chain. ${error.message}`); });
+    }
     setForm((prior) => ({ ...prior, ...Object.fromEntries(Object.entries(resumed.form || {}).filter(([, value]) => value !== undefined).map(([key, value]) => [key, key === "priceWei" ? weiToAvax(value) : value])) }));
     setWorkflow("catalog");
     setStep("sale");

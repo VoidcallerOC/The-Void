@@ -590,4 +590,15 @@ describe("Studio catalog wallet ownership", () => {
     expect(sql).toContain("lower(ao.owner_wallet)=lower($1)");
     expect(sql).not.toContain("factory_contract_id=$");
   });
+  it("listCatalog selects each edition's release clone, factory and dedicated sale so Studio can resume a published release", async () => {
+    const { instance, db } = service({ authenticatedWallet: "0x284c09a7cc187e096cbbdc88d99defe6df32180a" });
+    db.query.mockImplementation(async () => ({ rows: [] }));
+    await instance.listCatalog({ request });
+    const sql = db.query.mock.calls.map(([text]) => text).find((text) => text.includes("FROM editions e JOIN releases r"));
+    expect(sql).toContain("sale.address AS primary_sale_address");
+    expect(sql).toContain("factory.address AS factory_address");
+    expect(sql).toContain("c.address AS release_contract_address");
+    expect(sql).toContain("rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED')");
+    expect(sql).toContain("lower(ao.owner_wallet)=lower($1)");
+  });
 });
