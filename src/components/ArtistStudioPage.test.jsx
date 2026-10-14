@@ -319,6 +319,31 @@ describe("Artist Studio live primary sale", () => {
     expect(simulateReleaseSaleConfigure.mock.invocationCallOrder[0]).toBeLessThan(sendReleaseTransaction.mock.invocationCallOrder[0]);
   });
 
+  it("configures the unconfigured open edition with a second-precision T+300 → T+899 window, once", async () => {
+    renderSaleStep({ sale: null });
+    const T = NOW_SEC + 3600n + 1n; // not minute aligned
+    const stamp = (seconds) => {
+      const date = new Date(Number(seconds) * 1000);
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    };
+    expect((await screen.findByLabelText(/Sale start/)).getAttribute("step")).toBe("1");
+    expect(screen.getByLabelText(/Sale end/).getAttribute("step")).toBe("1");
+    fireEvent.change(screen.getByLabelText(/Most one person can buy/), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/Sale start/), { target: { value: stamp(T + 300n) } });
+    fireEvent.change(screen.getByLabelText(/Sale end/), { target: { value: stamp(T + 899n) } });
+    fireEvent.click(screen.getByRole("button", { name: "Review sale" }));
+    const confirm = await screen.findByRole("dialog", { name: "Confirm sale change" });
+    expect(confirm.textContent).toContain("Sale runs for 9 minutes 59 seconds");
+    const button = within(confirm).getByRole("button", { name: "Confirm and sign" });
+    fireEvent.click(button);
+    fireEvent.click(button); // double click must not submit twice
+    await waitFor(() => expect(sendReleaseTransaction).toHaveBeenCalled());
+    const [tokenId, priceWei, maxSupply, perWalletLimit, startTime, endTime, paused] = decodeSent();
+    expect({ tokenId, priceWei, maxSupply, perWalletLimit, startTime, endTime, paused }).toEqual({ tokenId: 5n, priceWei: 10_000_000_000_000_000n, maxSupply: 0n, perWalletLimit: 0n, startTime: T + 300n, endTime: T + 899n, paused: false });
+    expect(simulateReleaseSaleConfigure).toHaveBeenCalledTimes(1);
+  });
+
   it("warns about a short window before signing", async () => {
     renderSaleStep();
     fireEvent.click(await screen.findByRole("button", { name: "Edit sale" }));
