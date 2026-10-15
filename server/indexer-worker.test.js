@@ -208,7 +208,10 @@ describe("release deployment manifest", () => {
   it("adds nothing on another chain or when opted out", () => {
     const contracts = [{ chainId: 43113, address: "0xcccccccccccccccccccccccccccccccccccccccc", contractType: "ERC1155", startBlock: 5 }];
     expect(loadIndexerConfig({ ...env(contracts), INDEXER_INCLUDE_RELEASE_MANIFEST: "false" }).contracts).toHaveLength(1);
-    expect(withManifestReleaseDeployments([], { chainId: 43114 })).toEqual([]);
+    expect(withManifestReleaseDeployments([], { chainId: 43114 })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ chainId: 43114, address: "0x262b774cf9a1949170b58e2d57f6189980fe757b", contractType: "RELEASE_FACTORY", startBlock: 97619965 }),
+      expect.objectContaining({ chainId: 43114, address: "0x0e77116142844478a55eed2ab79de9f93770f8f5", contractType: "MARKETPLACE", startBlock: 97619978, platformFeeBps: 250 }),
+    ]));
   });
 });
 

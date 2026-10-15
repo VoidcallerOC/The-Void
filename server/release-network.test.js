@@ -69,6 +69,6 @@ describe("module selection with RELEASE_NETWORK=mainnet", () => {
     const studio = await import("./studio-service.js");
     expect(typeof studio.deriveStudioReleaseKey).toBe("function");
     const anchor = await import("./provenance-anchor.js");
-    expect(anchor.loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toMatchObject({ enabled: false, chainId: 43114, network: "mainnet" });
+    expect(anchor.loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toMatchObject({ enabled: true, chainId: 43114, network: "mainnet" });
   });
 });

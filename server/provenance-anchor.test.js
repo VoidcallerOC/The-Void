@@ -94,8 +94,8 @@ describe("provenance anchor configuration", () => {
     expect(defaultConfig).toMatchObject({ enabled: true, chainId: 43113, network: "fuji", contractAddress: null, rpcUrl: fujiPerContractV2.rpcUrl });
     expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "avalanche" })).toThrow(/RELEASE_NETWORK/);
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_CHAIN_ID: "43114", PROVENANCE_ANCHOR_NETWORK: "fuji" })).toThrow(/RELEASE_NETWORK/);
-    // Mainnet loads, but anchoring stays disabled until its factory deployment is recorded and authorized.
-    expect(loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toMatchObject({ enabled: false, chainId: 43114, network: "mainnet" });
+    // Mainnet loads; anchoring is enabled once its factory deployment is recorded and authorized.
+    expect(loadProvenanceAnchorConfig({ RELEASE_NETWORK: "mainnet" })).toMatchObject({ enabled: true, chainId: 43114, network: "mainnet" });
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_ADDRESS: anchorAddress, PROVENANCE_ANCHOR_RPC_URL: "https://user:secret@rpc.example/v1" })).toThrow(/credentials/);
     expect(() => loadProvenanceAnchorConfig({ NODE_ENV: "production", PROVENANCE_ANCHOR_ADDRESS: anchorAddress, PROVENANCE_ANCHOR_RPC_URL: "http://127.0.0.1:8545" })).toThrow(/HTTPS/);
     expect(() => loadProvenanceAnchorConfig({ PROVENANCE_ANCHOR_ADDRESS: fujiRelease.contractAddress, PROVENANCE_ANCHOR_RPC_URL: "https://rpc.example" })).toThrow(/release contract/);

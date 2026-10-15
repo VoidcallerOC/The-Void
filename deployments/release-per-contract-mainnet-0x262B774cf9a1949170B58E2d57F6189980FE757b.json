@@ -1,0 +1,27 @@
+{
+  "kind": "release-per-contract-mainnet",
+  "network": "mainnet",
+  "chainId": 43114,
+  "verificationMode": "VERIFIED",
+  "workflowRun": "https://github.com/VoidcallerOC/The-Void/actions/runs/38742681379",
+  "artifact": "https://github.com/VoidcallerOC/The-Void/actions/runs/38742681379/artifacts/11976955030",
+  "approvedPlanDigest": "3bc016d61b9a517b4048668ec3c2332de214516d6d23a097c2e4fcad7a83425f",
+  "deployer": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+  "factory": {
+    "address": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
+    "transactionHash": "0x50642dbf083c946b0d7b40034dd1909341fe7cec3069a3ce0c508be4f4d7f790",
+    "blockNumber": 97619965,
+    "nonce": 0
+  },
+  "implementation": {
+    "address": "0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006"
+  },
+  "marketplace": {
+    "address": "0x0e77116142844478a55EEd2Ab79de9F93770F8f5",
+    "transactionHash": "0x4fcdcd0368a0ba900ae3d031a2d9386f4ce8ddfadd371d3390d974414d10d2be",
+    "blockNumber": 97619978,
+    "nonce": 1
+  },
+  "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+  "recordedAt": "2026-10-15T13:29:00Z"
+}
