@@ -31,13 +31,17 @@ function Probe({ onReady }) {
   return null;
 }
 
+function methodOrder(provider) {
+  return provider.request.mock.calls.map(([call]) => call.method);
+}
+
 describe("WalletProvider connect chain targeting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete window.ethereum;
   });
 
-  it("requests a switch from Ethereum to the release chain before authenticating", async () => {
+  it("switches to the release chain before eth_requestAccounts so Rabby is not opened on Ethereum", async () => {
     let chain = "0x1";
     const provider = {
       request: vi.fn(async ({ method, params }) => {
@@ -58,18 +62,29 @@ describe("WalletProvider connect chain targeting", () => {
     let api;
     render(React.createElement(WalletProvider, null, React.createElement(Probe, { onReady: (value) => { api = value; } })));
     await waitFor(() => expect(api?.connect).toBeTypeOf("function"));
+    provider.request.mockClear();
 
     let result;
     await act(async () => { result = await api.connect(provider); });
 
     expect(result).toMatchObject({ ok: true });
-    expect(provider.request.mock.calls.map(([call]) => call.method)).toContain("wallet_switchEthereumChain");
+    const order = methodOrder(provider);
+    const firstSwitch = order.indexOf("wallet_switchEthereumChain");
+    const firstAccounts = order.indexOf("eth_requestAccounts");
+    expect(firstSwitch).toBeGreaterThanOrEqual(0);
+    expect(firstAccounts).toBeGreaterThan(firstSwitch);
+    // Pre-accounts ensure reads chain, then switches, then asserts — all before accounts.
+    expect(order.slice(0, firstAccounts)).toEqual([
+      "eth_chainId",
+      "wallet_switchEthereumChain",
+      "eth_chainId",
+    ]);
     const switchCall = provider.request.mock.calls.find(([call]) => call.method === "wallet_switchEthereumChain");
     expect(switchCall[0].params[0].chainId).toBe(String(RELEASE_DEPLOYMENT.chainHexId).toLowerCase());
     expect(authenticateWallet).toHaveBeenCalledWith(expect.objectContaining({ chainId: Number(RELEASE_DEPLOYMENT.chainId) }));
   });
 
-  it("adds the release network when the wallet reports it missing", async () => {
+  it("adds the release network before eth_requestAccounts when the wallet reports it missing", async () => {
     let chain = "0x1";
     const provider = {
       request: vi.fn(async ({ method, params }) => {
@@ -100,18 +115,21 @@ describe("WalletProvider connect chain targeting", () => {
     let api;
     render(React.createElement(WalletProvider, null, React.createElement(Probe, { onReady: (value) => { api = value; } })));
     await waitFor(() => expect(api?.connect).toBeTypeOf("function"));
+    provider.request.mockClear();
 
     let result;
     await act(async () => { result = await api.connect(provider); });
     expect(result).toMatchObject({ ok: true });
-    expect(provider.request.mock.calls.map(([call]) => call.method)).toEqual(expect.arrayContaining([
-      "eth_requestAccounts",
+    const order = methodOrder(provider);
+    expect(order.indexOf("wallet_addEthereumChain")).toBeLessThan(order.indexOf("eth_requestAccounts"));
+    expect(order).toEqual(expect.arrayContaining([
       "wallet_switchEthereumChain",
       "wallet_addEthereumChain",
+      "eth_requestAccounts",
     ]));
   });
 
-  it("does not authenticate when the user rejects the chain switch", async () => {
+  it("does not open eth_requestAccounts when the user rejects the pre-connect chain switch", async () => {
     const provider = {
       request: vi.fn(async ({ method }) => {
         if (method === "eth_requestAccounts") return ["0x1111111111111111111111111111111111111111"];
@@ -131,10 +149,54 @@ describe("WalletProvider connect chain targeting", () => {
     let api;
     render(React.createElement(WalletProvider, null, React.createElement(Probe, { onReady: (value) => { api = value; } })));
     await waitFor(() => expect(api?.connect).toBeTypeOf("function"));
+    provider.request.mockClear();
 
     let result;
     await act(async () => { result = await api.connect(provider); });
     expect(result).toMatchObject({ code: "CHAIN_SWITCH_REJECTED" });
+    expect(methodOrder(provider)).not.toContain("eth_requestAccounts");
     expect(authenticateWallet).not.toHaveBeenCalled();
+  });
+
+  it("re-ensures the release chain after accounts when pre-connect ensure needs permission first", async () => {
+    let chain = "0x1";
+    let permitted = false;
+    const provider = {
+      request: vi.fn(async ({ method, params }) => {
+        if (method === "eth_accounts") return [];
+        if (method === "eth_chainId") {
+          if (!permitted) {
+            const error = new Error("Unauthorized");
+            error.code = 4100;
+            throw error;
+          }
+          return chain;
+        }
+        if (method === "eth_requestAccounts") {
+          permitted = true;
+          return ["0x1111111111111111111111111111111111111111"];
+        }
+        if (method === "wallet_switchEthereumChain") {
+          chain = params[0].chainId;
+          return null;
+        }
+        throw new Error(`unexpected ${method}`);
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+
+    let api;
+    render(React.createElement(WalletProvider, null, React.createElement(Probe, { onReady: (value) => { api = value; } })));
+    await waitFor(() => expect(api?.connect).toBeTypeOf("function"));
+    provider.request.mockClear();
+
+    let result;
+    await act(async () => { result = await api.connect(provider); });
+    expect(result).toMatchObject({ ok: true });
+    const order = methodOrder(provider);
+    expect(order.indexOf("eth_requestAccounts")).toBeGreaterThanOrEqual(0);
+    expect(order.lastIndexOf("wallet_switchEthereumChain")).toBeGreaterThan(order.indexOf("eth_requestAccounts"));
+    expect(authenticateWallet).toHaveBeenCalledWith(expect.objectContaining({ chainId: Number(RELEASE_DEPLOYMENT.chainId) }));
   });
 });
