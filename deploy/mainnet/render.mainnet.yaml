@@ -36,6 +36,11 @@ services:
         sync: false
       - key: DATABASE_SSL
         value: "true"
+      # PEM from The Void Mainnet Supabase → Database Settings → SSL certificate.
+      # Required for verified TLS to the session pooler (avoids SELF_SIGNED_CERT_IN_CHAIN).
+      - key: DATABASE_SSL_CA
+        sync: false
+
       - key: DATABASE_POOL_MAX
         value: "10"
       - key: DATABASE_POOL_IDLE_TIMEOUT_MS
@@ -150,6 +155,10 @@ services:
         sync: false
       - key: DATABASE_SSL
         value: "true"
+      # Same The Void Mainnet SSL CA PEM as the API (verified session-pooler TLS).
+      - key: DATABASE_SSL_CA
+        sync: false
+
       - key: DATABASE_POOL_MAX
         value: "10"
       - key: DATABASE_POOL_IDLE_TIMEOUT_MS

@@ -41,9 +41,14 @@ describe("mainnet runtime configuration", () => {
     // 0 means uncapped (open edition); a finite free-claim cap is never configured.
     expect(api.env).toMatchObject({ GENESIS_CLAIM_ALLOCATION: "0", GENESIS_PUBLIC_MINT_ALLOCATION: "0" });
     expect(blueprint).not.toMatch(/0x[0-9a-fA-F]{64}/);
-    for (const key of ["DATABASE_URL", "PINATA_JWT", "MEDIA_AUDIT_HASH_SECRET", "X_API_SECRET", "PUBLIC_APP_URL", "INDEXER_CONTRACTS_JSON", "GENESIS_CLAIM_SIGNER_PRIVATE_KEY", "GENESIS_CLAIM_CONTRACT", "GENESIS_CLAIM_RELEASE_CONTRACT", "GENESIS_CLAIM_PRIMARY_SALE", "GENESIS_CLAIM_TOKEN_ID", "GENESIS_CLAIM_START"]) {
+    for (const key of ["DATABASE_URL", "DATABASE_SSL_CA", "PINATA_JWT", "MEDIA_AUDIT_HASH_SECRET", "X_API_SECRET", "PUBLIC_APP_URL", "INDEXER_CONTRACTS_JSON", "GENESIS_CLAIM_SIGNER_PRIVATE_KEY", "GENESIS_CLAIM_CONTRACT", "GENESIS_CLAIM_RELEASE_CONTRACT", "GENESIS_CLAIM_PRIMARY_SALE", "GENESIS_CLAIM_TOKEN_ID", "GENESIS_CLAIM_START"]) {
       expect(key in api.env ? api.env[key] : indexer.env[key], key).toBeNull();
     }
+    expect(api.env.DATABASE_SSL).toBe("true");
+    expect(indexer.env.DATABASE_SSL).toBe("true");
+    expect(indexer.env.DATABASE_SSL_CA).toBeNull();
+    expect(api.env.GENESIS_CLAIM_ENABLED).toBe("false");
+
   });
 
   it("loads the Genesis claim as a C-Chain production claim once its values are entered and it is enabled", () => {

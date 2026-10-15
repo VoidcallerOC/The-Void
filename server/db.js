@@ -1,35 +1,61 @@
 import pg from "pg";
-import { loadServerConfig } from "./config.js";
+import { ConfigurationError, loadServerConfig } from "./config.js";
 
 const { Pool } = pg;
 
-// sslmode in the URL would override the explicit ssl object below, so it is removed
-// whenever verification is disabled or a CA bundle supplies the trust anchor.
-function connectionStringForPool(connectionString, rejectUnauthorized, { ca = null } = {}) {
-  if (rejectUnauthorized !== false && !ca) return connectionString;
+// Supabase session/transaction poolers present a cert chain rooted at the project CA,
+// which is not in Node's default trust store. Verified TLS needs DATABASE_SSL_CA.
+export function isSupabaseDatabaseUrl(connectionString) {
+  try {
+    const host = new URL(connectionString).hostname.toLowerCase();
+    return host === "supabase.com" || host.endsWith(".supabase.com");
+  } catch {
+    return /\.supabase\.com(?::|\/|\?|$)/i.test(String(connectionString || ""));
+  }
+}
+
+// node-pg does Object.assign({}, poolOptions, parse(connectionString)), so sslmode /
+// sslrootcert / sslcert / sslkey in the URL replace any explicit `ssl` object. Strip them
+// whenever we pass `ssl` ourselves — otherwise sslmode=require is treated as verify-full
+// (empty ssl {}) and yields SELF_SIGNED_CERT_IN_CHAIN against Supabase without a CA.
+export function connectionStringForPool(connectionString, stripSslParams = false) {
+  if (!stripSslParams) return connectionString;
   try {
     const url = new URL(connectionString);
-    url.searchParams.delete("sslmode");
-    url.searchParams.delete("sslrootcert");
+    for (const key of ["sslmode", "sslrootcert", "sslcert", "sslkey"]) url.searchParams.delete(key);
     return url.toString();
   } catch {
-    return String(connectionString).replace(/([?&])sslmode=[^&]*/i, "$1").replace(/[?&]$/, "");
+    return String(connectionString)
+      .replace(/([?&])(sslmode|sslrootcert|sslcert|sslkey)=[^&]*/gi, "$1")
+      .replace(/[?&]$/, "")
+      .replace(/\?&+/, "?")
+      .replace(/&&+/g, "&");
   }
 }
 
 export function createDatabasePool(config = loadServerConfig()) {
   if (!config.databaseUrl) throw new Error("Cannot create a database pool without DATABASE_URL.");
+  const verifyCertificates = config.databaseSsl && config.databaseSslRejectUnauthorized !== false;
+  if (verifyCertificates && !config.databaseSslCa && isSupabaseDatabaseUrl(config.databaseUrl)) {
+    throw new ConfigurationError(
+      "Supabase Postgres with certificate verification requires DATABASE_SSL_CA (PEM from Database Settings → SSL certificate). Do not disable TLS verification or set NODE_TLS_REJECT_UNAUTHORIZED=0.",
+    );
+  }
+  const ssl = config.databaseSsl
+    ? {
+        rejectUnauthorized: config.databaseSslRejectUnauthorized !== false,
+        ...(config.databaseSslCa ? { ca: config.databaseSslCa } : {}),
+      }
+    : false;
   return new Pool({
-    connectionString: connectionStringForPool(config.databaseUrl, config.databaseSslRejectUnauthorized, { ca: config.databaseSslCa }),
+    connectionString: connectionStringForPool(config.databaseUrl, Boolean(ssl)),
     max: config.poolMax,
     idleTimeoutMillis: config.poolIdleTimeoutMs,
     connectionTimeoutMillis: config.poolConnectionTimeoutMs,
-    ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized !== false, ...(config.databaseSslCa ? { ca: config.databaseSslCa } : {}) } : false,
+    ssl,
     application_name: "voidcaller-persistence",
   });
 }
-
-export { connectionStringForPool };
 
 export async function withTransaction(pool, callback) {
   const client = await pool.connect();
