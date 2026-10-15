@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && npm ci",
-  "buildCommand": "cd ../.. && VITE_RELEASE_NETWORK=mainnet npx vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
+  "buildCommand": "cd ../.. && VITE_RELEASE_NETWORK=mainnet VITE_MARKETPLACE_CHAIN_ID=43114 VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5 VITE_MARKETPLACE_FEE_BPS=250 npx vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
   "outputDirectory": "dist",
   "routes": [
     {

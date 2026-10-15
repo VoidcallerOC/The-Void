@@ -56,7 +56,12 @@ export function releaseDeploymentForMarketplace(marketplaceAddress) {
 }
 
 function requestedNetwork() {
-  const web = typeof import.meta !== "undefined" ? import.meta.env?.VITE_RELEASE_NETWORK : undefined;
+  // Vite only statically replaces direct `import.meta.env.VITE_*` reads. Optional chaining
+  // (`import.meta.env?.VITE_RELEASE_NETWORK`) can leave the web build on the Fuji default even
+  // when VITE_RELEASE_NETWORK=mainnet is set at build time.
+  const web = typeof import.meta !== "undefined" && import.meta.env
+    ? import.meta.env.VITE_RELEASE_NETWORK
+    : undefined;
   const node = globalThis.process?.env?.RELEASE_NETWORK;
   return String(web || node || "fuji").trim().toLowerCase();
 }

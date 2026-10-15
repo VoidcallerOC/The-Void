@@ -130,9 +130,12 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
      `the-void-api-mainnet` and `the-void-indexer-mainnet`, both in region ohio with manual deploys.
      Enter its `sync: false` values (table below). Deploy the API, which applies migrations 001–039,
      then the indexer.
-   - **Vercel:** a new project from this repository, Root Directory `deploy/vercel-mainnet`. Set:
+   - **Vercel:** a new project from this repository, Root Directory `deploy/vercel-mainnet`
+     (see `deploy/vercel-mainnet/README.md`). Do **not** flip the Fuji `the-void` /
+     `the-void-alpha.vercel.app` project to mainnet. The mainnet `buildCommand` already bakes:
+     - `VITE_RELEASE_NETWORK=mainnet`
      - `VITE_MARKETPLACE_CHAIN_ID=43114`
-     - `VITE_MARKETPLACE_ADDRESS=<marketplace>`
+     - `VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5`
      - `VITE_MARKETPLACE_FEE_BPS=250`
 
      If Render's hostname differs from `the-void-api-mainnet.onrender.com`, update the project's
