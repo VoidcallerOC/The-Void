@@ -19,21 +19,27 @@ const rows = {
   releases: [
     rel("release-forgive", "Forgive & Forget", "PUBLISHED", "2026-10-13T00:00:00Z"),
     rel("release-single-2", "Second Single", "PUBLISHED", "2026-10-12T00:00:00Z"),
-    rel("release-draft", "Unfinished Demo", "DRAFT", null),
-    rel("release-archived", "Retired Test", "ARCHIVED", "2026-10-01T00:00:00Z"),
+    rel("release-draft", "Unreleased Sketch", "DRAFT", null),
+    rel("release-archived", "Retired Pressing", "ARCHIVED", "2026-10-01T00:00:00Z"),
   ],
   editions: [
     ed("edition-forgive", "release-forgive", "Forgive & Forget", "PUBLISHED", "111"),
     ed("edition-single-2", "release-single-2", "Second Single", "PUBLISHED", "222", OTHER_CLONE),
-    ed("edition-draft", "release-draft", "Unfinished Demo", "DRAFT", "333"),
-    ed("edition-archived", "release-archived", "Retired Test", "ARCHIVED", "444"),
+    ed("edition-draft", "release-draft", "Unreleased Sketch", "DRAFT", "333"),
+    ed("edition-archived", "release-archived", "Retired Pressing", "ARCHIVED", "444"),
   ],
+};
+
+// The public catalog as the app loads it: through fetchPublishedCatalog, over a stubbed API.
+const apiFor = (rows) => async (url) => {
+  const key = String(url).split("?")[0].replace(/^.*\/api\//, "");
+  return { ok: true, json: async () => ({ data: rows[key] || [] }) };
 };
 
 vi.mock("../lib/catalog-source.js", async (importOriginal) => {
   const actual = await importOriginal();
   const { collapsePublicCatalog } = await import("../lib/summit-demo.js");
-  const published = collapsePublicCatalog(actual.mapPublishedCatalog(rows));
+  const published = await actual.fetchPublishedCatalog({ fetchImpl: apiFor(rows) });
   return { ...actual, useMarketplaceCatalogs: () => collapsePublicCatalog(actual.mergeCatalogs([...actual.baseCatalogs(), published])) };
 });
 const { ArtistPage } = await import("./PlatformPages.jsx");
@@ -60,8 +66,8 @@ describe("Artist page releases", () => {
 
   it("keeps draft and archived releases off the public artist page", () => {
     const markup = render("/artist/voidcaller");
-    expect(markup).not.toContain("Unfinished Demo");
-    expect(markup).not.toContain("Retired Test");
+    expect(markup).not.toContain("Unreleased Sketch");
+    expect(markup).not.toContain("Retired Pressing");
     expect(markup).not.toContain("edition-draft");
     expect(markup).not.toContain("edition-archived");
   });

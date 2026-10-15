@@ -4,7 +4,7 @@ import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
-import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
 import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
@@ -416,6 +416,14 @@ export function CollectionDetailPage() {
   if (!collection) return <Navigate to="/collection" replace />;
   const artist = catalog.artists.find((item) => collection.artistIds.includes(item.id));
   const releases = catalog.releases.filter((item) => collection.releaseIds.includes(item.id));
+  // Published releases by the collection's artist that the collection does not list stay reachable.
+  const moreReleases = catalog.releases.filter((item) => collection.artistIds.includes(item.artistId) && !collection.releaseIds.includes(item.id));
+  const releaseCard = (release) => (
+    <Link key={release.id} to={`/release/${release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
+      <img src={release.artwork} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+      <div style={{ padding: 20 }}><Status>{release.status}</Status><h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{release.title}</h2><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{release.subtitle}</p></div>
+    </Link>
+  );
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Collection" title={collection.name}>
@@ -423,13 +431,16 @@ export function CollectionDetailPage() {
       </PlatformHeader>
       {artist && <p><Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>Artist · {artist.name}</Link></p>}
       <div className="vc-market-grid" style={{ marginTop: 28 }}>
-        {releases.map((release) => (
-          <Link key={release.id} to={`/release/${release.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none" }}>
-            <img src={release.artwork} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-            <div style={{ padding: 20 }}><Status>{release.status}</Status><h2 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: "12px 0 8px" }}>{release.title}</h2><p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{release.subtitle}</p></div>
-          </Link>
-        ))}
+        {releases.map(releaseCard)}
       </div>
+      {moreReleases.length > 0 && (
+        <>
+          <Eyebrow>More from {artist?.name || "this artist"}</Eyebrow>
+          <div className="vc-market-grid" style={{ marginTop: 16 }}>
+            {moreReleases.map(releaseCard)}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -457,7 +468,9 @@ export function CollectionPage() {
 }
 
 export function MyCollectionPage() {
-  const catalog = useMarketplaceCatalogs();
+  // Same-title releases are collapsed for discovery only; a held edition must still resolve here.
+  const published = useMarketplaceCatalogs();
+  const catalog = useMemo(() => withOwnableDuplicates(published), [published]);
   const wallet = useWallet();
   const library = useMemo(() => getCollectorLibrary(catalog, wallet.ownershipRecords || []), [catalog, wallet.ownershipRecords]);
   const [fujiOwned, setFujiOwned] = useState([]);
