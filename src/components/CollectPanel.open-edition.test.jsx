@@ -104,6 +104,35 @@ describe("CollectPanel open edition on a factory release", () => {
     expect(qty).toBe(1);
   });
 
+  it("a wallet that already holds the token (for example a Genesis claimant) can still buy when the sale has no per-wallet limit", async () => {
+    mocks.balance.mockResolvedValue(1n);
+    mocks.primarySale.mockResolvedValue(chainSale({ perWalletLimit: 0n, sold: 0n }));
+    mocks.collect.mockResolvedValue({ hash: "0x7aff87dd4dc89a38013501767fd94418fb0403bde620547454ac342ec25ad4dd" });
+    await renderPanel();
+    const button = screen.getByRole("button", { name: "Collect · 0.01 AVAX" });
+    expect(button.disabled).toBe(false);
+    await act(async () => { fireEvent.click(button); });
+    await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); });
+    expect(mocks.collect).toHaveBeenCalledTimes(1);
+    expect(mocks.collect.mock.calls[0][0]).toMatchObject({ priceWei: 10n ** 16n, qty: 1 });
+  });
+
+  it("a holder stays on 'Owned' with no Collect button when the sale caps copies per wallet", async () => {
+    mocks.balance.mockResolvedValue(1n);
+    mocks.primarySale.mockResolvedValue(chainSale({ perWalletLimit: 1n, purchased: 0n }));
+    await renderPanel();
+    expect(screen.getByText("Owned")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Collect/ })).toBeNull();
+  });
+
+  it("a holder of an unlimited-per-wallet sale sees no Collect action once the sale has ended", async () => {
+    mocks.balance.mockResolvedValue(1n);
+    mocks.primarySale.mockResolvedValue(chainSale({ perWalletLimit: 0n, endTime: NOW_S - 60n }));
+    await renderPanel();
+    expect(screen.queryByRole("button", { name: "Collect · 0.01 AVAX" })).toBeNull();
+    expect(screen.getByText("Owned")).toBeTruthy();
+  });
+
   it("open edition after its end time: disabled 'Sale ended'", async () => {
     mocks.primarySale.mockResolvedValue(chainSale({ endTime: NOW_S - 60n }));
     await renderPanel();

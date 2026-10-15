@@ -116,6 +116,9 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   const resaleCandidate = isReleasePerContractCandidate(edition);
   const availability = sale?.configured ? primarySaleAvailability(sale, { editionSupply: edition?.supply }) : null;
   const blocked = Boolean(sale?.configured && (saleIsSoldOut(sale) || sale.paused || walletLimitReached(sale) || CLOSED_WINDOW.has(availability?.state)));
+  // Holding a copy only ends the purchase path when the sale caps copies per wallet. A release-scoped sale with
+  // no per-wallet limit (0) lets a holder, for example a Genesis claimant, still buy in the paid phase.
+  const holderMayBuyMore = Boolean(collectorEnabled && releaseScoped && onChainOwned && sale?.configured && sale.perWalletLimit === 0n && !blocked);
 
   const storedEvidence = useMemo(() => loadPrimaryPurchaseEvidence({ editionId: edition?.id, tokenId, purchaser: wallet.account }), [edition?.id, tokenId, wallet.account]);
   const purchaseEvidence = sessionEvidence?.editionId === edition?.id
@@ -264,7 +267,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
   // the certified shared contract keeps its catalog availability.
   const primaryCollectReady = collectorEnabled && tokenId !== undefined && tokenId !== null
     && (releaseScoped ? Boolean(sale?.configured) || primary.availability === "available" : primary.availability === "available");
-  const action = owned ? (
+  const action = owned && !holderMayBuyMore ? (
     <span style={{ ...primaryBtn, cursor: "default" }}>Owned</span>
   ) : notCreated ? (
     <span style={ghostBtn}>Not yet available</span>
