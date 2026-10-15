@@ -340,3 +340,42 @@ describe("ownership reconciliation", () => {
     expect(errors).toHaveLength(2);
   });
 });
+
+describe("primary purchase finalization sweep", () => {
+  const sale = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const setup = ({ contractType = "PRIMARY_SALE", finalize } = {}) => {
+    const store = { ...storeDouble(), finalizePrimaryPurchases: finalize || vi.fn().mockResolvedValue({ finalized: 1 }) };
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(20), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    const logger = { error: vi.fn() };
+    const indexer = new BlockchainIndexer({ rpc, store, logger, confirmations: 12, configs: [{ chainId: 43113, address: sale.toUpperCase().replace("0X", "0x"), contractType, startBlock: 0, eventTopics: {} }] });
+    return { store, indexer, logger };
+  };
+
+  it("finalizes through head minus confirmations after the checkpoint is saved, every cycle", async () => {
+    const { store, indexer } = setup();
+    await indexer.syncAll();
+    await indexer.syncAll();
+    expect(store.finalizePrimaryPurchases).toHaveBeenCalledTimes(2);
+    expect(store.finalizePrimaryPurchases).toHaveBeenCalledWith({ chainId: 43113, saleAddress: sale, finalizedBlock: 8 });
+  });
+
+  it("does not sweep non-sale contracts", async () => {
+    const { store, indexer } = setup({ contractType: "ERC1155" });
+    await indexer.syncAll();
+    expect(store.finalizePrimaryPurchases).not.toHaveBeenCalled();
+  });
+
+  it("logs a sweep failure without failing synchronization or the checkpoint", async () => {
+    const { store, indexer, logger } = setup({ finalize: vi.fn().mockRejectedValue(new Error("db down")) });
+    await expect(indexer.syncAll()).resolves.toHaveLength(1);
+    expect(logger.error).toHaveBeenCalledWith("indexer.primary-purchase.finalize.failed", expect.objectContaining({ error: "db down" }));
+    expect(store.calls.errors).toHaveLength(0);
+  });
+
+  it("works against stores that predate the sweep", async () => {
+    const store = storeDouble();
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(20), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 12, configs: [{ chainId: 43113, address: sale, contractType: "PRIMARY_SALE", startBlock: 0, eventTopics: {} }] });
+    await expect(indexer.syncAll()).resolves.toHaveLength(1);
+  });
+});

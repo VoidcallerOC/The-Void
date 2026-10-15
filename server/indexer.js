@@ -300,6 +300,17 @@ export class BlockchainIndexer {
     this.releasesLoaded = true;
   }
 
+  // Runs every cycle for a primary sale, so rows indexed before this step existed are promoted too. A
+  // failure here never blocks block indexing; the next cycle retries the same idempotent sweep.
+  async finalizePrimarySalePurchases(config, finalizedBlock) {
+    if (config.contractType !== "PRIMARY_SALE" || typeof this.store.finalizePrimaryPurchases !== "function") return;
+    try {
+      await this.store.finalizePrimaryPurchases({ chainId: Number(config.chainId), saleAddress: String(config.address).toLowerCase(), finalizedBlock });
+    } catch (error) {
+      this.logger.error?.("indexer.primary-purchase.finalize.failed", { chainId: Number(config.chainId), address: String(config.address).toLowerCase(), error: error.message });
+    }
+  }
+
   async syncContract(config) {
     const chainId = Number(config.chainId);
     const address = String(config.address).toLowerCase();
@@ -361,6 +372,7 @@ export class BlockchainIndexer {
       }
       operation = "database";
       await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: nextBlock - 1, finalizedBlock: target, latestKnownBlock: latest, status: "IDLE", lastError: null, markRunSucceeded: true, markRunCompleted: true });
+      await this.finalizePrimarySalePurchases(config, target);
       return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, state: "CONFIRMED" };
     } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: operation === "rpc", databaseFailure: operation === "database" });

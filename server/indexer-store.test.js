@@ -234,3 +234,35 @@ describe("configured marketplace registration", () => {
     expect(pool.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO listings"), expect.arrayContaining([43114, registered.id, "7", seller, "token-contract"]));
   });
 });
+
+describe("primary purchase finalization", () => {
+  const sale = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const run = (results, args = {}) => {
+    const { pool, client } = poolWith(results);
+    return { client, promise: new IndexerStore(pool).finalizePrimaryPurchases({ chainId: 43113, saleAddress: sale.toUpperCase().replace("0X", "0x"), finalizedBlock: 150, ...args }) };
+  };
+
+  it("promotes only canonical CONFIRMED purchases at or below the finalized block, and their transactions", async () => {
+    const { client, promise } = run([{}, { rows: [{ transaction_hash: transactionHash }] }, {}, {}]);
+    await expect(promise).resolves.toEqual({ finalized: 1 });
+    const [sql, params] = client.query.mock.calls.find(([text]) => String(text).includes("UPDATE primary_purchases"));
+    expect(sql).toMatch(/status='CONFIRMED' AND pp\.block_number <= \$3/);
+    expect(sql).toMatch(/cb\.block_hash=pp\.block_hash AND cb\.is_canonical=true/);
+    expect(params).toEqual([43113, sale, 150]);
+    expect(client.query).toHaveBeenCalledWith(expect.stringMatching(/UPDATE transactions SET status='FINALIZED', finalized_at=now\(\).*status='CONFIRMED'/), [43113, [transactionHash]]);
+  });
+
+  it("is a no-op on re-run: nothing left CONFIRMED means no transaction write", async () => {
+    const { client, promise } = run([{}, { rows: [] }, {}]);
+    await expect(promise).resolves.toEqual({ finalized: 0 });
+    expect(client.query.mock.calls.some(([text]) => String(text).includes("UPDATE transactions"))).toBe(false);
+  });
+
+  it("refuses an unusable finalized block without touching the database", async () => {
+    const pool = { query: vi.fn(), connect: vi.fn() };
+    for (const finalizedBlock of [undefined, null, -1, "x", 1.5]) {
+      await expect(new IndexerStore(pool).finalizePrimaryPurchases({ chainId: 43113, saleAddress: sale, finalizedBlock })).resolves.toEqual({ finalized: 0 });
+    }
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+});
