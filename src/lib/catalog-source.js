@@ -329,6 +329,26 @@ async function fetchJson(path, { fetchImpl = fetch, signal } = {}) {
   return payload.data;
 }
 
+const UNPUBLISHED_STATUSES = new Set(["draft", "archived"]);
+
+// The public catalog only carries published releases. Draft and archived rows (and what depends on them)
+// are dropped here, not in mapPublishedCatalog, which the artist's own Studio also uses to see drafts.
+export function withoutUnpublished(catalog) {
+  if (!catalog) return catalog;
+  const hidden = (item) => UNPUBLISHED_STATUSES.has(String(item?.status || "").toLowerCase());
+  const hiddenReleaseIds = new Set(asArray(catalog.releases).filter(hidden).map((release) => release.id));
+  const editions = asArray(catalog.editions).filter((edition) => !hidden(edition) && !hiddenReleaseIds.has(edition.releaseId));
+  const keptEditionIds = new Set(editions.map((edition) => edition.id));
+  const editionIds = new Set(asArray(catalog.editions).map((edition) => edition.id));
+  return createCatalog({
+    ...catalog,
+    releases: asArray(catalog.releases).filter((release) => !hiddenReleaseIds.has(release.id)),
+    editions,
+    tokens: asArray(catalog.tokens).filter((token) => !editionIds.has(token.editionId) || keptEditionIds.has(token.editionId)),
+    experiences: asArray(catalog.experiences).filter((experience) => !hiddenReleaseIds.has(experience.releaseId) && (!editionIds.has(experience.editionId) || keptEditionIds.has(experience.editionId))),
+  });
+}
+
 export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) {
   const [artists, releases, editions, experiences] = await Promise.all([
     fetchJson("/api/artists", { fetchImpl, signal }).catch(() => []),
@@ -336,12 +356,41 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
     fetchJson("/api/editions", { fetchImpl, signal }).catch(() => []),
     fetchJson("/api/experiences", { fetchImpl, signal }).catch(() => []),
   ]);
-  return collapsePublicCatalog(onActiveReleaseNetwork(mapPublishedCatalog({
+  return collapsePublicCatalog(withoutUnpublished(onActiveReleaseNetwork(mapPublishedCatalog({
     artists: asArray(artists),
     releases: asArray(releases),
     editions: asArray(editions),
     experiences: asArray(experiences),
-  })));
+  }))));
+}
+
+const DUPLICATE_BUCKETS = ["releases", "editions", "tokens", "experiences"];
+
+// Items that same-title collapsing hid from discovery, from every collapse pass, minus anything the
+// final catalog kept. Used only to resolve what a wallet actually holds.
+export function combineDuplicates(catalog, ...earlier) {
+  const combined = {};
+  for (const bucket of DUPLICATE_BUCKETS) {
+    const kept = new Set((catalog?.[bucket] || []).map((item) => item?.id));
+    const seen = new Set();
+    combined[bucket] = [catalog?.duplicates, ...earlier].flatMap((duplicates) => duplicates?.[bucket] || []).filter((item) => {
+      if (!item?.id || kept.has(item.id) || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }
+  return combined;
+}
+
+/** The catalog plus the editions same-title collapsing hid, for ownership lookups (never for discovery). */
+export function withOwnableDuplicates(catalog) {
+  if (!catalog?.duplicates) return catalog;
+  const merged = { ...catalog };
+  for (const bucket of DUPLICATE_BUCKETS) {
+    const present = new Set((catalog[bucket] || []).map((item) => item?.id));
+    merged[bucket] = [...(catalog[bucket] || []), ...(catalog.duplicates[bucket] || []).filter((item) => item?.id && !present.has(item.id))];
+  }
+  return merged;
 }
 
 export function useMarketplaceCatalogs() {
@@ -368,10 +417,10 @@ export function useMarketplaceCatalogs() {
     return () => controller.abort();
   }, []);
 
-  return useMemo(() => ({
-    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))])),
-    publishedLoading,
-  }), [overlay, published, publishedLoading]);
+  return useMemo(() => {
+    const collapsed = collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))]));
+    return { ...collapsed, duplicates: combineDuplicates(collapsed, published.duplicates), publishedLoading };
+  }, [overlay, published, publishedLoading]);
 }
 
 export function notifyStudioOverlay() {

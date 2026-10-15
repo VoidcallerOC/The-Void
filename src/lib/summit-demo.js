@@ -155,8 +155,19 @@ export function deduplicatePublicReleases(catalog) {
   const editions = (catalog.editions || []).filter((edition) => !sourceReleaseIds.has(edition.releaseId) || keptReleaseIds.has(edition.releaseId));
   const keptEditionIds = new Set(editions.map((edition) => edition.id));
   const sourceEditionIds = new Set((catalog.editions || []).map((edition) => edition.id));
+  // Same-title releases are collapsed for discovery only. What was hidden is reported, not discarded,
+  // so a wallet that holds a hidden edition can still be shown it (see withOwnableDuplicates).
+  const hiddenEditions = (catalog.editions || []).filter((edition) => !keptEditionIds.has(edition.id));
+  const hiddenEditionIds = new Set(hiddenEditions.map((edition) => edition.id));
+  const duplicates = {
+    releases: releases.filter((release) => !keptReleaseIds.has(release.id)),
+    editions: hiddenEditions,
+    tokens: (catalog.tokens || []).filter((token) => hiddenEditionIds.has(token.editionId)),
+    experiences: (catalog.experiences || []).filter((experience) => hiddenEditionIds.has(experience.editionId)),
+  };
   return {
     ...catalog,
+    duplicates,
     releases: releases.filter((release) => keptReleaseIds.has(release.id)),
     editions,
     tokens: (catalog.tokens || []).filter((token) => keptEditionIds.has(token.editionId)),
