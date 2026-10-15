@@ -20,5 +20,10 @@ export function reportIndexedContracts({ indexed = [], configured = [] } = {}) {
   const configuredItems = configured.map(normalizeContract).filter(valid);
   const release = section("ERC1155", indexedItems, configuredItems);
   const primarySale = section("PRIMARY_SALE", indexedItems, configuredItems);
-  return { release, primarySale, ok: release.healthy && primarySale.healthy };
+  // Release clones and their primary sales are created later by the factory. Until at least
+  // one ERC1155 or PRIMARY_SALE is configured or discovered, those sections are not part of
+  // the backend-up gate — factory/marketplace checkpoints alone may satisfy indexer health.
+  // Once either type appears, both must be healthy (they are provisioned as a pair).
+  const expectsReleaseContracts = release.configured || primarySale.configured;
+  return { release, primarySale, ok: !expectsReleaseContracts || (release.healthy && primarySale.healthy) };
 }
