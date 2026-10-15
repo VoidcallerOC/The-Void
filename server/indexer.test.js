@@ -266,6 +266,29 @@ describe("durable index synchronization", () => {
     expect(attempts).toBe(3);
   });
 
+  it("does not advance checkpoints when getLogs exhausts HTTP 429 retries", async () => {
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const store = storeDouble();
+    const rateLimit = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryable: true, retryAfterMs: 1_000 });
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(50),
+      getLogs: vi.fn().mockRejectedValue(rateLimit),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
+    };
+    const indexer = new BlockchainIndexer({
+      rpc,
+      store,
+      confirmations: 0,
+      retryOptions: { retries: 2, baseDelayMs: 1, maxDelayMs: 5, sleep: async () => {}, random: () => 0 },
+      configs: [{ chainId: 43114, address, contractType: "ERC1155", startBlock: 10, eventTopics: { TransferSingle: singleTopic } }],
+    });
+    await expect(indexer.syncAll()).rejects.toMatchObject({ status: 429 });
+    expect(rpc.getLogs).toHaveBeenCalledTimes(3);
+    expect(rpc.getLogs.mock.calls.every(([filter]) => filter.fromBlock === 10 && filter.toBlock === 50)).toBe(true);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).nextBlock).toBe(10);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).status).toBe("FAILED");
+  });
+
   it("marks a changed block hash as a reorganization", async () => {
     const store = storeDouble({ blocks: new Map([["43114:2", { block_hash: "0xold" }]]) });
     const rpc = { getBlockNumber: vi.fn().mockResolvedValue(2), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => Promise.resolve(block(number, number === 2 ? "0xnew" : undefined))) };

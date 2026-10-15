@@ -15,6 +15,19 @@ export class IndexerLeaseError extends Error {
   }
 }
 
+function isRateLimitFailure(error) {
+  if (!error) return false;
+  if (error.status === 429) return true;
+  return /RPC HTTP 429/i.test(String(error.message || ""));
+}
+
+function rateLimitCooldownMs(error, config) {
+  const retryAfterMs = Number(error?.retryAfterMs);
+  const maxDelay = Math.max(1, Number(config?.retryMaxDelayMs) || 30_000);
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return Math.min(maxDelay, retryAfterMs);
+  return Math.min(maxDelay, Math.max(Number(config?.pollIntervalMs) || 15_000, Number(config?.retryBaseDelayMs) || 250));
+}
+
 export class ProductionIndexerWorker {
   constructor({ indexer, store, rpc, config, ownerId = randomUUID(), logger = console, now = () => Date.now() } = {}) {
     if (!indexer || !store || !rpc || !config) throw new TypeError("ProductionIndexerWorker requires an indexer, store, RPC client, and configuration.");
@@ -30,6 +43,8 @@ export class ProductionIndexerWorker {
     this.nextOwnershipReconciliationAt = 0;
     this.lastCycle = null;
     this._wake = null;
+    this._cycleInFlight = false;
+    this._nextCycleNotBefore = 0;
   }
 
   async acquire() {
@@ -79,15 +94,32 @@ export class ProductionIndexerWorker {
 
   async cycle() {
     if (this.stopping) return { stopped: true };
-    await this.heartbeat();
-    const rebuiltBefore = await this.runRebuilds();
-    const sync = await this.indexer.syncAll();
-    const rebuiltAfter = await this.runRebuilds();
-    const finalizedBlocks = sync.map((result) => Number(result.finalizedBlock)).filter(Number.isSafeInteger);
-    const ownership = await this.runOwnershipReconciliation({ finalizedBlock: finalizedBlocks.length ? Math.min(...finalizedBlocks) : null });
-    this.lastCycle = { completedAt: new Date(this.now()).toISOString(), sync, rebuilt: [...rebuiltBefore, ...rebuiltAfter], ownershipChecks: ownership.length };
-    this.logger.info?.("indexer.worker.cycle.completed", { chainId: this.config.chainId, contracts: sync.length, rebuilt: this.lastCycle.rebuilt.length, ownershipChecks: ownership.length });
-    return this.lastCycle;
+    if (this._cycleInFlight) {
+      this.logger.warn?.("indexer.worker.cycle.skipped", { chainId: this.config.chainId, reason: "in_flight" });
+      return { skipped: true, reason: "in_flight" };
+    }
+    this._cycleInFlight = true;
+    try {
+      await this.heartbeat();
+      const rebuiltBefore = await this.runRebuilds();
+      const sync = await this.indexer.syncAll();
+      const rebuiltAfter = await this.runRebuilds();
+      const finalizedBlocks = sync.map((result) => Number(result.finalizedBlock)).filter(Number.isSafeInteger);
+      const ownership = await this.runOwnershipReconciliation({ finalizedBlock: finalizedBlocks.length ? Math.min(...finalizedBlocks) : null });
+      this.lastCycle = { completedAt: new Date(this.now()).toISOString(), sync, rebuilt: [...rebuiltBefore, ...rebuiltAfter], ownershipChecks: ownership.length };
+      this._nextCycleNotBefore = 0;
+      this.logger.info?.("indexer.worker.cycle.completed", { chainId: this.config.chainId, contracts: sync.length, rebuilt: this.lastCycle.rebuilt.length, ownershipChecks: ownership.length });
+      return this.lastCycle;
+    } catch (error) {
+      if (isRateLimitFailure(error)) {
+        const cooldownMs = rateLimitCooldownMs(error, this.config);
+        this._nextCycleNotBefore = this.now() + cooldownMs;
+        this.logger.warn?.("indexer.worker.cycle.rate_limited", { chainId: this.config.chainId, cooldownMs, retryAfterMs: error.retryAfterMs ?? null, error: error.message });
+      }
+      throw error;
+    } finally {
+      this._cycleInFlight = false;
+    }
   }
 
   async runOnce() {
@@ -96,8 +128,10 @@ export class ProductionIndexerWorker {
   }
 
   async waitForNextCycle() {
+    const rateLimitWait = Math.max(0, this._nextCycleNotBefore - this.now());
+    const delay = Math.max(this.config.pollIntervalMs, rateLimitWait);
     await new Promise((resolve) => {
-      const timer = setTimeout(() => { this._wake = null; resolve(); }, this.config.pollIntervalMs);
+      const timer = setTimeout(() => { this._wake = null; resolve(); }, delay);
       this._wake = () => { clearTimeout(timer); this._wake = null; resolve(); };
     });
   }
@@ -148,9 +182,22 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
   const resolvedPool = pool || createDatabasePool(serverConfig);
   const resolvedStore = store || createIndexerStore(resolvedPool);
   const resolvedRpc = rpc || createJsonRpcClient({ url: indexerConfig.rpcUrl, timeoutMs: indexerConfig.rpcTimeoutMs });
-  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions: { retries: indexerConfig.rpcRetries, baseDelayMs: indexerConfig.retryBaseDelayMs }, logger });
+  const retryOptions = {
+    retries: indexerConfig.rpcRetries,
+    baseDelayMs: indexerConfig.retryBaseDelayMs,
+    maxDelayMs: indexerConfig.retryMaxDelayMs ?? 30_000,
+  };
+  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions, logger });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, logger });
   indexer.onProgress = () => worker.heartbeat();
+  // Keep the DB lease alive across long 429 / 5xx backoffs so the worker is not stolen mid-retry.
+  indexer.retryOptions = {
+    ...indexer.retryOptions,
+    onRetry: ({ attempt, delay, error }) => {
+      logger.warn?.("indexer.rpc.retry", { chainId: indexerConfig.chainId, attempt, delay, status: error?.status ?? null, error: error?.message });
+      return worker.heartbeat();
+    },
+  };
   return { worker, pool: resolvedPool };
 }
 
