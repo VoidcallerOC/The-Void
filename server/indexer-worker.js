@@ -144,7 +144,7 @@ export class ProductionIndexerWorker {
   }
 }
 
-export function createProductionIndexerWorker({ serverConfig = loadServerConfig(), indexerConfig = loadIndexerConfig(), pool = null, rpc = null, store = null, logger = console } = {}) {
+export function createProductionIndexerWorker({ serverConfig = loadServerConfig(process.env, { requireWalletAuth: false }), indexerConfig = loadIndexerConfig(), pool = null, rpc = null, store = null, logger = console } = {}) {
   const resolvedPool = pool || createDatabasePool(serverConfig);
   const resolvedStore = store || createIndexerStore(resolvedPool);
   const resolvedRpc = rpc || createJsonRpcClient({ url: indexerConfig.rpcUrl, timeoutMs: indexerConfig.rpcTimeoutMs });

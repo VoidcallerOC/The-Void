@@ -15,7 +15,13 @@ function services(text) {
     const name = block.match(/name: (\S+)/)[1];
     const env = {};
     for (const match of block.matchAll(/- key: (\S+)\n\s+(value|sync): ("?)([^\n"]*)\3/g)) env[match[1]] = match[2] === "sync" ? null : match[4];
-    return { name, region: block.match(/region: (\S+)/)?.[1], autoDeploy: block.match(/autoDeployTrigger: "?(\w+)"?/)?.[1], env };
+    return {
+      name,
+      region: block.match(/region: (\S+)/)?.[1],
+      autoDeploy: block.match(/autoDeployTrigger: "?(\w+)"?/)?.[1],
+      dockerCommand: block.match(/dockerCommand: (.+)/)?.[1]?.trim(),
+      env,
+    };
   });
 }
 
@@ -70,6 +76,14 @@ describe("mainnet runtime configuration", () => {
     expect(loadServerConfig(apiEnv)).toMatchObject({ appEnvironment: "production", authAllowedChainIds: [43114] });
     const contracts = JSON.stringify([{ address: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5", contractType: "MARKETPLACE", startBlock: 1, platformFeeBps: 250 }]);
     expect(loadIndexerConfig({ ...indexer.env, INDEXER_CONTRACTS_JSON: contracts })).toMatchObject({ chainId: 43114 });
+    // Worker blueprint has no PUBLIC_APP_URL / AUTH_*; indexer/migrate must still load DB config.
+    expect(indexer.dockerCommand).toBe("npm run start:indexer");
+    expect(indexer.env.PUBLIC_APP_URL).toBeUndefined();
+    expect(loadServerConfig({ ...indexer.env, DATABASE_URL: "postgres://user:pass@db.example:5432/postgres" }, { requireWalletAuth: false })).toMatchObject({
+      appEnvironment: "production",
+      authAllowedChainIds: [43114],
+    });
+    expect(() => loadServerConfig({ ...indexer.env, DATABASE_URL: "postgres://user:pass@db.example:5432/postgres" })).toThrow(/HTTPS PUBLIC_APP_URL/);
   });
 
   it("serves the mainnet web build from its own Vercel project with only the API host changed", () => {

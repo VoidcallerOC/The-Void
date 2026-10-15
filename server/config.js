@@ -175,19 +175,28 @@ export function withManifestReleaseDeployments(contracts, { chainId, deployments
   return added.length ? Object.freeze([...contracts, ...added]) : contracts;
 }
 
-export function loadServerConfig(env = process.env, { allowMissingDatabase = false } = {}) {
+// requireWalletAuth (default true): API processes that issue SIWE challenges must supply
+// HTTPS PUBLIC_APP_URL / AUTH_* aligned to RELEASE_NETWORK. Indexer workers and migrate only
+// need the database pool fields; they pass requireWalletAuth: false so a missing PUBLIC_APP_URL
+// does not fail closed on the http://localhost:5173 development default.
+export function loadServerConfig(env = process.env, { allowMissingDatabase = false, requireWalletAuth = true } = {}) {
   const databaseUrl = String(env.DATABASE_URL || env.POSTGRES_URL || "").trim();
   if (!databaseUrl && !allowMissingDatabase) throw new ConfigurationError("DATABASE_URL is required for the persistence layer.");
   const appEnvironment = String(env.NODE_ENV || "development").trim().toLowerCase();
   const publicApp = normalizedUrl(env.PUBLIC_APP_URL || "http://localhost:5173", "PUBLIC_APP_URL");
   const authUri = normalizedUrl(env.AUTH_URI || publicApp.toString(), "AUTH_URI");
-  if (authUri.origin !== publicApp.origin) throw new ConfigurationError("AUTH_URI must share the PUBLIC_APP_URL origin.");
   const authDomain = String(env.AUTH_DOMAIN || publicApp.host).trim().toLowerCase();
-  if (authDomain !== publicApp.host.toLowerCase()) throw new ConfigurationError("AUTH_DOMAIN must match the PUBLIC_APP_URL host.");
   const releaseChainId = productionChainId(env);
   const authAllowedChainIds = allowedChainIds(env.AUTH_ALLOWED_CHAIN_IDS, String(releaseChainId));
-  if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:" || authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== releaseChainId)) {
-    throw new ConfigurationError(`Production wallet authentication requires HTTPS and ${chainLabel(releaseChainId)} only.`);
+  if (requireWalletAuth) {
+    if (authUri.origin !== publicApp.origin) throw new ConfigurationError("AUTH_URI must share the PUBLIC_APP_URL origin.");
+    if (authDomain !== publicApp.host.toLowerCase()) throw new ConfigurationError("AUTH_DOMAIN must match the PUBLIC_APP_URL host.");
+    if (appEnvironment === "production" && (publicApp.protocol !== "https:" || authUri.protocol !== "https:")) {
+      throw new ConfigurationError(`Production wallet authentication requires HTTPS PUBLIC_APP_URL and AUTH_URI (got ${publicApp.protocol}//${publicApp.host}).`);
+    }
+    if (appEnvironment === "production" && (authAllowedChainIds.length !== 1 || authAllowedChainIds[0] !== releaseChainId)) {
+      throw new ConfigurationError(`Production wallet authentication requires HTTPS and ${chainLabel(releaseChainId)} only.`);
+    }
   }
   // MAINNET_RPC_URL is optional and read ONLY for live Avalanche C-Chain (43114)
   // reads against the original Voidcaller collection (legacy balanceOf and
