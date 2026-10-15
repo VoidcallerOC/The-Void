@@ -26,7 +26,7 @@ export function migrationBody(sql, name = "migration") {
   return body;
 }
 
-export async function migrate({ pool = null, config = loadServerConfig(), directory = migrationsDirectory } = {}) {
+export async function migrate({ pool = null, config = loadServerConfig(process.env, { requireWalletAuth: false }), directory = migrationsDirectory } = {}) {
   const ownPool = pool || createDatabasePool(config);
   const client = await ownPool.connect();
   try {
