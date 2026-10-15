@@ -21,11 +21,21 @@ function isRateLimitFailure(error) {
   return /RPC HTTP 429/i.test(String(error.message || ""));
 }
 
-function rateLimitCooldownMs(error, config) {
-  const retryAfterMs = Number(error?.retryAfterMs);
-  const maxDelay = Math.max(1, Number(config?.retryMaxDelayMs) || 30_000);
-  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return Math.min(maxDelay, retryAfterMs);
-  return Math.min(maxDelay, Math.max(Number(config?.pollIntervalMs) || 15_000, Number(config?.retryBaseDelayMs) || 250));
+export function rateLimitCooldownMs(error, config) {
+  const maxDelay = Math.max(1, Number(config?.retryMaxDelayMs) || 60_000);
+  const configuredFloor = Math.max(
+    Number(config?.rpcRateLimitCooldownMs) || 45_000,
+    Number(config?.pollIntervalMs) || 15_000,
+    Number(config?.retryBaseDelayMs) || 250,
+  );
+  // Only honor Retry-After when the transport actually attached a finite value.
+  // Number(null) === 0 would incorrectly collapse the cooldown to zero.
+  const rawRetryAfter = error?.retryAfterMs;
+  const retryAfterMs = rawRetryAfter == null || rawRetryAfter === "" ? NaN : Number(rawRetryAfter);
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    return Math.min(maxDelay, Math.max(configuredFloor, retryAfterMs));
+  }
+  return Math.min(maxDelay, configuredFloor);
 }
 
 export class ProductionIndexerWorker {
@@ -181,11 +191,19 @@ export class ProductionIndexerWorker {
 export function createProductionIndexerWorker({ serverConfig = loadServerConfig(process.env, { requireWalletAuth: false }), indexerConfig = loadIndexerConfig(), pool = null, rpc = null, store = null, logger = console } = {}) {
   const resolvedPool = pool || createDatabasePool(serverConfig);
   const resolvedStore = store || createIndexerStore(resolvedPool);
-  const resolvedRpc = rpc || createJsonRpcClient({ url: indexerConfig.rpcUrl, timeoutMs: indexerConfig.rpcTimeoutMs });
+  const resolvedRpc = rpc || createJsonRpcClient({
+    url: indexerConfig.rpcUrl,
+    timeoutMs: indexerConfig.rpcTimeoutMs,
+    minIntervalMs: indexerConfig.rpcMinIntervalMs ?? 1_500,
+    rateLimitCooldownMs: indexerConfig.rpcRateLimitCooldownMs ?? 45_000,
+    maxDelayMs: indexerConfig.retryMaxDelayMs ?? 60_000,
+  });
   const retryOptions = {
     retries: indexerConfig.rpcRetries,
     baseDelayMs: indexerConfig.retryBaseDelayMs,
-    maxDelayMs: indexerConfig.retryMaxDelayMs ?? 30_000,
+    maxDelayMs: indexerConfig.retryMaxDelayMs ?? 60_000,
+    // RPC pacer owns 429 cooldowns; avoid stacking another full Retry-After sleep here.
+    deferRateLimitDelay: true,
   };
   const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions, logger });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, logger });
@@ -194,7 +212,15 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
   indexer.retryOptions = {
     ...indexer.retryOptions,
     onRetry: ({ attempt, delay, error }) => {
-      logger.warn?.("indexer.rpc.retry", { chainId: indexerConfig.chainId, attempt, delay, status: error?.status ?? null, error: error?.message });
+      logger.warn?.(JSON.stringify({
+        event: "indexer.rpc.retry",
+        chainId: indexerConfig.chainId,
+        attempt,
+        delay,
+        status: error?.status ?? null,
+        retryAfterMs: error?.retryAfterMs ?? null,
+        error: error?.message,
+      }));
       return worker.heartbeat();
     },
   };

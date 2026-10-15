@@ -41,39 +41,159 @@ function markRetryable(error, { retryable = true } = {}) {
   return error;
 }
 
-export function createJsonRpcClient({ url, fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+/**
+ * Serializes RPC work and spaces requests so free public endpoints are not
+ * re-tripped immediately after a successful call or Retry-After wait.
+ */
+export function createRpcRequestPacer({
+  minIntervalMs = 1_500,
+  rateLimitCooldownMs = 45_000,
+  maxDelayMs = 60_000,
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  random = Math.random,
+} = {}) {
+  const safeMin = Math.max(0, Number(minIntervalMs) || 0);
+  const safeCooldown = Math.max(0, Number(rateLimitCooldownMs) || 0);
+  const safeMax = Math.max(safeCooldown, Number(maxDelayMs) || 0);
+  let tail = Promise.resolve();
+  let nextAllowedAt = 0;
+
+  function bump(delayMs) {
+    const wait = Math.max(0, Math.min(safeMax, Number(delayMs) || 0));
+    nextAllowedAt = Math.max(nextAllowedAt, now() + wait);
+  }
+
+  function noteSuccess() {
+    // Full jitter on the success path so catch-up traffic is not periodic.
+    const jittered = Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * (safeMin + 1));
+    bump(Math.max(safeMin, jittered));
+  }
+
+  function noteRateLimit(retryAfterMs = null) {
+    const raw = retryAfterMs == null || retryAfterMs === "" ? NaN : Number(retryAfterMs);
+    const fromHeader = Number.isFinite(raw) && raw >= 0 ? raw : NaN;
+    const delay = Number.isFinite(fromHeader) ? Math.max(safeCooldown, fromHeader) : safeCooldown;
+    bump(delay);
+  }
+
+  function schedule(operation) {
+    const run = tail.then(async () => {
+      const wait = Math.max(0, nextAllowedAt - now());
+      if (wait > 0) await sleep(wait);
+      try {
+        const result = await operation();
+        noteSuccess();
+        return result;
+      } catch (error) {
+        if (error?.status === 429 || /RPC HTTP 429/i.test(String(error?.message || ""))) {
+          noteRateLimit(error?.retryAfterMs);
+        }
+        throw error;
+      }
+    });
+    // Keep the queue alive after failures so later calls still serialize.
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  return {
+    schedule,
+    noteSuccess,
+    noteRateLimit,
+    getNextAllowedAt: () => nextAllowedAt,
+  };
+}
+
+export function createJsonRpcClient({
+  url,
+  fetchImpl = fetch,
+  timeoutMs = 15000,
+  minIntervalMs = 1_500,
+  rateLimitCooldownMs = 45_000,
+  maxDelayMs = 60_000,
+  pacer = null,
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  random = Math.random,
+} = {}) {
   if (!url) throw new TypeError("RPC URL is required.");
   let requestId = 0;
+  const resolvedPacer = pacer || createRpcRequestPacer({
+    minIntervalMs,
+    rateLimitCooldownMs,
+    maxDelayMs,
+    now,
+    sleep,
+    random,
+  });
+
   async function call(method, params) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      let response;
+    return resolvedPacer.schedule(async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        response = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method, params }), signal: controller.signal });
-      } catch (error) {
-        if (error?.name === "AbortError") throw markRetryable(error);
-        const wrapped = markRetryable(new Error(error?.message || "RPC network error"));
-        wrapped.name = "RpcNetworkError";
-        wrapped.cause = error;
-        throw wrapped;
+        let response;
+        try {
+          response = await fetchImpl(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method, params }),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (error?.name === "AbortError") throw markRetryable(error);
+          const wrapped = markRetryable(new Error(error?.message || "RPC network error"));
+          wrapped.name = "RpcNetworkError";
+          wrapped.cause = error;
+          throw wrapped;
+        }
+        if (!response.ok) {
+          throw new RpcHttpError(response.status, {
+            retryAfterMs: parseRetryAfterMs(headerValue(response.headers, "retry-after")),
+          });
+        }
+        const body = await response.json();
+        if (body.error) throw markRetryable(new Error(body.error.message || `RPC ${method} failed`), { retryable: true });
+        return body.result;
+      } finally {
+        clearTimeout(timer);
       }
-      if (!response.ok) {
-        throw new RpcHttpError(response.status, {
-          retryAfterMs: parseRetryAfterMs(headerValue(response.headers, "retry-after")),
-        });
-      }
-      const body = await response.json();
-      if (body.error) throw markRetryable(new Error(body.error.message || `RPC ${method} failed`), { retryable: true });
-      return body.result;
-    } finally { clearTimeout(timer); }
+    });
   }
+
   return {
+    pacer: resolvedPacer,
     async getBlockNumber() { return Number(BigInt(await call("eth_blockNumber", []))); },
-    async getLogs({ address, fromBlock, toBlock, topics = undefined }) { return (await call("eth_getLogs", [{ address, fromBlock: hex(fromBlock), toBlock: hex(toBlock), ...(topics ? { topics } : {}) }])).map((log) => ({ ...log, blockNumber: Number(BigInt(log.blockNumber)), logIndex: Number(BigInt(log.logIndex)) })); },
-    async getBlock(_chainId, blockNumber) { const block = await call("eth_getBlockByNumber", [hex(blockNumber), false]); if (!block) throw new Error(`Block ${blockNumber} was not found.`); return { number: Number(BigInt(block.number)), hash: block.hash, parentHash: block.parentHash, timestamp: Number(BigInt(block.timestamp)) }; },
+    async getLogs({ address, fromBlock, toBlock, topics = undefined }) {
+      return (await call("eth_getLogs", [{
+        address,
+        fromBlock: hex(fromBlock),
+        toBlock: hex(toBlock),
+        ...(topics ? { topics } : {}),
+      }])).map((log) => ({
+        ...log,
+        blockNumber: Number(BigInt(log.blockNumber)),
+        logIndex: Number(BigInt(log.logIndex)),
+      }));
+    },
+    async getBlock(_chainId, blockNumber) {
+      const block = await call("eth_getBlockByNumber", [hex(blockNumber), false]);
+      if (!block) throw new Error(`Block ${blockNumber} was not found.`);
+      return {
+        number: Number(BigInt(block.number)),
+        hash: block.hash,
+        parentHash: block.parentHash,
+        timestamp: Number(BigInt(block.timestamp)),
+      };
+    },
     async getTransactionReceipt({ transactionHash }) { return call("eth_getTransactionReceipt", [transactionHash]); },
-    async getMarketplaceListing({ marketplaceAddress, listingId, blockTag = "finalized" }) { return call("eth_call", [{ to: marketplaceAddress, data: marketplaceInterface.encodeFunctionData("getListing", [listingId]) }, blockTag]); },
-    async getBalanceOf({ address, contractAddress, tokenId, blockTag = "latest" }) { const data = `0x00fdd58e${address.slice(2).padStart(64, "0")}${BigInt(tokenId).toString(16).padStart(64, "0")}`; return BigInt(await call("eth_call", [{ to: contractAddress, data }, blockTag])); },
+    async getMarketplaceListing({ marketplaceAddress, listingId, blockTag = "finalized" }) {
+      return call("eth_call", [{ to: marketplaceAddress, data: marketplaceInterface.encodeFunctionData("getListing", [listingId]) }, blockTag]);
+    },
+    async getBalanceOf({ address, contractAddress, tokenId, blockTag = "latest" }) {
+      const data = `0x00fdd58e${address.slice(2).padStart(64, "0")}${BigInt(tokenId).toString(16).padStart(64, "0")}`;
+      return BigInt(await call("eth_call", [{ to: contractAddress, data }, blockTag]));
+    },
   };
 }

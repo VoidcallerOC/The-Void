@@ -239,9 +239,16 @@ export class BlockchainIndexer {
     if (!this.marketplacesRegistered) await this.registerConfiguredMarketplaces();
     if (!this.collectionsLoaded) await this.loadRegisteredCollections();
     if (!this.releasesLoaded) await this.loadRegisteredReleases();
+    // One tip read per cycle — avoids duplicate eth_blockNumber storms across contracts.
+    const tipChainId = Number(this.configs[0]?.chainId);
+    const sharedLatest = Number(await retry(() => this.rpc.getBlockNumber(tipChainId), this.retryOptions));
     const results = [];
-    for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY" || item.contractType === "RELEASE_FACTORY")) results.push(await this.syncContract(config));
-    for (const config of this.configs.filter((item) => item.contractType !== "COLLECTION_FACTORY" && item.contractType !== "RELEASE_FACTORY")) results.push(await this.syncContract(config));
+    for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY" || item.contractType === "RELEASE_FACTORY")) {
+      results.push(await this.syncContract(config, { latest: sharedLatest }));
+    }
+    for (const config of this.configs.filter((item) => item.contractType !== "COLLECTION_FACTORY" && item.contractType !== "RELEASE_FACTORY")) {
+      results.push(await this.syncContract(config, { latest: sharedLatest }));
+    }
     return results;
   }
 
@@ -317,13 +324,17 @@ export class BlockchainIndexer {
     }
   }
 
-  async syncContract(config) {
+  async syncContract(config, { latest: providedLatest = null } = {}) {
     const chainId = Number(config.chainId);
     const address = String(config.address).toLowerCase();
     const checkpoint = await this.store.getCheckpoint({ chainId, address });
     let operation;
     let latest;
-    try { latest = Number(await retry(() => this.rpc.getBlockNumber(chainId), this.retryOptions)); } catch (error) {
+    try {
+      latest = providedLatest == null
+        ? Number(await retry(() => this.rpc.getBlockNumber(chainId), this.retryOptions))
+        : Number(providedLatest);
+    } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint, error, rpcFailure: true });
       throw error;
     }

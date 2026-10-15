@@ -289,6 +289,58 @@ describe("durable index synchronization", () => {
     expect((await store.getCheckpoint({ chainId: 43114, address })).status).toBe("FAILED");
   });
 
+  it("reads eth_blockNumber once per syncAll cycle across multiple contracts", async () => {
+    const factory = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const market = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const store = storeDouble();
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(20),
+      getLogs: vi.fn().mockResolvedValue([]),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
+    };
+    const indexer = new BlockchainIndexer({
+      rpc,
+      store,
+      confirmations: 0,
+      chunkSize: 100,
+      configs: [
+        { chainId: 43114, address: factory, contractType: "RELEASE_FACTORY", startBlock: 10, eventTopics: {} },
+        { chainId: 43114, address: market, contractType: "MARKETPLACE", startBlock: 10, eventTopics: {} },
+      ],
+    });
+    await indexer.syncAll();
+    expect(rpc.getBlockNumber).toHaveBeenCalledTimes(1);
+    expect((await store.getCheckpoint({ chainId: 43114, address: factory })).nextBlock).toBe(21);
+    expect((await store.getCheckpoint({ chainId: 43114, address: market })).nextBlock).toBe(21);
+  });
+
+  it("recovers and advances the checkpoint after a transient 429 on getLogs", async () => {
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const store = storeDouble();
+    const rateLimit = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryable: true, retryAfterMs: 1_000 });
+    let logsCalls = 0;
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(15),
+      getLogs: vi.fn(async () => {
+        logsCalls += 1;
+        if (logsCalls === 1) throw rateLimit;
+        return [];
+      }),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
+    };
+    const indexer = new BlockchainIndexer({
+      rpc,
+      store,
+      confirmations: 0,
+      retryOptions: { retries: 2, baseDelayMs: 1, maxDelayMs: 5, sleep: async () => {}, random: () => 0, deferRateLimitDelay: true },
+      configs: [{ chainId: 43114, address, contractType: "ERC1155", startBlock: 10, eventTopics: { TransferSingle: singleTopic } }],
+    });
+    await indexer.syncAll();
+    expect(logsCalls).toBe(1 + 1);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).nextBlock).toBe(16);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).status).toBe("IDLE");
+  });
+
   it("marks a changed block hash as a reorganization", async () => {
     const store = storeDouble({ blocks: new Map([["43114:2", { block_hash: "0xold" }]]) });
     const rpc = { getBlockNumber: vi.fn().mockResolvedValue(2), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => Promise.resolve(block(number, number === 2 ? "0xnew" : undefined))) };

@@ -35,6 +35,10 @@ function isRateLimitError(error) {
  * Respects Retry-After when present (capped by maxDelayMs).
  * Rate limits without Retry-After use a higher exponential floor so short
  * defaults (250ms base) do not storm the public Avalanche RPC.
+ *
+ * When `deferRateLimitDelay` is true (production path with an RPC pacer),
+ * 429 waits are owned by the pacer so retry sleep stays tiny and does not
+ * stack another full Retry-After on top of the gate.
  */
 export function computeRetryDelayMs({
   attempt = 0,
@@ -42,10 +46,14 @@ export function computeRetryDelayMs({
   maxDelayMs = 30_000,
   error = null,
   random = Math.random,
+  deferRateLimitDelay = false,
 } = {}) {
   const safeBase = Math.max(0, Number(baseDelayMs) || 0);
   const safeMax = Math.max(0, Number(maxDelayMs) || 0);
   const rateLimited = isRateLimitError(error);
+  if (rateLimited && deferRateLimitDelay) {
+    return Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * 250);
+  }
   const effectiveBase = rateLimited ? Math.max(safeBase, 1_000) : safeBase;
   const expAttempt = rateLimited ? attempt + 2 : attempt;
   const exponential = Math.min(safeMax, effectiveBase * (2 ** expAttempt));
@@ -69,13 +77,21 @@ export function retry(operation, {
   onRetry = () => {},
   random = Math.random,
   shouldRetry = isRetryableRpcError,
+  deferRateLimitDelay = false,
 } = {}) {
   return (async () => {
     let attempt = 0;
     while (true) {
       try { return await operation(); } catch (error) {
         if (attempt >= retries || !shouldRetry(error)) throw error;
-        const delay = computeRetryDelayMs({ attempt, baseDelayMs, maxDelayMs, error, random });
+        const delay = computeRetryDelayMs({
+          attempt,
+          baseDelayMs,
+          maxDelayMs,
+          error,
+          random,
+          deferRateLimitDelay,
+        });
         attempt += 1;
         await onRetry({ attempt, delay, error });
         if (delay > 0) await sleep(delay);
