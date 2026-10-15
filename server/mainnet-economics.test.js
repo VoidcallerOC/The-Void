@@ -20,7 +20,7 @@ describe("mainnet economics", () => {
   const policy = releaseRoyaltyPolicyForChain(43114);
 
   it("records one platform fee recipient for both fees and a 2.5% artist royalty, on mainnet only", () => {
-    expect(mainnet).toMatchObject({ platformRecipient: NANO, marketplaceFeeRecipient: NANO, primaryFeeBps: 250, marketplaceFeeBps: 250, artistRoyaltyBps: 250, deployed: false });
+    expect(mainnet).toMatchObject({ platformRecipient: NANO, marketplaceFeeRecipient: NANO, primaryFeeBps: 250, marketplaceFeeBps: 250, artistRoyaltyBps: 250, deployed: true });
     expect(policy).toEqual({ chainId: 43114, royaltyBps: 250, forbiddenReceivers: [NANO.toLowerCase()] });
     expect(releaseRoyaltyPolicyForChain(43113)).toBeNull();
     expect(releaseRoyaltyPolicy(releasePerContractManifestFor("fuji"))).toBeNull();
