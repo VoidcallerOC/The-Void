@@ -211,20 +211,34 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     const p = provider || providerRef.current || window.ethereum;
     if (!p) return { error: "No wallet detected. Install MetaMask or Core." };
     try {
+      // Switch/add the release network BEFORE eth_requestAccounts. Rabby's
+      // "Connect to DApp" modal shows the wallet's current chain at account
+      // request time — if we only ensure after accounts, Ethereum is what the
+      // owner sees even when #202 is live.
+      try {
+        const preparedChainId = await ensureReleaseChain(p);
+        setChainId(preparedChainId);
+      } catch (preChainError) {
+        if (preChainError?.code === "CHAIN_SWITCH_REJECTED" || preChainError?.code === "CHAIN_ADD_REJECTED") {
+          const message = preChainError.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`;
+          setAuthenticationError(message);
+          return { error: message, code: preChainError.code };
+        }
+        // Some wallets require an account permission before chain RPCs succeed.
+        // Continue to eth_requestAccounts, then re-ensure below — never auth on
+        // a failed/unknown chain.
+      }
+
       const accts = await p.request({ method: "eth_requestAccounts" });
       if (!accts || !accts.length) return { error: "No accounts returned." };
       setAccount(accts[0]);
       wireProvider(p);
-      // Ask the wallet for the build-selected Avalanche network (C-Chain mainnet
-      // or Fuji) before auth. Without this, Rabby stays on Ethereum and only
-      // eth_requestAccounts runs — which is why Connect showed chain 1.
+
       let selectedChainId;
       try {
         selectedChainId = await ensureReleaseChain(p);
         setChainId(selectedChainId);
       } catch (chainError) {
-        // Still surface the connected account + whatever chain the wallet is on,
-        // but do not authenticate or continue mainnet-only work on the wrong chain.
         try {
           const cid = await p.request({ method: "eth_chainId" });
           setChainId(parseInt(cid, 16));
