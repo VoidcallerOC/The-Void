@@ -1,5 +1,6 @@
 import { Interface } from "ethers";
-import { isValidAddress, switchChain, waitForReceipt } from "./web3.js";
+import { isValidAddress, waitForReceipt } from "./web3.js";
+import { ensureWalletOnChain } from "./release-chain.js";
 import { releaseDeploymentForFactory, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
@@ -62,8 +63,6 @@ export function encodeApprovalCheck(owner, marketplace) { return SELECTORS.appro
 export function requiredPayment(listing, quantity = listing?.amount) { if (!listing || !/^[0-9]+$/.test(String(listing.price)) || !Number.isInteger(Number(quantity)) || Number(quantity) <= 0) return null; return (BigInt(listing.price) * BigInt(quantity)).toString(); }
 
 export async function fetchListings({ signal, filters = {} } = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== null && value !== "")); const response = await fetch(`${MARKETPLACE_CONFIG.apiBaseUrl}/listings?${query}`, { signal }); if (!response.ok) throw new Error("Marketplace listings could not be loaded."); const payload = await response.json(); return payload.data || []; }
-export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) { if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] }); return waitForReceipt(provider, txHash); }
-export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) { const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 }); if (error) throw new Error(error); if (chainId !== chain.id) await switchChain(provider, chain.key); const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] }); return waitForReceipt(provider, txHash); }
 export function listingIdFromReceipt(receipt) { const log = receipt?.logs?.find((item) => item.topics?.[0]?.toLowerCase() === LISTING_CREATED_TOPIC); return log?.topics?.[1] ? BigInt(log.topics[1]).toString() : null; }
 function assertSuccessfulMarketplaceReceipt(receipt, marketplace, sender) {
   if (!receipt || BigInt(receipt.status ?? 0) !== 1n) throw Object.assign(new Error("Marketplace transaction did not succeed on chain."), { code: "MARKETPLACE_TX_REVERTED" });
@@ -125,7 +124,48 @@ async function assertWalletChain(provider, expectedChainId) {
   try { actual = Number(BigInt(await provider.request({ method: "eth_chainId" }))); } catch { actual = null; }
   if (actual !== Number(expectedChainId)) throw Object.assign(new Error(`Switch your wallet to chain ${expectedChainId} before purchasing.`), { code: "WRONG_CHAIN" });
 }
-export async function submitPurchase({ provider, buyer, marketplace, listing, quantity = listing.amount, chain, chainId, onState = () => {}, canonical = MARKETPLACE_CONFIG }) { assertCanonicalMarketplaceTarget({ marketplace, chainId: chain?.id, config: canonical }); const validationError = validatePurchase({ listing, buyer, quantity }); if (validationError) throw Object.assign(new Error(validationError), { code: listing?.expiresAt && Math.floor(Date.now() / 1000) > listing.expiresAt ? "EXPIRED" : "INVALID_LISTING" }); if (chainId !== chain.id) await switchChain(provider, chain.key); await assertWalletChain(provider, chain.id); const payment = requiredPayment(listing, quantity); onState(PURCHASE_STATE.WALLET_CONFIRMATION); let txHash; try { txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: buyer, to: marketplace, data: encodeBuy(listing.listingId, quantity), value: `0x${BigInt(payment).toString(16)}` }] }); } catch (error) { onState(error?.code === 4001 ? PURCHASE_STATE.REJECTED : PURCHASE_STATE.FAILED); throw error; } onState(PURCHASE_STATE.SUBMITTED); onState(PURCHASE_STATE.PENDING); const receipt = await waitForReceipt(provider, txHash); const settlement = verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity }); onState(PURCHASE_STATE.OBSERVED); return { txHash, receipt, settlement, quantity, payment }; }
+async function ensureMarketplaceChain(provider, chain) {
+  const targetId = Number(chain?.id ?? chain?.chainId);
+  await ensureWalletOnChain(provider, chain);
+  await assertWalletChain(provider, targetId);
+}
+export async function submitApproval({ provider, owner, tokenContract, marketplace, chain, chainId }) {
+  void chainId;
+  await ensureMarketplaceChain(provider, chain);
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] });
+  return waitForReceipt(provider, txHash);
+}
+export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) {
+  const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 });
+  if (error) throw new Error(error);
+  void chainId;
+  await ensureMarketplaceChain(provider, chain);
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] });
+  return waitForReceipt(provider, txHash);
+}
+export async function submitPurchase({ provider, buyer, marketplace, listing, quantity = listing.amount, chain, chainId, onState = () => {}, canonical = MARKETPLACE_CONFIG }) {
+  const targetChainId = Number(chain?.id ?? chain?.chainId);
+  assertCanonicalMarketplaceTarget({ marketplace, chainId: targetChainId, config: canonical });
+  const validationError = validatePurchase({ listing, buyer, quantity });
+  if (validationError) throw Object.assign(new Error(validationError), { code: listing?.expiresAt && Math.floor(Date.now() / 1000) > listing.expiresAt ? "EXPIRED" : "INVALID_LISTING" });
+  void chainId;
+  await ensureMarketplaceChain(provider, chain);
+  const payment = requiredPayment(listing, quantity);
+  onState(PURCHASE_STATE.WALLET_CONFIRMATION);
+  let txHash;
+  try {
+    txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: buyer, to: marketplace, data: encodeBuy(listing.listingId, quantity), value: `0x${BigInt(payment).toString(16)}` }] });
+  } catch (error) {
+    onState(error?.code === 4001 ? PURCHASE_STATE.REJECTED : PURCHASE_STATE.FAILED);
+    throw error;
+  }
+  onState(PURCHASE_STATE.SUBMITTED);
+  onState(PURCHASE_STATE.PENDING);
+  const receipt = await waitForReceipt(provider, txHash);
+  const settlement = verifyPurchaseReceipt(receipt, { listing, buyer, marketplace, quantity });
+  onState(PURCHASE_STATE.OBSERVED);
+  return { txHash, receipt, settlement, quantity, payment };
+}
 
 export function transitionListing(listing, nextStatus) { if (!listing || !Object.values(LISTING_STATUS).includes(nextStatus)) throw new Error("Invalid listing state."); const allowed = { ACTIVE: ["SOLD", "CANCELLED", "EXPIRED", "REORGED"], SOLD: [], CANCELLED: [], EXPIRED: [], REORGED: [] }; if (!allowed[listing.status].includes(nextStatus)) throw new Error(`Cannot transition ${listing.status} to ${nextStatus}.`); return { ...listing, status: nextStatus }; }
 const TERMINAL_TRANSACTION_STATES = new Set([TRANSACTION_STATE.FAILED, TRANSACTION_STATE.REVERTED, TRANSACTION_STATE.REPLACED, TRANSACTION_STATE.STALE, TRANSACTION_STATE.RECONCILIATION_REQUIRED, TRANSACTION_STATE.FINALIZED]);

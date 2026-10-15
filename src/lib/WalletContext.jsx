@@ -3,6 +3,7 @@ import { CHAINS, checkOwnership, checkCollectionOwnership, checkOwnershipRecords
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 import { authenticateWallet, authorizationHeaders } from "./wallet-auth.js";
+import { ensureReleaseChain } from "./release-chain.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
@@ -136,21 +137,25 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     setAuthenticating(false);
   }, []);
 
-  const authenticate = useCallback(async ({ targetProvider = providerRef.current, wallet = account, selectedChainId = chainId } = {}) => {
-    if (!targetProvider || !wallet || !Number.isInteger(selectedChainId)) {
+  const authenticate = useCallback(async ({ targetProvider = providerRef.current, wallet = account } = {}) => {
+    if (!targetProvider || !wallet) {
       const error = "Connect a wallet and select an Avalanche network first.";
       setAuthenticationError(error);
       return { error, code: "AUTH_WALLET_REQUIRED" };
     }
-    if (selectedChainId !== AUTH_CHAIN_ID) {
-      const error = `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) before signing in.`;
-      setAuthenticationError(error);
-      return { error, code: "AUTH_CHAIN_UNSUPPORTED" };
-    }
     setAuthenticating(true);
     setAuthenticationError(null);
     try {
-      const session = await authenticateWallet({ provider: targetProvider, wallet, chainId: selectedChainId });
+      // Re-request / verify the release chain before any auth signature so a
+      // wallet left on Ethereum (or Fuji during a mainnet build) cannot sign.
+      const verifiedChainId = await ensureReleaseChain(targetProvider);
+      setChainId(verifiedChainId);
+      if (verifiedChainId !== AUTH_CHAIN_ID) {
+        const error = `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) before signing in.`;
+        setAuthenticationError(error);
+        return { error, code: "AUTH_CHAIN_UNSUPPORTED" };
+      }
+      const session = await authenticateWallet({ provider: targetProvider, wallet, chainId: verifiedChainId });
       setAuthSession(session);
       VC_AUDIO.setMediaAuthorization({ wallet, authHeaders: authorizationHeaders(session) });
       return { ok: true, session };
@@ -162,7 +167,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     } finally {
       setAuthenticating(false);
     }
-  }, [account, chainId]);
+  }, [account]);
 
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
@@ -208,12 +213,27 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     try {
       const accts = await p.request({ method: "eth_requestAccounts" });
       if (!accts || !accts.length) return { error: "No accounts returned." };
-      const cid = await p.request({ method: "eth_chainId" });
       setAccount(accts[0]);
-      const selectedChainId = parseInt(cid, 16);
-      setChainId(selectedChainId);
       wireProvider(p);
-      return authenticate({ targetProvider: p, wallet: accts[0], selectedChainId });
+      // Ask the wallet for the build-selected Avalanche network (C-Chain mainnet
+      // or Fuji) before auth. Without this, Rabby stays on Ethereum and only
+      // eth_requestAccounts runs — which is why Connect showed chain 1.
+      let selectedChainId;
+      try {
+        selectedChainId = await ensureReleaseChain(p);
+        setChainId(selectedChainId);
+      } catch (chainError) {
+        // Still surface the connected account + whatever chain the wallet is on,
+        // but do not authenticate or continue mainnet-only work on the wrong chain.
+        try {
+          const cid = await p.request({ method: "eth_chainId" });
+          setChainId(parseInt(cid, 16));
+        } catch { /* ignore */ }
+        const message = chainError?.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`;
+        setAuthenticationError(message);
+        return { error: message, code: chainError?.code || "CHAIN_SWITCH_FAILED" };
+      }
+      return authenticate({ targetProvider: p, wallet: accts[0] });
     } catch (error) {
       const message = error?.code === 4001 ? "Wallet connection was rejected." : (error?.message || "Wallet connection failed.");
       setAuthenticationError(message);
