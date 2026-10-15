@@ -57,19 +57,35 @@ export async function checkCollectionOwnership(account, { chains = CHAINS, token
   return owned;
 }
 export const checkOwnership = (account, options = {}) => checkCollectionOwnership(account, { chains: CHAINS, tokenIds: RELIC_TOKEN_IDS, ...options });
-export async function checkCollectionOwnershipRecords(account, { chains = CHAINS, tokenIds = RELIC_TOKEN_IDS, contracts = null, rpc = rpcCall } = {}) {
+export async function checkCollectionOwnershipRecords(account, { chains = CHAINS, tokenIds = RELIC_TOKEN_IDS, contracts = null, assets = [], rpc = rpcCall } = {}) {
   if (!account) return [];
   const records = [];
+  const covered = new Set();
   await Promise.all(Object.entries(chains).map(async ([key, chain]) => {
     const contract = contracts?.[key] || chain.contract;
     const chainTokenIds = Array.isArray(chain.tokenIds) ? chain.tokenIds : tokenIds;
     await Promise.all(chainTokenIds.map(async (id) => {
       try {
+        covered.add(`${key}:${contract.toLowerCase()}:${id}`);
         const result = await rpc(chain.rpc, contract, SEL.balanceOf + padAddr(account) + padUint(id));
         const amount = decodeUint(result.slice(2));
         if (amount > 0n) records.push({ wallet: account.toLowerCase(), contract: contract.toLowerCase(), tokenId: String(id), amount: Number(amount), chain: { key, id: chain.id, name: chain.name }, updatedAt: Date.now() });
       } catch { /* an unavailable chain is non-fatal */ }
     }));
+  }));
+  // Exact (chain, contract, tokenId) tuples, e.g. per-release factory clones. Malformed tuples, unknown
+  // chains and tuples already read above are skipped; a failed read is non-fatal, like the reads above.
+  await Promise.all((Array.isArray(assets) ? assets : []).map(async (asset) => {
+    const chain = chains[asset?.chainKey];
+    const contract = String(asset?.contract || "").toLowerCase();
+    const id = String(asset?.tokenId ?? "").trim();
+    if (!chain || !isValidAddress(contract) || !/^\d+$/.test(id) || covered.has(`${asset.chainKey}:${contract}:${id}`)) return;
+    covered.add(`${asset.chainKey}:${contract}:${id}`);
+    try {
+      const result = await rpc(chain.rpc, contract, SEL.balanceOf + padAddr(account) + padUint(id));
+      const amount = decodeUint(result.slice(2));
+      if (amount > 0n) records.push({ wallet: account.toLowerCase(), contract, tokenId: id, amount: Number(amount), chain: { key: asset.chainKey, id: chain.id, name: chain.name }, updatedAt: Date.now() });
+    } catch { /* an unavailable chain is non-fatal */ }
   }));
   return records;
 }

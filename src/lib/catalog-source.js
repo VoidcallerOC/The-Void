@@ -344,6 +344,35 @@ export async function fetchPublishedCatalog({ fetchImpl = fetch, signal } = {}) 
   })));
 }
 
+const DUPLICATE_BUCKETS = ["releases", "editions", "tokens", "experiences"];
+
+// Items that same-title collapsing hid from discovery, from every collapse pass, minus anything the
+// final catalog kept. Used only to resolve what a wallet actually holds.
+function combineDuplicates(catalog, ...earlier) {
+  const combined = {};
+  for (const bucket of DUPLICATE_BUCKETS) {
+    const kept = new Set((catalog?.[bucket] || []).map((item) => item?.id));
+    const seen = new Set();
+    combined[bucket] = [catalog?.duplicates, ...earlier].flatMap((duplicates) => duplicates?.[bucket] || []).filter((item) => {
+      if (!item?.id || kept.has(item.id) || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }
+  return combined;
+}
+
+/** The catalog plus the editions same-title collapsing hid, for ownership lookups (never for discovery). */
+export function withOwnableDuplicates(catalog) {
+  if (!catalog?.duplicates) return catalog;
+  const merged = { ...catalog };
+  for (const bucket of DUPLICATE_BUCKETS) {
+    const present = new Set((catalog[bucket] || []).map((item) => item?.id));
+    merged[bucket] = [...(catalog[bucket] || []), ...(catalog.duplicates[bucket] || []).filter((item) => item?.id && !present.has(item.id))];
+  }
+  return merged;
+}
+
 export function useMarketplaceCatalogs() {
   const [overlay, setOverlay] = useState(() => readStudioOverlay());
   const [published, setPublished] = useState(emptyCatalog());
@@ -368,10 +397,10 @@ export function useMarketplaceCatalogs() {
     return () => controller.abort();
   }, []);
 
-  return useMemo(() => ({
-    ...collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))])),
-    publishedLoading,
-  }), [overlay, published, publishedLoading]);
+  return useMemo(() => {
+    const collapsed = collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))]));
+    return { ...collapsed, duplicates: combineDuplicates(collapsed, published.duplicates), publishedLoading };
+  }, [overlay, published, publishedLoading]);
 }
 
 export function notifyStudioOverlay() {

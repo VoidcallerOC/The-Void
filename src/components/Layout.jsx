@@ -6,7 +6,7 @@ import { Nav } from "./Nav.jsx";
 import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
-import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
 import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
@@ -47,7 +47,7 @@ function ScrollToTop() {
 // route changes so playback continues as you navigate.
 export function Layout() {
   const catalog = useMarketplaceCatalogs();
-  const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(catalog.editions), [catalog.editions]);
+  const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(withOwnableDuplicates(catalog).editions), [catalog]);
   return (
     <WalletProvider collectionConfig={ownershipConfig}>
       <ReviewerNotificationsProvider>
