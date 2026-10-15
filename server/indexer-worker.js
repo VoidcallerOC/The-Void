@@ -191,12 +191,16 @@ export class ProductionIndexerWorker {
 export function createProductionIndexerWorker({ serverConfig = loadServerConfig(process.env, { requireWalletAuth: false }), indexerConfig = loadIndexerConfig(), pool = null, rpc = null, store = null, logger = console } = {}) {
   const resolvedPool = pool || createDatabasePool(serverConfig);
   const resolvedStore = store || createIndexerStore(resolvedPool);
+  // Populated after the worker exists so long pacer waits can heartbeat the lease.
+  const pacerHooks = { onWait: null };
   const resolvedRpc = rpc || createJsonRpcClient({
     url: indexerConfig.rpcUrl,
     timeoutMs: indexerConfig.rpcTimeoutMs,
-    minIntervalMs: indexerConfig.rpcMinIntervalMs ?? 1_500,
+    minIntervalMs: indexerConfig.rpcMinIntervalMs ?? 5_000,
     rateLimitCooldownMs: indexerConfig.rpcRateLimitCooldownMs ?? 45_000,
     maxDelayMs: indexerConfig.retryMaxDelayMs ?? 60_000,
+    postRateLimitIntervalMs: indexerConfig.rpcPostRateLimitIntervalMs ?? 10_000,
+    onWait: (...args) => pacerHooks.onWait?.(...args),
   });
   const retryOptions = {
     retries: indexerConfig.rpcRetries,
@@ -208,6 +212,18 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
   const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions, logger });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, logger });
   indexer.onProgress = () => worker.heartbeat();
+  pacerHooks.onWait = ({ waitMs, nextAllowedAt }) => {
+    // delay in indexer.rpc.retry is only the tiny deferred sleep; this is the real gate.
+    if (waitMs >= 1_000) {
+      logger.info?.(JSON.stringify({
+        event: "indexer.rpc.pacer.wait",
+        chainId: indexerConfig.chainId,
+        waitMs,
+        nextAllowedAt,
+      }));
+    }
+    return worker.heartbeat();
+  };
   // Keep the DB lease alive across long 429 / 5xx backoffs so the worker is not stolen mid-retry.
   indexer.retryOptions = {
     ...indexer.retryOptions,
@@ -217,6 +233,7 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
         chainId: indexerConfig.chainId,
         attempt,
         delay,
+        delayKind: "deferred_inner_retry",
         status: error?.status ?? null,
         retryAfterMs: error?.retryAfterMs ?? null,
         error: error?.message,

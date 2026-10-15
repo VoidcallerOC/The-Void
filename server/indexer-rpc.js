@@ -44,30 +44,43 @@ function markRetryable(error, { retryable = true } = {}) {
 /**
  * Serializes RPC work and spaces requests so free public endpoints are not
  * re-tripped immediately after a successful call or Retry-After wait.
+ *
+ * After a 429, success-path spacing is elevated for the Retry-After window so
+ * catch-up does not immediately re-burn the shared free-tier quota.
  */
 export function createRpcRequestPacer({
-  minIntervalMs = 1_500,
+  minIntervalMs = 5_000,
   rateLimitCooldownMs = 45_000,
   maxDelayMs = 60_000,
+  postRateLimitIntervalMs = 10_000,
   now = () => Date.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   random = Math.random,
+  onWait = null,
 } = {}) {
   const safeMin = Math.max(0, Number(minIntervalMs) || 0);
   const safeCooldown = Math.max(0, Number(rateLimitCooldownMs) || 0);
   const safeMax = Math.max(safeCooldown, Number(maxDelayMs) || 0);
+  const safePenalty = Math.max(safeMin, Number(postRateLimitIntervalMs) || 0);
   let tail = Promise.resolve();
   let nextAllowedAt = 0;
+  let elevatedUntil = 0;
+  let elevatedIntervalMs = safeMin;
 
   function bump(delayMs) {
     const wait = Math.max(0, Math.min(safeMax, Number(delayMs) || 0));
     nextAllowedAt = Math.max(nextAllowedAt, now() + wait);
   }
 
+  function activeIntervalMs() {
+    return now() < elevatedUntil ? elevatedIntervalMs : safeMin;
+  }
+
   function noteSuccess() {
+    const interval = activeIntervalMs();
     // Full jitter on the success path so catch-up traffic is not periodic.
-    const jittered = Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * (safeMin + 1));
-    bump(Math.max(safeMin, jittered));
+    const jittered = Math.floor(Math.max(0, Math.min(1, Number(random()) || 0)) * (interval + 1));
+    bump(Math.max(interval, jittered));
   }
 
   function noteRateLimit(retryAfterMs = null) {
@@ -75,12 +88,18 @@ export function createRpcRequestPacer({
     const fromHeader = Number.isFinite(raw) && raw >= 0 ? raw : NaN;
     const delay = Number.isFinite(fromHeader) ? Math.max(safeCooldown, fromHeader) : safeCooldown;
     bump(delay);
+    // Stay elevated past the gate so the first recovered calls do not use the tight success interval.
+    elevatedIntervalMs = Math.max(safeMin, Math.min(safeMax, safePenalty));
+    elevatedUntil = Math.max(elevatedUntil, nextAllowedAt + elevatedIntervalMs);
   }
 
   function schedule(operation) {
     const run = tail.then(async () => {
       const wait = Math.max(0, nextAllowedAt - now());
-      if (wait > 0) await sleep(wait);
+      if (wait > 0) {
+        await onWait?.({ waitMs: wait, nextAllowedAt });
+        await sleep(wait);
+      }
       try {
         const result = await operation();
         noteSuccess();
@@ -102,6 +121,8 @@ export function createRpcRequestPacer({
     noteSuccess,
     noteRateLimit,
     getNextAllowedAt: () => nextAllowedAt,
+    getElevatedUntil: () => elevatedUntil,
+    getActiveIntervalMs: () => activeIntervalMs(),
   };
 }
 
@@ -109,13 +130,15 @@ export function createJsonRpcClient({
   url,
   fetchImpl = fetch,
   timeoutMs = 15000,
-  minIntervalMs = 1_500,
+  minIntervalMs = 5_000,
   rateLimitCooldownMs = 45_000,
   maxDelayMs = 60_000,
+  postRateLimitIntervalMs = 10_000,
   pacer = null,
   now = () => Date.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   random = Math.random,
+  onWait = null,
 } = {}) {
   if (!url) throw new TypeError("RPC URL is required.");
   let requestId = 0;
@@ -123,9 +146,11 @@ export function createJsonRpcClient({
     minIntervalMs,
     rateLimitCooldownMs,
     maxDelayMs,
+    postRateLimitIntervalMs,
     now,
     sleep,
     random,
+    onWait,
   });
 
   async function call(method, params) {
