@@ -243,8 +243,11 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
   const rpcTimeoutMs = boundedPositiveInteger(env.INDEXER_RPC_TIMEOUT_MS, 15_000, "INDEXER_RPC_TIMEOUT_MS", { min: 1_000, max: 120_000 });
   const rpcRetries = nonNegativeInteger(env.INDEXER_RPC_RETRIES, 4, "INDEXER_RPC_RETRIES", { max: 20 });
   const retryBaseDelayMs = boundedPositiveInteger(env.INDEXER_RETRY_BASE_DELAY_MS, 250, "INDEXER_RETRY_BASE_DELAY_MS", { min: 1, max: 60_000 });
+  const retryMaxDelayMs = boundedPositiveInteger(env.INDEXER_RETRY_MAX_DELAY_MS, 30_000, "INDEXER_RETRY_MAX_DELAY_MS", { min: 1, max: 300_000 });
+  if (retryMaxDelayMs < retryBaseDelayMs) throw new ConfigurationError("INDEXER_RETRY_MAX_DELAY_MS must be greater than or equal to INDEXER_RETRY_BASE_DELAY_MS.");
   const leaseTtlMs = boundedPositiveInteger(env.INDEXER_LEASE_TTL_MS, 90_000, "INDEXER_LEASE_TTL_MS", { min: 10_000, max: 600_000 });
-  const minimumLeaseTtlMs = ((rpcRetries + 1) * rpcTimeoutMs) + (retryBaseDelayMs * ((2 ** rpcRetries) - 1)) + 1_000;
+  // Retries heartbeat the worker lease between attempts; cover one RPC timeout + one capped backoff + buffer.
+  const minimumLeaseTtlMs = rpcTimeoutMs + retryMaxDelayMs + 10_000;
   if (leaseTtlMs < minimumLeaseTtlMs) throw new ConfigurationError(`INDEXER_LEASE_TTL_MS must be at least ${minimumLeaseTtlMs} to cover the configured RPC retry window.`);
   return Object.freeze({
     chainId,
@@ -259,6 +262,7 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     rpcTimeoutMs,
     rpcRetries,
     retryBaseDelayMs,
+    retryMaxDelayMs,
     ownershipReconciliationIntervalMs: boundedPositiveInteger(env.INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS, 900_000, "INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS", { min: 60_000, max: 86_400_000 }),
     leaseTtlMs,
   });

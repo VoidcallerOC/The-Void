@@ -99,6 +99,57 @@ describe("production indexer worker", () => {
     expect(indexer.syncAll).toHaveBeenCalledOnce();
     expect(durableStore.releaseWorkerLease).toHaveBeenCalledOnce();
   });
+
+  it("skips overlapping cycles instead of issuing duplicate RPC work", async () => {
+    const durableStore = store();
+    let releaseSync;
+    const syncGate = new Promise((resolve) => { releaseSync = resolve; });
+    const indexer = {
+      retryOptions: {},
+      syncAll: vi.fn(async () => {
+        await syncGate;
+        return [];
+      }),
+    };
+    const worker = new ProductionIndexerWorker({ indexer, store: durableStore, rpc: {}, config: config(), logger });
+    await worker.acquire();
+    const first = worker.cycle();
+    await expect(worker.cycle()).resolves.toEqual({ skipped: true, reason: "in_flight" });
+    releaseSync();
+    await expect(first).resolves.toMatchObject({ sync: [] });
+    expect(indexer.syncAll).toHaveBeenCalledOnce();
+    await worker.release();
+  });
+
+  it("extends the next cycle wait after a rate-limit failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const durableStore = store();
+      const failure = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: 8_000 });
+      const clock = 1_000;
+      const worker = new ProductionIndexerWorker({
+        indexer: { syncAll: vi.fn().mockRejectedValue(failure), retryOptions: {} },
+        store: durableStore,
+        rpc: {},
+        config: config({ pollIntervalMs: 1_000, retryMaxDelayMs: 30_000, retryBaseDelayMs: 250 }),
+        logger,
+        now: () => clock,
+      });
+      await expect(worker.runOnce()).rejects.toMatchObject({ status: 429 });
+      expect(worker._nextCycleNotBefore).toBe(9_000);
+      const pending = worker.waitForNextCycle();
+      await vi.advanceTimersByTimeAsync(7_999);
+      let settled = false;
+      pending.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("indexer worker configuration", () => {
@@ -106,7 +157,7 @@ describe("indexer worker configuration", () => {
     const configured = Object.freeze([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 100 }]);
     const { worker } = createProductionIndexerWorker({
       serverConfig: {},
-      indexerConfig: { chainId: 43113, contracts: configured, confirmations: 12, chunkSize: 500, rpcRetries: 0, retryBaseDelayMs: 1 },
+      indexerConfig: { chainId: 43113, contracts: configured, confirmations: 12, chunkSize: 500, rpcRetries: 0, retryBaseDelayMs: 1, retryMaxDelayMs: 30 },
       pool: {},
       rpc: {},
       store: {},
@@ -142,6 +193,25 @@ describe("indexer worker configuration", () => {
       INDEXER_CHUNK_SIZE: "50",
       INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
     }).chunkSize).toBe(50);
+  });
+
+  it("defaults retry max delay and rejects leases that cannot cover one capped backoff", () => {
+    const result = loadIndexerConfig({
+      INDEXER_CHAIN_ID: "43113",
+      INDEXER_RPC_URL: "https://rpc.example",
+      INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+      INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
+    });
+    expect(result.retryMaxDelayMs).toBe(30_000);
+    expect(result.leaseTtlMs).toBeGreaterThanOrEqual(result.rpcTimeoutMs + result.retryMaxDelayMs + 10_000);
+    expect(() => loadIndexerConfig({
+      INDEXER_CHAIN_ID: "43113",
+      INDEXER_RPC_URL: "https://rpc.example",
+      INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+      INDEXER_RETRY_MAX_DELAY_MS: "60000",
+      INDEXER_LEASE_TTL_MS: "50000",
+      INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
+    })).toThrow(/INDEXER_LEASE_TTL_MS must be at least/);
   });
 
   it("indexes the ERC1155 release and the primary sale together", () => {
