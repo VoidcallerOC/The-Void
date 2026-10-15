@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { id } from "ethers";
-import { BlockchainIndexer, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
+import { BlockchainIndexer, DEFAULT_INDEXER_CHUNK_SIZE, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
 import { CheckpointRegressionError } from "./indexer-store.js";
 import { createIndexerWorker, ProductionIndexerWorker } from "./indexer-worker.js";
@@ -162,6 +162,102 @@ describe("durable index synchronization", () => {
     expect((await store.getCheckpoint({ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).nextBlock).toBe(2);
     await indexer.syncAll();
     expect(store.calls.applied.some((item) => item.blockNumber === 3)).toBe(true);
+  });
+
+  it("defaults getLogs spans to at most 100 blocks for Avalanche public RPC limits", () => {
+    expect(DEFAULT_INDEXER_CHUNK_SIZE).toBe(100);
+    const indexer = new BlockchainIndexer({
+      rpc: {},
+      store: storeDouble(),
+      configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }],
+    });
+    expect(indexer.chunkSize).toBe(100);
+  });
+
+  it("splits a large backlog into sequential getLogs ranges of at most 100 blocks for factory and marketplace", async () => {
+    const factory = "0x262b774cf9a1949170b58e2d57f6189980fe757b";
+    const marketplace = "0x0e77116142844478a55eed2ab79de9f93770f8f5";
+    const start = 97_619_965;
+    const tip = start + 249;
+    const store = storeDouble();
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(tip),
+      getLogs: vi.fn(async ({ fromBlock, toBlock }) => {
+        expect(toBlock - fromBlock + 1).toBeLessThanOrEqual(100);
+        return [];
+      }),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
+    };
+    const indexer = new BlockchainIndexer({
+      rpc,
+      store,
+      confirmations: 0,
+      configs: [
+        { chainId: 43114, address: factory, contractType: "RELEASE_FACTORY", startBlock: start, eventTopics: {} },
+        { chainId: 43114, address: marketplace, contractType: "MARKETPLACE", startBlock: start + 13, eventTopics: {} },
+      ],
+    });
+    const results = await indexer.syncAll();
+    expect(results).toHaveLength(2);
+    const ranges = rpc.getLogs.mock.calls.map(([filter]) => ({
+      address: String(filter.address).toLowerCase(),
+      fromBlock: filter.fromBlock,
+      toBlock: filter.toBlock,
+      span: filter.toBlock - filter.fromBlock + 1,
+    }));
+    expect(ranges.every((range) => range.span <= 100)).toBe(true);
+    expect(ranges.every((range) => range.span >= 1)).toBe(true);
+
+    const factoryRanges = ranges.filter((range) => range.address === factory);
+    const marketplaceRanges = ranges.filter((range) => range.address === marketplace);
+    expect(factoryRanges).toHaveLength(3);
+    expect(factoryRanges.map((range) => [range.fromBlock, range.toBlock])).toEqual([
+      [start, start + 99],
+      [start + 100, start + 199],
+      [start + 200, tip],
+    ]);
+    expect(marketplaceRanges).toHaveLength(3);
+    expect(marketplaceRanges[0]).toMatchObject({ fromBlock: start + 13, toBlock: start + 13 + 99 });
+    expect(marketplaceRanges.at(-1).toBlock).toBe(tip);
+    expect((await store.getCheckpoint({ chainId: 43114, address: factory })).nextBlock).toBe(tip + 1);
+    expect((await store.getCheckpoint({ chainId: 43114, address: marketplace })).nextBlock).toBe(tip + 1);
+  });
+
+  it("does not skip blocks when a chunked getLogs request fails mid-backlog", async () => {
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const store = storeDouble();
+    let rejectOnce = true;
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(249),
+      getLogs: vi.fn(async ({ fromBlock, toBlock }) => {
+        expect(toBlock - fromBlock + 1).toBeLessThanOrEqual(100);
+        if (rejectOnce && fromBlock === 100) {
+          rejectOnce = false;
+          throw new Error("block range too large: total block range in this request exceeds the maximum of 100 blocks");
+        }
+        return [];
+      }),
+      getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
+    };
+    const indexer = new BlockchainIndexer({
+      rpc,
+      store,
+      confirmations: 0,
+      retryOptions: { retries: 0 },
+      configs: [{ chainId: 43114, address, contractType: "ERC1155", startBlock: 0, eventTopics: { TransferSingle: singleTopic } }],
+    });
+    await expect(indexer.syncAll()).rejects.toThrow(/block range too large/);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).nextBlock).toBe(100);
+    await indexer.syncAll();
+    const ranges = rpc.getLogs.mock.calls.map(([filter]) => [filter.fromBlock, filter.toBlock]);
+    expect(ranges).toEqual([
+      [0, 99],
+      [100, 199],
+      [100, 199],
+      [200, 249],
+    ]);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).nextBlock).toBe(250);
+    expect((await store.getCheckpoint({ chainId: 43114, address })).lastProcessedBlock).toBe(249);
   });
 
   it("retries RPC failures and does not advance after a failed fetch", async () => {
