@@ -73,7 +73,10 @@ describe("mainnet runtime configuration", () => {
     for (const rule of withoutFujiTest.headers) if (rule.source === "/(owner-deploy|fuji-rabby-test)(.html)?") rule.source = "/owner-deploy(.html)?";
     expect(swap(routing)).toEqual(withoutFujiTest);
     expect(buildCommand).toContain("VITE_RELEASE_NETWORK=mainnet");
-    expect(JSON.stringify(mainnetVercel)).not.toMatch(/fuji/);
+    expect(buildCommand).toContain("VITE_MARKETPLACE_CHAIN_ID=43114");
+    expect(buildCommand).toContain("VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5");
+    expect(buildCommand).toContain("VITE_MARKETPLACE_FEE_BPS=250");
+    expect(JSON.stringify(mainnetVercel)).not.toMatch(/fuji|43113|avax-test/);
     expect({ installCommand, outputDirectory }).toEqual({ installCommand: "cd ../.. && npm ci", outputDirectory: "dist" });
   });
 });
