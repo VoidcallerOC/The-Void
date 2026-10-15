@@ -17,12 +17,14 @@ const ed = (id, releaseId, title, status, token, contract = CLONE) => ({
 const rows = {
   artists: [artist],
   releases: [
+    rel("release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff", "Fuji Rehearsal A", "PUBLISHED", "2026-10-05T00:00:00Z"),
     rel("release-forgive", "Forgive & Forget", "PUBLISHED", "2026-10-13T00:00:00Z"),
     rel("release-single-2", "Second Single", "PUBLISHED", "2026-10-12T00:00:00Z"),
     rel("release-draft", "Unreleased Sketch", "DRAFT", null),
     rel("release-archived", "Retired Pressing", "ARCHIVED", "2026-10-01T00:00:00Z"),
   ],
   editions: [
+    ed("edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c", "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff", "Fuji Rehearsal A", "PUBLISHED", "555"),
     ed("edition-forgive", "release-forgive", "Forgive & Forget", "PUBLISHED", "111"),
     ed("edition-single-2", "release-single-2", "Second Single", "PUBLISHED", "222", OTHER_CLONE),
     ed("edition-draft", "release-draft", "Unreleased Sketch", "DRAFT", "333"),
@@ -70,6 +72,13 @@ describe("Artist page releases", () => {
     expect(markup).not.toContain("Retired Pressing");
     expect(markup).not.toContain("edition-draft");
     expect(markup).not.toContain("edition-archived");
+  });
+
+  it("does not list Fuji Rehearsal A, which is not a public release", () => {
+    const markup = render("/artist/voidcaller");
+    expect(markup).not.toContain("Fuji Rehearsal A");
+    expect(markup).not.toContain("edition-e2d7f780");
+    expect(markup).toContain("Forgive &amp; Forget");
   });
 
   it("redirects an unknown artist instead of rendering releases", () => {

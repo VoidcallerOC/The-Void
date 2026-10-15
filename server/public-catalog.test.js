@@ -130,4 +130,33 @@ describe("public catalog reads", () => {
     await expect(experiences.instance.getExperience({ id: experienceId })).rejects.toMatchObject({ code: "EXPERIENCE_NOT_FOUND", status: 404 });
     await expect(experiences.instance.listExperiences({})).resolves.toEqual([]);
   });
+
+  it("omits Fuji Rehearsal A from public reads and keeps the published Forgive & Forget editions", async () => {
+    const releaseId = "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff";
+    const editionId = "edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c";
+    const experienceIds = ["experience-c157e09c-2d89-4f81-a6d1-7cd13dc1198b", "experience-ac708f12-2ddb-46c0-9362-375fc7d3f08e"];
+    const rehearsalRelease = { id: releaseId, artist_id: "voidcaller", slug: "fuji-rehearsal-a", title: "Fuji Rehearsal A", status: "PUBLISHED", artist_slug: "voidcaller", artist_name: "Voidcaller" };
+    const forgiveRelease = { id: "release-090b0c0e-b9ed-483a-b6b8-f9f459dab216", artist_id: "voidcaller", slug: "forgive-forget", title: "Forgive & Forget", status: "PUBLISHED", artist_slug: "voidcaller", artist_name: "Voidcaller" };
+    const rehearsalEdition = { id: editionId, release_id: releaseId, title: "Fuji Rehearsal A", status: "PUBLISHED", chain_id: 43113, contract_address: "0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6", token_id: "32576654265188520654558003526257523500225069882834127180395020264533797735282" };
+    const forgiveEdition = { id: "edition-332337ec-c3f2-4bf3-8db7-c5baa94dcb64", release_id: forgiveRelease.id, title: "Forgive & Forget", status: "PUBLISHED", chain_id: 43113, contract_address: "0xe87410e9a2c703b6bb696d4bfb5f268d3c5bcf65", token_id: "25679935302133066722236771263728427871936411831072189551573738559199048803312" };
+    const olderForgiveEdition = { id: "edition-8f80ce4f-034c-45ad-b0b7-5a9b3963e0a6", release_id: "release-dc027a1f-ebbd-4550-9d75-1fb1f643e021", title: "Forgive & Forget", status: "PUBLISHED", chain_id: 43113, contract_address: "0x7bba0690a43e2ffe9ad553fbda0451177b7b95b6", token_id: "68295446124735607526723992966590672866552040894184280645408531208339092616023" };
+    const experiences = experienceIds.map((id) => ({ id, artist_id: "voidcaller", release_id: releaseId, edition_id: editionId, title: "Full record", status: "PUBLISHED", experience_type: "AUDIO" }));
+
+    const releases = service(rehearsalRelease);
+    releases.db.query.mockResolvedValue({ rows: [rehearsalRelease, forgiveRelease] });
+    await expect(releases.instance.getRelease({ idOrSlug: "fuji-rehearsal-a" })).rejects.toMatchObject({ code: "RELEASE_NOT_FOUND", status: 404 });
+    await expect(releases.instance.listReleases({})).resolves.toEqual([expect.objectContaining({ id: forgiveRelease.id, title: "Forgive & Forget" })]);
+
+    const editions = service(rehearsalEdition);
+    editions.db.query.mockResolvedValue({ rows: [rehearsalEdition, forgiveEdition, olderForgiveEdition] });
+    await expect(editions.instance.getEdition({ id: editionId })).rejects.toMatchObject({ code: "EDITION_NOT_FOUND", status: 404 });
+    const listed = await editions.instance.listEditions({});
+    expect(listed.map((item) => item.id)).toEqual([forgiveEdition.id, olderForgiveEdition.id]);
+    expect(listed.map((item) => item.contract_address)).toEqual([forgiveEdition.contract_address, olderForgiveEdition.contract_address]);
+
+    const exp = service(experiences[0]);
+    exp.db.query.mockResolvedValue({ rows: experiences });
+    await expect(exp.instance.getExperience({ id: experienceIds[0] })).rejects.toMatchObject({ code: "EXPERIENCE_NOT_FOUND", status: 404 });
+    await expect(exp.instance.listExperiences({})).resolves.toEqual([]);
+  });
 });

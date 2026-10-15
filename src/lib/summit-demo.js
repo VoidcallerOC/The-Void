@@ -52,10 +52,20 @@ const TEST_PROFILE_LABELS = new Set(["wer", "sdfg", "qwe", "asdf"]);
 // ended with nothing minted, and the public metadata was removed from
 // Pinata. This is a read-side exclusion only: the artist, the contract,
 // the token, and the sale are untouched.
+//
+// Fuji Rehearsal A (release-7e7cecfe, edition-e2d7f780 on the legacy shared Fuji contract, and its two
+// "Full record" experiences) is obsolete rehearsal content and is not a public release. Same
+// read-side exclusion, at the owner's request (2026-10-15): the same list drives the public API and the
+// storefront, so it leaves discovery in both. Nothing is deleted or changed in the database; the
+// token, the sale, ownership and purchases stay. Reversal: remove these ids.
 const WITHDRAWN_PUBLIC_LISTING_IDS = new Set([
   "release-1b4a2d71-218f-47a2-afde-cd5171909ace",
   "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1",
   "experience-d798300c-37eb-4cc6-aad3-4b078b77135a",
+  "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff",
+  "edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c",
+  "experience-c157e09c-2d89-4f81-a6d1-7cd13dc1198b",
+  "experience-ac708f12-2ddb-46c0-9362-375fc7d3f08e",
 ]);
 const PUBLIC_TEST_MARKER = /\b(?:test(?:ing)?|demo|e2e|certification)\b|fuji[\s_-]*e2e|pinata[\s_-]*(?:json[\s_-]*)?certif/i;
 

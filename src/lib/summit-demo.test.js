@@ -127,4 +127,41 @@ describe("summit demo boundary", () => {
     expect(result.tokens).toEqual([]);
     expect(result.experiences).toEqual([]);
   });
+
+  it("drops Fuji Rehearsal A everywhere in the public catalog while keeping both Forgive & Forget editions", () => {
+    const releaseId = "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff";
+    const editionId = "edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c";
+    const source = {
+      artists: [{ id: "voidcaller", name: "Voidcaller", slug: "voidcaller" }],
+      releases: [
+        { id: "voidcaller-legacy-genesis", artistId: "voidcaller", title: "VOIDCALLER", status: "published" },
+        { id: releaseId, artistId: "voidcaller", title: "Fuji Rehearsal A", status: "published" },
+        { id: "release-090b0c0e-b9ed-483a-b6b8-f9f459dab216", artistId: "voidcaller", title: "Forgive & Forget", status: "published", publishedAt: "2026-10-13T00:00:00Z" },
+        { id: "release-dc027a1f-ebbd-4550-9d75-1fb1f643e021", artistId: "voidcaller", title: "Forgive & Forget", status: "published", publishedAt: "2026-10-04T00:00:00Z" },
+      ],
+      editions: [
+        { id: "voidcaller-legacy-edition", releaseId: "voidcaller-legacy-genesis", title: "Chapter I · The Relic", status: "minted" },
+        { id: editionId, releaseId, title: "Fuji Rehearsal A", status: "available" },
+        { id: "edition-332337ec-c3f2-4bf3-8db7-c5baa94dcb64", releaseId: "release-090b0c0e-b9ed-483a-b6b8-f9f459dab216", title: "Forgive & Forget", status: "available" },
+        { id: "edition-8f80ce4f-034c-45ad-b0b7-5a9b3963e0a6", releaseId: "release-dc027a1f-ebbd-4550-9d75-1fb1f643e021", title: "Forgive & Forget", status: "available" },
+      ],
+      tokens: [{ id: "rehearsal-token", editionId }, { id: "forgive-token", editionId: "edition-332337ec-c3f2-4bf3-8db7-c5baa94dcb64" }],
+      experiences: [
+        { id: "experience-c157e09c-2d89-4f81-a6d1-7cd13dc1198b", releaseId, editionId, title: "Full record" },
+        { id: "experience-ac708f12-2ddb-46c0-9362-375fc7d3f08e", releaseId, editionId, title: "Full record" },
+        { id: "experience-88480cc0-2e75-42c9-b971-75faba55a6e9", releaseId: "release-090b0c0e-b9ed-483a-b6b8-f9f459dab216", editionId: "edition-332337ec-c3f2-4bf3-8db7-c5baa94dcb64", title: "Stranger Things" },
+      ],
+      collections: [],
+    };
+    const result = collapsePublicCatalog(source);
+    expect(isWithdrawnPublicListing({ id: editionId })).toBe(true);
+    expect(isWithdrawnPublicListing({ id: "x", release_id: releaseId })).toBe(true);
+    expect(result.releases.map((item) => item.id)).not.toContain(releaseId);
+    expect(result.editions.map((item) => item.id)).not.toContain(editionId);
+    expect(result.tokens.map((item) => item.id)).toEqual(["forgive-token"]);
+    expect(result.experiences.map((item) => item.id)).toEqual(["experience-88480cc0-2e75-42c9-b971-75faba55a6e9"]);
+    // The newer Forgive & Forget stays the discovery winner; the older one stays recoverable for holders.
+    expect(result.editions.map((item) => item.id)).toEqual(["voidcaller-legacy-edition", "edition-332337ec-c3f2-4bf3-8db7-c5baa94dcb64"]);
+    expect(result.duplicates.editions.map((item) => item.id)).toEqual(["edition-8f80ce4f-034c-45ad-b0b7-5a9b3963e0a6"]);
+  });
 });

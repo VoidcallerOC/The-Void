@@ -13,12 +13,14 @@ const WALLET = "0x6a86efa012feda64b70112022487fee22e67d2fb";
 const rows = {
   artists: [{ id: "voidcaller", display_name: "Voidcaller", slug: "voidcaller" }, { id: "artist-indigo", display_name: "Indigo Static", slug: "indigo-static" }],
   releases: [
+    { id: "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff", artist_id: "voidcaller", title: "Fuji Rehearsal A", status: "PUBLISHED", published_at: "2026-10-05T00:00:00Z" },
     { id: "release-new", artist_id: "voidcaller", title: "Forgive & Forget", status: "PUBLISHED", published_at: "2026-10-13T00:00:00Z" },
     { id: "release-old", artist_id: "voidcaller", title: "Forgive & Forget", status: "PUBLISHED", published_at: "2026-10-04T00:00:00Z" },
     { id: "release-draft", artist_id: "voidcaller", title: "Unreleased Sketch", status: "DRAFT" },
     { id: "release-other", artist_id: "artist-indigo", title: "Someone Else", status: "PUBLISHED", published_at: "2026-10-12T00:00:00Z" },
   ],
   editions: [
+    { id: "edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c", release_id: "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff", title: "Fuji Rehearsal A", status: "PUBLISHED", chain_id: 43113, contract_address: LEGACY, token_id: "555" },
     { id: "edition-new", release_id: "release-new", title: "Forgive & Forget", status: "PUBLISHED", chain_id: 43113, contract_address: CLONE, release_contract_address: CLONE, factory_address: FACTORY, token_id: "111" },
     { id: "edition-old", release_id: "release-old", title: "Forgive & Forget", status: "PUBLISHED", chain_id: 43113, contract_address: LEGACY, token_id: "222" },
     { id: "edition-draft", release_id: "release-draft", title: "Unreleased Sketch", status: "DRAFT", chain_id: 43113, contract_address: CLONE, release_contract_address: CLONE, factory_address: FACTORY, token_id: "333" },
@@ -108,5 +110,25 @@ describe("My Collection -> owned editions", () => {
     const markup = renderMyCollection([]);
     expect(markup).not.toContain('href="/edition/edition-new"');
     expect(markup).toContain("Nothing held");
+  });
+});
+
+describe("Fuji Rehearsal A is not public", () => {
+  const rehearsalRecord = { wallet: WALLET, contract: LEGACY.toLowerCase(), tokenId: "555", amount: 1, chain: { key: "fuji", id: 43113, name: "Avalanche Fuji" }, updatedAt: 1 };
+
+  it("is absent from the collection page while the published releases stay", () => {
+    const markup = renderCollection("voidcaller-collection");
+    expect(markup).not.toContain("release-7e7cecfe");
+    expect(markup).not.toContain("Fuji Rehearsal A");
+    expect(markup).toContain('href="/release/release-new"');
+    expect(markup).toContain('href="/release/voidcaller-self-titled"');
+  });
+
+  it("is not listed in My Collection even if the wallet still holds it, and does not disturb the other holdings", () => {
+    const markup = renderMyCollection([...records, rehearsalRecord]);
+    expect(markup).not.toContain("edition-e2d7f780");
+    expect(markup).not.toContain("Fuji Rehearsal A");
+    expect(markup).toContain('href="/edition/edition-new"');
+    expect(markup).toContain('href="/edition/edition-old"');
   });
 });
