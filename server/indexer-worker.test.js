@@ -127,6 +127,23 @@ describe("indexer worker configuration", () => {
     expect(result.contracts[0].skipMintOperators).toEqual([]);
   });
 
+  it("defaults INDEXER_CHUNK_SIZE to 100 for Avalanche public eth_getLogs limits", () => {
+    const result = loadIndexerConfig({
+      INDEXER_CHAIN_ID: "43113",
+      INDEXER_RPC_URL: "https://rpc.example",
+      INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+      INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
+    });
+    expect(result.chunkSize).toBe(100);
+    expect(loadIndexerConfig({
+      INDEXER_CHAIN_ID: "43113",
+      INDEXER_RPC_URL: "https://rpc.example",
+      INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+      INDEXER_CHUNK_SIZE: "50",
+      INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
+    }).chunkSize).toBe(50);
+  });
+
   it("indexes the ERC1155 release and the primary sale together", () => {
     const sale = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const result = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 10 }, { chainId: 43113, address: sale, contractType: "PRIMARY_SALE", tokenAddress: contract, startBlock: 11 }]) });

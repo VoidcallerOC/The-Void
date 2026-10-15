@@ -253,7 +253,8 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
       ? parseIndexerContracts(contractsValue, { chainId })
       : withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }),
     confirmations: boundedPositiveInteger(env.INDEXER_CONFIRMATIONS, 12, "INDEXER_CONFIRMATIONS", { min: 1, max: 500 }),
-    chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 500, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),
+    // Default 100 matches Avalanche public C-Chain eth_getLogs max span; override only for RPCs that allow larger ranges.
+    chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 100, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),
     pollIntervalMs: boundedPositiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15_000, "INDEXER_POLL_INTERVAL_MS", { min: 1_000, max: 300_000 }),
     rpcTimeoutMs,
     rpcRetries,

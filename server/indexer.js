@@ -214,14 +214,20 @@ export function classifyMarketplaceLog(log, topics = {}) {
   return { eventType, raw: log, indexed: log.topics, dataWords: words(log.data || "0x") };
 }
 
+// Avalanche public C-Chain eth_getLogs rejects spans above 100 blocks ("block range too large").
+// Operators with a private RPC may raise INDEXER_CHUNK_SIZE; keep the default at the public limit.
+export const DEFAULT_INDEXER_CHUNK_SIZE = 100;
+
 export class BlockchainIndexer {
-  constructor({ rpc, store, configs, confirmations = 12, chunkSize = 500, retryOptions = {}, logger = console, onProgress = null } = {}) {
+  constructor({ rpc, store, configs, confirmations = 12, chunkSize = DEFAULT_INDEXER_CHUNK_SIZE, retryOptions = {}, logger = console, onProgress = null } = {}) {
     if (!rpc || !store || !Array.isArray(configs) || configs.length === 0) throw new TypeError("Indexer requires rpc, store, and at least one contract config.");
+    const resolvedChunkSize = Number(chunkSize);
+    if (!Number.isSafeInteger(resolvedChunkSize) || resolvedChunkSize < 1) throw new TypeError("Indexer chunkSize must be a positive integer.");
     this.rpc = rpc;
     this.store = store;
     this.configs = configs;
     this.confirmations = confirmations;
-    this.chunkSize = chunkSize;
+    this.chunkSize = resolvedChunkSize;
     this.retryOptions = retryOptions;
     this.logger = logger;
     this.onProgress = onProgress;
