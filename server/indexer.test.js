@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { id } from "ethers";
 import { BlockchainIndexer, DEFAULT_INDEXER_CHUNK_SIZE, decodePurchasedLog, decodeTransferLog, retry } from "./indexer.js";
-import { loadIndexerConfig } from "./config.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
 import { CheckpointRegressionError } from "./indexer-store.js";
 import { createIndexerWorker, ProductionIndexerWorker } from "./indexer-worker.js";
