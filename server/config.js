@@ -246,7 +246,15 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
   // 60s cap covers observed free-RPC Retry-After values and still fits the 90s lease default.
   const retryMaxDelayMs = boundedPositiveInteger(env.INDEXER_RETRY_MAX_DELAY_MS, 60_000, "INDEXER_RETRY_MAX_DELAY_MS", { min: 1, max: 300_000 });
   // Space successful calls so catch-up does not immediately re-trip shared public quotas.
-  const rpcMinIntervalMs = boundedPositiveInteger(env.INDEXER_RPC_MIN_INTERVAL_MS, 1_500, "INDEXER_RPC_MIN_INTERVAL_MS", { min: 0, max: 60_000 });
+  // 5s default (~12 req/min) matches observed free api.avax.network behavior better than 1.5s.
+  const rpcMinIntervalMs = boundedPositiveInteger(env.INDEXER_RPC_MIN_INTERVAL_MS, 5_000, "INDEXER_RPC_MIN_INTERVAL_MS", { min: 0, max: 60_000 });
+  // After a 429, keep success-path spacing at least this wide for the Retry-After window.
+  const rpcPostRateLimitIntervalMs = boundedPositiveInteger(
+    env.INDEXER_RPC_POST_RATE_LIMIT_INTERVAL_MS,
+    10_000,
+    "INDEXER_RPC_POST_RATE_LIMIT_INTERVAL_MS",
+    { min: 0, max: 60_000 },
+  );
   // Floor cooldown after HTTP 429 when Retry-After is missing or shorter than the public-RPC settle time.
   const requestedCooldownMs = boundedPositiveInteger(env.INDEXER_RPC_RATE_LIMIT_COOLDOWN_MS, 45_000, "INDEXER_RPC_RATE_LIMIT_COOLDOWN_MS", { min: 1_000, max: 300_000 });
   // Cap to retryMaxDelayMs so an explicit lower INDEXER_RETRY_MAX_DELAY_MS still boots.
@@ -271,6 +279,7 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     retryBaseDelayMs,
     retryMaxDelayMs,
     rpcMinIntervalMs,
+    rpcPostRateLimitIntervalMs,
     rpcRateLimitCooldownMs,
     ownershipReconciliationIntervalMs: boundedPositiveInteger(env.INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS, 900_000, "INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS", { min: 60_000, max: 86_400_000 }),
     leaseTtlMs,

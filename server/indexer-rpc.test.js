@@ -90,7 +90,7 @@ describe("RPC request pacer", () => {
     const sleeps = [];
     let clock = 1_000;
     const pacer = createRpcRequestPacer({
-      minIntervalMs: 1_500,
+      minIntervalMs: 5_000,
       rateLimitCooldownMs: 45_000,
       maxDelayMs: 60_000,
       now: () => clock,
@@ -99,7 +99,7 @@ describe("RPC request pacer", () => {
     });
     await pacer.schedule(async () => "a");
     await pacer.schedule(async () => "b");
-    expect(sleeps).toEqual([1_500]);
+    expect(sleeps).toEqual([5_000]);
   });
 
   it("extends the next-allowed time on HTTP 429 using the cooldown floor", async () => {
@@ -109,6 +109,7 @@ describe("RPC request pacer", () => {
       minIntervalMs: 100,
       rateLimitCooldownMs: 45_000,
       maxDelayMs: 60_000,
+      postRateLimitIntervalMs: 100,
       now: () => clock,
       sleep: async (ms) => { sleeps.push(ms); clock += ms; },
       random: () => 0,
@@ -127,6 +128,7 @@ describe("RPC request pacer", () => {
       minIntervalMs: 0,
       rateLimitCooldownMs: 10_000,
       maxDelayMs: 60_000,
+      postRateLimitIntervalMs: 0,
       now: () => clock,
       sleep: async (ms) => { sleeps.push(ms); clock += ms; },
       random: () => 0,
@@ -136,6 +138,49 @@ describe("RPC request pacer", () => {
     })).rejects.toMatchObject({ status: 429 });
     await pacer.schedule(async () => "ok");
     expect(sleeps[0]).toBe(55_000);
+  });
+
+  it("raises success-path spacing after a 429 so recovery does not immediately re-trip the quota", async () => {
+    let clock = 0;
+    const sleeps = [];
+    const pacer = createRpcRequestPacer({
+      minIntervalMs: 5_000,
+      rateLimitCooldownMs: 45_000,
+      maxDelayMs: 60_000,
+      postRateLimitIntervalMs: 10_000,
+      now: () => clock,
+      sleep: async (ms) => { sleeps.push(ms); clock += ms; },
+      random: () => 0,
+    });
+    await expect(pacer.schedule(async () => {
+      throw new RpcHttpError(429, { retryAfterMs: 60_000 });
+    })).rejects.toMatchObject({ status: 429 });
+    expect(pacer.getActiveIntervalMs()).toBe(10_000);
+    await pacer.schedule(async () => "recovered");
+    await pacer.schedule(async () => "next");
+    // First sleep is the 60s rate-limit gate; second is the elevated post-429 spacing.
+    expect(sleeps[0]).toBe(60_000);
+    expect(sleeps[1]).toBe(10_000);
+  });
+
+  it("invokes onWait with the real pacer gate before a deferred request", async () => {
+    let clock = 0;
+    const waits = [];
+    const pacer = createRpcRequestPacer({
+      minIntervalMs: 0,
+      rateLimitCooldownMs: 45_000,
+      maxDelayMs: 60_000,
+      postRateLimitIntervalMs: 0,
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      random: () => 0,
+      onWait: (info) => { waits.push(info); },
+    });
+    await expect(pacer.schedule(async () => {
+      throw new RpcHttpError(429, { retryAfterMs: 60_000 });
+    })).rejects.toMatchObject({ status: 429 });
+    await pacer.schedule(async () => "ok");
+    expect(waits).toEqual([expect.objectContaining({ waitMs: 60_000 })]);
   });
 
   it("spaces client calls so concurrent getLogs work cannot overlap on the wire", async () => {

@@ -209,7 +209,8 @@ describe("indexer worker configuration", () => {
       INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
     });
     expect(result.retryMaxDelayMs).toBe(60_000);
-    expect(result.rpcMinIntervalMs).toBe(1_500);
+    expect(result.rpcMinIntervalMs).toBe(5_000);
+    expect(result.rpcPostRateLimitIntervalMs).toBe(10_000);
     expect(result.rpcRateLimitCooldownMs).toBe(45_000);
     expect(result.leaseTtlMs).toBeGreaterThanOrEqual(result.rpcTimeoutMs + result.retryMaxDelayMs + 10_000);
     expect(loadIndexerConfig({
