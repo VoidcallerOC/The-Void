@@ -47,6 +47,9 @@ describe("mainnet runtime configuration", () => {
     expect(api.env.DATABASE_SSL).toBe("true");
     expect(indexer.env.DATABASE_SSL).toBe("true");
     expect(indexer.env.DATABASE_SSL_CA).toBeNull();
+    // API and worker both declare INDEXER_CONTRACTS_JSON (Fuji pattern): readiness scopes to it.
+    expect(api.env.INDEXER_CONTRACTS_JSON).toBeNull();
+    expect(indexer.env.INDEXER_CONTRACTS_JSON).toBeNull();
     expect(api.env.GENESIS_CLAIM_ENABLED).toBe("false");
 
   });

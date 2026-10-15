@@ -147,6 +147,17 @@ describe("indexer worker configuration", () => {
     expect(ready.primarySale).toMatchObject({ contractType: "PRIMARY_SALE", healthy: true, address: sale });
     expect(reportIndexedContracts({ configured: [{ address: contract, contractType: "ERC1155" }], indexed: [{ address: contract, type: "ERC1155", status: "IDLE" }] }).ok).toBe(false);
   });
+
+  it("treats release and primarySale as optional until a release exists", () => {
+    const factory = "0xcccccccccccccccccccccccccccccccccccccccc";
+    const marketplace = "0xdddddddddddddddddddddddddddddddddddddddd";
+    // Factory + marketplace only (mainnet before any ReleaseCreated): backend-up may pass.
+    expect(reportIndexedContracts({
+      configured: [{ address: factory, contractType: "RELEASE_FACTORY" }, { address: marketplace, contractType: "MARKETPLACE" }],
+      indexed: [{ address: factory, type: "RELEASE_FACTORY", status: "IDLE" }, { address: marketplace, type: "MARKETPLACE", status: "IDLE" }],
+    })).toMatchObject({ ok: true, release: { configured: false, healthy: false }, primarySale: { configured: false, healthy: false } });
+    expect(reportIndexedContracts()).toMatchObject({ ok: true });
+  });
   it("rejects the known placeholder contract address in production configuration", () => {
     expect(() => loadIndexerConfig({ NODE_ENV: "production", INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: "0x0000000000000000000000000000000000000001", contractType: "MARKETPLACE", startBlock: 0 }]) })).toThrow(/placeholder contract address/);
   });

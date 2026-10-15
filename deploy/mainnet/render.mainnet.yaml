@@ -94,6 +94,11 @@ services:
         value: "12"
       - key: INDEXER_POLL_INTERVAL_MS
         value: "15000"
+      # Same contract list as the indexer worker. Readiness scopes /api/health/ready to these
+      # addresses (plus factory-discovered releases). Without it the API loads no indexer
+      # config and reports empty checkpoints even when the worker is healthy.
+      - key: INDEXER_CONTRACTS_JSON
+        sync: false
       - key: MAINNET_RPC_URL
         value: https://api.avax.network/ext/bc/C/rpc
       - key: MARKETPLACE_CHAIN_ID
