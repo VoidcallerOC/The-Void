@@ -245,6 +245,34 @@ export const RESERVATION_EXPIRY_GRACE_SECONDS = 120n;
 // Block span per eth_getLogs request for Genesis transfers (public C-Chain RPC limit).
 export const TRANSFER_LOG_CHUNK_BLOCKS = 2048;
 
+/**
+ * Settles stored PENDING reservations from the claim contract, the source of truth (hasClaimed).
+ * The service settles lazily, only inside issueVoucher, which stops running once the claim window
+ * closes, so a redeemed voucher's row would stay PENDING for good. This performs that settlement on
+ * demand: claimed -> REDEEMED; unclaimed and past deadline plus grace -> EXPIRED; otherwise untouched.
+ * Idempotent: REDEEMED and EXPIRED rows are never read or rewritten, and the used-unit ledger is
+ * unchanged because activeReservations already treats these transitions as equivalent.
+ * With apply=false (default) it reports the transitions and writes nothing.
+ */
+export async function reconcileGenesisReservations({ store, claimContract, readAlreadyClaimed, destinationNow, apply = false } = {}) {
+  if (!store?.withLock || typeof readAlreadyClaimed !== "function" || typeof destinationNow !== "function") throw new TypeError("Reservation reconciliation requires the store, a hasClaimed reader and a destination clock.");
+  return store.withLock(claimContract, async (tx) => {
+    const pending = (await tx.list()).filter((record) => record.status === "PENDING");
+    const now = pending.length ? BigInt(await destinationNow()) : 0n;
+    const transitions = [];
+    for (const record of pending) {
+      const claimed = await readAlreadyClaimed(record.wallet);
+      let status = null;
+      if (claimed) status = "REDEEMED";
+      else if (BigInt(record.deadline) + RESERVATION_EXPIRY_GRACE_SECONDS < now) status = "EXPIRED";
+      if (!status) continue;
+      if (apply) await tx.setStatus(record.wallet, status);
+      transitions.push({ wallet: record.wallet, from: "PENDING", to: status, applied: apply });
+    }
+    return Object.freeze({ pending: pending.length, transitions });
+  });
+}
+
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,

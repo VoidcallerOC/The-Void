@@ -11,6 +11,7 @@ import {
   LEGACY_FUJI_SINGLETON,
   checkGenesisSignerConfig,
   loadGenesisClaimConfig,
+  reconcileGenesisReservations,
 } from "./genesis-claim.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 
@@ -655,5 +656,60 @@ describe("startup signer check while GENESIS_CLAIM_ENABLED is unset", () => {
     expect(checkGenesisSignerConfig({ GENESIS_CLAIM_SIGNER_PRIVATE_KEY: TEST_SIGNER_KEY })).toMatchObject({ status: "INCOMPLETE" });
     expect(checkGenesisSignerConfig({ GENESIS_CLAIM_SIGNER_ADDRESS: address })).toMatchObject({ status: "INCOMPLETE" });
     expect(loadGenesisClaimConfig({})).toBeNull();
+  });
+});
+
+describe("Genesis reservation reconciliation", () => {
+  const CONTRACT = "0x16C7A0f55847F508c9326A4c5AEEa99CcBE488f6";
+  const claimed = getAddress("0x6a86efa012feda64b70112022487fee22e67d2fb");
+  const idle = getAddress("0x1111111111111111111111111111111111111111");
+  const record = (wallet, status, deadline) => ({ claimContract: getAddress(CONTRACT), wallet, block: 1, usedTokenId: "0", balances: { 0: "1", 1: "0", 2: "0", 3: "0" }, deadline: BigInt(deadline), status, voucher: {}, signature: "0x" });
+  const seed = async (rows) => { const store = createMemoryGenesisClaimReservationStore(); await store.withLock(CONTRACT, async (tx) => { for (const row of rows) await tx.upsert(row); }); return store; };
+  const run = (store, overrides = {}) => reconcileGenesisReservations({ store, claimContract: CONTRACT, readAlreadyClaimed: async (wallet) => wallet === claimed, destinationNow: async () => 2000, ...overrides });
+  const statusOf = (store, wallet) => store.rows.get(`${CONTRACT.toLowerCase()}:${wallet.toLowerCase()}`).status;
+
+  it("settles a claimed PENDING row to REDEEMED and an unclaimed expired one to EXPIRED", async () => {
+    const store = await seed([record(claimed, "PENDING", 1000), record(idle, "PENDING", 1000)]);
+    const result = await run(store, { apply: true });
+    expect(result.transitions.map((t) => [t.wallet, t.to])).toEqual([[claimed, "REDEEMED"], [idle, "EXPIRED"]]);
+    expect(statusOf(store, claimed)).toBe("REDEEMED");
+    expect(statusOf(store, idle)).toBe("EXPIRED");
+  });
+
+  it("defaults to a dry run that writes nothing", async () => {
+    const store = await seed([record(claimed, "PENDING", 1000)]);
+    const result = await run(store);
+    expect(result.transitions).toEqual([{ wallet: claimed, from: "PENDING", to: "REDEEMED", applied: false }]);
+    expect(statusOf(store, claimed)).toBe("PENDING");
+  });
+
+  it("is idempotent: settled rows are neither read nor rewritten on a second run", async () => {
+    const store = await seed([record(claimed, "PENDING", 1000)]);
+    await run(store, { apply: true });
+    const reader = vi.fn().mockResolvedValue(true);
+    const again = await run(store, { apply: true, readAlreadyClaimed: reader });
+    expect(again).toEqual({ pending: 0, transitions: [] });
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it("leaves an unclaimed voucher that can still be redeemed PENDING, and never reopens EXPIRED rows", async () => {
+    const store = await seed([record(idle, "PENDING", 1990), record(getAddress("0x2222222222222222222222222222222222222222"), "EXPIRED", 10)]);
+    const result = await run(store, { apply: true });
+    expect(result).toEqual({ pending: 1, transitions: [] });
+    expect(statusOf(store, idle)).toBe("PENDING");
+  });
+
+  it("writes nothing when the chain cannot be read", async () => {
+    const store = await seed([record(claimed, "PENDING", 1000), record(idle, "PENDING", 1000)]);
+    await expect(run(store, { apply: true, readAlreadyClaimed: async (wallet) => { if (wallet === idle) throw new Error("rpc down"); return true; } })).rejects.toThrow("rpc down");
+    expect(statusOf(store, claimed)).toBe("PENDING");
+  });
+
+  it("keeps the used-unit ledger identical before and after settlement", async () => {
+    const before = await seed([record(claimed, "PENDING", 1000)]);
+    const settled = await seed([record(claimed, "PENDING", 1000)]);
+    await run(settled, { apply: true });
+    const view = async (store) => store.withLock(CONTRACT, async (tx) => (await tx.list()).map((r) => [r.wallet, r.usedTokenId, r.status === "EXPIRED"]));
+    expect(await view(settled)).toEqual((await view(before)));
   });
 });

@@ -337,6 +337,29 @@ export class IndexerStore {
     });
   }
 
+  /**
+   * Promotes CONFIRMED primary-sale purchases to FINALIZED once the sale contract's checkpoint has
+   * indexed past their block (finalizedBlock = head minus the configured confirmations). The row must
+   * still sit in the canonical block it was indexed from, so a reorged block is never finalized.
+   * Idempotent: only CONFIRMED rows move, finalized_at is stamped once, and a re-run touches nothing.
+   */
+  async finalizePrimaryPurchases({ chainId, saleAddress, finalizedBlock }) {
+    const upTo = finalizedBlock === null || finalizedBlock === undefined ? NaN : Number(finalizedBlock);
+    if (!Number.isSafeInteger(upTo) || upTo < 0) return { finalized: 0 };
+    return withTransaction(this.db, async (client) => {
+      const { rows } = await client.query(
+        `UPDATE primary_purchases pp SET status='FINALIZED', finalized_at=now(), reconciled_at=now()
+         FROM chain_blocks cb
+         WHERE pp.chain_id=$1 AND pp.sale_contract_address=$2 AND pp.status='CONFIRMED' AND pp.block_number <= $3
+           AND cb.chain_id=pp.chain_id AND cb.block_number=pp.block_number AND cb.block_hash=pp.block_hash AND cb.is_canonical=true
+         RETURNING pp.transaction_hash`,
+        [chainId, lower(saleAddress), upTo],
+      );
+      if (rows.length) await client.query("UPDATE transactions SET status='FINALIZED', finalized_at=now(), updated_at=now() WHERE chain_id=$1 AND transaction_hash = ANY($2::text[]) AND status='CONFIRMED'", [chainId, rows.map((row) => row.transaction_hash)]);
+      return { finalized: rows.length };
+    });
+  }
+
   async reconcileMarketplaceTransaction({ chainId, transactionHash, state, receipt }) {
     return withTransaction(this.db, async (client) => {
       const hash = lower(transactionHash);
