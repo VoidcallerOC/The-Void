@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadIndexerConfig, withManifestReleaseDeployments } from "./config.js";
 import { reportIndexedContracts } from "./indexer-contracts.js";
-import { createProductionIndexerWorker, IndexerLeaseError, ProductionIndexerWorker } from "./indexer-worker.js";
+import { createProductionIndexerWorker, IndexerLeaseError, ProductionIndexerWorker, rateLimitCooldownMs } from "./indexer-worker.js";
 
 const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const wallet = "0x1111111111111111111111111111111111111111";
@@ -131,11 +131,17 @@ describe("production indexer worker", () => {
         indexer: { syncAll: vi.fn().mockRejectedValue(failure), retryOptions: {} },
         store: durableStore,
         rpc: {},
-        config: config({ pollIntervalMs: 1_000, retryMaxDelayMs: 30_000, retryBaseDelayMs: 250 }),
+        config: config({
+          pollIntervalMs: 1_000,
+          retryMaxDelayMs: 30_000,
+          retryBaseDelayMs: 250,
+          rpcRateLimitCooldownMs: 5_000,
+        }),
         logger,
         now: () => clock,
       });
       await expect(worker.runOnce()).rejects.toMatchObject({ status: 429 });
+      // cooldown = max(floor 5s, Retry-After 8s) = 8s → 1000 + 8000
       expect(worker._nextCycleNotBefore).toBe(9_000);
       const pending = worker.waitForNextCycle();
       await vi.advanceTimersByTimeAsync(7_999);
@@ -195,15 +201,25 @@ describe("indexer worker configuration", () => {
     }).chunkSize).toBe(50);
   });
 
-  it("defaults retry max delay and rejects leases that cannot cover one capped backoff", () => {
+  it("defaults retry max delay, pacing, and rejects leases that cannot cover one capped backoff", () => {
     const result = loadIndexerConfig({
       INDEXER_CHAIN_ID: "43113",
       INDEXER_RPC_URL: "https://rpc.example",
       INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
       INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
     });
-    expect(result.retryMaxDelayMs).toBe(30_000);
+    expect(result.retryMaxDelayMs).toBe(60_000);
+    expect(result.rpcMinIntervalMs).toBe(1_500);
+    expect(result.rpcRateLimitCooldownMs).toBe(45_000);
     expect(result.leaseTtlMs).toBeGreaterThanOrEqual(result.rpcTimeoutMs + result.retryMaxDelayMs + 10_000);
+    expect(loadIndexerConfig({
+      INDEXER_CHAIN_ID: "43113",
+      INDEXER_RPC_URL: "https://rpc.example",
+      INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+      INDEXER_RETRY_MAX_DELAY_MS: "30000",
+      INDEXER_RPC_RATE_LIMIT_COOLDOWN_MS: "45000",
+      INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
+    }).rpcRateLimitCooldownMs).toBe(30_000);
     expect(() => loadIndexerConfig({
       INDEXER_CHAIN_ID: "43113",
       INDEXER_RPC_URL: "https://rpc.example",
@@ -212,6 +228,26 @@ describe("indexer worker configuration", () => {
       INDEXER_LEASE_TTL_MS: "50000",
       INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
     })).toThrow(/INDEXER_LEASE_TTL_MS must be at least/);
+  });
+
+  it("does not collapse cycle cooldown when Retry-After is absent", () => {
+    const failure = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: null });
+    expect(rateLimitCooldownMs(failure, {
+      retryMaxDelayMs: 60_000,
+      rpcRateLimitCooldownMs: 45_000,
+      pollIntervalMs: 15_000,
+      retryBaseDelayMs: 250,
+    })).toBe(45_000);
+    expect(rateLimitCooldownMs(Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: 12_000 }), {
+      retryMaxDelayMs: 60_000,
+      rpcRateLimitCooldownMs: 45_000,
+      pollIntervalMs: 15_000,
+    })).toBe(45_000);
+    expect(rateLimitCooldownMs(Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: 55_000 }), {
+      retryMaxDelayMs: 60_000,
+      rpcRateLimitCooldownMs: 45_000,
+      pollIntervalMs: 15_000,
+    })).toBe(55_000);
   });
 
   it("indexes the ERC1155 release and the primary sale together", () => {
