@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_CONFIG, assertFujiProvider, fujiExplorerUrl, sendFujiTransaction } from "./fuji-release.js";
 import { assertReleaseProvider, releaseAssetIdentity } from "./release-asset.js";
+import { ensureReleaseChain } from "./release-chain.js";
 import { normalizeSaleTimeToUnixSeconds } from "./sale-time.js";
 
 export const FUJI_RPC_TIMEOUT_MS = 10_000;
@@ -320,18 +321,10 @@ export async function readReleasePrimarySale(provider, releaseAsset, account) {
 }
 
 export async function ensureFujiNetwork(provider) {
-  try {
-    await assertFujiProvider(provider);
-    return;
-  } catch (error) {
-    try {
-      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: FUJI_RELEASE_CONFIG.chainHexId }] });
-      await assertFujiProvider(provider);
-    } catch (switchError) {
-      if (switchError?.code === 4001) throw switchError;
-      throw error;
-    }
-  }
+  // FUJI_RELEASE_CONFIG tracks the build-selected release network (Fuji or C-Chain).
+  // Delegate to ensureReleaseChain so missing networks are added (EIP-3085) before switch.
+  await ensureReleaseChain(provider, FUJI_RELEASE_CONFIG);
+  await assertFujiProvider(provider);
 }
 
 // Explicit gas for dry runs: without one, a node can assume its full gas cap

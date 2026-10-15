@@ -25,7 +25,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
-import { switchChain } from "../lib/web3.js";
+import { ensureReleaseChain, releaseChainDescriptor } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
 const pollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
@@ -306,7 +306,7 @@ export function ListingPanel({ edition }) {
 
       if (!latest.approved) {
         setSession({ key: verificationKey, stage: "approval", context: latest, message: "Confirm marketplace approval in your wallet. This gives the configured marketplace operator access to this release contract’s ERC-1155 tokens." });
-        const approvalReceipt = await submitApproval({ provider, owner: wallet.account, tokenContract: contract, marketplace: marketplace.address, chain: { key: "fuji", id: canonicalChainId }, chainId: wallet.chainId });
+        const approvalReceipt = await submitApproval({ provider, owner: wallet.account, tokenContract: contract, marketplace: marketplace.address, chain: releaseChainDescriptor(), chainId: wallet.chainId });
         if (BigInt(approvalReceipt?.status ?? 0) !== 1n) throw Object.assign(new Error("Marketplace approval transaction did not succeed."), { code: "APPROVAL_REVERTED" });
       }
 
@@ -329,7 +329,7 @@ export function ListingPanel({ edition }) {
         owner: wallet.account,
         edition,
         marketplace: marketplace.address,
-        chain: { key: "fuji", id: canonicalChainId },
+        chain: releaseChainDescriptor(),
         chainId: wallet.chainId,
         tokenId,
         amount,
@@ -437,9 +437,12 @@ export function ListingPanel({ edition }) {
 
   const switchToFuji = async () => {
     try {
-      await switchChain(wallet.getProvider(), "fuji");
+      const chainId = await ensureReleaseChain(wallet.getProvider());
+      if (Number(chainId) !== canonicalChainId) {
+        throw Object.assign(new Error(`Switch your wallet to chain ${canonicalChainId}.`), { code: "WRONG_NETWORK" });
+      }
     } catch (error) {
-      setSession({ key: verificationKey, stage: "wrong-network", message: error?.message || "Could not switch to Avalanche Fuji." });
+      setSession({ key: verificationKey, stage: "wrong-network", message: error?.message || `Could not switch to the release network (chain ${canonicalChainId}).` });
     }
   };
 
