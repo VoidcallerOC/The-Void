@@ -118,6 +118,7 @@ function initialState() {
     quantity: "25",
     priceWei: "0.01",
     royaltyBps: "250",
+    releaseSymbol: "",
     saleSupply: "",
     perWalletLimit: "1",
     saleStart: "",
@@ -526,7 +527,7 @@ export function ArtistStudioPage() {
     let nextReleaseId = releaseId;
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
-      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork },
+      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(releaseId || !form.releaseSymbol.trim() ? {} : { symbol: form.releaseSymbol.trim() }) },
       headers,
     });
     nextReleaseId = release.id;
@@ -1092,6 +1093,7 @@ export function ArtistStudioPage() {
             canUseStudio && ownedStudioCatalog && <TextField title="Your artist name (creates your artist profile — add bio and links on your profile page)" value={form.artistName} onChange={(value) => set("artistName", value)} required />
           )}
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
+          {!releaseId && <TextField title="Contract symbol (optional, up to 11 letters or digits; fixed once the release is created on-chain)" value={form.releaseSymbol} onChange={(value) => set("releaseSymbol", value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))} placeholder="Derived from the title if left empty" />}
           <label style={label}>Release type
             <select value={form.releaseType} onChange={(event) => set("releaseType", event.target.value)} style={field}>
               {RELEASE_TYPES.map((type) => <option key={type} value={type}>{RELEASE_TYPE_LABELS[type]}</option>)}

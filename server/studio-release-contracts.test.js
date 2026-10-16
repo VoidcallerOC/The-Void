@@ -58,8 +58,8 @@ describe("provisioning across factory deployments", () => {
   const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
   const NEW_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
   const request = { headers: {} };
-  function provisioningHarness({ existingRequest = null, releaseKey, artistAuthority = {} } = {}) {
-    const release = { id: "release-p", artist_id: "artist-1", slug: "p", title: "Prepared Release", status: "DRAFT", release_metadata: { applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), ...(releaseKey ? { releaseKey } : {}) } };
+  function provisioningHarness({ existingRequest = null, releaseKey, artistAuthority = {}, releaseMetadata = {} } = {}) {
+    const release = { id: "release-p", artist_id: "artist-1", slug: "p", title: "Prepared Release", status: "DRAFT", release_metadata: { applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), ...(releaseKey ? { releaseKey } : {}), ...releaseMetadata } };
     const authority = { id: "artist-1", status: "ACTIVE", wallet_authorized: true, verification_decision: "VERIFIED", application_verified: true, contract_verified: false, ...artistAuthority };
     const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [release] } : String(sql).includes("FROM artists a WHERE a.id=$1") ? { rows: [authority] } : String(sql).startsWith("UPDATE releases SET release_metadata") ? { rows: [{ id: release.id }] } : { rows: [] })) };
     const repo = repository();
@@ -82,6 +82,25 @@ describe("provisioning across factory deployments", () => {
     await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 403, code: "ARTIST_NOT_VERIFIED" });
     expect(repo.createReleaseProvisioningRequest).not.toHaveBeenCalled();
     expect(db.query.mock.calls.some(([sql]) => String(sql).startsWith("UPDATE releases SET release_metadata"))).toBe(false);
+  });
+
+  it("uses the artist's chosen contract symbol instead of the title-derived one", async () => {
+    const { instance, repo } = provisioningHarness({ releaseMetadata: { contractSymbol: "FNF" } });
+    const prepared = await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" });
+    expect(prepared.symbol).toBe("FNF");
+    expect(prepared.name).toBe("Prepared Release");
+    expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ expectedParameters: expect.objectContaining({ symbol: "FNF", name: "Prepared Release" }) }));
+  });
+
+  it("falls back to the title-derived symbol when none is chosen", async () => {
+    const { instance } = provisioningHarness();
+    expect((await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).symbol).toBe("PREPAREDREL");
+  });
+
+  it("rejects an invalid stored contract symbol before any transaction is prepared", async () => {
+    const { instance, repo } = provisioningHarness({ releaseMetadata: { contractSymbol: "NOT A SYMBOL!" } });
+    await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 400, code: "CONTRACT_SYMBOL_INVALID" });
+    expect(repo.createReleaseProvisioningRequest).not.toHaveBeenCalled();
   });
 
   it("keeps a release already provisioned on the historical factory on that factory and key", async () => {
