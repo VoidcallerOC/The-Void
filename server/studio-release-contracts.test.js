@@ -58,9 +58,10 @@ describe("provisioning across factory deployments", () => {
   const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
   const NEW_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
   const request = { headers: {} };
-  function provisioningHarness({ existingRequest = null, releaseKey } = {}) {
+  function provisioningHarness({ existingRequest = null, releaseKey, artistAuthority = {} } = {}) {
     const release = { id: "release-p", artist_id: "artist-1", slug: "p", title: "Prepared Release", status: "DRAFT", release_metadata: { applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), ...(releaseKey ? { releaseKey } : {}) } };
-    const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [release] } : String(sql).startsWith("UPDATE releases SET release_metadata") ? { rows: [{ id: release.id }] } : { rows: [] })) };
+    const authority = { id: "artist-1", status: "ACTIVE", wallet_authorized: true, verification_decision: "VERIFIED", application_verified: true, contract_verified: false, ...artistAuthority };
+    const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [release] } : String(sql).includes("FROM artists a WHERE a.id=$1") ? { rows: [authority] } : String(sql).startsWith("UPDATE releases SET release_metadata") ? { rows: [{ id: release.id }] } : { rows: [] })) };
     const repo = repository();
     repo.getReleaseProvisioningRequest = vi.fn(async () => existingRequest);
     repo.createReleaseProvisioningRequest = vi.fn(async (input) => ({ request_id: "req-1", state: "PREPARED", ...input }));
@@ -74,6 +75,13 @@ describe("provisioning across factory deployments", () => {
     expect(prepared.factoryAddress).toBe(NEW_FACTORY);
     expect(prepared.releaseKey).toBe(deriveStudioReleaseKey({ releaseId: "release-p", artistWallet: OWNER, factoryAddress: NEW_FACTORY }));
     expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ factoryAddress: NEW_FACTORY }));
+  });
+
+  it("refuses to prepare the createRelease transaction for an unverified artist, before any gas is spent", async () => {
+    const { instance, repo, db } = provisioningHarness({ artistAuthority: { application_verified: false, contract_verified: false, verification_decision: null } });
+    await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 403, code: "ARTIST_NOT_VERIFIED" });
+    expect(repo.createReleaseProvisioningRequest).not.toHaveBeenCalled();
+    expect(db.query.mock.calls.some(([sql]) => String(sql).startsWith("UPDATE releases SET release_metadata"))).toBe(false);
   });
 
   it("keeps a release already provisioned on the historical factory on that factory and key", async () => {
