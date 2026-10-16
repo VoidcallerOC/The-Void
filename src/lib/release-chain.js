@@ -102,6 +102,37 @@ export async function assertWalletChainId(provider, expectedChainId, networkName
   return actual;
 }
 
+/** True when the wallet reports the build-selected release chain. */
+export function isOnReleaseChain(chainId, deployment = RELEASE_DEPLOYMENT) {
+  return Number(chainId) === Number(deployment.chainId);
+}
+
+/** User-facing copy: Avalanche (or Fuji) is required — never present Ethereum as intended. */
+export function releaseNetworkRequiredMessage(deployment = RELEASE_DEPLOYMENT, { action = "continue" } = {}) {
+  const name = deployment.networkName || deployment.network || `chain ${deployment.chainId}`;
+  return `${name} (${deployment.chainId}) is required to ${action}. Ethereum is not supported.`;
+}
+
+export function releaseNetworkSwitchLabel(deployment = RELEASE_DEPLOYMENT) {
+  const name = String(deployment.networkName || deployment.network || "network");
+  if (/fuji/i.test(name)) return "SWITCH TO FUJI";
+  if (/avalanche|c-chain/i.test(name)) return "SWITCH TO AVALANCHE";
+  return "SWITCH NETWORK";
+}
+
+/** Codes that mean permission may exist but the wallet is not on the release chain. */
+export const RELEASE_CHAIN_GATE_CODES = Object.freeze([
+  "WRONG_CHAIN",
+  "CHAIN_SWITCH_REJECTED",
+  "CHAIN_ADD_REJECTED",
+  "CHAIN_SWITCH_FAILED",
+  "CHAIN_ADD_FAILED",
+]);
+
+export function isReleaseChainGateError(error) {
+  return RELEASE_CHAIN_GATE_CODES.includes(error?.code);
+}
+
 function isUserRejection(error) {
   const code = error?.code;
   const message = String(error?.message || "");

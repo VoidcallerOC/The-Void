@@ -3,8 +3,12 @@ import {
   assertWalletChainId,
   ensureReleaseChain,
   ensureWalletOnChain,
+  isOnReleaseChain,
+  isReleaseChainGateError,
   readWalletChainId,
   releaseChainDescriptor,
+  releaseNetworkRequiredMessage,
+  releaseNetworkSwitchLabel,
   toChainHexId,
 } from "./release-chain.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
@@ -118,5 +122,18 @@ describe("release-chain helpers", () => {
     expect(toChainHexId(43114)).toBe("0xa86a");
     expect(toChainHexId(43113)).toBe("0xa869");
     expect(toChainHexId(1)).toBe("0x1");
+  });
+
+  it("exposes Avalanche-first UX helpers that never name Ethereum as intended", () => {
+    expect(isOnReleaseChain(RELEASE_DEPLOYMENT.chainId)).toBe(true);
+    expect(isOnReleaseChain(1)).toBe(false);
+    expect(isReleaseChainGateError({ code: "WRONG_CHAIN" })).toBe(true);
+    expect(isReleaseChainGateError({ code: "CHAIN_SWITCH_REJECTED" })).toBe(true);
+    expect(isReleaseChainGateError({ code: 4001 })).toBe(false);
+    const message = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT);
+    expect(message).toMatch(new RegExp(String(RELEASE_DEPLOYMENT.chainId)));
+    expect(message).toMatch(/Ethereum is not supported/i);
+    expect(releaseNetworkSwitchLabel({ networkName: "Avalanche C-Chain", chainId: 43114 })).toBe("SWITCH TO AVALANCHE");
+    expect(releaseNetworkSwitchLabel({ networkName: "Avalanche Fuji", chainId: 43113 })).toBe("SWITCH TO FUJI");
   });
 });

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { Wallet, LogOut } from "lucide-react";
+import { Wallet, LogOut, Network } from "lucide-react";
 import { useWallet } from "../lib/wallet-context.js";
 import { shortAddr } from "../lib/web3.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
+import { releaseNetworkRequiredMessage, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 // Brand-styled connect button + wallet picker dropdown for the Nav.
 export function WalletButton({ compact }) {
@@ -16,7 +17,15 @@ export function WalletButton({ compact }) {
     return () => document.removeEventListener("click", onDoc);
   }, []);
 
+  const needsNetwork = Boolean(w.needsNetworkSwitch);
+  const switchLabel = releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT);
+  const networkHint = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "use The Void" });
+
   const onClick = async () => {
+    if (needsNetwork) {
+      await w.ensureNetwork?.({ thenAuthenticate: true });
+      return;
+    }
     if (w.connected && w.authenticated) { w.disconnect(); return; }
     if (w.connected) { await w.authenticate(); return; }
     if (w.wallets.length === 1) { await w.connect(w.wallets[0].provider); return; }
@@ -24,12 +33,29 @@ export function WalletButton({ compact }) {
     setOpen((v) => !v);
   };
 
-  const label = w.authenticating ? "AUTHENTICATING" : w.connected ? (w.authenticated ? shortAddr(w.account) : "AUTH REQUIRED") : "CONNECT";
+  const label = w.authenticating
+    ? "AUTHENTICATING"
+    : needsNetwork
+      ? switchLabel
+      : w.connected
+        ? (w.authenticated ? shortAddr(w.account) : "AUTH REQUIRED")
+        : "CONNECT";
+
   const accessibleName = w.authenticating
     ? "Authenticating wallet"
-    : w.connected
-      ? (w.authenticated ? `Disconnect wallet ${shortAddr(w.account)}` : "Authenticate wallet")
-      : "Connect wallet";
+    : needsNetwork
+      ? `Switch wallet to ${RELEASE_DEPLOYMENT.networkName}`
+      : w.connected
+        ? (w.authenticated ? `Disconnect wallet ${shortAddr(w.account)}` : "Authenticate wallet")
+        : "Connect wallet";
+
+  const title = needsNetwork
+    ? (w.authenticationError || networkHint)
+    : w.authenticated
+      ? w.account
+      : w.connected
+        ? (w.authenticationError || "Sign the wallet authentication message.")
+        : `Connect · ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) required. If Rabby shows Ethereum first, approve connect, then approve the Avalanche switch.`;
 
   return (
     <span ref={ref} style={{ position: "relative", display: "inline-block" }}>
@@ -37,7 +63,8 @@ export function WalletButton({ compact }) {
         type="button"
         onClick={onClick}
         aria-label={accessibleName}
-        title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : `Connect wallet · select ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) in Rabby if prompted`}
+        title={title}
+        data-needs-network={needsNetwork ? "true" : "false"}
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 500,
@@ -47,8 +74,8 @@ export function WalletButton({ compact }) {
           padding: compact ? "10px 14px" : "12px 16px",
           background: "transparent",
           border: "1px solid",
-          borderColor: w.connected ? "var(--vc-crimson)" : "var(--vc-smoke)",
-          color: w.connected ? "var(--vc-bone)" : "var(--vc-bone-dim)",
+          borderColor: needsNetwork ? "var(--vc-crimson)" : w.connected ? "var(--vc-crimson)" : "var(--vc-smoke)",
+          color: needsNetwork || w.connected ? "var(--vc-bone)" : "var(--vc-bone-dim)",
           cursor: "pointer",
           display: "inline-flex",
           alignItems: "center",
@@ -57,11 +84,18 @@ export function WalletButton({ compact }) {
           transition: "all 120ms cubic-bezier(0.6,0,0.2,1)",
         }}
         onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--vc-crimson)"; e.currentTarget.style.color = "var(--vc-bone)"; }}
-        onMouseLeave={(e) => { if (!w.connected) { e.currentTarget.style.borderColor = "var(--vc-smoke)"; e.currentTarget.style.color = "var(--vc-bone-dim)"; } }}
+        onMouseLeave={(e) => {
+          if (!w.connected && !needsNetwork) {
+            e.currentTarget.style.borderColor = "var(--vc-smoke)";
+            e.currentTarget.style.color = "var(--vc-bone-dim)";
+          }
+        }}
       >
-        {w.connected
-          ? w.authenticated ? <LogOut size={14} strokeWidth={1.75} aria-hidden="true" /> : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />
-          : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />}
+        {needsNetwork
+          ? <Network size={14} strokeWidth={1.75} aria-hidden="true" />
+          : w.connected
+            ? w.authenticated ? <LogOut size={14} strokeWidth={1.75} aria-hidden="true" /> : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />
+            : <Wallet size={14} strokeWidth={1.75} aria-hidden="true" />}
         <span aria-hidden="true">{label}</span>
       </button>
 
@@ -79,8 +113,11 @@ export function WalletButton({ compact }) {
             padding: 6,
           }}
         >
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", padding: "8px 10px 10px" }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", padding: "8px 10px 6px" }}>
             SELECT A BEARER WALLET
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em", color: "var(--vc-bone-dim)", padding: "0 10px 10px", lineHeight: 1.5 }}>
+            {RELEASE_DEPLOYMENT.networkName} ({RELEASE_DEPLOYMENT.chainId}) · AVAX
           </div>
           {w.wallets.length === 0 && (
             <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--vc-bone-dim)", padding: "8px 10px 12px" }}>

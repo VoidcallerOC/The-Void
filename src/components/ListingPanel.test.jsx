@@ -298,7 +298,7 @@ describe("release-per-contract secondary listing flow", () => {
     setup({ walletOverrides: { chainId: 43114 } });
     await act(async () => { await flushPromises(); });
 
-    expect(screen.getByText("Switch to Avalanche Fuji (43113) before listing this release.")).toBeTruthy();
+    expect(screen.getByText(/Avalanche Fuji \(43113\) is required to list this release/i)).toBeTruthy();
     expect(mocks.readContext).not.toHaveBeenCalled();
     expect(mocks.submitListing).not.toHaveBeenCalled();
   });
