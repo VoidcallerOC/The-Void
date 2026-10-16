@@ -213,6 +213,19 @@ function provisioningFactoryFor(provisioningRequest) {
   return { ...active, factoryAddress: ethers.getAddress(recorded.factoryAddress), albumCapable: recorded.albumCapable, releaseVersion: recorded.releaseVersion };
 }
 
+// The on-chain ERC-1155 symbol. An artist may choose a short ticker (stored as release_metadata.contractSymbol);
+// otherwise it is derived from the release title. It is fixed once the release contract exists.
+const CONTRACT_SYMBOL_PATTERN = /^[A-Z0-9]{1,11}$/;
+function contractSymbolInput(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const symbol = String(value).trim().toUpperCase();
+  if (!CONTRACT_SYMBOL_PATTERN.test(symbol)) throw new ApiError(400, "CONTRACT_SYMBOL_INVALID", "The release symbol must be 1 to 11 letters or digits.");
+  return symbol;
+}
+function derivedContractSymbol(release) {
+  return contractSymbolInput(release.release_metadata?.contractSymbol) || generatedSlug(release.title, "release title").replace(/-/g, "").slice(0, 11).toUpperCase();
+}
+
 function expectedReleaseVersion(factory) {
   const version = Number(factory?.releaseVersion ?? 2);
   return Number.isSafeInteger(version) && version > 0 ? version : 2;
@@ -418,7 +431,7 @@ export class ArtistStudioService {
       if (!updated.rows[0]) throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "The expected V2 release key could not be persisted before authorization.");
     }
     const name = requiredText(release.title, "release.title", { max: 256 });
-    const symbol = generatedSlug(release.title, "release title").replace(/-/g, "").slice(0, 11).toUpperCase();
+    const symbol = derivedContractSymbol(release);
     const contractURI = optionalText(release.release_metadata?.contractURI, "release.contractURI", { max: 2048 }) || "";
     const expectedParameters = { chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress.toLowerCase(), applicationReleaseId, applicationReleaseRecordId: release.id, releaseKey: expectedKey, artistWallet: identity.wallet.toLowerCase(), name, symbol, contractURI };
     const authorizationDigest = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(expectedParameters)));
@@ -755,7 +768,7 @@ export class ArtistStudioService {
     // Release slugs become the on-chain releaseId (bytes32), which is shared by every
     // artist on the canonical contract, so they are allocated platform-wide.
     const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
-    const metadata = { ...(input.metadata || {}), releaseType: releaseType(input.releaseType), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}) };
+    const metadata = { ...(input.metadata || {}), releaseType: releaseType(input.releaseType), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}), ...(contractSymbolInput(input.symbol) ? { contractSymbol: contractSymbolInput(input.symbol) } : {}) };
     const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject(metadata, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return { ...release, releaseKey: metadata.releaseKey, chainId: PROVISIONING_CHAIN_ID };
