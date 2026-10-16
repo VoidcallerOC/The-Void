@@ -403,6 +403,9 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may provision a blockchain release. Verified managers cannot create releases on-chain.");
     if (release.status !== "DRAFT") throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "Only a draft release can be provisioned.");
+    // Publication later requires a verified artist. Check it before the artist pays gas for createRelease,
+    // so an unverified wallet never ends up with an on-chain release it cannot publish.
+    await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     const existingRequest = await this.repository.getReleaseProvisioningRequest({ releaseId: release.id, chainId: provisioningFactoryConfig().chainId });
     const factory = provisioningFactoryFor(existingRequest);
     const applicationReleaseId = deriveStudioApplicationReleaseId(release.id);
