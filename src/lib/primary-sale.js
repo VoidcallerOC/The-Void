@@ -152,12 +152,12 @@ export async function simulateConfigureSale(provider, { from, data, value = 0 } 
   await assertFujiProvider(provider);
   if (!ethers.isAddress(from)) throw new Error("A connected wallet is required.");
   const sale = fujiPrimarySaleAddress();
-  if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
+  if (!sale) throw new Error(`Primary sale is not configured on ${FUJI_RELEASE_CONFIG.networkName} yet.`);
   try {
     return await provider.request({ method: "eth_call", params: [{ from, to: sale, data, value: ethers.toQuantity(BigInt(value)), gas: SIMULATION_GAS }, "latest"] });
   } catch (error) {
     if (error?.code === "FUJI_RPC_TIMEOUT" || error?.code === "FUJI_RPC_UNAVAILABLE") throw error;
-    throw Object.assign(new Error(`Sale configuration simulation reverted on Fuji: ${error?.shortMessage || error?.message || "execution reverted"}`), {
+    throw Object.assign(new Error(`Sale configuration simulation reverted on ${FUJI_RELEASE_CONFIG.networkName}: ${error?.shortMessage || error?.message || "execution reverted"}`), {
       code: "CONFIGURE_SALE_SIMULATION_REVERTED",
       cause: error,
     });
@@ -252,16 +252,16 @@ export function explainCollectError(error) {
     } catch { /* Not a sale error; try the release contract's errors. */ }
     try {
       const parsed = releaseErrorIface.parseError(data);
-      if (parsed?.name === "AccessDenied") return { state: "unauthorized-sale", message: "The sale contract is not authorized to mint this release on Fuji (missing ISSUER_ROLE). Nothing was collected." };
-      if (parsed?.name === "ContractPaused") return { state: "paused", message: "The certified Fuji release is paused. Nothing was collected." };
+      if (parsed?.name === "AccessDenied") return { state: "unauthorized-sale", message: `The sale contract is not authorized to mint this release on ${FUJI_RELEASE_CONFIG.networkName} (missing ISSUER_ROLE). Nothing was collected.` };
+      if (parsed?.name === "ContractPaused") return { state: "paused", message: `The certified ${FUJI_RELEASE_CONFIG.networkName} release is paused. Nothing was collected.` };
       if (parsed?.name === "EditionNotFound") return { state: "not-created", message: "This release hasn't been published on-chain yet." };
       if (parsed?.name === "InactiveEdition") return { state: "closed", message: "This edition is not active on-chain. Nothing was collected." };
       if (parsed?.name === "ExceedsSupply") return { state: "sold-out", message: "This release is sold out." };
     } catch { /* Unknown revert data falls through. */ }
   }
   if (/sold out/i.test(message)) return { state: "sold-out", message: "This release is sold out." };
-  if (/insufficient funds/i.test(message)) return { state: "insufficient-funds", message: "This wallet does not have enough Fuji AVAX for the price plus gas. Nothing was collected." };
-  if (/revert/i.test(message)) return { state: "reverted", message: `The collect transaction would revert on Fuji: ${message.slice(0, 240)}` };
+  if (/insufficient funds/i.test(message)) return { state: "insufficient-funds", message: `This wallet does not have enough AVAX on ${FUJI_RELEASE_CONFIG.networkName} for the price plus gas. Nothing was collected.` };
+  if (/revert/i.test(message)) return { state: "reverted", message: `The collect transaction would revert on ${FUJI_RELEASE_CONFIG.networkName}: ${message.slice(0, 240)}` };
   return { state: "unavailable", message: "Collection is temporarily unavailable. Please try again later." };
 }
 
@@ -334,7 +334,7 @@ export const SIMULATION_GAS = ethers.toQuantity(500_000n);
 
 export async function collectEdition({ provider, from, tokenId, qty, priceWei }) {
   const sale = fujiPrimarySaleAddress();
-  if (!sale) throw new Error("Primary sale is not configured on Fuji yet.");
+  if (!sale) throw new Error(`Primary sale is not configured on ${FUJI_RELEASE_CONFIG.networkName} yet.`);
   await ensureFujiNetwork(provider);
   const quantity = BigInt(qty);
   const value = purchaseCost(priceWei, quantity);

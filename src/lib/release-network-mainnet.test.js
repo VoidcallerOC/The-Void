@@ -61,6 +61,11 @@ describe("frontend release config with mainnet selected", () => {
     expect(release.FUJI_RELEASE_CONFIG.network).not.toMatch(/fuji/i);
     const chain = await import("./release-chain.js");
     expect(chain.resolveChainDescriptor({ id: 43114 }).networkName).toBe("Avalanche C-Chain");
+    // Buyer-path collect errors must name Avalanche C-Chain on a 43114 build, never "Fuji".
+    const primarySale = await import("./primary-sale.js");
+    expect(primarySale.explainCollectError({ message: "insufficient funds for gas" }).message).toContain("Avalanche C-Chain");
+    expect(primarySale.explainCollectError({ message: "execution reverted: nope" }).message).toContain("Avalanche C-Chain");
+    expect(primarySale.explainCollectError({ message: "insufficient funds" }).message).not.toMatch(/on Fuji\b/);
     expect(release.isCertifiedFujiEdition({ contractAddress: "", chainId: 43114 })).toBe(false);
     expect(release.isCertifiedFujiEdition({ chainId: 43114 })).toBe(false);
     await expect(release.simulateReleaseCall({ request: vi.fn() }, { from: "0x1111111111111111111111111111111111111111", to: "0x2222222222222222222222222222222222222222", data: "0x", chainId: 43113 })).rejects.toThrow(/Avalanche C-Chain/);
@@ -82,5 +87,8 @@ describe("frontend release config with mainnet selected", () => {
     const chain = await import("./release-chain.js");
     expect(chain.resolveChainDescriptor({ id: 43113 }).networkName).toBe("Avalanche Fuji");
     expect(chain.resolveChainDescriptor({ id: 43114 }).networkName).toBe("Avalanche C-Chain");
+    // Genuinely Fuji build: buyer-path collect errors still read "Avalanche Fuji".
+    const primarySale = await import("./primary-sale.js");
+    expect(primarySale.explainCollectError({ message: "insufficient funds" }).message).toContain("Avalanche Fuji");
   });
 });
