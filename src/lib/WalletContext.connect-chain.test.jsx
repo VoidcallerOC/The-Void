@@ -222,7 +222,7 @@ describe("WalletProvider connect chain targeting", () => {
   it("ensureNetwork does not authenticate after a rejected switch", async () => {
     let chain = "0x1";
     const provider = {
-      request: vi.fn(async ({ method, params }) => {
+      request: vi.fn(async ({ method }) => {
         if (method === "eth_requestAccounts" || method === "eth_accounts") {
           return ["0x1111111111111111111111111111111111111111"];
         }
