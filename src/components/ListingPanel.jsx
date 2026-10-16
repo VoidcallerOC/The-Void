@@ -23,9 +23,9 @@ import {
   recordAuthoritativeTransactionSubmission,
 } from "../lib/marketplace-api.js";
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
-import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
+import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
-import { ensureReleaseChain, releaseChainDescriptor } from "../lib/release-chain.js";
+import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
 const pollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
@@ -68,7 +68,7 @@ function statusCopy(stage, message) {
     "not-owner": "This wallet no longer owns the selected edition on chain. Refresh the page after verifying your wallet.",
     unsupported: "Only a Fuji (43113) release-per-contract edition registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.",
     unavailable: "Marketplace or ownership verification is unavailable. No listing action was taken.",
-    "wrong-network": "Switch to Avalanche Fuji (43113) before listing this release.",
+    "wrong-network": releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" }),
     disconnected: "Connect a wallet to verify ownership and list this edition.",
     "reconciliation-required": "A wallet receipt was observed, but authoritative confirmation is incomplete. Do not submit again; reconciliation is required.",
     error: "The listing could not be completed.",
@@ -435,14 +435,20 @@ export function ListingPanel({ edition }) {
     }
   };
 
-  const switchToFuji = async () => {
+  const switchToReleaseNetwork = async () => {
     try {
-      const chainId = await ensureReleaseChain(wallet.getProvider());
-      if (Number(chainId) !== canonicalChainId) {
-        throw Object.assign(new Error(`Switch your wallet to chain ${canonicalChainId}.`), { code: "WRONG_NETWORK" });
+      if (typeof wallet.ensureNetwork === "function") {
+        const result = await wallet.ensureNetwork({ thenAuthenticate: false });
+        if (result?.error) throw Object.assign(new Error(result.error), { code: result.code || "WRONG_NETWORK" });
+      } else {
+        const chainId = await ensureReleaseChain(wallet.getProvider());
+        if (Number(chainId) !== canonicalChainId) {
+          throw Object.assign(new Error(releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" })), { code: "WRONG_NETWORK" });
+        }
       }
+      setSession({ key: verificationKey, stage: "checking", message: "" });
     } catch (error) {
-      setSession({ key: verificationKey, stage: "wrong-network", message: error?.message || `Could not switch to the release network (chain ${canonicalChainId}).` });
+      setSession({ key: verificationKey, stage: "wrong-network", message: error?.message || releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" }) });
     }
   };
 
@@ -476,7 +482,7 @@ export function ListingPanel({ edition }) {
       <details style={{ maxWidth: 760, margin: "12px 0", border: "1px solid var(--vc-ash)", padding: "10px 12px", background: "var(--vc-abyss)" }}>
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
         <div style={{ marginTop: 10, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.8, overflowWrap: "anywhere" }}>
-          <div>NETWORK · AVALANCHE FUJI · CHAIN {canonicalChainId}</div>
+          <div>NETWORK · {String(RELEASE_DEPLOYMENT.networkName || "Avalanche").toUpperCase()} · CHAIN {canonicalChainId}</div>
           <div>RELEASE FACTORY · {deployment?.factoryAddress || RELEASE_PER_CONTRACT.factoryAddress}</div>
           <div>MARKETPLACE · {canonicalMarketplace}</div>
           <div>RELEASE CONTRACT · {contract || "UNAVAILABLE"}</div>
@@ -488,8 +494,8 @@ export function ListingPanel({ edition }) {
       {!candidate && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{statusCopy("unsupported")}</p>}
       {candidate && !marketplaceConfigured && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Marketplace unavailable: this build has no matching live Fuji marketplace configuration. No transaction can be submitted.</p>}
       {stage === "disconnected" && <div style={{ margin: "18px 0" }}><WalletButton /><span style={{ display: "block", marginTop: 8, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</span></div>}
-      {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p><Btn onClick={switchToFuji}>SWITCH TO FUJI</Btn></div>}
-      {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
+      {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p><Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn></div>}
+      {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && !wallet.needsNetworkSwitch && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
 
       {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (
         <p role="status" aria-live="polite" style={{ color: ["not-owner", "unsupported", "unavailable", "error", "reconciliation-required"].includes(stage) ? "var(--vc-crimson)" : "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, overflowWrap: "anywhere" }}>

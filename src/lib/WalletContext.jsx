@@ -3,7 +3,12 @@ import { CHAINS, checkOwnership, checkCollectionOwnership, checkOwnershipRecords
 import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 import { authenticateWallet, authorizationHeaders } from "./wallet-auth.js";
-import { ensureReleaseChain } from "./release-chain.js";
+import {
+  ensureReleaseChain,
+  isOnReleaseChain,
+  isReleaseChainGateError,
+  releaseNetworkRequiredMessage,
+} from "./release-chain.js";
 import { connectWithReleaseChain, logWalletConnectDiag } from "./wallet-connect-flow.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
@@ -140,7 +145,7 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
 
   const authenticate = useCallback(async ({ targetProvider = providerRef.current, wallet = account } = {}) => {
     if (!targetProvider || !wallet) {
-      const error = "Connect a wallet and select an Avalanche network first.";
+      const error = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "connect and sign in" });
       setAuthenticationError(error);
       return { error, code: "AUTH_WALLET_REQUIRED" };
     }
@@ -151,8 +156,8 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       // wallet left on Ethereum (or Fuji during a mainnet build) cannot sign.
       const verifiedChainId = await ensureReleaseChain(targetProvider);
       setChainId(verifiedChainId);
-      if (verifiedChainId !== AUTH_CHAIN_ID) {
-        const error = `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) before signing in.`;
+      if (!isOnReleaseChain(verifiedChainId)) {
+        const error = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "sign in" });
         setAuthenticationError(error);
         return { error, code: "AUTH_CHAIN_UNSUPPORTED" };
       }
@@ -162,13 +167,48 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
       return { ok: true, session };
     } catch (error) {
       setAuthSession(null);
-      const message = error?.message || "Wallet authentication failed.";
+      try {
+        const cid = await targetProvider.request({ method: "eth_chainId" });
+        setChainId(Number(BigInt(cid)));
+      } catch { /* ignore */ }
+      const message = isReleaseChainGateError(error)
+        ? (error.message || releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "sign in" }))
+        : (error?.message || "Wallet authentication failed.");
       setAuthenticationError(message);
       return { error: message, code: error?.code || "AUTH_REQUEST_FAILED" };
     } finally {
       setAuthenticating(false);
     }
   }, [account]);
+
+  /** Prompt wallet_switchEthereumChain to the release network; never auth/tx until verified. */
+  const ensureNetwork = useCallback(async ({ targetProvider = providerRef.current, thenAuthenticate = true } = {}) => {
+    const p = targetProvider || providerRef.current || window.ethereum;
+    if (!p) {
+      const error = "No wallet detected. Install MetaMask, Rabby, or Core.";
+      setAuthenticationError(error);
+      return { error, code: "WALLET_PROVIDER_REQUIRED" };
+    }
+    try {
+      const verifiedChainId = await ensureReleaseChain(p);
+      setChainId(verifiedChainId);
+      setAuthenticationError(null);
+      logWalletConnectDiag("ensure_network_ok", { chainId: verifiedChainId });
+      if (thenAuthenticate && account) {
+        return authenticate({ targetProvider: p, wallet: account });
+      }
+      return { ok: true, chainId: verifiedChainId };
+    } catch (error) {
+      try {
+        const cid = await p.request({ method: "eth_chainId" });
+        setChainId(Number(BigInt(cid)));
+      } catch { /* ignore */ }
+      logWalletConnectDiag("ensure_network_failed", { code: error?.code || null });
+      const message = error?.message || releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT);
+      setAuthenticationError(message);
+      return { error: message, code: error?.code || "CHAIN_SWITCH_FAILED" };
+    }
+  }, [account, authenticate]);
 
   // Detach whatever listeners we last attached (if any) from their provider.
   const unwireProvider = useCallback(() => {
@@ -210,26 +250,49 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
 
   const connect = useCallback(async (provider) => {
     const p = provider || providerRef.current || window.ethereum;
-    if (!p) return { error: "No wallet detected. Install MetaMask or Core." };
+    if (!p) return { error: "No wallet detected. Install MetaMask, Rabby, or Core." };
     try {
       // See wallet-connect-flow.js: Rabby opens Connect (ETH default) for
       // wallet_switchEthereumChain when the origin is not yet permitted.
       // Fresh connect → accounts first, then ensure. Reconnect → ensure first.
+      // Dapps cannot force Rabby's Connect selector off Ethereum — after
+      // permission we immediately request Avalanche and refuse auth otherwise.
       const { accounts, chainId: selectedChainId } = await connectWithReleaseChain(p);
       setAccount(accounts[0]);
       setChainId(selectedChainId);
       wireProvider(p);
+      if (!isOnReleaseChain(selectedChainId)) {
+        const message = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "sign in" });
+        setAuthenticationError(message);
+        return { error: message, code: "WRONG_CHAIN" };
+      }
       return authenticate({ targetProvider: p, wallet: accounts[0] });
     } catch (error) {
+      let reportedChainId = null;
       try {
         const cid = await p.request({ method: "eth_chainId" });
-        setChainId(Number(BigInt(cid)));
+        reportedChainId = Number(BigInt(cid));
+        setChainId(reportedChainId);
       } catch { /* ignore */ }
-      logWalletConnectDiag("connect_failed", { code: error?.code || null });
+      logWalletConnectDiag("connect_failed", { code: error?.code || null, currentChainId: reportedChainId });
+
+      // Permission may already be granted (accounts returned) while switch was
+      // rejected or stuck on Ethereum — keep the session connected so the UI
+      // can show SWITCH NETWORK instead of silently disconnecting.
+      if (isReleaseChainGateError(error)) {
+        try {
+          const accts = await p.request({ method: "eth_accounts" });
+          if (accts?.length) {
+            setAccount(accts[0]);
+            wireProvider(p);
+          }
+        } catch { /* ignore */ }
+      }
+
       const code = error?.code || "WALLET_CONNECTION_FAILED";
       const message = code === 4001
         ? "Wallet connection was rejected."
-        : (error?.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`);
+        : (error?.message || releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT));
       setAuthenticationError(message);
       return { error: message, code };
     }
@@ -267,6 +330,9 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
   // Detach provider listeners if the provider tree unmounts.
   useEffect(() => unwireProvider, [unwireProvider]);
 
+  const onReleaseChain = isOnReleaseChain(chainId);
+  const needsNetworkSwitch = !!account && chainId != null && !onReleaseChain;
+
   const value = {
     wallets,
     account,
@@ -276,14 +342,19 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     identity,
     loadingOwnership,
     connected: !!account,
-    authenticated: !!authSession,
+    authenticated: !!authSession && onReleaseChain,
     authenticating,
     authenticationError,
-    authSession,
-    authHeaders: authorizationHeaders(authSession),
+    authSession: onReleaseChain ? authSession : null,
+    authHeaders: authorizationHeaders(onReleaseChain ? authSession : null),
     provider,
+    releaseChainId: AUTH_CHAIN_ID,
+    releaseNetworkName: RELEASE_DEPLOYMENT.networkName,
+    onReleaseChain,
+    needsNetworkSwitch,
     getProvider: () => providerRef.current || window.ethereum,
     connect,
+    ensureNetwork,
     authenticate,
     disconnect,
     refreshOwnership,

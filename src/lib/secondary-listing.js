@@ -77,7 +77,7 @@ export async function readReleaseListingContext({
     fail("The wallet network could not be verified. No listing action was taken.", "OWNERSHIP_READ_FAILED");
   }
   if (connectedChainId !== expectedChainId) {
-    fail(`Switch to Avalanche Fuji (${expectedChainId}) to list this release.`, "WRONG_NETWORK");
+    fail(`Switch to ${expectedChainId === 43114 ? "Avalanche C-Chain" : expectedChainId === 43113 ? "Avalanche Fuji" : `chain ${expectedChainId}`} (${expectedChainId}) to list this release. Ethereum is not supported.`, "WRONG_NETWORK");
   }
 
   let registry;
