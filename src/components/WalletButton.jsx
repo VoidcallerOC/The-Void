@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Wallet, LogOut } from "lucide-react";
 import { useWallet } from "../lib/wallet-context.js";
 import { shortAddr } from "../lib/web3.js";
+import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 // Brand-styled connect button + wallet picker dropdown for the Nav.
 export function WalletButton({ compact }) {
@@ -36,7 +37,7 @@ export function WalletButton({ compact }) {
         type="button"
         onClick={onClick}
         aria-label={accessibleName}
-        title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : "Connect wallet"}
+        title={w.authenticated ? w.account : w.connected ? (w.authenticationError || "Sign the wallet authentication message.") : `Connect wallet · select ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}) in Rabby if prompted`}
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 500,

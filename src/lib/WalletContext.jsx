@@ -4,6 +4,7 @@ import { VC_AUDIO } from "./audio.js";
 import { WalletCtx } from "./wallet-context.js";
 import { authenticateWallet, authorizationHeaders } from "./wallet-auth.js";
 import { ensureReleaseChain } from "./release-chain.js";
+import { connectWithReleaseChain, logWalletConnectDiag } from "./wallet-connect-flow.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 
 // Known wallet flags → rdns, so legacy injection dedups against EIP-6963.
@@ -211,47 +212,26 @@ export function WalletProvider({ children, collectionConfig = null, ownershipRea
     const p = provider || providerRef.current || window.ethereum;
     if (!p) return { error: "No wallet detected. Install MetaMask or Core." };
     try {
-      // Switch/add the release network BEFORE eth_requestAccounts. Rabby's
-      // "Connect to DApp" modal shows the wallet's current chain at account
-      // request time — if we only ensure after accounts, Ethereum is what the
-      // owner sees even when #202 is live.
-      try {
-        const preparedChainId = await ensureReleaseChain(p);
-        setChainId(preparedChainId);
-      } catch (preChainError) {
-        if (preChainError?.code === "CHAIN_SWITCH_REJECTED" || preChainError?.code === "CHAIN_ADD_REJECTED") {
-          const message = preChainError.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`;
-          setAuthenticationError(message);
-          return { error: message, code: preChainError.code };
-        }
-        // Some wallets require an account permission before chain RPCs succeed.
-        // Continue to eth_requestAccounts, then re-ensure below — never auth on
-        // a failed/unknown chain.
-      }
-
-      const accts = await p.request({ method: "eth_requestAccounts" });
-      if (!accts || !accts.length) return { error: "No accounts returned." };
-      setAccount(accts[0]);
+      // See wallet-connect-flow.js: Rabby opens Connect (ETH default) for
+      // wallet_switchEthereumChain when the origin is not yet permitted.
+      // Fresh connect → accounts first, then ensure. Reconnect → ensure first.
+      const { accounts, chainId: selectedChainId } = await connectWithReleaseChain(p);
+      setAccount(accounts[0]);
+      setChainId(selectedChainId);
       wireProvider(p);
-
-      let selectedChainId;
-      try {
-        selectedChainId = await ensureReleaseChain(p);
-        setChainId(selectedChainId);
-      } catch (chainError) {
-        try {
-          const cid = await p.request({ method: "eth_chainId" });
-          setChainId(parseInt(cid, 16));
-        } catch { /* ignore */ }
-        const message = chainError?.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`;
-        setAuthenticationError(message);
-        return { error: message, code: chainError?.code || "CHAIN_SWITCH_FAILED" };
-      }
-      return authenticate({ targetProvider: p, wallet: accts[0] });
+      return authenticate({ targetProvider: p, wallet: accounts[0] });
     } catch (error) {
-      const message = error?.code === 4001 ? "Wallet connection was rejected." : (error?.message || "Wallet connection failed.");
+      try {
+        const cid = await p.request({ method: "eth_chainId" });
+        setChainId(Number(BigInt(cid)));
+      } catch { /* ignore */ }
+      logWalletConnectDiag("connect_failed", { code: error?.code || null });
+      const code = error?.code || "WALLET_CONNECTION_FAILED";
+      const message = code === 4001
+        ? "Wallet connection was rejected."
+        : (error?.message || `Switch your wallet to ${RELEASE_DEPLOYMENT.networkName} (${RELEASE_DEPLOYMENT.chainId}).`);
       setAuthenticationError(message);
-      return { error: message, code: error?.code || "WALLET_CONNECTION_FAILED" };
+      return { error: message, code };
     }
   }, [wireProvider, authenticate]);
 
