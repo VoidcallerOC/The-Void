@@ -7,8 +7,16 @@ import { useWallet } from "../lib/wallet-context.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { findMarketplaceEdition, marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
-import { FUJI_RELEASE_FACTORY_CONFIG } from "../lib/fuji-release.js";
+import { resolveChainDescriptor } from "../lib/release-chain.js";
 import { releaseBindingFor } from "../lib/claim-state.js";
+
+// Network label derived from the claim's own chain id (claims run on the build-selected
+// network): 43114 → "Avalanche C-Chain", 43113 → "Avalanche Fuji". Never hardcoded.
+function claimNetworkLabel(chainId) {
+  const id = Number(chainId);
+  if (!Number.isSafeInteger(id) || id <= 0) return "—";
+  try { return resolveChainDescriptor({ id }).networkName; } catch { return `Chain ${id}`; }
+}
 import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
 import { formatSaleInstant } from "../lib/sale-editor.js";
 
@@ -153,7 +161,7 @@ function GenesisClaimLanding({ catalog }) {
             </div>
             <div className="vc-claim-supporting">
               <Eyebrow red>Verified claim target</Eyebrow>
-              <InfoRow label="Network">Avalanche Fuji · {target.destinationChainId}</InfoRow>
+              <InfoRow label="Network">{claimNetworkLabel(target.destinationChainId)} · {target.destinationChainId}</InfoRow>
               <InfoRow label="Release" mono>{target.releaseContract}</InfoRow>
               <InfoRow label="Token" mono>{target.tokenId}</InfoRow>
               <InfoRow label="Claim contract" mono>{target.claimContract}</InfoRow>
@@ -227,7 +235,7 @@ export function ClaimPage() {
       }
       if (Number(wallet.chainId) !== binding.chainId) {
         setPhase(CLAIM_PHASES.WRONG_NETWORK);
-        setMessage(`Switch your wallet to ${binding.chainId === 43113 ? FUJI_RELEASE_FACTORY_CONFIG.networkName : `chain ${binding.chainId}`} (${binding.chainId}) to claim.`);
+        setMessage(`Switch your wallet to ${claimNetworkLabel(binding.chainId)} (${binding.chainId}) to claim.`);
         return;
       }
       if (!provider) {
@@ -377,7 +385,7 @@ export function ClaimPage() {
             {phase === CLAIM_PHASES.AUTHORIZED && <p className="vc-claim-wallet">No claim price; the wallet will pay the destination network’s normal transaction gas.</p>}
             {!connected && <WalletButton />}
             {connected && <p className="vc-claim-wallet vc-claim-mono">Wallet · {shortAddress(account)}</p>}
-            {connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {FUJI_RELEASE_FACTORY_CONFIG.networkName} ({binding.chainId}).</p>}
+            {connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {claimNetworkLabel(binding.chainId)} ({binding.chainId}).</p>}
             {phase === CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE && <p className="vc-claim-warning">An RPC or ownership-read failure is not treated as ineligibility. No voucher or transaction was produced.</p>}
             {phase === CLAIM_PHASES.PENDING && <p className="vc-claim-warning">Waiting for the destination-chain receipt. Do not close this page until confirmation completes.</p>}
             {transactionHash && <p className="vc-claim-wallet vc-claim-mono">Receipt · {transactionHash}</p>}
@@ -402,7 +410,7 @@ export function ClaimPage() {
             <InfoRow label="Provenance">Factory-created release binding required</InfoRow>
             <InfoRow label="Release contract" mono>{binding.valid ? binding.releaseContractAddress : "UNVERIFIED · CLOSED"}</InfoRow>
             <InfoRow label="Token identity" mono>{binding.valid ? `${binding.chainId}:${binding.releaseContractAddress}:${binding.tokenId}` : "UNVERIFIED"}</InfoRow>
-            <InfoRow label="Network">{binding.chainId === 43113 ? "Avalanche Fuji · 43113" : `Chain ${binding.chainId || "—"}`}</InfoRow>
+            <InfoRow label="Network">{binding.chainId ? `${claimNetworkLabel(binding.chainId)} · ${binding.chainId}` : "—"}</InfoRow>
             {scheduleMatches && <ClaimSchedule target={schedule} />}
           </div>
         </div>

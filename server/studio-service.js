@@ -6,7 +6,7 @@ import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory, releaseRoyaltyPolicyForChain, releaseRoyaltyPolicyViolation } from "../config/release-network.js";
 import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
-import { canonicalMetadata } from "./metadata-storage.js";
+import { canonicalMetadata, collectionMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
 import { assertProvenanceConsistency, persistPublicationProof, publicationView } from "./studio-publication.js";
 import { verifyEditionPublication } from "./publication-anchor.js";
@@ -410,6 +410,38 @@ export class ArtistStudioService {
     return { ...saved, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, provenanceAnchorAddress: deployment.provenance_anchor_address };
   }
 
+  // Generates (once) and then reuses the release's collection-level contract URI. The URI is
+  // produced through the configured metadata pipeline and persisted to release_metadata.contractURI,
+  // so every repeated provisioning preparation reuses the exact same value and the authorization
+  // digest stays stable (a retry can never bind different metadata to the same pending request). It
+  // is never an empty string, placeholder, or fabricated CID: if metadata storage is unconfigured or
+  // the upload fails, provisioning fails closed here, before any transaction is authorized.
+  async ensureReleaseContractURI(release) {
+    const existing = optionalText(release.release_metadata?.contractURI, "release.contractURI", { max: 2048 });
+    if (existing) return existing;
+    if (typeof this.metadataStorage?.write !== "function") {
+      throw new ApiError(503, "METADATA_STORAGE_UNAVAILABLE", "Collection metadata storage is not configured. A release cannot be provisioned without a contract URI.");
+    }
+    const image = optionalText(release.release_metadata?.artwork, "release.artwork", { max: 2048 }) || null;
+    const metadata = collectionMetadata({ release, image });
+    const { uri } = await this.metadataStorage.write({ metadata, name: `collection-${release.id}` });
+    const contractURI = optionalText(uri, "contractURI", { max: 2048 });
+    if (!contractURI || !/^ipfs:\/\/.+/.test(contractURI)) {
+      throw new ApiError(503, "METADATA_URI_INVALID", "Collection metadata storage did not return a usable contract URI.");
+    }
+    // Persist only while the release is still a draft and no URI is set yet, so concurrent
+    // preparations converge on one stored URI instead of binding different metadata.
+    const persisted = await this.db.query(
+      "UPDATE releases SET release_metadata=jsonb_set(COALESCE(release_metadata,'{}'::jsonb),'{contractURI}',to_jsonb($2::text),true), updated_at=now() WHERE id=$1 AND status='DRAFT' AND COALESCE(release_metadata->>'contractURI','')='' RETURNING id",
+      [release.id, contractURI],
+    );
+    if (persisted.rows[0]) return contractURI;
+    const current = await this.db.query("SELECT release_metadata->>'contractURI' AS uri FROM releases WHERE id=$1 LIMIT 1", [release.id]);
+    const stored = optionalText(current.rows[0]?.uri, "release.contractURI", { max: 2048 });
+    if (!stored) throw new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "The release contract URI could not be persisted before authorization.");
+    return stored;
+  }
+
   async prepareReleaseProvisioning({ request, releaseId }) {
     const identity = await this.identity(request);
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
@@ -432,7 +464,7 @@ export class ArtistStudioService {
     }
     const name = requiredText(release.title, "release.title", { max: 256 });
     const symbol = derivedContractSymbol(release);
-    const contractURI = optionalText(release.release_metadata?.contractURI, "release.contractURI", { max: 2048 }) || "";
+    const contractURI = await this.ensureReleaseContractURI(release);
     const expectedParameters = { chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress.toLowerCase(), applicationReleaseId, applicationReleaseRecordId: release.id, releaseKey: expectedKey, artistWallet: identity.wallet.toLowerCase(), name, symbol, contractURI };
     const authorizationDigest = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(expectedParameters)));
     const provisioning = await this.repository.createReleaseProvisioningRequest({ releaseId: release.id, chainId: factory.chainId, releaseKey: expectedKey, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, authorizationDigest, expectedParameters });

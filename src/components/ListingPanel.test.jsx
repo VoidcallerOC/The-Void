@@ -178,7 +178,7 @@ describe("release-per-contract secondary listing flow", () => {
     await act(async () => { await flushPromises(); });
 
     expect(screen.getByRole("button", { name: "LIST FOR SALE" }).disabled).toBe(true);
-    expect(screen.getByText(/Only a Fuji \(43113\) release-per-contract edition/)).toBeTruthy();
+    expect(screen.getByText(/Only a release-per-contract edition on Avalanche Fuji/)).toBeTruthy();
     expect(mocks.readContext).not.toHaveBeenCalled();
     expect(mocks.submitListing).not.toHaveBeenCalled();
   });
@@ -242,7 +242,7 @@ describe("release-per-contract secondary listing flow", () => {
     setup();
     await act(async () => { await flushPromises(); });
 
-    expect(screen.getByText("This wallet does not currently own this edition. New listings are unavailable. Ownership is read directly from this edition’s Fuji release contract. A failed chain read is never treated as a zero balance.")).toBeTruthy();
+    expect(screen.getByText("This wallet does not currently own this edition. New listings are unavailable. Ownership is read directly from this edition’s release contract on Avalanche Fuji. A failed chain read is never treated as a zero balance.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "REVIEW LISTING" })).toBeNull();
   });
 

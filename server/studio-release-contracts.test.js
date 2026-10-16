@@ -58,15 +58,15 @@ describe("provisioning across factory deployments", () => {
   const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
   const NEW_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
   const request = { headers: {} };
-  function provisioningHarness({ existingRequest = null, releaseKey, artistAuthority = {}, releaseMetadata = {} } = {}) {
+  function provisioningHarness({ existingRequest = null, releaseKey, artistAuthority = {}, releaseMetadata = {}, metadataStorage = { write: vi.fn(async () => ({ uri: "ipfs://collection-metadata-cid" })) } } = {}) {
     const release = { id: "release-p", artist_id: "artist-1", slug: "p", title: "Prepared Release", status: "DRAFT", release_metadata: { applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), ...(releaseKey ? { releaseKey } : {}), ...releaseMetadata } };
     const authority = { id: "artist-1", status: "ACTIVE", wallet_authorized: true, verification_decision: "VERIFIED", application_verified: true, contract_verified: false, ...artistAuthority };
     const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [release] } : String(sql).includes("FROM artists a WHERE a.id=$1") ? { rows: [authority] } : String(sql).startsWith("UPDATE releases SET release_metadata") ? { rows: [{ id: release.id }] } : { rows: [] })) };
     const repo = repository();
     repo.getReleaseProvisioningRequest = vi.fn(async () => existingRequest);
     repo.createReleaseProvisioningRequest = vi.fn(async (input) => ({ request_id: "req-1", state: "PREPARED", ...input }));
-    const instance = new ArtistStudioService({ db, repository: repo, authenticator: vi.fn().mockResolvedValue({ wallet: OWNER }), logger: { error: vi.fn() } });
-    return { instance, repo, db };
+    const instance = new ArtistStudioService({ db, repository: repo, metadataStorage, authenticator: vi.fn().mockResolvedValue({ wallet: OWNER }), logger: { error: vi.fn() } });
+    return { instance, repo, db, metadataStorage };
   }
 
   it("prepares a new release on the active album-capable factory", async () => {
@@ -75,6 +75,37 @@ describe("provisioning across factory deployments", () => {
     expect(prepared.factoryAddress).toBe(NEW_FACTORY);
     expect(prepared.releaseKey).toBe(deriveStudioReleaseKey({ releaseId: "release-p", artistWallet: OWNER, factoryAddress: NEW_FACTORY }));
     expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ factoryAddress: NEW_FACTORY }));
+  });
+
+  it("generates a non-empty collection contract URI through the metadata pipeline and carries it into the authorized createRelease parameters", async () => {
+    const { instance, repo, metadataStorage } = provisioningHarness();
+    const prepared = await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" });
+    expect(prepared.contractURI).toBe("ipfs://collection-metadata-cid");
+    expect(metadataStorage.write).toHaveBeenCalledOnce();
+    expect(metadataStorage.write).toHaveBeenCalledWith(expect.objectContaining({ metadata: expect.objectContaining({ name: "Prepared Release" }) }));
+    expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ expectedParameters: expect.objectContaining({ contractURI: "ipfs://collection-metadata-cid" }) }));
+  });
+
+  it("reuses an already-persisted contract URI without re-uploading, keeping a retry's authorization digest stable", async () => {
+    const { instance, repo, metadataStorage } = provisioningHarness({ releaseMetadata: { contractURI: "ipfs://already-pinned" } });
+    const prepared = await instance.prepareReleaseProvisioning({ request, releaseId: "release-p" });
+    expect(prepared.contractURI).toBe("ipfs://already-pinned");
+    expect(metadataStorage.write).not.toHaveBeenCalled();
+    expect(repo.createReleaseProvisioningRequest).toHaveBeenCalledWith(expect.objectContaining({ expectedParameters: expect.objectContaining({ contractURI: "ipfs://already-pinned" }) }));
+  });
+
+  it("fails closed, never authorizing createRelease with an empty contract URI, when metadata storage is unavailable", async () => {
+    const { instance, repo } = provisioningHarness({ metadataStorage: null });
+    await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 503, code: "METADATA_STORAGE_UNAVAILABLE" });
+    expect(repo.createReleaseProvisioningRequest).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the metadata upload fails, never binding a placeholder or fabricated URI", async () => {
+    const metadataStorage = { write: vi.fn(async () => { throw Object.assign(new Error("provider rejected"), { status: 503, code: "METADATA_STORAGE_UNAVAILABLE" }); }) };
+    const { instance, repo } = provisioningHarness({ metadataStorage });
+    await expect(instance.prepareReleaseProvisioning({ request, releaseId: "release-p" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE" });
+    expect(metadataStorage.write).toHaveBeenCalledOnce();
+    expect(repo.createReleaseProvisioningRequest).not.toHaveBeenCalled();
   });
 
   it("refuses to prepare the createRelease transaction for an unverified artist, before any gas is spent", async () => {
