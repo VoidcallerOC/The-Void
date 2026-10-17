@@ -197,13 +197,13 @@ export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, d
     const provider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
     (async () => {
       const [sale, edition] = await Promise.all([readReleasePrimarySale(provider, target, wallet.account), readReleaseEdition(provider, target)]);
-      if (!edition?.exists) throw new Error("The published edition could not be found on Fuji.");
+      if (!edition?.exists) throw new Error(`The published edition could not be found on ${FUJI_RELEASE_CONFIG.network}.`);
       let claim;
       try { claim = await readGenesisClaimSaleGuard(provider, target); } catch (error) { claim = { state: "unknown", message: error?.message || "" }; }
       return { sale: sale?.configured ? sale : null, edition, claim };
     })()
       .then((loaded) => { if (!cancelled) setLive({ status: "ready", ...loaded }); })
-      .catch((error) => { if (!cancelled) setLive({ status: "error", message: error?.message || "The live sale could not be read from Fuji." }); });
+      .catch((error) => { if (!cancelled) setLive({ status: "error", message: error?.message || `The live sale could not be read from ${FUJI_RELEASE_CONFIG.network}.` }); });
     return () => { cancelled = true; };
   }, [target, wallet.account, reloadKey]);
 
@@ -275,7 +275,7 @@ export function StudioSalePanel({ releaseAsset, tokenId, wallet, canUseStudio, d
     }
   };
 
-  if (live.status === "loading") return <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Reading the live sale from Fuji…</p>;
+  if (live.status === "loading") return <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Reading the live sale from {FUJI_RELEASE_CONFIG.network}…</p>;
   if (live.status === "error") {
     return (
       <div role="alert" style={warnPanel}>
@@ -500,7 +500,7 @@ export function ArtistStudioPage() {
     setAlbumState({ status: "checking" });
     readReleaseAlbumState(createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl }), albumReleaseContract)
       .then((state) => { if (!cancelled) setAlbumState({ status: "ready", ...state }); })
-      .catch((error) => { if (!cancelled) setAlbumState({ status: "error", message: error?.message || "Album state could not be read from Fuji." }); });
+      .catch((error) => { if (!cancelled) setAlbumState({ status: "error", message: error?.message || `Album state could not be read from ${FUJI_RELEASE_CONFIG.network}.` }); });
     return () => { cancelled = true; };
   }, [albumReleaseContract, form.releaseType]);
 
@@ -588,7 +588,7 @@ export function ArtistStudioPage() {
       await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/submit`, { method: "POST", payload: { transactionHash: submitted.hash }, headers });
       setProvisioningState("SUBMITTED");
       setTxEvidence({ status: "submitted", transactionHash: submitted.hash, explorerUrl: fujiExplorerUrl("tx", submitted.hash), contractAddress: submitted.factoryAddress, chainId: submitted.chainId });
-      setNotice(`Transaction submitted by ${wallet.account}. Your artist wallet pays the gas. Waiting for the Fuji receipt…`);
+      setNotice(`Transaction submitted by ${wallet.account}. Your artist wallet pays the gas. Waiting for the ${FUJI_RELEASE_CONFIG.network} receipt…`);
       const verified = await verifyArtistReleaseCreation(publicProvider, { transactionHash: submitted.hash, expected });
       setActiveReleaseAsset({ chainId: verified.chainId, releaseContractAddress: verified.releaseContractAddress, primarySaleAddress: verified.primarySaleAddress, provenanceAnchorAddress: verified.provenanceAnchorAddress });
       setProvisioningState("RECONCILING");
@@ -1025,7 +1025,7 @@ export function ArtistStudioPage() {
                   <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => {
                     const resumed = resumeOwnedRelease(ownedStudioCatalog, mintReleaseId);
                     if (!resumed) { setNotice("This release could not be loaded into the editor."); return; }
-                    if (resumed.published) { setNotice(`${resumed.title} is already published on Fuji and its token metadata cannot change. To publish it again with a preview and full track, create a new release in the catalog editor.`); return; }
+                    if (resumed.published) { setNotice(`${resumed.title} is already published on ${FUJI_RELEASE_CONFIG.network} and its token metadata cannot change. To publish it again with a preview and full track, create a new release in the catalog editor.`); return; }
                     setSelectedReleaseId(resumed.releaseId);
                     setArtistId(resumed.artistId);
                     setReleaseId(resumed.releaseId);
@@ -1033,8 +1033,8 @@ export function ArtistStudioPage() {
                     setForm((prior) => ({ ...prior, ...resumed.form, ...(resumed.form?.priceWei ? { priceWei: weiToAvax(resumed.form.priceWei) } : {}) }));
                     setWorkflow("catalog");
                     setStep("track");
-                    setNotice(`${resumed.form.releaseTitle} is loaded. Check its preview clip and full track${resumed.gated ? "" : ", save the catalog structure"}, then publish it on Fuji.`);
-                  }}>Publish this release on Fuji →</button>
+                    setNotice(`${resumed.form.releaseTitle} is loaded. Check its preview clip and full track${resumed.gated ? "" : ", save the catalog structure"}, then publish it on ${FUJI_RELEASE_CONFIG.network}.`);
+                  }}>Publish this release on {FUJI_RELEASE_CONFIG.network} →</button>
                 </div>
               )}
             </div>
@@ -1051,7 +1051,7 @@ export function ArtistStudioPage() {
         <section style={card} id="create-release">
           <Eyebrow red>Your release</Eyebrow>
           <h2 style={{ fontFamily: "var(--font-display)", textTransform: "uppercase", fontSize: 36, margin: "10px 0 8px" }}>The record</h2>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose an existing release, or create a new one. Publishing uses the certified Fuji contract underneath.</p>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.65 }}>Choose an existing release, or create a new one. Publishing uses the certified {FUJI_RELEASE_CONFIG.network} contract underneath.</p>
           {existingReleases.length > 0 && (
             <div className="vc-release-picker">
               {existingReleases.map((record) => (
@@ -1102,14 +1102,14 @@ export function ArtistStudioPage() {
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
           {releaseId && <div style={{ ...card, marginTop: 18 }}>
-            <Eyebrow red>Artist-paid release deployment · Fuji</Eyebrow>
+            <Eyebrow red>Artist-paid release deployment · {FUJI_RELEASE_CONFIG.network}</Eyebrow>
             <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Only the canonical artist OWNER can provision this release. The Factory call is sent by your connected wallet; the artist wallet pays gas. The platform has no release-creation signer.</p>
             {provisioning ? <dl style={{ display: "grid", gridTemplateColumns: "minmax(110px, 150px) 1fr", gap: "8px 12px", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 11 }}>
               <dt>Factory</dt><dd>{provisioning.factoryAddress}</dd><dt>Chain</dt><dd>{provisioning.chainId}</dd><dt>Release key</dt><dd>{provisioning.releaseKey}</dd><dt>Artist / gas payer</dt><dd>{provisioning.artistWallet}</dd><dt>Name</dt><dd>{provisioning.name}</dd><dt>Symbol</dt><dd>{provisioning.symbol}</dd><dt>Contract URI</dt><dd>{provisioning.contractURI || "(empty string)"}</dd><dt>Parameters digest</dt><dd>{provisioning.authorizationDigest}</dd>
             </dl> : <p style={{ color: "var(--vc-bone-dim)" }}>Provisioning has not been prepared. Existing V1 Factory is deliberately not used.</p>}
             <p role="status">Provisioning state: {provisioningState}</p>
             {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
-            {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on Fuji: {albumState.message}</p>}
+            {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on {FUJI_RELEASE_CONFIG.network}: {albumState.message}</p>}
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh exact parameters" : "Prepare provisioning"}</button>

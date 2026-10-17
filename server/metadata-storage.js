@@ -77,6 +77,24 @@ export function canonicalMetadata(input) {
   return digestCanonicalMetadata(metadata);
 }
 
+// Collection-level ("contractURI") metadata for a release-per-contract clone: the ERC-1155
+// contract-level document describing the release as a collection, not a single token. Only
+// standard, widely-supported fields are emitted (name, and description/image when present). Fees
+// and royalty stay on-chain (ERC-2981 / the sealed primary split) and are never duplicated here,
+// so this document can never become a second, conflicting source of truth for economics. A release
+// title is required; the object is size-guarded by the same limit as token metadata.
+export function collectionMetadata({ release, image } = {}) {
+  const name = text(release?.title, 256);
+  if (!name) throw new ApiError(400, "COLLECTION_METADATA_INVALID", "A release title is required before collection metadata can be published.");
+  const metadata = { name };
+  const description = text(release?.description, 20000);
+  if (description) metadata.description = description;
+  const img = text(image, 2048);
+  if (img) metadata.image = img;
+  digestCanonicalMetadata(metadata); // size/structure validation only; discard the digest
+  return metadata;
+}
+
 export class PinataMetadataStorage {
   constructor({ config, fetchImpl = fetch, logger = console } = {}) {
     if (!config?.endpoint || !config?.jwt) throw new TypeError("Pinata metadata storage requires endpoint and JWT configuration.");

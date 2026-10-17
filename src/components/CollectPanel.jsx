@@ -191,7 +191,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       if (certified) {
         await ensureFujiNetwork(provider);
         const paused = await readFujiPaused(provider);
-        if (paused) throw Object.assign(new Error("The certified Fuji release is paused. Collect is unavailable until it is unpaused."), { state: "paused" });
+        if (paused) throw Object.assign(new Error(`The certified ${FUJI_RELEASE_CONFIG.networkName} release is paused. Collect is unavailable until it is unpaused.`), { state: "paused" });
         let onChainEdition;
         try {
           onChainEdition = await readFujiEdition(provider, tokenId);

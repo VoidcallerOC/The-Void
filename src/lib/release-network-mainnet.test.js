@@ -53,6 +53,19 @@ describe("frontend release config with mainnet selected", () => {
     expect(release.RELEASE_FACTORY_CONFIG.factoryAddress).toBe(MAINNET_FACTORY);
     expect(release.RELEASE_FACTORY_CONFIG.marketplaceAddress).toBe(MAINNET_MARKETPLACE);
     expect(release.FUJI_RELEASE_FACTORY_V2_CONFIG).toBe(release.RELEASE_FACTORY_CONFIG);
+    // Regression: the network-label source that Artist Studio, Studio earnings and the listing panel
+    // interpolate into transaction/receipt/provisioning copy must read "Avalanche C-Chain" on a 43114
+    // build — a mainnet transaction must never be labeled "Fuji".
+    expect(release.FUJI_RELEASE_CONFIG.network).toBe("Avalanche C-Chain");
+    expect(release.FUJI_RELEASE_FACTORY_V2_CONFIG.networkName).toBe("Avalanche C-Chain");
+    expect(release.FUJI_RELEASE_CONFIG.network).not.toMatch(/fuji/i);
+    const chain = await import("./release-chain.js");
+    expect(chain.resolveChainDescriptor({ id: 43114 }).networkName).toBe("Avalanche C-Chain");
+    // Buyer-path collect errors must name Avalanche C-Chain on a 43114 build, never "Fuji".
+    const primarySale = await import("./primary-sale.js");
+    expect(primarySale.explainCollectError({ message: "insufficient funds for gas" }).message).toContain("Avalanche C-Chain");
+    expect(primarySale.explainCollectError({ message: "execution reverted: nope" }).message).toContain("Avalanche C-Chain");
+    expect(primarySale.explainCollectError({ message: "insufficient funds" }).message).not.toMatch(/on Fuji\b/);
     expect(release.isCertifiedFujiEdition({ contractAddress: "", chainId: 43114 })).toBe(false);
     expect(release.isCertifiedFujiEdition({ chainId: 43114 })).toBe(false);
     await expect(release.simulateReleaseCall({ request: vi.fn() }, { from: "0x1111111111111111111111111111111111111111", to: "0x2222222222222222222222222222222222222222", data: "0x", chainId: 43113 })).rejects.toThrow(/Avalanche C-Chain/);
@@ -66,5 +79,16 @@ describe("frontend release config with mainnet selected", () => {
     expect(network.RELEASE_NETWORK).toBe("fuji");
     expect(network.RELEASE_DEPLOYMENT.chainId).toBe(43113);
     expect(network.IS_MAINNET_RELEASE).toBe(false);
+    // Genuinely Fuji surfaces must stay correct: the default build still labels its network "Avalanche
+    // Fuji", and the chain descriptor maps 43113 to Fuji.
+    const release = await import("./fuji-release.js");
+    expect(release.FUJI_RELEASE_CONFIG.network).toBe("Avalanche Fuji");
+    expect(release.FUJI_RELEASE_FACTORY_V2_CONFIG.networkName).toBe("Avalanche Fuji");
+    const chain = await import("./release-chain.js");
+    expect(chain.resolveChainDescriptor({ id: 43113 }).networkName).toBe("Avalanche Fuji");
+    expect(chain.resolveChainDescriptor({ id: 43114 }).networkName).toBe("Avalanche C-Chain");
+    // Genuinely Fuji build: buyer-path collect errors still read "Avalanche Fuji".
+    const primarySale = await import("./primary-sale.js");
+    expect(primarySale.explainCollectError({ message: "insufficient funds" }).message).toContain("Avalanche Fuji");
   });
 });

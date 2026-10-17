@@ -38,7 +38,7 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
     try {
       setState({ status: "ready", results: await readStudioEarnings(provider, targets, account) });
     } catch (error) {
-      setState({ status: "error", results: [], error: error?.message || "Balances could not be read from Fuji." });
+      setState({ status: "error", results: [], error: error?.message || `Balances could not be read from ${FUJI_RELEASE_FACTORY_V2_CONFIG.networkName}.` });
     }
   }, [account, provider, targets]);
 
@@ -49,7 +49,7 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
     setState((prior) => ({ ...prior, status: "loading" }));
     readStudioEarnings(provider, targets, account)
       .then((results) => { if (!cancelled) setState({ status: "ready", results }); })
-      .catch((error) => { if (!cancelled) setState({ status: "error", results: [], error: error?.message || "Balances could not be read from Fuji." }); });
+      .catch((error) => { if (!cancelled) setState({ status: "error", results: [], error: error?.message || `Balances could not be read from ${FUJI_RELEASE_FACTORY_V2_CONFIG.networkName}.` }); });
     return () => { cancelled = true; };
   }, [account, discovering, provider, targets]);
 
@@ -76,7 +76,7 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
         Each release has its own sale contract. Sales proceeds stay in that contract until the payout wallet withdraws them. Balances are read live from {FUJI_RELEASE_FACTORY_V2_CONFIG.networkName}. Each withdrawal is one transaction to one sale contract.
       </p>
 
-      {state.status === "loading" && <p role="status" style={dim}>Reading balances from Fuji…</p>}
+      {state.status === "loading" && <p role="status" style={dim}>Reading balances from {FUJI_RELEASE_FACTORY_V2_CONFIG.networkName}…</p>}
       {state.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{state.error}</p>}
       {state.status === "ready" && !targets.length && <p style={dim}>None of your releases is bound to a sale contract yet.</p>}
 

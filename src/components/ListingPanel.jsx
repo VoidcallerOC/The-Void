@@ -66,7 +66,7 @@ function statusCopy(stage, message) {
     listed: "The authoritative marketplace index confirms this edition is listed.",
     "already-listed": "An active listing already exists for this exact contract and token. A second listing will not be created.",
     "not-owner": "This wallet no longer owns the selected edition on chain. Refresh the page after verifying your wallet.",
-    unsupported: "Only a Fuji (43113) release-per-contract edition registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.",
+    unsupported: `Only a release-per-contract edition on ${RELEASE_DEPLOYMENT.networkName} registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.`,
     unavailable: "Marketplace or ownership verification is unavailable. No listing action was taken.",
     "wrong-network": releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" }),
     disconnected: "Connect a wallet to verify ownership and list this edition.",
@@ -464,7 +464,7 @@ export function ListingPanel({ edition }) {
     ? "The offer remains indexed, but the wallet no longer holds this token. A marketplace purchase requires the balance and approval to verify; cancel the offer if it is no longer valid."
     : context && BigInt(context.balance) > 0n
       ? "The listing does not escrow your edition; ownership transfers only through a verified marketplace purchase."
-      : "Ownership is read directly from this edition’s Fuji release contract. A failed chain read is never treated as a zero balance.";
+      : `Ownership is read directly from this edition’s release contract on ${RELEASE_DEPLOYMENT.networkName}. A failed chain read is never treated as a zero balance.`;
   const identity = candidate
     ? `CHAIN ${canonicalChainId} · CONTRACT ${contract} · TOKEN ${tokenId}`
     : `CHAIN ${Number(edition?.chainId || 0)} · CONTRACT ${contract || "UNAVAILABLE"} · TOKEN ${tokenId || "UNAVAILABLE"}`;
@@ -492,7 +492,7 @@ export function ListingPanel({ edition }) {
       </details>
 
       {!candidate && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{statusCopy("unsupported")}</p>}
-      {candidate && !marketplaceConfigured && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>Marketplace unavailable: this build has no matching live Fuji marketplace configuration. No transaction can be submitted.</p>}
+      {candidate && !marketplaceConfigured && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`Marketplace unavailable: this build has no matching live ${RELEASE_DEPLOYMENT.networkName} marketplace configuration. No transaction can be submitted.`}</p>}
       {stage === "disconnected" && <div style={{ margin: "18px 0" }}><WalletButton /><span style={{ display: "block", marginTop: 8, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</span></div>}
       {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p><Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn></div>}
       {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && !wallet.needsNetworkSwitch && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
