@@ -61,7 +61,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const provenanceRecords = new ProvenanceRecords({ db: pool });
   const metadataFetcher = createIpfsMetadataFetcher({ gateway: process.env.IPFS_GATEWAY });
   // Profile pictures and banners are local site files. Release artwork still uses artworkUploader (Pinata).
-  const artistPortfolioStore = createLocalArtistPortfolioStore({ root: fileURLToPath(new URL("../public/assets/artist-portfolio", import.meta.url)), db: pool });
+  const artistPortfolioStore = createLocalArtistPortfolioStore({ root: fileURLToPath(new URL("../public/assets/artist-portfolio", import.meta.url)), db: pool, logger });
   const studioService = createArtistStudioService({ db: pool, repository, authenticator: resolvedAuthenticator, metadataStorage, mediaUploader, directMediaUploads, artworkUploader, portfolioStore: artistPortfolioStore, provenanceRecords, metadataFetcher, logger });
   // Reviewer alerts: X DM to the server-configured reviewer account. Missing
   // X configuration is reported (startup log + per-alert CONFIG_MISSING), never fatal.

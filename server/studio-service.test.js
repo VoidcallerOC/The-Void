@@ -517,6 +517,49 @@ describe("Artist Studio", () => {
         await rm(directory, { recursive: true, force: true });
       }
     });
+
+    it("refuses a wallet that does not own the artist", async () => {
+      const { instance, repo } = service({ rows: [] });
+      instance.portfolioStore = { save: vi.fn() };
+      await expect(instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64") } }))
+        .rejects.toMatchObject({ status: 403, code: "ARTIST_ACCESS_DENIED" });
+      expect(instance.portfolioStore.save).not.toHaveBeenCalled();
+      expect(repo.appendAuditEvent).not.toHaveBeenCalled();
+    });
+
+    it("does not report success when the storage layer fails", async () => {
+      const { instance, repo } = service({ rows: [artistRow] });
+      instance.portfolioStore = { save: vi.fn(async () => { throw Object.assign(new Error("storage down"), { status: 503, code: "PORTFOLIO_STORAGE_UNAVAILABLE" }); }) };
+      await expect(instance.uploadPortfolioImage({ request, artistId: "artist-1", input: { data: png.toString("base64") } }))
+        .rejects.toMatchObject({ status: 503, code: "PORTFOLIO_STORAGE_UNAVAILABLE" });
+      expect(repo.appendAuditEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("profile update preserves unrelated fields", () => {
+    const owned = { id: "artist-1", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE", bio: "Existing bio", website_url: "https://v.example", social_links: { discord: "https://discord.gg/abc" }, profile_metadata: { profileArtwork: "/assets/artist-portfolio/artist-portfolio-aaaaaaaaaaaaaaaa.png", keep: true } };
+
+    it("keeps bio, links and other metadata when only the picture pointer changes", async () => {
+      const { instance, repo } = service({ rows: [owned] });
+      await instance.updateArtist({ request, artistId: "artist-1", input: { profileArtwork: "/assets/artist-portfolio/artist-portfolio-bbbbbbbbbbbbbbbb.png" } });
+      expect(repo.saveArtistProfile).toHaveBeenCalledWith(expect.objectContaining({
+        artistId: "artist-1",
+        bio: "Existing bio",
+        websiteUrl: "https://v.example",
+        socialLinks: { discord: "https://discord.gg/abc" },
+        metadata: { profileArtwork: "/assets/artist-portfolio/artist-portfolio-bbbbbbbbbbbbbbbb.png", keep: true },
+      }));
+    });
+
+    it("surfaces a database failure without claiming the picture was replaced", async () => {
+      const { instance, repo } = service({ rows: [owned] });
+      repo.saveArtistProfile.mockRejectedValueOnce(Object.assign(new Error("write failed"), { code: "57P01" }));
+      await expect(instance.updateArtist({ request, artistId: "artist-1", input: { profileArtwork: "/assets/artist-portfolio/artist-portfolio-bbbbbbbbbbbbbbbb.png" } }))
+        .rejects.toThrow("write failed");
+      // The failure is loud: no success audit is recorded, so the existing
+      // pointer (artist-portfolio-aaaa...) is never silently replaced.
+      expect(repo.appendAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ eventType: "STUDIO_ARTIST_UPDATED" }));
+    });
   });
 });
 
