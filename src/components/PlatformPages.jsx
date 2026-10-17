@@ -66,8 +66,8 @@ export function DiscoverPage() {
   const secondary = resolveSecondaryStatus();
   return (
     <section style={shell}>
-      <PlatformHeader eyebrow="† Discovery" title="Find the next record">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>What is on the shelf is what exists. One pressing, presented as a pressing.</p>
+      <PlatformHeader eyebrow="† Discovery" title="Currently featuring Voidcaller">
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The catalog currently features Voidcaller. What is on the shelf is what exists.</p>
       </PlatformHeader>
       <div style={{ margin: "0 0 28px" }}><Link to="/marketplace" style={ghostBtn}>Enter marketplace</Link></div>
       <nav aria-label="Discovery categories" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 28 }}>
@@ -98,7 +98,7 @@ export function ArtistsPage() {
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Artists" title="Artists">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The verified mark is branded to the wallet that signed. It is not a name anyone can type.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The catalog currently features Voidcaller. The verified mark is branded to the wallet that signed. It is not a name anyone can type.</p>
         <div style={{ marginTop: 22 }}>
           <Link to="/verify" style={ghostBtn}>Become verified</Link>
         </div>
@@ -188,10 +188,9 @@ export function ReleasePage({ children = null } = {}) {
               <ol style={{ color: "var(--vc-bone-dim)", lineHeight: 2 }}>{release.tracks.map((track) => <li key={track.n}>{track.title} <span style={{ opacity: 0.6 }}>· {track.time}</span></li>)}</ol>
             </>
           )}
-          {editionItems[0] && (
+          {editionItems.length > 0 && (
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
-              <Link to={editionItems[0].primary.href} style={primaryBtn}>{editionItems[0].primary.label}</Link>
-              <Link to={`/marketplace?release=${release.id}`} style={ghostBtn}>View on marketplace</Link>
+              <Link to={`/marketplace?release=${release.id}`} style={primaryBtn}>View on marketplace</Link>
             </div>
           )}
         </div>
@@ -274,7 +273,12 @@ export function EditionPage() {
             <Eyebrow>Listen</Eyebrow>
             {previewTrack ? (
               <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
-            ) : <p className="vc-card-meta">No preview is attached to this pressing.</p>}
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p className="vc-card-meta">Public track previews for this release are available on the record page.</p>
+                <Link to={`/release/${release.id}`} style={ghostBtn}>Hear previews on the release →</Link>
+              </div>
+            )}
           </div>
           <Eyebrow>Collector receives</Eyebrow>
           <ul style={{ color: "var(--vc-bone-dim)", lineHeight: 1.8 }}>

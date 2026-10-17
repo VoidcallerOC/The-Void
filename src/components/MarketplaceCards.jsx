@@ -5,7 +5,7 @@ import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 
 export function SectionHead({ id, eyebrow, title, children, action }) {
   return (
-    <div className="vc-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, margin: "50px 0 22px", flexWrap: "wrap" }}>
+    <div className="vc-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24, margin: "24px 0 22px", flexWrap: "wrap" }}>
       <div>
         {eyebrow && <Eyebrow red>{eyebrow}</Eyebrow>}
         <h2 id={id} style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 52px)", lineHeight: 0.95, textTransform: "uppercase", margin: "10px 0 0" }}>{title}</h2>

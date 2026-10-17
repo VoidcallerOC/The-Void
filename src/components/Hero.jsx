@@ -106,7 +106,7 @@ export function Hero() {
             lineHeight: 1,
             letterSpacing: "0",
             textTransform: "uppercase",
-          }}>Four tracks · one relic · forged on Avalanche</span>
+          }}>The Void · music-native platform</span>
         </div>
         <p
           style={{
@@ -118,7 +118,7 @@ export function Hero() {
             margin: 0,
           }}
         >
-          The first call. A relic forged. The chain remembers.
+          Songs are the primary objects. Collectibles and ownership-gated experiences are additive. Currently featuring Voidcaller.
         </p>
         <p
           style={{
@@ -132,7 +132,7 @@ export function Hero() {
             textTransform: "uppercase",
           }}
         >
-          One Chapter I relic unlocks the entire EP. Without it you hear fragments.
+          Song → Release → Edition/Relic → Experience. Hear available previews without a wallet. Collect an edition to unlock protected experiences. Ownership does not transfer copyright.
         </p>
         <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
           <Btn kind="ghost" onClick={hearEP}>Hear the EP</Btn>

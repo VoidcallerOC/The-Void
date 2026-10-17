@@ -104,8 +104,10 @@ export function WalletButton({ compact }) {
           style={{
             position: "absolute",
             top: "calc(100% + 8px)",
-            right: 0,
+            left: compact ? 0 : "auto",
+            right: compact ? "auto" : 0,
             minWidth: 220,
+            maxWidth: "min(280px, calc(100vw - 24px))",
             background: "rgba(10,10,11,0.98)",
             backdropFilter: "blur(14px)",
             border: "1px solid var(--vc-ash)",
@@ -113,10 +115,10 @@ export function WalletButton({ compact }) {
             padding: 6,
           }}
         >
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", padding: "8px 10px 6px" }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--vc-ember)", padding: "8px 10px 4px", fontWeight: 500 }}>
             SELECT A BEARER WALLET
           </div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em", color: "var(--vc-bone-dim)", padding: "0 10px 10px", lineHeight: 1.5 }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.06em", color: "var(--vc-bone)", padding: "0 10px 10px", lineHeight: 1.5 }}>
             {RELEASE_DEPLOYMENT.networkName} ({RELEASE_DEPLOYMENT.chainId}) · AVAX
           </div>
           {w.wallets.length === 0 && (

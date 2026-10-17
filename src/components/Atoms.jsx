@@ -27,10 +27,11 @@ export function Eyebrow({ children, red, style }) {
     <div
       style={{
         fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        letterSpacing: "0.18em",
+        fontSize: 12,
+        fontWeight: 500,
+        letterSpacing: "0.16em",
         textTransform: "uppercase",
-        color: red ? "var(--vc-crimson)" : "var(--vc-bone-dim)",
+        color: red ? "var(--vc-ember)" : "var(--vc-bone-dim)",
         ...style,
       }}
     >

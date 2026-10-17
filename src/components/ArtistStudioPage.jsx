@@ -1102,20 +1102,25 @@ export function ArtistStudioPage() {
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
           {releaseId && <div style={{ ...card, marginTop: 18 }}>
-            <Eyebrow red>Artist-paid release deployment · {FUJI_RELEASE_CONFIG.network}</Eyebrow>
-            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Only the canonical artist OWNER can provision this release. The Factory call is sent by your connected wallet; the artist wallet pays gas. The platform has no release-creation signer.</p>
-            {provisioning ? <dl style={{ display: "grid", gridTemplateColumns: "minmax(110px, 150px) 1fr", gap: "8px 12px", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              <dt>Factory</dt><dd>{provisioning.factoryAddress}</dd><dt>Chain</dt><dd>{provisioning.chainId}</dd><dt>Release key</dt><dd>{provisioning.releaseKey}</dd><dt>Artist / gas payer</dt><dd>{provisioning.artistWallet}</dd><dt>Name</dt><dd>{provisioning.name}</dd><dt>Symbol</dt><dd>{provisioning.symbol}</dd><dt>Contract URI</dt><dd>{provisioning.contractURI || "(empty string)"}</dd><dt>Parameters digest</dt><dd>{provisioning.authorizationDigest}</dd>
-            </dl> : <p style={{ color: "var(--vc-bone-dim)" }}>Provisioning has not been prepared. Existing V1 Factory is deliberately not used.</p>}
-            <p role="status">Provisioning state: {provisioningState}</p>
+            <Eyebrow red>Create this release on-chain</Eyebrow>
+            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Your connected wallet creates the release. You pay the gas. Nothing is published until this step succeeds.</p>
+            {provisioning ? (
+              <p style={{ color: "var(--vc-bone-dim)", margin: "12px 0" }}>
+                Ready to create <strong style={{ color: "var(--vc-bone)" }}>{provisioning.name}</strong>
+                {provisioning.symbol ? <> ({provisioning.symbol})</> : null} on {FUJI_RELEASE_CONFIG.network}.
+              </p>
+            ) : (
+              <p style={{ color: "var(--vc-bone-dim)" }}>Preparing the release. This only takes a moment.</p>
+            )}
+            <p role="status" style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase" }}>Status: {provisioningState}</p>
             {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
             {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on {FUJI_RELEASE_CONFIG.network}: {albumState.message}</p>}
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh exact parameters" : "Prepare provisioning"}</button>
-              {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain · artist pays gas"}</button>}
+              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh" : "Prepare"}</button>
+              {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
-              {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Reconcile release</button> : null}
+              {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Check status</button> : null}
             </div>
           </div>}
           {form.releaseType === "ALBUM" && releaseId && canUseStudio && <div style={{ ...card, marginTop: 18 }}>

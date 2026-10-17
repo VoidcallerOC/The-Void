@@ -9,7 +9,7 @@ export const contentShell = {
   maxWidth: 1360,
   width: "100%",
   margin: "0 auto",
-  padding: "48px clamp(16px, 4vw, 56px) 96px",
+  padding: "24px clamp(16px, 4vw, 56px) 96px",
 };
 
 export const ghostBtn = {

@@ -57,7 +57,7 @@ export function Footer() {
             <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 26, width: "auto", display: "block" }} />
           </div>
           <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--vc-bone-dim)", maxWidth: 380, lineHeight: 1.6, margin: 0 }}>
-            On-chain metalcore. Music as ritual, NFT as relic. The chain remembers.
+            The Void is a music-native artist–fan platform. Songs first. Editions and experiences additive. Currently featuring Voidcaller.
           </p>
           <div
             style={{
@@ -104,7 +104,7 @@ export function Footer() {
       </div>
       <div className="vc-footer-bottom" style={{ marginTop: 64, paddingTop: 24, borderTop: "1px solid var(--vc-ash)", display: "flex", justifyContent: "space-between" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>
-          © MMXXVI · VOIDCALLER · ALL BLEEDS RESERVED
+          © MMXXVI · THE VOID
         </span>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>
           † AT REST IN THE VOID †
