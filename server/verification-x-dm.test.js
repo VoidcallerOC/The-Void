@@ -199,7 +199,13 @@ describe("security", () => {
     await tick(); await tick();
     expect(h.x.dms()).toHaveLength(1);
     expect(h.x.dms()[0].url).toContain("/dm_conversations/with/1234567890/");
-    expect(JSON.stringify(h.x.calls)).not.toContain("666");
+    // Check the attacker-injectable surface (URL, method and body) only. The
+    // OAuth Authorization header is server-signed with a random hex nonce and a
+    // base64 signature that can incidentally contain a short sentinel like
+    // "666", which would flake this assertion without reflecting any injection.
+    const wire = h.x.calls.map(({ url, method, body }) => ({ url, method, body }));
+    expect(JSON.stringify(wire)).not.toContain("666");
+    expect(JSON.stringify(wire)).not.toContain("attacker");
   });
 
   it("an artist name cannot add lines or fake fields to the DM", () => {
