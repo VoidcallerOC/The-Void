@@ -18,9 +18,14 @@ export function artistPortfolioFilename(filename) {
   return name;
 }
 
-export function createLocalArtistPortfolioStore({ root, db = null } = {}) {
+export function createLocalArtistPortfolioStore({ root, db = null, logger = null } = {}) {
   if (!root) throw new TypeError("Artist portfolio storage requires a directory.");
   const directory = resolve(root);
+  // The database (artist_portfolio_files) is the durable store in production.
+  // The directory under public/assets is only a serving cache for local dev; a
+  // production container mounts it read-only (writes to /app/public raise EACCES),
+  // so it can never be required when a durable database copy exists.
+  const hasDatabase = typeof db?.query === "function";
 
   function filePath(name) {
     const path = resolve(directory, name);
@@ -29,8 +34,11 @@ export function createLocalArtistPortfolioStore({ root, db = null } = {}) {
   }
 
   return {
-    // Writes a file under public/assets/artist-portfolio and, when a database
-    // is configured, keeps the same bytes there so a redeploy can still serve them.
+    // Writes the durable copy to the database, then best-effort mirrors it to
+    // the local cache directory. With a database configured, a read-only or
+    // ephemeral filesystem (production) no longer fails the upload. Without a
+    // database there is no durable store, so a filesystem failure is reported
+    // as a controlled error rather than leaking the attempted path.
     async save({ body, filename, contentType }) {
       const name = artistPortfolioFilename(filename);
       const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body || []);
@@ -38,7 +46,7 @@ export function createLocalArtistPortfolioStore({ root, db = null } = {}) {
       if (!CONTENT_TYPES[name.split(".").pop()] || CONTENT_TYPES[name.split(".").pop()] !== contentType) {
         throw fail(400, "ARTWORK_TYPE_UNSUPPORTED", "Artwork must be a PNG, JPEG, GIF or WebP image.");
       }
-      if (db?.query) {
+      if (hasDatabase) {
         await db.query(
           `INSERT INTO artist_portfolio_files (filename, content_type, byte_size, body)
            VALUES ($1, $2, $3, $4)
@@ -46,14 +54,23 @@ export function createLocalArtistPortfolioStore({ root, db = null } = {}) {
           [name, contentType, bytes.length, bytes],
         );
       }
-      await mkdir(directory, { recursive: true });
-      await writeFile(filePath(name), bytes);
+      try {
+        await mkdir(directory, { recursive: true });
+        await writeFile(filePath(name), bytes);
+      } catch (error) {
+        // No durable database copy exists: do not report success, and do not
+        // leak the filesystem path (e.g. EACCES mkdir '/app/public').
+        if (!hasDatabase) throw fail(503, "PORTFOLIO_STORAGE_UNAVAILABLE", "Artist portfolio storage is not configured for persistence.");
+        // The durable database copy already succeeded; the local cache is
+        // optional, so a read-only/ephemeral filesystem is not a failure.
+        logger?.warn?.("artist.portfolio.cache_write_failed", { filename: name, code: error?.code || null });
+      }
       return { uri: `/assets/artist-portfolio/${name}` };
     },
 
     async read({ filename }) {
       const name = artistPortfolioFilename(filename);
-      if (db?.query) {
+      if (hasDatabase) {
         const { rows } = await db.query("SELECT content_type, body FROM artist_portfolio_files WHERE filename = $1", [name]);
         if (rows[0]?.body) {
           const stored = Buffer.isBuffer(rows[0].body) ? rows[0].body : Buffer.from(rows[0].body);
