@@ -30,6 +30,7 @@ function service(state = {}, extra = {}) {
     if (text.includes("FROM editions e JOIN releases r")) return { rows: state.edition ? [state.edition] : [] };
     if (text.includes("SELECT release_id, status FROM editions")) return { rows: state.existingEdition ? [state.existingEdition] : [] };
     if (text.includes("e.status IN ('DRAFT','REVIEW')")) return { rows: [{ id: "edition-draft", release_id: "ep-1", title: "T", status: "DRAFT", application_metadata: {} }] };
+    if (text.includes("FROM tokens WHERE edition_id")) return { rows: state.submittedMetadata ? [{ "?column?": 1 }] : [] };
     if (text.includes("FROM release_contracts rc")) return { rows: state.binding ? [state.binding] : [] };
     if (text.includes("FROM artists a")) return { rows: [{ id: "artist-1", slug: "a", display_name: "A", status: "ACTIVE", owner_wallet: owner }] };
     return { rows: [] };
@@ -108,6 +109,25 @@ describe("EP track cap", () => {
     const bound = service({ release: release("EP"), binding, edition: { id: "edition-6", release_id: "ep-1", status: "DRAFT", application_metadata: {}, owner_wallet: owner } });
     await expect(bound.instance.updateEdition({ request, editionId: "edition-6", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "TRACK_REMOVAL_UNAVAILABLE" });
     expect(bound.repo.saveEdition).not.toHaveBeenCalled();
+  });
+
+  it("never removes a draft whose metadata was already submitted, even without a contract binding", async () => {
+    const submitted = service({ release: release("EP"), submittedMetadata: true, edition: { id: "edition-6", release_id: "ep-1", status: "DRAFT", application_metadata: {}, owner_wallet: owner } });
+    await expect(submitted.instance.updateEdition({ request, editionId: "edition-6", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ status: 409, code: "TRACK_REMOVAL_UNAVAILABLE" });
+    expect(submitted.repo.saveEdition).not.toHaveBeenCalled();
+  });
+
+  it("grandfathers a contract-bound over-limit EP: records stay, edits work, no new track or submission", async () => {
+    const binding = { release_contract_id: "c1", release_contract_address: "0x2222222222222222222222222222222222222222", chain_id: 43113, release_key: `0x${"1".repeat(64)}` };
+    const state = { release: release("EP", {}, "PUBLISHED"), binding, tracks: 7, edition: { id: "edition-1", release_id: "ep-1", title: "Old", status: "DRAFT", application_metadata: {}, owner_wallet: owner } };
+    const grandfathered = service(state, { metadataStorage: { write: vi.fn() } });
+    await expect(grandfathered.instance.createEdition({ request, releaseId: "ep-1", input: newTrack })).rejects.toMatchObject({ code: "EP_TRACK_LIMIT_EXCEEDED" });
+    await expect(grandfathered.instance.publishMetadata({ request, releaseId: "ep-1", input: {} })).rejects.toMatchObject({ code: "EP_TRACK_LIMIT_EXCEEDED" });
+    await expect(grandfathered.instance.updateEdition({ request, editionId: "edition-1", input: { status: "ARCHIVED" } })).rejects.toMatchObject({ code: "TRACK_REMOVAL_UNAVAILABLE" });
+    await expect(grandfathered.instance.updateRelease({ request, releaseId: "ep-1", input: { title: "Retitled" } })).resolves.toBeTruthy();
+    // No forced conversion: the type is only ever changed by the artist's own request.
+    expect(grandfathered.repo.saveRelease.mock.calls[0][0].metadata.releaseType).toBe("EP");
+    expect(grandfathered.repo.saveEdition).not.toHaveBeenCalled();
   });
 
   it("refuses to submit an over-limit EP until it is back within five tracks", async () => {

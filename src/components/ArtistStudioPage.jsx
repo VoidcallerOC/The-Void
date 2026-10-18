@@ -425,6 +425,8 @@ export function ArtistStudioPage() {
   const mintEditions = (ownedStudioCatalog?.editions || []).filter((edition) => edition.releaseId === mintReleaseId);
   const mintTracks = useMemo(() => tracksOnRelease(selectedMintRelease, mintEditions), [selectedMintRelease, mintEditions]);
   const mintEpLimit = epTrackLimit(selectedMintRelease?.releaseType, mintTracks.length);
+  // Every edition of a contract-bound release is already bound; its tracks are kept as they are and only a draft with no contract can be removed.
+  const mintReleaseBound = mintEditions.some((edition) => edition.factoryAddress);
   // The clone this release is bound to: the persisted catalog binding (survives a
   // reload of a bound or published release), else the one confirmed this session.
   const albumReleaseContract = boundReleaseContract(ownedStudioCatalog, releaseId, FUJI_RELEASE_FACTORY_V2_CONFIG.chainId) || activeReleaseAsset?.releaseContractAddress || "";
@@ -1035,7 +1037,7 @@ export function ArtistStudioPage() {
             <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               {mintTracks.length ? mintTracks.map((track) => {
                 const onChain = track.tokenId !== undefined && track.tokenId !== null && track.tokenId !== "";
-                return <p key={track.editionId || track.id || track.title} style={{ margin: 0 }}>{track.title || "Untitled track"}{onChain ? ` · already out · token ${track.tokenId}` : " · not published yet"}{!onChain && track.editionId && mintEpLimit.overLimit && <button type="button" style={{ ...ghostBtn, marginLeft: 12 }} disabled={busy !== ""} onClick={() => removeDraftTrack(track)}>Remove</button>}</p>;
+                return <p key={track.editionId || track.id || track.title} style={{ margin: 0 }}>{track.title || "Untitled track"}{onChain ? ` · already out · token ${track.tokenId}` : " · not published yet"}{!onChain && track.editionId && mintEpLimit.overLimit && !mintReleaseBound && <button type="button" style={{ ...ghostBtn, marginLeft: 12 }} disabled={busy !== ""} onClick={() => removeDraftTrack(track)}>Remove</button>}</p>;
               }) : (
                 <div>
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 12px" }}>No songs on this release yet. Publishing is what puts a song out. After that, you can't add more copies.</p>
@@ -1055,7 +1057,7 @@ export function ArtistStudioPage() {
                 </div>
               )}
             </div>
-            {mintEpLimit.limited && <p role={mintEpLimit.atLimit ? "alert" : "status"} style={{ color: mintEpLimit.atLimit ? "var(--vc-crimson)" : "var(--vc-bone-dim)", marginTop: 12 }}>{mintEpLimit.count} of {mintEpLimit.max} EP tracks used.{mintEpLimit.overLimit ? ` This draft has more than ${mintEpLimit.max}: remove tracks until it has ${mintEpLimit.max} or fewer before publishing.` : mintEpLimit.atLimit ? " An EP holds at most 5 tracks, so no more can be added." : ""}</p>}
+            {mintEpLimit.limited && <p role={mintEpLimit.atLimit ? "alert" : "status"} style={{ color: mintEpLimit.atLimit ? "var(--vc-crimson)" : "var(--vc-bone-dim)", marginTop: 12 }}>{mintEpLimit.count} of {mintEpLimit.max} EP tracks used.{mintEpLimit.overLimit ? (mintReleaseBound ? ` This EP was created before the ${mintEpLimit.max}-track limit. Its existing tracks stay exactly as they are, but no tracks can be added and it cannot be submitted again.` : ` This draft has more than ${mintEpLimit.max}: remove tracks until it has ${mintEpLimit.max} or fewer before publishing.`) : mintEpLimit.atLimit ? " An EP holds at most 5 tracks, so no more can be added." : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
               <button type="button" style={primaryBtn} disabled={singleIsComplete(ownedStudioCatalog, selectedMintRelease) || mintEpLimit.atLimit} onClick={startNewTrack}>{singleIsComplete(ownedStudioCatalog, selectedMintRelease) ? "Single already has its track" : mintEpLimit.atLimit ? "EP is at its 5-track limit" : "Add track"}</button>
               <button type="button" style={ghostBtn} onClick={() => { setWorkflow("catalog"); setStep("release"); }}>Back to catalog editor</button>
