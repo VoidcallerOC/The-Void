@@ -320,3 +320,109 @@ describe("Pinata signed upload requests", () => {
     expect(fetchImpl).toHaveBeenCalledWith("https://gw.example/files/bafyx?sig=1", { headers: { "accept-encoding": "identity" } });
   });
 });
+
+describe("Pinata private download-link request", () => {
+  const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature-value";
+  const make = () => new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: JWT, gateway: "https://media.example.mypinata.cloud", endpoint: "https://api.pinata.cloud/v3/files/private/download_link" } } });
+  const run = async (response) => {
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+    try { return { fetchMock, outcome: await make().signer(CID).then((value) => ({ value }), (error) => ({ error })) }; } finally { vi.unstubAllGlobals(); }
+  };
+
+  it("sends the documented request: POST, JSON, Bearer key, gateway /files/{cid}, GET, 60 s", async () => {
+    const { fetchMock, outcome } = await run(new Response(JSON.stringify({ data: "https://media.example.mypinata.cloud/files/x?X-Algorithm=1" }), { status: 200 }));
+    expect(outcome.value).toBe("https://media.example.mypinata.cloud/files/x?X-Algorithm=1");
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.pinata.cloud/v3/files/private/download_link");
+    expect(options.method).toBe("POST");
+    expect(options.headers).toEqual({ "content-type": "application/json", authorization: `Bearer ${JWT}` });
+    expect(JSON.parse(options.body)).toMatchObject({ url: `https://media.example.mypinata.cloud/files/${CID}`, expires: 60, method: "GET" });
+  });
+
+  it("keeps Pinata's reason on a 403 without leaking the key or any URL, and names the failing endpoint", async () => {
+    const body = JSON.stringify({ error: { reason: "FORBIDDEN", details: `key not allowed for https://media.example.mypinata.cloud/files/${CID}?sig=secret using Bearer ${JWT}` } });
+    const { outcome } = await run(new Response(body, { status: 403 }));
+    expect(outcome.error).toMatchObject({ message: "Pinata refused to create a private download link (HTTP 403).", code: "MEDIA_LINK_UNAUTHORIZED", status: 502 });
+    expect(outcome.error.upstream).toMatchObject({ endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud" });
+    expect(outcome.error.upstream.error).toContain("FORBIDDEN");
+    const shown = JSON.stringify([outcome.error.message, outcome.error.upstream]);
+    for (const secret of [JWT, "signature-value", "sig=secret", "https://", CID, "Bearer eyJ"]) expect(shown).not.toContain(secret);
+    expect(shown).not.toMatch(/permission|scope/i);
+  });
+
+  it("classifies other refusals and unreachable errors without a permission diagnosis, keeping the redacted body", async () => {
+    for (const status of [400, 404, 429, 500, 503]) {
+      const { outcome } = await run(new Response(`{"error":"busy","link":"https://media.example.mypinata.cloud/files/${CID}?sig=secret"}`, { status }));
+      expect(outcome.error).toMatchObject({ message: `Pinata private download-link HTTP ${status}`, code: "MEDIA_LINK_FAILED", upstream: { status, gateway: "media.example.mypinata.cloud" } });
+      expect(JSON.stringify(outcome.error.upstream)).not.toMatch(/sig=secret|https:\/\//);
+    }
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(`connect failed https://api.pinata.cloud/x?sig=secret Bearer ${JWT}`)));
+    const error = await make().signer(CID).then(() => null, (e) => e);
+    vi.unstubAllGlobals();
+    expect(error).toMatchObject({ code: "MEDIA_LINK_FAILED", upstream: { status: null, gateway: "media.example.mypinata.cloud" } });
+    expect(JSON.stringify([error.message, error.upstream])).not.toMatch(new RegExp(`sig=secret|${JWT.split(".")[2]}|https://`));
+  });
+
+  it("still fails closed when the 403 has no readable body", async () => {
+    const { outcome } = await run(new Response("", { status: 403 }));
+    expect(outcome.error.upstream).toMatchObject({ endpoint: "POST /v3/files/private/download_link", status: 403 });
+  });
+
+  it("does not try to download the object when the link cannot be created", async () => {
+    const storage = make();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 403 })));
+    try { await expect(storage.sha256OfPrivateObject({ cid: CID, fetchImpl })).rejects.toMatchObject({ code: "MEDIA_LINK_UNAUTHORIZED", upstream: { status: 403 } }); } finally { vi.unstubAllGlobals(); }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("registration reports the failing download-link call", () => {
+  it("shows the download-link endpoint and status, not the successful lookup, when the link is refused", async () => {
+    const { instance, direct, repository } = setup({ file: stored() });
+    const linkFailure = Object.assign(new Error("Pinata private download-link HTTP 403"), { upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud", error: "FORBIDDEN" } });
+    direct.sha256.mockRejectedValueOnce(linkFailure);
+    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { ...IDENTITY, uploadId: UPLOAD_ID, contentSha256: SHA, byteSize: 180 * 1024 * 1024 } })).rejects.toMatchObject({ status: 502, code: "MEDIA_HASH_UNVERIFIED", details: { upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, error: "FORBIDDEN" } } });
+    expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+});
+
+describe("private download: gateway responses and untrusted links cannot leak or be fetched", () => {
+  const config = { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, objectUrlHosts: ["gw.example"], pinata: { jwt: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature-value", gateway: "https://gw.example", endpoint: "https://api.pinata.cloud/v3/files/private/download_link" } };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("a signed URL echoed in a gateway 403 body is redacted from the error", async () => {
+    const link = `https://gw.example/files/${CID}?X-Signature=opaque-signature`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: link }), { status: 200 })));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(`{"error":"denied for ${link}","auth":"Bearer abc.def"}`, { status: 403 }));
+    const error = await new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: CID, fetchImpl }).then(() => null, (e) => e);
+    expect(error).toMatchObject({ code: "MEDIA_DOWNLOAD_FORBIDDEN", upstream: { status: 403, gatewayHost: "gw.example" } });
+    expect(JSON.stringify([error.message, error.upstream])).not.toMatch(/opaque-signature|X-Signature|https:\/\/|abc\.def/);
+    expect(JSON.stringify(error.upstream)).not.toContain(CID);
+  });
+
+  it("a network error that echoes the signed URL is redacted", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: "https://gw.example/files/x?X-Signature=opaque-signature" }), { status: 200 })));
+    const error = await new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: CID, fetchImpl: vi.fn().mockRejectedValue(new Error("failed https://gw.example/files/x?X-Signature=opaque-signature")) }).then(() => null, (e) => e);
+    expect(error.code).toBe("MEDIA_HASH_UNVERIFIED");
+    expect(JSON.stringify([error.message, error.upstream])).not.toMatch(/opaque-signature|https:\/\//);
+  });
+
+  it("an untrusted link host is rejected as MEDIA_LINK_INVALID and never fetched", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: "https://gw.example.evil.test/files/x?sig=1" }), { status: 200 })));
+    await expect(new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: CID, fetchImpl })).rejects.toMatchObject({ code: "MEDIA_LINK_INVALID" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("registration after a refused download link", () => {
+  it("keeps the link error code and upstream record, saves no asset and reports no success", async () => {
+    const { instance, direct, repository } = setup({ file: stored() });
+    direct.sha256.mockRejectedValueOnce(Object.assign(new Error("Pinata refused to create a private download link (HTTP 403)."), { status: 502, code: "MEDIA_LINK_UNAUTHORIZED", upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud", error: "FORBIDDEN" } }));
+    const result = await instance.registerMediaUpload({ request, artistId: "artist-1", input: { ...IDENTITY, uploadId: UPLOAD_ID, contentSha256: SHA, byteSize: 180 * 1024 * 1024 } }).then(() => null, (e) => e);
+    expect(result).toMatchObject({ status: 502, code: "MEDIA_LINK_UNAUTHORIZED", details: { upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud" } } });
+    expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+});

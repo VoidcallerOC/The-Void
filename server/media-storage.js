@@ -53,15 +53,21 @@ export class PrivateMediaStorage {
     return async (cid) => {
       if (!/^(?:baf[a-z0-9]+|Qm[1-9A-HJ-NP-Za-km-z]+)$/.test(cid)) throw new Error("Pinata protected media reference must be a CID.");
       const date = Math.floor(Date.now() / 1000);
-      const linkFailure = (message, code, status) => Object.assign(new Error(message), { status: 502, code, upstream: { endpoint: "POST /v3/files/private/download_link", status } });
+      const gateway = (() => { try { return new URL(config.pinata.gateway).host; } catch { return null; } })();
+      // Every failure names the call, its status and the gateway host, and keeps
+      // Pinata's own reason (redacted). The message never guesses at the cause.
+      const linkFailure = (message, code, status, body = "") => Object.assign(new Error(message), { status: 502, code, upstream: { endpoint: "POST /v3/files/private/download_link", status, gateway, error: redactUpstreamBody(body) || undefined } });
       let response;
       try {
         response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
       } catch (error) {
-        throw linkFailure(`Pinata private download-link request could not be reached: ${error.message}`, "MEDIA_LINK_FAILED", null);
+        throw linkFailure(`Pinata private download-link request could not be reached: ${redactUpstreamBody(error?.message)}`, "MEDIA_LINK_FAILED", null);
       }
-      if (response.status === 401 || response.status === 403) throw linkFailure(`The Pinata key may not create private download links (HTTP ${response.status}). Give it Files read permission.`, "MEDIA_LINK_UNAUTHORIZED", response.status);
-      if (!response.ok) throw linkFailure(`Pinata private download-link HTTP ${response.status}`, "MEDIA_LINK_FAILED", response.status);
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        if (response.status === 401 || response.status === 403) throw linkFailure(`Pinata refused to create a private download link (HTTP ${response.status}).`, "MEDIA_LINK_UNAUTHORIZED", response.status, body);
+        throw linkFailure(`Pinata private download-link HTTP ${response.status}`, "MEDIA_LINK_FAILED", response.status, body);
+      }
       const payload = await response.json().catch(() => null);
       if (typeof payload?.data !== "string") throw linkFailure("Pinata private download-link response was invalid.", "MEDIA_LINK_INVALID", response.status);
       return payload.data;
@@ -160,12 +166,12 @@ export class PrivateMediaStorage {
     try {
       response = await fetchImpl(url, { headers: { "accept-encoding": "identity" } });
     } catch (error) {
-      throw Object.assign(new Error(`Private object download could not be reached: ${error.message}`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", gatewayHost: host, status: null } });
+      throw Object.assign(new Error(`Private object download could not be reached: ${redactUpstreamBody(error?.message)}`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", gatewayHost: host, status: null } });
     }
     const download = { status: response.status, contentLength: response.headers?.get?.("content-length") ?? null, contentEncoding: response.headers?.get?.("content-encoding") ?? null, contentType: response.headers?.get?.("content-type") ?? null };
     if (response.status !== 200 || !response.body) {
       const denied = response.status === 401 || response.status === 403;
-      const detail = denied ? await response.text().then(redactText, () => "") : "";
+      const detail = denied ? await response.text().then(redactUpstreamBody, () => "") : "";
       throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}); the download link was issued but the gateway refused to serve the object.`), { status: 502, code: denied ? "MEDIA_DOWNLOAD_FORBIDDEN" : "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", gatewayHost: host, ...download, error: detail || undefined } });
     }
     const hash = createHash("sha256");
@@ -203,6 +209,12 @@ export function redactPinataFile(file = {}) {
 }
 function redactText(text) {
   return String(text || "").replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[jwt]").replace(/\b(baf[a-z0-9]{10,}|Qm[1-9A-HJ-NP-Za-km-z]{20,})\b/g, (cid) => shortId(cid)).slice(0, 300);
+}
+
+// A provider error body for logs and the Studio message: no JWTs, no URLs
+// (a signed link would carry its signature), CIDs shortened.
+function redactUpstreamBody(text) {
+  return redactText(String(text || "").replace(/https?:\/\/[^\s"'\\]+/g, "[url]").replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")).replace(/\s+/g, " ").trim();
 }
 
 export function createPrivateMediaStorage(options) { return new PrivateMediaStorage(options); }
