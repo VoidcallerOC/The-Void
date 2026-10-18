@@ -79,6 +79,16 @@ describe("metadata storage", () => {
     await expect(invalid.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_URI_INVALID" });
   });
 
+  it("fails closed on a plain-text 403 and on unexpected 200 bodies", async () => {
+    const cfg = { endpoint: "https://api.pinata.cloud/pinning/pinJSONToIPFS", jwt: "secret" };
+    const denied = new PinataMetadataStorage({ config: cfg, fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "Forbidden" }) });
+    await expect(denied.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_STORAGE_UNAVAILABLE", details: { status: 403, authorization: true } });
+    for (const json of [async () => { throw new SyntaxError("bad json"); }, async () => ({}), async () => ({ data: { cid: "bafy123" } }), async () => ({ IpfsHash: 42 })]) {
+      const odd = new PinataMetadataStorage({ config: cfg, fetchImpl: vi.fn().mockResolvedValue({ ok: true, status: 200, json }) });
+      await expect(odd.write({ metadata: input, name: "summit" })).rejects.toMatchObject({ code: "METADATA_URI_INVALID" });
+    }
+  });
+
   it("surfaces an actionable, JWT-safe message when the key lacks the pinJSONToIPFS scope", async () => {
     const jwt = "eyJ-super-secret-production-pinata-jwt-value-do-not-leak-abcdef0123456789";
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => JSON.stringify({ error: { reason: "NO_SCOPES_FOUND", details: "This key does not have the required scopes associated with it." } }) });
