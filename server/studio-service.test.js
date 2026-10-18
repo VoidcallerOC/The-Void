@@ -31,7 +31,8 @@ function repository() {
 }
 function service({ rows = [], authenticated = true, authenticatedWallet = owner, metadataStorage = null, authorization = {} } = {}) {
   const repo = repository();
-  const db = { query: vi.fn().mockResolvedValue({ rows }) };
+  // Every query returns `rows`, except "was this edition's metadata submitted?", which is empty for these fixtures.
+  const db = { query: vi.fn(async (sql) => ({ rows: String(sql).includes("FROM tokens WHERE edition_id") ? [] : rows })) };
   return { instance: new ArtistStudioService({ db: verifiedArtistDb(db, authorization), repository: repo, metadataStorage, authenticator: authenticated ? vi.fn().mockResolvedValue({ wallet: authenticatedWallet }) : vi.fn().mockResolvedValue(null), logger: { info: vi.fn() } }), repo, db };
 }
 const request = { requestId: "request-1", headers: {} };
