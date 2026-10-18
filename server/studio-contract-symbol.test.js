@@ -1,3 +1,4 @@
+import { ethers } from "ethers";
 import { describe, expect, it, vi } from "vitest";
 import { ArtistStudioService, deriveStudioApplicationReleaseId, deriveStudioReleaseKey } from "./studio-service.js";
 
@@ -149,5 +150,41 @@ describe("on-chain tag: editing and saving against the existing draft", () => {
       await expect(instance.updateRelease({ request, releaseId: "release-1", input: { symbol: "NEW" } })).rejects.toMatchObject({ status: 409, code: "CONTRACT_SYMBOL_LOCKED" });
       expect(repo.saveRelease).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("on-chain tag: confirmed creation reports the deployed contract's symbol", () => {
+  const CLONE = "0x1111111111111111111111111111111111111111";
+  const iface = new ethers.Interface(["function owner() view returns(address)", "function releaseKey() view returns(bytes32)", "function name() view returns(string)", "function symbol() view returns(string)", "function contractURI() view returns(string)"]);
+
+  // A mocked chain provider: answers the clone's view calls, so no network is touched.
+  function statusHarness({ onChainSymbol, expectedSymbol }) {
+    const key = deriveStudioReleaseKey({ releaseId: "release-p", applicationReleaseId: deriveStudioApplicationReleaseId("release-p"), artistWallet: OWNER, factoryAddress: FACTORY });
+    const answers = { owner: OWNER, releaseKey: key, name: "Forgive & Forget", symbol: onChainSymbol, contractURI: "ipfs://pinned" };
+    const publicationChain = { call: vi.fn(async (tx) => {
+      const fn = iface.getFunction(String(tx.data).slice(0, 10));
+      return iface.encodeFunctionResult(fn, [answers[fn.name]]);
+    }) };
+    const expected = { releaseKey: key, name: "Forgive & Forget", symbol: expectedSymbol, contractURI: "ipfs://pinned" };
+    const stored = { request_id: "req-1", state: "SUBMITTED", transaction_hash: `0x${"cc".repeat(32)}`, factory_address: FACTORY.toLowerCase(), release_key: key, artist_wallet: OWNER, expected_parameters: expected };
+    const db = { query: vi.fn(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [{ id: "release-p" }] } : String(sql).includes("FROM factory_releases") ? { rows: [{ implementation_version: 2, transaction_hash: stored.transaction_hash, release_contract_address: CLONE, primary_sale_address: CLONE, provenance_anchor_address: CLONE, deployment_block_number: 1 }] } : { rows: [] })) };
+    const repo = repository();
+    repo.getReleaseProvisioningRequest = vi.fn(async () => stored);
+    repo.confirmReleaseProvisioningRequest = vi.fn(async () => ({ request_id: "req-1" }));
+    const instance = new ArtistStudioService({ db, repository: repo, publicationChain, authenticator: vi.fn().mockResolvedValue({ wallet: OWNER }), logger: { error: vi.fn() } });
+    vi.spyOn(instance, "bindReleaseContract").mockResolvedValue({ releaseContractAddress: CLONE });
+    return { instance, repo, publicationChain };
+  }
+
+  it("returns the symbol and name read from the deployed clone, not the draft value", async () => {
+    const { instance, publicationChain } = statusHarness({ onChainSymbol: "FORGIVEFORG", expectedSymbol: "FORGIVEFORG" });
+    await expect(instance.releaseProvisioningStatus({ request, releaseId: "release-p" })).resolves.toMatchObject({ state: "CONFIRMED", symbol: "FORGIVEFORG", name: "Forgive & Forget", releaseContractAddress: CLONE });
+    expect(publicationChain.call).toHaveBeenCalled();
+  });
+
+  it("fails closed and never confirms when the deployed symbol differs from the authorized one", async () => {
+    const { instance, repo } = statusHarness({ onChainSymbol: "WRONGTAG", expectedSymbol: "FORGIVEFORG" });
+    await expect(instance.releaseProvisioningStatus({ request, releaseId: "release-p" })).rejects.toMatchObject({ status: 409, code: "RELEASE_INITIALIZATION_MISMATCH" });
+    expect(repo.confirmReleaseProvisioningRequest).not.toHaveBeenCalled();
   });
 });
