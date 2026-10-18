@@ -51,6 +51,7 @@ const tree = (path, pattern, Page) => React.createElement(WalletCtx.Provider, { 
 const renderEdition = () => { plays.length = 0; return renderToStaticMarkup(tree(`/edition/${editionId}`, "/edition/:edition", EditionPage)); };
 const renderExperience = (id) => { plays.length = 0; return renderToStaticMarkup(tree(`/experience/${id}`, "/experience/:experience", ExperiencePage)); };
 const mainPlay = () => plays.find((props) => props.label === "Play preview");
+const publicPlay = () => plays.find((props) => props.label === "Play public preview");
 
 const FULL = (updatedAt) => row(FULL_ID, "Forgive & Forget", "AUDIO", true, updatedAt);
 const DEMO = (updatedAt) => row(DEMO_ID, "Stranger Things", "DEMO", false, updatedAt);
@@ -85,36 +86,53 @@ describe("edition page main Play button", () => {
     }
   });
 
-  it("keeps the public preview as the separate public track the button degrades to", async () => {
+  it("keeps the public preview as its own control next to the gated main Play", async () => {
     catalogState.current = await catalogFor(listing([FULL("2026-10-18T10:00:00Z"), DEMO("2026-10-18T12:00:00Z")]));
     renderEdition();
     const { track } = mainPlay();
     expect(track.previewSrc).toContain("bafypublicpreviewclip");
     expect(track.protectedMedia.experienceId).not.toBe(DEMO_ID);
     expect(JSON.stringify(track.protectedMedia)).not.toMatch(/preview/i);
+    expect(publicPlay()).toBeUndefined(); // one control while the primary resolves
   });
 
-  it("does not fall back to the demo when the designated primary is missing", async () => {
-    // Only the demo is published; it is explicitly not primary.
+  // Withheld, not silently replaced: no gated Play at all, only the explicitly labelled public preview.
+  const expectGatedPlayWithheld = (markup, state) => {
+    expect(mainPlay()).toBeUndefined();
+    expect(plays.filter((props) => props.protectedExperience)).toEqual([]);
+    expect(plays.filter((props) => props.track?.protectedMedia)).toEqual([]);
+    const pub = publicPlay();
+    expect(plays).toHaveLength(1);
+    expect(pub.label).toBe("Play public preview");
+    expect(pub.protectedExperience ?? null).toBeNull();
+    expect(pub.track.previewSrc).toContain("bafypublicpreviewclip");
+    expect(markup).toContain(`data-primary-state="${state}"`);
+    expect(markup).toContain("Full-track playback is unavailable");
+  };
+
+  it("withholds the gated Play when the designated primary is missing (only the demo is published)", async () => {
     catalogState.current = await catalogFor([DEMO("2026-10-18T12:00:00Z")]);
     const markup = renderEdition();
-    const play = mainPlay();
-    expect(play.protectedExperience).toBeNull();
-    expect(play.track.protectedMedia).toBeUndefined();
-    expect(play.track.previewSrc).toContain("bafypublicpreviewclip");
+    expectGatedPlayWithheld(markup, "missing");
     expect(markup).toContain(`/experience/${DEMO_ID}`); // still reachable as its own experience
   });
 
-  it("does not guess when two experiences claim to be primary", async () => {
+  it("withholds the gated Play when the primary is invalid", async () => {
+    // Designated, but not a gated experience.
+    catalogState.current = await catalogFor([{ ...FULL("2026-10-18T10:00:00Z"), protected: false, gated: false }, DEMO("2026-10-18T12:00:00Z")]);
+    expectGatedPlayWithheld(renderEdition(), "invalid");
+  });
+
+  it("withholds the gated Play when two experiences claim to be primary", async () => {
     catalogState.current = await catalogFor([row(FULL_ID, "Forgive & Forget", "AUDIO", true, "2026-10-18T10:00:00Z"), row(DEMO_ID, "Stranger Things", "DEMO", true, "2026-10-18T12:00:00Z")]);
-    renderEdition();
-    expect(mainPlay().protectedExperience).toBeNull();
+    expectGatedPlayWithheld(renderEdition(), "ambiguous");
   });
 
   it("keeps the previous behaviour for editions without any designation (Genesis and older releases)", async () => {
     catalogState.current = await catalogFor([row("legacy-a", "Track A", "AUDIO", undefined, "2026-10-18T12:00:00Z"), row("legacy-b", "Track B", "AUDIO", undefined, "2026-10-18T10:00:00Z")]);
     renderEdition();
     expect(mainPlay().protectedExperience.id).toBe("legacy-a"); // first listed, as before
+    expect(publicPlay()).toBeUndefined();
     catalogState.current = await catalogFor([row("only", "Only experience", "AUDIO", undefined, "2026-10-18T10:00:00Z")]);
     renderEdition();
     expect(mainPlay().protectedExperience.id).toBe("only");

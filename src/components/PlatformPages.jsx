@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
-import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryExperience } from "../domain/models.js";
+import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryExperience, primaryExperienceUnresolved, resolvePrimaryExperience } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
@@ -253,7 +253,10 @@ export function EditionPage() {
   // Non-holders retain the tokenURI preview; entitled holders are upgraded
   // through the same protected experience grant used by the player.
   // The edition's designated primary experience (the full track), never just whichever sorts first.
-  const previewExperience = primaryExperience(experiences);
+  // When an edition designates a primary that is missing, invalid or ambiguous, the gated main Play is
+  // withheld; the public preview stays available as its own labelled control.
+  const { state: primaryState, experience: previewExperience } = resolvePrimaryExperience(experiences);
+  const primaryUnresolved = primaryExperienceUnresolved(primaryState);
   const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
   const chainId = String(edition.chainId || "");
   const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
@@ -274,7 +277,12 @@ export function EditionPage() {
           <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyLabel}{price ? ` · ${price}` : ""}</p>
           <div style={{ margin: "18px 0" }}>
             <Eyebrow>Listen</Eyebrow>
-            {previewTrack ? (
+            {previewTrack && primaryUnresolved ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p className="vc-card-meta" data-primary-state={primaryState}>Full-track playback is unavailable for this edition right now.</p>
+                <PlayTokenButton track={previewTrack} queueId={`public-preview:${edition.id}`} collection={release.title} label="Play public preview" />
+              </div>
+            ) : previewTrack ? (
               <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

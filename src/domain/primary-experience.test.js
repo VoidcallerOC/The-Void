@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getEditionCatalog, orderExperiences, primaryExperience } from "./models.js";
+import { getEditionCatalog, orderExperiences, primaryExperience, resolvePrimaryExperience } from "./models.js";
 import { baseCatalogs, mapPublishedCatalog } from "../lib/catalog-source.js";
 
-const full = { id: "full", primary: true };
-const demo = { id: "demo", primary: false };
+const gated = { protected: true, type: "AUDIO" };
+const full = { id: "full", primary: true, media: gated };
+const demo = { id: "demo", primary: false, media: { protected: true, type: "DEMO" } };
 
 describe("primaryExperience", () => {
   it("returns the designated experience wherever it sorts", () => {
@@ -15,7 +16,7 @@ describe("primaryExperience", () => {
   it("never falls back to another experience once an edition designates a primary", () => {
     expect(primaryExperience([demo])).toBeNull(); // full track missing: the demo is not promoted
     expect(primaryExperience([demo, { id: "x", primary: false }])).toBeNull();
-    expect(primaryExperience([{ id: "a", primary: true }, { id: "b", primary: true }])).toBeNull(); // ambiguous
+    expect(primaryExperience([{ id: "a", primary: true, media: gated }, { id: "b", primary: true, media: gated }])).toBeNull(); // ambiguous
   });
 
   it("falls back to the first listed when nothing is designated (older releases, Genesis)", () => {
@@ -27,6 +28,26 @@ describe("primaryExperience", () => {
 
   it("treats a designated primary next to undesignated rows as the primary", () => {
     expect(primaryExperience([{ id: "legacy" }, full]).id).toBe("full");
+  });
+});
+
+describe("resolvePrimaryExperience states", () => {
+  it("reports why no primary resolves", () => {
+    expect(resolvePrimaryExperience([demo])).toEqual({ state: "missing", experience: null });
+    expect(resolvePrimaryExperience([demo, { id: "x", primary: false }]).state).toBe("missing");
+    expect(resolvePrimaryExperience([{ id: "a", primary: true, media: gated }, { id: "b", primary: true, media: gated }]).state).toBe("ambiguous");
+  });
+
+  it("treats an untrustworthy designation as invalid, never as a fallback", () => {
+    expect(resolvePrimaryExperience([{ id: "a", primary: "true", media: gated }, demo]).state).toBe("invalid");
+    expect(resolvePrimaryExperience([{ id: "a", primary: true }, demo]).state).toBe("invalid"); // not a gated experience
+    expect(resolvePrimaryExperience([{ id: "a", primary: true, media: { protected: false } }]).experience).toBeNull();
+  });
+
+  it("keeps the legacy and designated states", () => {
+    expect(resolvePrimaryExperience([{ id: "a" }, { id: "b" }])).toMatchObject({ state: "legacy", experience: { id: "a" } });
+    expect(resolvePrimaryExperience([])).toEqual({ state: "legacy", experience: null });
+    expect(resolvePrimaryExperience([demo, full])).toMatchObject({ state: "designated", experience: { id: "full" } });
   });
 });
 

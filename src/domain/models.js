@@ -69,12 +69,21 @@ export function getReleaseCatalog(catalog, releaseId) { const release = catalog.
 //    falls back to another experience, so a demo cannot stand in for a missing full track;
 //  - no experience carries a designation (Genesis, older releases) -> the first listed,
 //    which is the behaviour before designations existed.
-export function primaryExperience(experiences = []) {
+//  - a designation that cannot be trusted (a non-boolean flag, or a primary that is not a
+//    gated experience) is "invalid" and also resolves to null.
+export function resolvePrimaryExperience(experiences = []) {
   const list = (experiences || []).filter(Boolean);
+  if (list.some((experience) => experience.primary != null && typeof experience.primary !== "boolean")) return { state: "invalid", experience: null };
   const designated = list.filter((experience) => experience.primary === true);
-  if (designated.length === 1) return designated[0];
-  if (list.some((experience) => typeof experience.primary === "boolean")) return null;
-  return list[0] || null;
+  if (designated.length > 1) return { state: "ambiguous", experience: null };
+  if (designated.length === 1) return designated[0].media?.protected ? { state: "designated", experience: designated[0] } : { state: "invalid", experience: null };
+  if (list.some((experience) => typeof experience.primary === "boolean")) return { state: "missing", experience: null };
+  return { state: "legacy", experience: list[0] || null };
+}
+// "designated" and "legacy" resolve to a playable primary; the rest must not offer gated playback.
+export const primaryExperienceUnresolved = (state) => state === "missing" || state === "invalid" || state === "ambiguous";
+export function primaryExperience(experiences = []) {
+  return resolvePrimaryExperience(experiences).experience;
 }
 
 // The designated primary first, everything else in its original order.
