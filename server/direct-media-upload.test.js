@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtistStudioService, DIRECT_AUDIO_MIME_TYPES } from "./studio-service.js";
 import { PrivateMediaStorage } from "./media-storage.js";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
@@ -268,6 +268,49 @@ describe("Pinata signed upload requests", () => {
     const hashing = new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: "j", gateway: "https://gw.example", endpoint: "x" } }, signer: async (cid) => `https://gw.example/files/${cid}` });
     const fetchImpl = vi.fn().mockResolvedValue(new Response("hel", { status: 206, headers: { "content-range": "bytes 0-2/5" } }));
     await expect(hashing.sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).rejects.toMatchObject({ code: "MEDIA_HASH_UNVERIFIED", upstream: { status: 206 } });
+  });
+
+  describe("private download: link creation and object read are separate steps", () => {
+    const config = { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, objectUrlHosts: ["gw.example"], pinata: { jwt: "secret-jwt", gateway: "https://gw.example", endpoint: "https://api.pinata.cloud/v3/files/private/download_link" } };
+    const linkResponse = (init) => vi.fn().mockResolvedValue(init);
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("maps a 403 on link creation to MEDIA_LINK_UNAUTHORIZED without leaking the JWT", async () => {
+      vi.stubGlobal("fetch", linkResponse(new Response("{\"error\":{\"reason\":\"NO_SCOPES_FOUND\"}}", { status: 403 })));
+      const error = await new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: "bafyx", fetchImpl: vi.fn() }).then(() => null, (e) => e);
+      expect(error).toMatchObject({ code: "MEDIA_LINK_UNAUTHORIZED", status: 502, upstream: { status: 403 } });
+      expect(JSON.stringify([error.message, error.upstream])).not.toContain("secret-jwt");
+    });
+
+    it("rejects a malformed link response (non-JSON, wrong shape)", async () => {
+      for (const body of ["<html>oops</html>", JSON.stringify({ data: { url: "x" } }), JSON.stringify({})]) {
+        vi.stubGlobal("fetch", linkResponse(new Response(body, { status: 200 })));
+        await expect(new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: "bafyx", fetchImpl: vi.fn() })).rejects.toMatchObject({ code: "MEDIA_LINK_INVALID" });
+      }
+    });
+
+    it("refuses a link that is not https on the configured gateway host and never fetches it", async () => {
+      const fetchImpl = vi.fn();
+      for (const link of ["https://evil.example/files/bafyx", "http://gw.example/files/bafyx", "not a url"]) {
+        vi.stubGlobal("fetch", linkResponse(new Response(JSON.stringify({ data: link }), { status: 200 })));
+        await expect(new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: "bafyx", fetchImpl })).rejects.toMatchObject({ code: "MEDIA_LINK_INVALID" });
+      }
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("a successful link (HTTP 200) followed by a 403 download is MEDIA_DOWNLOAD_FORBIDDEN, never a verified hash", async () => {
+      vi.stubGlobal("fetch", linkResponse(new Response(JSON.stringify({ data: "https://gw.example/files/bafyx?X-Signature=opaque" }), { status: 200 })));
+      const fetchImpl = vi.fn().mockResolvedValue(new Response("{\"error\":\"forbidden\"}", { status: 403 }));
+      const error = await new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: "bafyx", fetchImpl }).then(() => null, (e) => e);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(error).toMatchObject({ code: "MEDIA_DOWNLOAD_FORBIDDEN", status: 502, upstream: { status: 403, gatewayHost: "gw.example" } });
+      expect(JSON.stringify(error.upstream)).not.toContain("opaque");
+    });
+
+    it("a network failure on the download is MEDIA_HASH_UNVERIFIED", async () => {
+      vi.stubGlobal("fetch", linkResponse(new Response(JSON.stringify({ data: "https://gw.example/files/bafyx?sig=1" }), { status: 200 })));
+      await expect(new PrivateMediaStorage({ config }).sha256OfPrivateObject({ cid: "bafyx", fetchImpl: vi.fn().mockRejectedValue(new Error("socket hang up")) })).rejects.toMatchObject({ code: "MEDIA_HASH_UNVERIFIED" });
+    });
   });
 
   it("hashes the stored private object through a signed download link", async () => {
