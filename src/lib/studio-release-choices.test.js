@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT } from "./legacy-genesis.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
-import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "./studio-release-choices.js";
+import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "./studio-release-choices.js";
 
 // Mirrors the Studio picker the user reported: real releases buried among
 // test profiles, certification runs and repeated "VOIDCALLER" drafts.
@@ -125,5 +125,30 @@ describe("Take this off the site", () => {
     expect(canTakeReleaseOffTheSite({ id: "fuji-pending", title: "Not out yet", status: "published" }, editions)).toBe(true);
     expect(canTakeReleaseOffTheSite({ id: "ff-18", title: "Forgive & Forget", status: "published" }, editions)).toBe(true);
     expect(canTakeReleaseOffTheSite({ id: "ff-draft", title: "Forgive & Forget", status: "draft" }, [{ releaseId: "ff-draft", status: "draft", tokenIds: ["4"] }])).toBe(false);
+  });
+});
+
+describe("existingDraftsForTitle (Create release must not clone a draft)", () => {
+  const owned = [
+    { id: "release-original", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" },
+    { id: "release-published", artistId: "voidcaller", title: "Forgive & Forget", status: "published" },
+    { id: "release-archived", artistId: "voidcaller", title: "Forgive & Forget", status: "archived" },
+    { id: "release-other-artist", artistId: "someone-else", title: "Forgive & Forget", status: "draft" },
+    { id: "release-other-title", artistId: "voidcaller", title: "Another", status: "draft" },
+  ];
+
+  it("finds only this artist's unpublished drafts of the same title, ignoring case and spacing", () => {
+    expect(existingDraftsForTitle(owned, { artistId: "VoidCaller", title: "  forgive & FORGET " }).map((release) => release.id)).toEqual(["release-original"]);
+  });
+
+  it("returns every match so the caller can refuse to guess between duplicates", () => {
+    const twice = [...owned, { id: "release-dup", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" }];
+    expect(existingDraftsForTitle(twice, { artistId: "voidcaller", title: "Forgive & Forget" })).toHaveLength(2);
+  });
+
+  it("is empty for a new title, a missing artist, or an unloaded catalog", () => {
+    expect(existingDraftsForTitle(owned, { artistId: "voidcaller", title: "Brand New" })).toEqual([]);
+    expect(existingDraftsForTitle(owned, { title: "Forgive & Forget" })).toEqual([]);
+    expect(existingDraftsForTitle(undefined, { artistId: "voidcaller", title: "x" })).toEqual([]);
   });
 });

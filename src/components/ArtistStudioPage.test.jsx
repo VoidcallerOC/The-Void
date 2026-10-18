@@ -660,3 +660,93 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
     });
   });
 });
+
+describe("Artist Studio on-chain tag on an existing draft", () => {
+  const DIGEST_A = `0x${"aa".repeat(32)}`;
+  const DIGEST_B = `0x${"bb".repeat(32)}`;
+  const draftCatalog = (contractSymbol) => ({ artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Forgive & Forget", status: "DRAFT", release_metadata: { releaseType: "SINGLE", ...(contractSymbol ? { contractSymbol } : {}) } }], editions: [], experiences: [] });
+  const prepared = (symbol, digest = DIGEST_A) => ({ state: "PENDING", requestId: "req-1", chainId: CHAIN_ID, name: "Forgive & Forget", symbol, authorizationDigest: digest, releaseKey: `0x${"ab".repeat(32)}`, artistWallet: wallet.account });
+  const calls = (method, suffix) => studioFetch.mock.calls.filter(([path, options]) => (options?.method || "GET") === method && path.endsWith(suffix));
+  const tagField = () => screen.findByLabelText(/On-chain tag/);
+
+  function mockDraft({ stored, symbol = "FORGIVEFORG", status = { state: "NOT_STARTED" }, onPrepare } = {}) {
+    let prepares = 0;
+    studioFetch.mockImplementation(async (path, options = {}) => {
+      if (path === "/studio/catalog") return draftCatalog(stored);
+      if (path.endsWith("/provisioning/prepare")) { prepares += 1; return onPrepare ? onPrepare(prepares) : prepared(symbol); }
+      if (path.endsWith("/provisioning/status")) return status;
+      if (path === "/studio/releases/rel-draft" && options.method === "PATCH") return { id: "rel-draft" };
+      throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+    });
+  }
+
+  it("shows an editable on-chain tag for a loaded, undeployed draft, populated with its current symbol", async () => {
+    mockDraft();
+    renderStudio("rel-draft");
+    const field = await tagField();
+    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
+    expect(field.readOnly).toBe(false);
+    expect(screen.getByLabelText(/Release type/).value).toBe("SINGLE");
+  });
+
+  it("prefers the symbol the artist already stored on the draft", async () => {
+    mockDraft({ stored: "FNF", symbol: "FNF" });
+    renderStudio("rel-draft");
+    await waitFor(async () => expect((await tagField()).value).toBe("FNF"));
+  });
+
+  it("normalises typing to at most 11 uppercase letters or digits", async () => {
+    mockDraft();
+    renderStudio("rel-draft");
+    const field = await tagField();
+    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
+    fireEvent.change(field, { target: { value: "fnf-12 abcdefghij" } });
+    expect(field.value).toBe("FNF12ABCDEF");
+  });
+
+  it("saves an edited symbol onto the existing draft (PATCH) and re-prepares, never creating a draft", async () => {
+    mockDraft({ onPrepare: (n) => (n === 1 ? prepared("FORGIVEFORG", DIGEST_A) : prepared("FNF", DIGEST_B)) });
+    renderStudio("rel-draft");
+    const field = await tagField();
+    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
+    fireEvent.change(field, { target: { value: "fnf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(calls("PATCH", "/studio/releases/rel-draft")).toHaveLength(1));
+    expect(calls("PATCH", "/studio/releases/rel-draft")[0][1].payload).toMatchObject({ symbol: "FNF", releaseType: "SINGLE", title: "Forgive & Forget" });
+    expect(calls("POST", "/releases")).toHaveLength(0);
+    await waitFor(() => expect(calls("POST", "/provisioning/prepare")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText(/\(FNF\)/)).toBeTruthy());
+    expect(field.value).toBe("FNF");
+  });
+
+  it("withholds Create release on-chain while the prepared request is stale, until it is re-prepared", async () => {
+    mockDraft();
+    renderStudio("rel-draft");
+    const field = await tagField();
+    await screen.findByRole("button", { name: "Create release on-chain" });
+    fireEvent.change(field, { target: { value: "NEWTAG" } });
+    expect(screen.queryByRole("button", { name: "Create release on-chain" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toMatch(/on-chain tag changed/i);
+  });
+
+  it("never opens the wallet when a fresh preparation differs from the parameters the artist reviewed", async () => {
+    mockDraft({ onPrepare: (n) => (n === 1 ? prepared("FORGIVEFORG", DIGEST_A) : prepared("FORGIVEFORG", DIGEST_B)) });
+    renderStudio("rel-draft");
+    fireEvent.click(await screen.findByRole("button", { name: "Create release on-chain" }));
+    await waitFor(() => expect(calls("POST", "/provisioning/prepare")).toHaveLength(2));
+    expect(await screen.findByText(/parameters changed since you reviewed them/i)).toBeTruthy();
+    expect(walletProvider.request).not.toHaveBeenCalled();
+    expect(calls("POST", "/provisioning/submit")).toHaveLength(0);
+  });
+
+  it("locks the tag only after on-chain creation is confirmed, and shows the deployed contract's symbol", async () => {
+    mockDraft({ symbol: "DRAFTVALUE", status: { state: "CONFIRMED", chainId: CHAIN_ID, symbol: "FORGIVEFORG", releaseContractAddress: CLONE, primarySaleAddress: SALE, provenanceAnchorAddress: ANCHOR } });
+    renderStudio("rel-draft");
+    // Confirmed creation moves Studio on to the track step; go back to the release form.
+    await screen.findByText("Track details");
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Catalog editor workflow" })).getByRole("button", { name: /Your release/ }));
+    const field = await screen.findByLabelText(/On-chain tag \(fixed/);
+    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
+    expect(field.readOnly).toBe(true);
+  });
+});
