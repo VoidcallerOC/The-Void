@@ -132,7 +132,7 @@ export function MarketplacePage() {
         <div className="vc-market-hero-copy">
           <Eyebrow red>† The catalog</Eyebrow>
           <h1 className="vc-market-hero-title">Releases</h1>
-          <p className="vc-market-hero-lede">Collect the pressing. Hear what it unlocks. Provenance stays on the colophon.</p>
+          <p className="vc-market-hero-lede">Collect the pressing. Hear what it unlocks.</p>
           {volume && <div className="vc-market-volume" aria-label="Overall volume">
             <Eyebrow>Overall volume</Eyebrow>
             <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
