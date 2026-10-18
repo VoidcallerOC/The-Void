@@ -19,7 +19,7 @@ import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectR
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
 import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readCurrentReleaseEditions, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
-import { canTakeReleaseOffTheSite, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
+import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings } from "../lib/sale-earnings.js";
@@ -525,6 +525,19 @@ export function ArtistStudioPage() {
     if (!form.releaseTitle) throw new Error("Enter a release title before creating a track.");
     const nextArtistId = await ensureArtist();
     let nextReleaseId = releaseId;
+    // No draft id in memory (reload, second tab) but a draft with this title already exists:
+    // never POST a second one. Load the single match, or ask for an explicit pick.
+    if (!releaseId) {
+      const drafts = existingDraftsForTitle(ownedStudioCatalog?.releases, { artistId: nextArtistId, title: form.releaseTitle });
+      if (drafts.length === 1) {
+        const [draft] = drafts;
+        setSelectedReleaseId(draft.id);
+        setReleaseId(draft.id);
+        setForm((prior) => ({ ...prior, releaseTitle: draft.title || prior.releaseTitle, releaseType: draft.releaseType || prior.releaseType, releaseDescription: draft.description || "", releaseArtwork: draft.artwork || "" }));
+        throw Object.assign(new Error(`A draft named "${draft.title}" already exists (${draft.id}). It is loaded; review it, then select Create release again to prepare it.`), { code: "DRAFT_ALREADY_EXISTS" });
+      }
+      if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Open the one you want at /studio?release=<id> so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
+    }
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
       payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(releaseId || !form.releaseSymbol.trim() ? {} : { symbol: form.releaseSymbol.trim() }) },
@@ -546,7 +559,7 @@ export function ArtistStudioPage() {
       setProvisioningState(prepared.state || "PENDING");
       setNotice("Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.");
     } catch (error) {
-      setNotice(`Release draft saved. ${error.message}`);
+      setNotice(error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : `Release draft saved. ${error.message}`);
     } finally {
       setBusy("");
     }
