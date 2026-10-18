@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "./release-types.js";
+import { MAX_EP_TRACKS, RELEASE_TYPE_LABELS, albumSingleCandidates, epTrackLimit, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "./release-types.js";
 
 const catalog = {
   releases: [
@@ -39,5 +39,21 @@ describe("album limits wording (D2 Option A)", () => {
     const { RELEASE_TYPE_LABELS } = await import("./release-types.js");
     expect(RELEASE_TYPE_LABELS.ALBUM).toMatch(/13 tracks \/ 4 singles by default/);
     expect(RELEASE_TYPE_LABELS.ALBUM).not.toMatch(/up to 13|maximum|max\b/i);
+  });
+});
+
+describe("EP track cap (Studio view)", () => {
+  it("allows five tracks, blocks adding a sixth, and flags an over-limit draft without hiding it", () => {
+    expect(MAX_EP_TRACKS).toBe(5);
+    expect(epTrackLimit("EP", 4)).toMatchObject({ limited: true, atLimit: false, overLimit: false });
+    expect(epTrackLimit("EP", 5)).toMatchObject({ atLimit: true, overLimit: false, count: 5, max: 5 });
+    expect(epTrackLimit("EP", 7)).toMatchObject({ atLimit: true, overLimit: true });
+    expect(epTrackLimit(undefined, 5)).toMatchObject({ limited: true, atLimit: true });
+  });
+
+  it("never limits a Single or an Album, and states the limit in the EP label", () => {
+    expect(epTrackLimit("SINGLE", 5)).toMatchObject({ limited: false, atLimit: false, overLimit: false });
+    expect(epTrackLimit("ALBUM", 12)).toMatchObject({ limited: false, atLimit: false });
+    expect(RELEASE_TYPE_LABELS.EP).toMatch(/up to 5 tracks/);
   });
 });
