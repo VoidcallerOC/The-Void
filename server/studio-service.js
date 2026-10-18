@@ -5,6 +5,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory, releaseRoyaltyPolicyForChain, releaseRoyaltyPolicyViolation } from "../config/release-network.js";
+import { isDeepStrictEqual } from "node:util";
 import { EP_TRACK_LIMIT_MESSAGE, MAX_EP_TRACKS } from "../src/lib/release-types.js";
 import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata, collectionMetadata } from "./metadata-storage.js";
@@ -70,6 +71,22 @@ function withoutRemovedDraftFlag(metadata) {
   const rest = { ...(metadata || {}) };
   delete rest.removedDraft;
   return rest;
+}
+// Once an edition is confirmed on-chain (PUBLISHED, or taken off the site afterwards) its title, tier, description,
+// supply and metadata are committed in the on-chain edition and the immutable metadata document. The database copy
+// must not drift from them, so only an unchanged resave or taking it off the site is accepted. A removed draft is
+// handled separately and a DRAFT or REVIEW edition is unaffected.
+function assertEditionNotFrozen(edition, next) {
+  const frozen = edition.status === "PUBLISHED" || (edition.status === "ARCHIVED" && edition.application_metadata?.removedDraft !== true);
+  if (!frozen) return;
+  const changed = [];
+  if (next.title !== edition.title) changed.push("title");
+  if ((next.tier ?? null) !== (edition.tier ?? null)) changed.push("tier");
+  if ((next.description ?? null) !== (edition.description ?? null)) changed.push("description");
+  if (String(next.supply ?? "") !== String(edition.supply ?? "")) changed.push("supply");
+  if (!isDeepStrictEqual(next.metadata ?? {}, edition.application_metadata ?? {})) changed.push("metadata");
+  if (next.status !== edition.status && !(edition.status === "PUBLISHED" && next.status === "ARCHIVED")) changed.push("status");
+  if (changed.length) throw new ApiError(409, "PUBLISHED_EDITION_IMMUTABLE", `A published edition's ${changed.join(", ")} cannot be changed. It can only be taken off the site.`);
 }
 const SINGLE_ONE_TRACK_MESSAGE = "A single is exactly one standalone track. Remove the extra tracks before choosing Single.";
 // Tracks are the release's editions. A draft the artist removed stays stored as ARCHIVED but no longer counts.
@@ -1001,7 +1018,9 @@ export class ArtistStudioService {
     // Once its metadata was submitted the track may already be minted (the database can lag the chain), so it is never hidden.
     if (removingDraft && (await this.db.query("SELECT 1 FROM tokens WHERE edition_id=$1 AND metadata_uri IS NOT NULL LIMIT 1", [edition.id])).rows[0]) throw new ApiError(409, "TRACK_REMOVAL_UNAVAILABLE", "This track's metadata was already submitted for publication, so it cannot be removed here.");
     const status = removingDraft ? "ARCHIVED" : patchStatus(input, edition.status, "edition");
-    const saved = await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: input.name === undefined && input.title === undefined ? edition.title : requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: input.tier === undefined ? edition.tier : optionalText(input.tier, "edition.tier", { max: 128 }), description: input.description === undefined ? edition.description : optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? edition.supply : editionQuantity(input.quantity, "edition.quantity"), status, metadata: { ...withoutRemovedDraftFlag(input.metadata === undefined ? edition.application_metadata : jsonObject(input.metadata, "edition.metadata")), ...(removingDraft ? { removedDraft: true } : {}) } });
+    const next = { id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: input.name === undefined && input.title === undefined ? edition.title : requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: input.tier === undefined ? edition.tier : optionalText(input.tier, "edition.tier", { max: 128 }), description: input.description === undefined ? edition.description : optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? edition.supply : editionQuantity(input.quantity, "edition.quantity"), status, metadata: { ...withoutRemovedDraftFlag(input.metadata === undefined ? edition.application_metadata : jsonObject(input.metadata, "edition.metadata")), ...(removingDraft ? { removedDraft: true } : {}) } };
+    assertEditionNotFrozen(edition, next);
+    const saved = await this.repository.saveEdition(next);
     await this.audit({ identity, request, eventType: "STUDIO_EDITION_UPDATED", subjectType: "edition", subjectId: edition.id });
     return saved;
   }
