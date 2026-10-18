@@ -93,6 +93,21 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
   return pool.filter((record) => keep.has(record.release.id));
 }
 
+/**
+ * Unpublished drafts this artist already has under the same title
+ * (case- and whitespace-insensitive). Create release uses this before it
+ * POSTs a new release, so a page that lost its in-memory draft id (reload,
+ * second tab) loads the existing draft instead of cloning it.
+ */
+export function existingDraftsForTitle(releases = [], { artistId, title } = {}) {
+  const wantedTitle = normalizedText(title);
+  const wantedArtist = normalizedText(artistId);
+  if (!wantedTitle || !wantedArtist) return [];
+  return releases.filter((release) => normalizedText(release?.status) === "draft"
+    && normalizedText(release?.artistId) === wantedArtist
+    && normalizedText(release?.title) === wantedTitle);
+}
+
 function editionMetadata(edition) {
   const meta = edition.application_metadata ?? edition.applicationMetadata;
   return meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {};

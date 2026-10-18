@@ -126,6 +126,15 @@ export class PersistenceRepository {
     } catch (error) { throw normalizeDbError(error, "This release key or transaction is already assigned to another provisioning request."); }
   }
 
+  // Re-prepares a request that was never submitted (still PENDING, no transaction hash) with new
+  // parameters. Key, wallet and factory must be unchanged; a submitted or confirmed request never matches.
+  async refreshReleaseProvisioningRequest({ releaseId, chainId: rawChainId, releaseKey, artistWallet, factoryAddress, authorizationDigest, expectedParameters }) {
+    const values = [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId), requiredText(releaseKey, "provisioning.releaseKey").toLowerCase(), walletAddress(artistWallet, "provisioning.artistWallet"), walletAddress(factoryAddress, "provisioning.factoryAddress"), requiredText(authorizationDigest, "provisioning.authorizationDigest").toLowerCase(), normalizeJson(expectedParameters)];
+    const { rows } = await this.db.query("UPDATE release_provisioning_requests SET authorization_digest=$6, expected_parameters=$7, updated_at=now() WHERE release_id=$1 AND chain_id=$2 AND state='PENDING' AND transaction_hash IS NULL AND release_key=$3 AND lower(artist_wallet)=lower($4) AND lower(factory_address)=lower($5) RETURNING *", values);
+    if (!rows[0]) throw new PersistenceConflictError("The provisioning request was submitted or changed authority and can no longer be re-prepared.");
+    return rows[0];
+  }
+
   async getReleaseProvisioningRequest({ releaseId, chainId: rawChainId }) {
     const { rows } = await this.db.query("SELECT * FROM release_provisioning_requests WHERE release_id=$1 AND chain_id=$2 LIMIT 1", [requiredText(releaseId, "provisioning.releaseId"), chainId(rawChainId)]);
     return rows[0] || null;

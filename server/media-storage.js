@@ -46,19 +46,30 @@ export class PrivateMediaStorage {
     return async (key) => getSignedUrl(client, new GetObjectCommand({ Bucket: config.r2.bucket, Key: key }), { expiresIn: config.signedUrlTtlSeconds });
   }
 
+  // Step 1 of a private read: ask Pinata for a short-lived signed gateway link.
+  // A 200 here only proves the key may CREATE links; it says nothing about
+  // whether the gateway will serve the object (that is sha256OfPrivateObject).
   createPinataSigner(config) {
     return async (cid) => {
       if (!/^(?:baf[a-z0-9]+|Qm[1-9A-HJ-NP-Za-km-z]+)$/.test(cid)) throw new Error("Pinata protected media reference must be a CID.");
       const date = Math.floor(Date.now() / 1000);
-      const response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
-      if (!response.ok) {
-        // Keep Pinata's own reason: a bare status cannot tell a key-permission
-        // rejection from a gateway/account mismatch. Success is unchanged.
-        const text = await response.text().catch(() => "");
-        throw Object.assign(new Error(`Pinata private download-link HTTP ${response.status}`), { upstream: { endpoint: "POST /v3/files/private/download_link", status: response.status, gateway: new URL(config.pinata.gateway).host, error: redactUpstreamBody(text) || undefined } });
+      const gateway = (() => { try { return new URL(config.pinata.gateway).host; } catch { return null; } })();
+      // Every failure names the call, its status and the gateway host, and keeps
+      // Pinata's own reason (redacted). The message never guesses at the cause.
+      const linkFailure = (message, code, status, body = "") => Object.assign(new Error(message), { status: 502, code, upstream: { endpoint: "POST /v3/files/private/download_link", status, gateway, error: redactUpstreamBody(body) || undefined } });
+      let response;
+      try {
+        response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
+      } catch (error) {
+        throw linkFailure(`Pinata private download-link request could not be reached: ${redactUpstreamBody(error?.message)}`, "MEDIA_LINK_FAILED", null);
       }
-      const payload = await response.json();
-      if (typeof payload?.data !== "string") throw new Error("Pinata private download-link response was invalid.");
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        if (response.status === 401 || response.status === 403) throw linkFailure(`Pinata refused to create a private download link (HTTP ${response.status}).`, "MEDIA_LINK_UNAUTHORIZED", response.status, body);
+        throw linkFailure(`Pinata private download-link HTTP ${response.status}`, "MEDIA_LINK_FAILED", response.status, body);
+      }
+      const payload = await response.json().catch(() => null);
+      if (typeof payload?.data !== "string") throw linkFailure("Pinata private download-link response was invalid.", "MEDIA_LINK_INVALID", response.status);
       return payload.data;
     };
   }
@@ -137,12 +148,32 @@ export class PrivateMediaStorage {
   // SHA-256 of the stored private object, streamed through a short-lived
   // private download link. Proves the bytes in storage are the declared ones.
   async sha256OfPrivateObject({ cid, fetchImpl = fetch }) {
+    // Stage 1: create the link. Failures keep their own coded error.
     const url = await this.signer(cid);
+    let host;
+    try {
+      const parsed = new URL(url);
+      host = parsed.host.toLowerCase();
+      const allowed = this.config.objectUrlHosts;
+      if (parsed.protocol !== "https:" || (Array.isArray(allowed) && allowed.length && !allowed.includes(host))) throw new Error("unapproved");
+    } catch {
+      throw Object.assign(new Error("Pinata returned a download link that is not on the configured gateway host."), { status: 502, code: "MEDIA_LINK_INVALID", upstream: { endpoint: "POST /v3/files/private/download_link", status: 200 } });
+    }
+    // Stage 2: read the object through that link. A link is not proof of access.
     // Ask for the stored bytes exactly: a compressed or partial response would
     // hash to something other than the uploaded file.
-    const response = await fetchImpl(url, { headers: { "accept-encoding": "identity" } });
+    let response;
+    try {
+      response = await fetchImpl(url, { headers: { "accept-encoding": "identity" } });
+    } catch (error) {
+      throw Object.assign(new Error(`Private object download could not be reached: ${redactUpstreamBody(error?.message)}`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", gatewayHost: host, status: null } });
+    }
     const download = { status: response.status, contentLength: response.headers?.get?.("content-length") ?? null, contentEncoding: response.headers?.get?.("content-encoding") ?? null, contentType: response.headers?.get?.("content-type") ?? null };
-    if (response.status !== 200 || !response.body) throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}).`), { status: 502, code: "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", ...download } });
+    if (response.status !== 200 || !response.body) {
+      const denied = response.status === 401 || response.status === 403;
+      const detail = denied ? await response.text().then(redactUpstreamBody, () => "") : "";
+      throw Object.assign(new Error(`Private object download failed (HTTP ${response.status}); the download link was issued but the gateway refused to serve the object.`), { status: 502, code: denied ? "MEDIA_DOWNLOAD_FORBIDDEN" : "MEDIA_HASH_UNVERIFIED", upstream: { endpoint: "GET private download link", gatewayHost: host, ...download, error: detail || undefined } });
+    }
     const hash = createHash("sha256");
     let bytes = 0;
     for await (const chunk of response.body) { hash.update(chunk); bytes += chunk.length; }
