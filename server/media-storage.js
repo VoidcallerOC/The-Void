@@ -51,7 +51,12 @@ export class PrivateMediaStorage {
       if (!/^(?:baf[a-z0-9]+|Qm[1-9A-HJ-NP-Za-km-z]+)$/.test(cid)) throw new Error("Pinata protected media reference must be a CID.");
       const date = Math.floor(Date.now() / 1000);
       const response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
-      if (!response.ok) throw new Error(`Pinata private download-link HTTP ${response.status}`);
+      if (!response.ok) {
+        // Keep Pinata's own reason: a bare status cannot tell a key-permission
+        // rejection from a gateway/account mismatch. Success is unchanged.
+        const text = await response.text().catch(() => "");
+        throw Object.assign(new Error(`Pinata private download-link HTTP ${response.status}`), { upstream: { endpoint: "POST /v3/files/private/download_link", status: response.status, gateway: new URL(config.pinata.gateway).host, error: redactUpstreamBody(text) || undefined } });
+      }
       const payload = await response.json();
       if (typeof payload?.data !== "string") throw new Error("Pinata private download-link response was invalid.");
       return payload.data;
@@ -173,6 +178,12 @@ export function redactPinataFile(file = {}) {
 }
 function redactText(text) {
   return String(text || "").replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "[jwt]").replace(/\b(baf[a-z0-9]{10,}|Qm[1-9A-HJ-NP-Za-km-z]{20,})\b/g, (cid) => shortId(cid)).slice(0, 300);
+}
+
+// A provider error body for logs and the Studio message: no JWTs, no URLs
+// (a signed link would carry its signature), CIDs shortened.
+function redactUpstreamBody(text) {
+  return redactText(String(text || "").replace(/https?:\/\/[^\s"'\\]+/g, "[url]").replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")).replace(/\s+/g, " ").trim();
 }
 
 export function createPrivateMediaStorage(options) { return new PrivateMediaStorage(options); }

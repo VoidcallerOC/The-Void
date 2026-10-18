@@ -277,3 +277,56 @@ describe("Pinata signed upload requests", () => {
     expect(fetchImpl).toHaveBeenCalledWith("https://gw.example/files/bafyx?sig=1", { headers: { "accept-encoding": "identity" } });
   });
 });
+
+describe("Pinata private download-link request", () => {
+  const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature-value";
+  const make = () => new PrivateMediaStorage({ config: { driver: "pinata", maxBytes: 500, signedUrlTtlSeconds: 60, pinata: { jwt: JWT, gateway: "https://media.example.mypinata.cloud", endpoint: "https://api.pinata.cloud/v3/files/private/download_link" } } });
+  const run = async (response) => {
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+    try { return { fetchMock, outcome: await make().signer(CID).then((value) => ({ value }), (error) => ({ error })) }; } finally { vi.unstubAllGlobals(); }
+  };
+
+  it("sends the documented request: POST, JSON, Bearer key, gateway /files/{cid}, GET, 60 s", async () => {
+    const { fetchMock, outcome } = await run(new Response(JSON.stringify({ data: "https://media.example.mypinata.cloud/files/x?X-Algorithm=1" }), { status: 200 }));
+    expect(outcome.value).toBe("https://media.example.mypinata.cloud/files/x?X-Algorithm=1");
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.pinata.cloud/v3/files/private/download_link");
+    expect(options.method).toBe("POST");
+    expect(options.headers).toEqual({ "content-type": "application/json", authorization: `Bearer ${JWT}` });
+    expect(JSON.parse(options.body)).toMatchObject({ url: `https://media.example.mypinata.cloud/files/${CID}`, expires: 60, method: "GET" });
+  });
+
+  it("keeps Pinata's reason on a 403 without leaking the key or any URL, and names the failing endpoint", async () => {
+    const body = JSON.stringify({ error: { reason: "FORBIDDEN", details: `key not allowed for https://media.example.mypinata.cloud/files/${CID}?sig=secret using Bearer ${JWT}` } });
+    const { outcome } = await run(new Response(body, { status: 403 }));
+    expect(outcome.error.message).toBe("Pinata private download-link HTTP 403");
+    expect(outcome.error.upstream).toMatchObject({ endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud" });
+    expect(outcome.error.upstream.error).toContain("FORBIDDEN");
+    const shown = JSON.stringify(outcome.error.upstream);
+    for (const secret of [JWT, "signature-value", "sig=secret", "https://", CID]) expect(shown).not.toContain(secret);
+  });
+
+  it("still fails closed when the 403 has no readable body", async () => {
+    const { outcome } = await run(new Response("", { status: 403 }));
+    expect(outcome.error.upstream).toMatchObject({ endpoint: "POST /v3/files/private/download_link", status: 403 });
+  });
+
+  it("does not try to download the object when the link cannot be created", async () => {
+    const storage = make();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 403 })));
+    try { await expect(storage.sha256OfPrivateObject({ cid: CID, fetchImpl })).rejects.toMatchObject({ message: "Pinata private download-link HTTP 403", upstream: { status: 403 } }); } finally { vi.unstubAllGlobals(); }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("registration reports the failing download-link call", () => {
+  it("shows the download-link endpoint and status, not the successful lookup, when the link is refused", async () => {
+    const { instance, direct, repository } = setup({ file: stored() });
+    const linkFailure = Object.assign(new Error("Pinata private download-link HTTP 403"), { upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, gateway: "media.example.mypinata.cloud", error: "FORBIDDEN" } });
+    direct.sha256.mockRejectedValueOnce(linkFailure);
+    await expect(instance.registerMediaUpload({ request, artistId: "artist-1", input: { ...IDENTITY, uploadId: UPLOAD_ID, contentSha256: SHA, byteSize: 180 * 1024 * 1024 } })).rejects.toMatchObject({ status: 502, code: "MEDIA_HASH_UNVERIFIED", details: { upstream: { endpoint: "POST /v3/files/private/download_link", status: 403, error: "FORBIDDEN" } } });
+    expect(repository.saveMediaAsset).not.toHaveBeenCalled();
+  });
+});
