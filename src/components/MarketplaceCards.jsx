@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { primaryExperience } from "../domain/models.js";
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
@@ -133,7 +134,7 @@ export function SecondaryListingCard({ item, listings = [], owned = false }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
           <Link to={`/edition/${edition.id}`} style={primaryBtn}>View edition</Link>
           {primary.availability === "available" && <Link to={primary.href} style={ghostBtn}>Collect</Link>}
-          {owned && item.experiences?.[0]?.id && <Link to={`/experience/${item.experiences[0].id}`} style={ghostBtn}>Open experience</Link>}
+          {owned && primaryExperience(item.experiences)?.id && <Link to={`/experience/${primaryExperience(item.experiences).id}`} style={ghostBtn}>Open experience</Link>}
         </div>
       </div>
     </article>

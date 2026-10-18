@@ -106,6 +106,21 @@ describe("public catalog reads", () => {
     expect(String(experiences.db.query.mock.calls[0][0])).not.toMatch(/,\s*requirements\b/);
   });
 
+  it("exposes only the explicit primary designation of an experience, never media_config", async () => {
+    const row = { id: "exp-full", artist_id: "artist-1", release_id: "rel-1", edition_id: "ed-1", title: "Full track", description: "", experience_type: "AUDIO", version: 1, status: "PUBLISHED", gated: true, protected: true, primary_experience: true, media_config: { protected: true, primary: true, protectedMedia: [{ storageKey: CID, mediaType: "AUDIO" }] }, release_metadata: {}, application_metadata: {}, artist_slug: "voidcaller", artist_name: "Voidcaller", chain_id: 43113, contract_address: "0x262b774cf9a1949170b58e2d57f6189980fe757b" };
+    const listed = service(row);
+    const [one] = await listed.instance.listExperiences({});
+    const single = await service(row).instance.getExperience({ id: "exp-full" });
+    for (const body of [one, single]) {
+      expect(body.primary_experience).toBe(true);
+      expect(JSON.stringify(body)).not.toMatch(/media_config|storageKey|storage_key/i);
+      expect(JSON.stringify(body)).not.toContain(CID);
+    }
+    // The designation is computed from media_config in SQL: true, false, or null when never set.
+    expect(String(listed.db.query.mock.calls[0][0])).toContain("AS primary_experience");
+    expect(String(listed.db.query.mock.calls[0][0])).toMatch(/media_config->>'primary' = 'true' THEN true WHEN media_config->>'primary' = 'false' THEN false END/);
+  });
+
   it("omits the withdrawn Fuji Forgive & Forget release from public collect reads", async () => {
     const releaseId = "release-1b4a2d71-218f-47a2-afde-cd5171909ace";
     const editionId = "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1";

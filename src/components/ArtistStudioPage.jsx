@@ -16,6 +16,7 @@ import { readGenesisClaimSaleGuard } from "../lib/genesis-claim.js";
 import { normalizeEditionSupply, publicationResultMessage, studioPublicationPath, transactionEvidenceForOutcome, validateReleasePublish } from "../lib/studio-publish.js";
 import { resolveCatalogSaleBinding, verifyReleaseSaleBinding } from "../lib/release-sale-binding.js";
 import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectReleaseTemplate } from "../lib/studio-selection.js";
+import { planCatalogExperiences } from "../lib/studio-experiences.js";
 import { EP_TRACK_LIMIT_MESSAGE, RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, epTrackLimit, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
 import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readCurrentReleaseEditions, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
@@ -707,31 +708,26 @@ export function ArtistStudioPage() {
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const alreadyGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
-      // Holders unlock the private full track through this experience, so never
-      // save it without one (that would publish a token that unlocks nothing).
-      const unlockAudio = experienceAudio || fullTrack;
-      if (!unlockAudio && !alreadyGated) throw new Error("Upload the experience audio below (or the full track on the Tracks step). It is what holders unlock.");
+      // Holders unlock private files through experiences, so never save without
+      // one (that would publish a token that unlocks nothing). The full track and
+      // the experience file are separate experiences: neither replaces the other.
+      const hasFiles = Boolean(experienceAudio || fullTrack);
+      if (!hasFiles && !alreadyGated) throw new Error("Upload the experience audio below (or the full track on the Tracks step). It is what holders unlock.");
       const ids = editionId ? { releaseId, editionId } : await saveDraft();
       if (!ids.editionId) throw new Error("Save the track draft before configuring its experience.");
-      if (!unlockAudio && alreadyGated) {
-        const done = "Catalog already saved with its private full track. Continue to Supply.";
+      if (!hasFiles && alreadyGated) {
+        const done = "Catalog already saved with its private audio. Continue to Supply.";
         setNotice(done); setCatalogStatus({ ok: true, message: done }); setStep("supply");
         return;
       }
-      await studioFetch(`/studio/editions/${encodeURIComponent(ids.editionId)}/experiences`, {
-        method: "POST",
-        payload: {
-          title: form.experienceTitle || experienceCategoryLabel(form.productType),
-          description: form.experienceDescription,
-          experienceType: experienceCategory(form.productType)?.deliveryType || "AUDIO",
-          productType: form.productType,
-          requirements: [],
-          mediaConfig: { protected: true, protectedMedia: [{ assetId: unlockAudio.assetId, mediaType: unlockAudio.mediaType || "AUDIO", contentType: unlockAudio.contentType }] },
-        },
-        headers,
-      });
+      const plans = planCatalogExperiences({ editionId: ids.editionId, productType: form.productType, experienceTitle: form.experienceTitle, experienceDescription: form.experienceDescription, trackTitle: form.trackTitle, releaseTitle: form.releaseTitle, fullTrack, experienceAudio });
+      // One stable id per role: saving again updates that experience instead of adding another.
+      for (const plan of plans) {
+        await studioFetch(`/studio/editions/${encodeURIComponent(ids.editionId)}/experiences`, { method: "POST", payload: plan.payload, headers });
+      }
       setGatedEditionId(ids.editionId);
-      const done = `Catalog saved: holders of ${form.releaseTitle || "this release"} unlock ${unlockAudio.filename || unlockAudio.assetId}. Continue with supply and publishing.`;
+      const unlocked = plans.map((plan) => `${plan.payload.title} (${plan.asset.filename || plan.asset.assetId})`).join("; ");
+      const done = `Catalog saved: holders of ${form.releaseTitle || "this release"} unlock ${plans.length > 1 ? "separate experiences" : "the experience"}: ${unlocked}. Continue with supply and publishing.`;
       setNotice(done);
       setCatalogStatus({ ok: true, message: done });
       setStep("supply");
@@ -1232,7 +1228,7 @@ export function ArtistStudioPage() {
             {form.trackPreview && <audio controls preload="none" src={ipfsToHttp(form.trackPreview)} style={{ width: "100%", marginTop: 12 }} />}
           </div>
           <div style={{ marginTop: 16 }}>
-            <p style={{ margin: "0 0 8px" }}>Full track (private master) — never public; holders unlock it unless you add separate experience audio on the Experiences step</p>
+            <p style={{ margin: "0 0 8px" }}>Full track (private master) — never public; holders unlock it as its own experience, separate from any demo or experience file you add next</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ ...ghostBtn, cursor: busy !== "" || !canUseStudio ? "not-allowed" : "pointer", opacity: busy !== "" || !canUseStudio ? 0.6 : 1 }}>
                 {busy === "full-track" ? "Uploading…" : fullTrack ? "Replace full track" : "Upload full track"}
@@ -1286,13 +1282,15 @@ export function ArtistStudioPage() {
             );
           })()}
           <p role="status" style={{ color: experienceAudio || fullTrack || editionGated ? "var(--vc-bone-dim)" : "var(--vc-crimson)", lineHeight: 1.6 }}>
-            {experienceAudio
-              ? `Holders unlock: ${experienceAudio.filename || experienceAudio.assetId}.`
-              : fullTrack
-                ? `Holders unlock: ${fullTrack.filename || fullTrack.assetId} (the full track). Upload experience audio above to unlock something else.`
-                : editionGated
-                  ? "This edition already unlocks private audio for holders."
-                  : "Nothing for holders to unlock yet. Upload the experience audio above."}
+            {experienceAudio && fullTrack
+              ? `Holders unlock two separate experiences: ${experienceAudio.filename || experienceAudio.assetId}, and the full track ${fullTrack.filename || fullTrack.assetId}.`
+              : experienceAudio
+                ? `Holders unlock: ${experienceAudio.filename || experienceAudio.assetId}.`
+                : fullTrack
+                  ? `Holders unlock: ${fullTrack.filename || fullTrack.assetId} (the full track). Upload experience audio above to add a separate experience.`
+                  : editionGated
+                    ? "This edition already unlocks private audio for holders."
+                    : "Nothing for holders to unlock yet. Upload the experience audio above."}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Back</button>
