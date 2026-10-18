@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Eyebrow } from "./Atoms.jsx";
 import { useWallet } from "../lib/wallet-context.js";
 import { ARTWORK_ACCEPT, studioFetch, uploadStudioPortfolioImage } from "../lib/studio-api.js";
-import { PROFILE_LINKS, portfolioImageSrc, profileFormFromRow, profilePayload, profileSocials } from "../lib/artist-profile.js";
+import { DEFAULT_ARTIST_AVATAR, PROFILE_LINKS, portfolioImageSrc, profileFormFromRow, profilePayload, profileSocials } from "../lib/artist-profile.js";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,.04)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", padding: "12px 14px", fontSize: 15, marginTop: 6 };
@@ -62,7 +62,7 @@ export function ArtistProfileEditor({ artistId, onSaved, standalone = false }) {
       await studioFetch(`/studio/artists/${encodeURIComponent(artistId)}`, { method: "PATCH", payload, headers });
       const nextRow = { ...row, display_name: payload.name, bio: payload.bio, website_url: payload.websiteUrl, social_links: payload.links, profile_metadata: { ...payload.profileMetadata, profileArtwork: payload.profileArtwork } };
       setRow(nextRow);
-      onSaved?.({ name: payload.name, bio: payload.bio, avatar: portfolioImageSrc(payload.profileArtwork || ""), banner: portfolioImageSrc(payload.profileMetadata.banner || ""), socials: profileSocials(payload.links, payload.websiteUrl) });
+      onSaved?.({ name: payload.name, bio: payload.bio, avatar: portfolioImageSrc(payload.profileArtwork || "") || DEFAULT_ARTIST_AVATAR, banner: portfolioImageSrc(payload.profileMetadata.banner || ""), socials: profileSocials(payload.links, payload.websiteUrl) });
       if (standalone) setForm(profileFormFromRow(nextRow));
       else setOpen(false);
       setNotice("Profile saved.");
@@ -82,7 +82,7 @@ export function ArtistProfileEditor({ artistId, onSaved, standalone = false }) {
     <div style={{ marginTop: 16 }}>
       <span style={label}>{title}</span>
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        {form[key] && <img src={portfolioImageSrc(form[key])} alt={`${title} preview`} style={{ width: 96, aspectRatio: key === "banner" ? "3 / 1" : "1", objectFit: "cover", display: "block" }} />}
+        {form[key] && <img src={portfolioImageSrc(form[key])} alt={`${title} preview`} onError={() => setNotice(`${title} could not be loaded. Replace it or remove it.`)} style={{ width: 96, aspectRatio: key === "banner" ? "3 / 1" : "1", objectFit: "cover", display: "block" }} />}
         <label style={{ ...ghostBtn, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }}>
           {busy === key ? "Uploading…" : form[key] ? "Replace" : "Upload"}
           <input type="file" accept={ARTWORK_ACCEPT} disabled={Boolean(busy)} style={{ display: "none" }} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) upload(key, file); }} />

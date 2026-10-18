@@ -58,6 +58,54 @@ describe("artist profile editor", () => {
     expect(studioFetch.mock.calls.some(([path]) => String(path).includes("/artwork"))).toBe(false);
   });
 
+  it("persists an uploaded picture on save and reports it to the page as a displayable URL", async () => {
+    const onSaved = vi.fn();
+    studioFetch.mockImplementation(async (path) => (path === "/studio/catalog" ? { artists: [ownerRow] } : { id: "artist-a" }));
+    uploadStudioPortfolioImage.mockResolvedValue({ uri: "/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png" });
+    renderWith(signedIn, { onSaved });
+    fireEvent.click(await screen.findByText("Edit profile"));
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([new Uint8Array([1])], "face.png", { type: "image/png" })] } });
+    await screen.findByAltText("Profile picture preview");
+    fireEvent.click(screen.getByText("Save profile"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const [, options] = studioFetch.mock.calls.find(([call]) => call !== "/studio/catalog");
+    expect(options.payload.profileArtwork).toBe("/assets/artist-portfolio/artist-portfolio-0123456789abcdef.png");
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ avatar: "/api/artists/portfolio/artist-portfolio-0123456789abcdef.png" }));
+  });
+
+  it("removing the picture clears the stored reference and restores the fallback avatar", async () => {
+    const onSaved = vi.fn();
+    studioFetch.mockImplementation(async (path) => (path === "/studio/catalog" ? { artists: [ownerRow] } : { id: "artist-a" }));
+    renderWith(signedIn, { onSaved });
+    fireEvent.click(await screen.findByText("Edit profile"));
+    fireEvent.click(screen.getAllByText("Remove")[0]);
+    fireEvent.click(screen.getByText("Save profile"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const [, options] = studioFetch.mock.calls.find(([call]) => call !== "/studio/catalog");
+    expect(options.payload.profileArtwork).toBeNull();
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ avatar: "/assets/voidcaller_art_4.png" }));
+  });
+
+  it("shows the error and does not save when the upload fails", async () => {
+    const onSaved = vi.fn();
+    studioFetch.mockResolvedValue({ artists: [ownerRow] });
+    uploadStudioPortfolioImage.mockRejectedValue(new Error("Portfolio storage is down."));
+    renderWith(signedIn, { onSaved });
+    fireEvent.click(await screen.findByText("Edit profile"));
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([new Uint8Array([1])], "face.png", { type: "image/png" })] } });
+    expect(await screen.findByText("Portfolio storage is down.")).toBeTruthy();
+    expect(screen.queryByText("Profile saved.")).toBeNull();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("reports an inaccessible picture instead of silently showing a broken image", async () => {
+    studioFetch.mockResolvedValue({ artists: [ownerRow] });
+    renderWith(signedIn);
+    fireEvent.click(await screen.findByText("Edit profile"));
+    fireEvent.error(screen.getByAltText("Profile picture preview"));
+    expect(await screen.findByText(/Profile picture could not be loaded/)).toBeTruthy();
+  });
+
   describe("standalone edit page mode", () => {
     it("tells a signed-out visitor to connect instead of rendering nothing", async () => {
       renderWith({ connected: false, authenticated: false, authHeaders: {} }, { standalone: true });

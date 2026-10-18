@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
@@ -139,10 +140,24 @@ export function SecondaryListingCard({ item, listings = [], owned = false }) {
   );
 }
 
+// The artist's persisted profile picture. An image that is missing or fails to
+// load falls back to the artist's initial instead of a broken-image icon.
+export function ArtistAvatar({ artist, size = 56 }) {
+  const [failed, setFailed] = useState("");
+  const src = artist.avatar || "";
+  const initial = String(artist.name || "?").trim().charAt(0).toUpperCase() || "?";
+  const box = { width: size, height: size, borderRadius: "50%", border: "1px solid var(--vc-ash)", marginBottom: 14, flexShrink: 0, overflow: "hidden", background: "rgba(0,0,0,.5)" };
+  if (!src || failed === src) {
+    return <div role="img" aria-label={`${artist.name} profile picture placeholder`} data-testid="artist-avatar-fallback" style={{ ...box, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontSize: size / 2.2 }}>{initial}</div>;
+  }
+  return <img src={src} alt={`${artist.name} profile picture`} data-testid="artist-avatar" onError={() => setFailed(src)} style={{ ...box, objectFit: "cover", display: "block" }} />;
+}
+
 export function ArtistCard({ artist, releases = [] }) {
   return (
     <Link to={`/artist/${artist.id}`} className="vc-market-card" style={{ color: "inherit", textDecoration: "none", display: "flex", flexDirection: "column" }}>
       <div style={{ minHeight: 200, backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.78)), url(${artist.banner || artist.avatar || "/assets/voidcaller_art_6.png"})`, backgroundSize: "cover", backgroundPosition: "center", padding: 22, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+        <ArtistAvatar artist={artist} />
         <p className="vc-card-kicker">{artist.verified ? "Verified artist" : "Artist"}</p>
         <h3 className="vc-card-title" style={{ fontSize: 34 }}>{artist.name}</h3>
       </div>

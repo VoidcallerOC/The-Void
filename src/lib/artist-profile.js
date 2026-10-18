@@ -3,6 +3,9 @@
 
 import { ipfsToHttp } from "./web3.js";
 
+/** Avatar shown when an artist has no saved profile picture (also what a reload yields after Remove). */
+export const DEFAULT_ARTIST_AVATAR = "/assets/voidcaller_art_4.png";
+
 const LOCAL_PORTFOLIO_FILE = /^\/assets\/artist-portfolio\/(artist-portfolio-[a-f0-9]{16}\.(?:png|jpg|gif|webp))$/;
 
 /** Browser URL for a stored profile picture or banner.
