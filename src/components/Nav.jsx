@@ -68,7 +68,7 @@ export function Nav() {
     >
       <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
         <Link to="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
-          <img src="/assets/VoidcallerLogo.gif" alt="" style={{ width: 32, height: 32, display: "block" }} />
+          <img src="/assets/voidcaller-primary-emblem-header.png" alt="" style={{ height: 40, width: "auto", margin: "-4px 0", display: "block" }} />
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
