@@ -19,10 +19,10 @@ describe("catalog experiences planned from the Studio's private files", () => {
     const full = plans.find((plan) => plan.role === FULL_TRACK_ROLE);
 
     expect(demo.payload).toMatchObject({ productType: "DEMO", experienceType: "DEMO", title: "Stranger Things", description: "Stranger things have happened..." });
-    expect(demo.payload.mediaConfig).toEqual({ protected: true, protectedMedia: [{ assetId: "asset-demo", mediaType: "DEMO", contentType: "audio/x-wav" }] });
+    expect(demo.payload.mediaConfig).toEqual({ protected: true, protectedMedia: [{ assetId: "asset-demo", mediaType: "DEMO", contentType: "audio/x-wav" }], primary: false });
 
     expect(full.payload).toMatchObject({ productType: "FULL_RECORD", experienceType: "AUDIO", title: "Forgive & Forget", description: "" });
-    expect(full.payload.mediaConfig).toEqual({ protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO", contentType: "audio/x-wav" }] });
+    expect(full.payload.mediaConfig).toEqual({ protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO", contentType: "audio/x-wav" }], primary: true });
 
     expect(demo.id).not.toBe(full.id);
     expect(JSON.stringify(demo.payload)).not.toContain("asset-master");
@@ -31,8 +31,13 @@ describe("catalog experiences planned from the Studio's private files", () => {
     expect(JSON.stringify(full.payload)).not.toContain("Stranger");
   });
 
-  it("saves the full track last so it is the most recently updated experience", () => {
-    expect(planCatalogExperiences({ ...base, fullTrack: FULL, experienceAudio: DEMO }).map((plan) => plan.role)).toEqual([EXPERIENCE_AUDIO_ROLE, FULL_TRACK_ROLE]);
+  it("designates the full track as primary and the demo as explicitly not, whatever the save order", () => {
+    const plans = planCatalogExperiences({ ...base, fullTrack: FULL, experienceAudio: DEMO });
+    expect(plans.find((plan) => plan.role === FULL_TRACK_ROLE).payload.mediaConfig.primary).toBe(true);
+    expect(plans.find((plan) => plan.role === EXPERIENCE_AUDIO_ROLE).payload.mediaConfig.primary).toBe(false);
+    // Replacing either file keeps both designations.
+    const replaced = planCatalogExperiences({ ...base, fullTrack: { ...FULL, assetId: "asset-master-2" }, experienceAudio: { ...DEMO, assetId: "asset-demo-2" } });
+    expect(replaced.map((plan) => [plan.role, plan.payload.mediaConfig.primary]).sort()).toEqual([[EXPERIENCE_AUDIO_ROLE, false], [FULL_TRACK_ROLE, true]]);
   });
 
   it("gives every role one stable id per edition, so a repeat save cannot add a duplicate", () => {
@@ -53,6 +58,8 @@ describe("catalog experiences planned from the Studio's private files", () => {
   it("keeps the previous single-file behavior when only one file exists", () => {
     const [onlyDemo] = planCatalogExperiences({ ...base, experienceAudio: DEMO });
     expect(onlyDemo).toMatchObject({ role: EXPERIENCE_AUDIO_ROLE, payload: { productType: "DEMO", experienceType: "DEMO", title: "Stranger Things" } });
+    // A demo saved alone stays undesignated, exactly as before.
+    expect(onlyDemo.payload.mediaConfig).not.toHaveProperty("primary");
 
     const [onlyFull] = planCatalogExperiences({ ...base, productType: "UNRELEASED_TRACK", fullTrack: FULL });
     expect(onlyFull).toMatchObject({ role: FULL_TRACK_ROLE, payload: { productType: "UNRELEASED_TRACK", experienceType: "AUDIO", title: "Stranger Things", description: "Stranger things have happened..." } });

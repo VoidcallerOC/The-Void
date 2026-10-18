@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { primaryExperience } from "../domain/models.js";
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
@@ -258,7 +259,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
     }
   };
 
-  const linkedExperience = experiences.find((experience) => experience?.id);
+  const linkedExperience = primaryExperience(experiences.filter((experience) => experience?.id));
   const experienceHref = linkedExperience ? `/experience/${linkedExperience.id}` : "/reliquary";
   const experienceLabel = linkedExperience ? "Open experience" : "Open reliquary";
   const confirmed = noticeState === "confirmed" || /confirm|owned/i.test(notice);

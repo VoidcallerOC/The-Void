@@ -3,6 +3,7 @@ import { ArtistStudioService } from "./studio-service.js";
 import { ProtectedMediaGateway } from "./media-gateway.js";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 import { mapPublishedCatalog } from "../src/lib/catalog-source.js";
+import { getEditionCatalog, primaryExperience } from "../src/domain/models.js";
 import { planCatalogExperiences } from "../src/lib/studio-experiences.js";
 
 // The full song and the 30-second demo are two separate private files and two
@@ -34,6 +35,7 @@ function world({ extraExperiences = [], extraAssets = [] } = {}) {
     experiences: new Map(extraExperiences.map((row) => [row.id, row])),
   };
   const tokens = [{ token_id: "7", contract_address: contract, chain_id: 43113 }];
+  let clock = 0;
   const rows = () => [...state.experiences.values()];
   const db = {
     query: vi.fn(async (sql, params = []) => {
@@ -41,6 +43,7 @@ function world({ extraExperiences = [], extraAssets = [] } = {}) {
       if (text.includes("FROM editions e JOIN releases r")) return { rows: params[1] === owner ? state.editions.filter((edition) => edition.id === params[0]) : [] };
       if (text.includes("FROM experiences WHERE edition_id=$1 OR id=$2")) return { rows: rows().filter((row) => row.edition_id === params[0] || row.id === params[1]) };
       if (text.includes("FROM experiences x JOIN artist_owners")) return { rows: params[1] === owner ? rows().filter((row) => row.id === params[0]).map((row) => ({ ...row, owner_wallet: owner })) : [] };
+      if (text.includes("FROM experiences WHERE edition_id=$1 AND id<>$2")) return { rows: rows().filter((row) => row.edition_id === params[0] && row.id !== params[1]) };
       if (text.includes("FROM experiences WHERE release_id=$1")) return { rows: rows().filter((row) => row.release_id === params[0]) };
       if (text.includes("FROM experiences WHERE id=$1 AND status='PUBLISHED'")) return { rows: rows().filter((row) => row.id === params[0] && row.status === "PUBLISHED") };
       if (text.includes("FROM tokens")) return { rows: tokens };
@@ -53,7 +56,7 @@ function world({ extraExperiences = [], extraAssets = [] } = {}) {
   };
   const repository = {
     saveExperience: vi.fn(async (input) => {
-      const row = { id: input.id, artist_id: input.artistId, release_id: input.releaseId, edition_id: input.editionId, title: input.title, description: input.description, experience_type: input.experienceType, requirements: input.requirements, media_config: input.mediaConfig, version: input.version ?? 1, status: input.status ?? "DRAFT" };
+      const row = { id: input.id, artist_id: input.artistId, release_id: input.releaseId, edition_id: input.editionId, title: input.title, description: input.description, experience_type: input.experienceType, requirements: input.requirements, media_config: input.mediaConfig, version: input.version ?? 1, status: input.status ?? "DRAFT", updated_at: ++clock };
       state.experiences.set(row.id, row);
       return row;
     }),
@@ -86,7 +89,8 @@ const assetIdsOf = (row) => row.media_config.protectedMedia.map((entry) => entry
 
 // The public experience listing row the catalog is built from (EXPERIENCE_PUBLIC_SELECT).
 function publicListing(w) {
-  return [...w.state.experiences.values()].filter((row) => row.status === "PUBLISHED").map((row) => ({ id: row.id, artist_id: row.artist_id, release_id: row.release_id, edition_id: row.edition_id, title: row.title, description: row.description, experience_type: row.experience_type, status: row.status, gated: row.requirements.length > 0, protected: row.media_config?.protected === true }));
+  const flag = (row) => (row.media_config?.primary === true ? true : row.media_config?.primary === false ? false : undefined);
+  return [...w.state.experiences.values()].filter((row) => row.status === "PUBLISHED").sort((a, b) => b.updated_at - a.updated_at).map((row) => ({ id: row.id, artist_id: row.artist_id, release_id: row.release_id, edition_id: row.edition_id, title: row.title, description: row.description, experience_type: row.experience_type, status: row.status, gated: row.requirements.length > 0, protected: row.media_config?.protected === true, ...(flag(row) === undefined ? {} : { primary_experience: flag(row) }) }));
 }
 // What a collector's player does: ask for the experience's own type, then read which private object the grant resolves to.
 async function collectorPlays(w, experience, mediaType = experience.media.type) {
@@ -231,5 +235,99 @@ describe("full song and demo as separate protected experiences", () => {
     expect(w.state.experiences.size).toBe(1);
     const [demo] = mapPublishedCatalog({ experiences: publicListing(w) }).experiences;
     expect(await collectorPlays(w, demo)).toBe("bafyprivatedemo");
+  });
+});
+
+// The edition's main Play button follows an explicit designation, not save order or
+// update times (the public listing is ordered by updated_at DESC, and publishing rewrites
+// every experience's updated_at).
+describe("explicit primary experience", () => {
+  const primaryRow = (w) => [...w.state.experiences.values()].filter((row) => row.media_config.primary === true);
+  const mainPlayExperience = (w) => {
+    const catalog = mapPublishedCatalog({ experiences: publicListing(w) });
+    // The same resolution the edition page performs: its experiences, then the primary.
+    return primaryExperience(getEditionCatalog({ editions: [{ id: "edition-1", experienceIds: [] }], experiences: catalog.experiences, releases: [], artists: [], tokens: [] }, "edition-1").experiences);
+  };
+
+  it("designates the full track primary and the demo explicitly not, in the stored media config", async () => {
+    const w = world();
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    expect(stored(w, "full-track").media_config.primary).toBe(true);
+    expect(stored(w, "experience-audio").media_config.primary).toBe(false);
+    expect(primaryRow(w).map((row) => row.id)).toEqual(["experience-edition-1-full-track"]);
+  });
+
+  it("keeps the full track primary however the update times fall, including after publish and demo edits", async () => {
+    const w = world({ extraAssets: [{ id: "asset-demo-2", artist_id: "artist-1", storage_key: "bafyprivatedemo2", media_type: "DEMO" }] });
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    await publish(w);
+    // Publishing rewrote updated_at for both; editing the demo afterwards makes it the newest.
+    await studioSave(w, { experienceAudio: { ...DEMO, assetId: "asset-demo-2" } });
+
+    const order = publicListing(w).map((row) => row.id);
+    expect(order[0]).toBe("experience-edition-1-experience-audio"); // the API lists the demo first
+    expect(mainPlayExperience(w).id).toBe("experience-edition-1-full-track");
+  });
+
+  it("updating the demo never changes the primary designation, even when saved alone", async () => {
+    const w = world({ extraAssets: [{ id: "asset-demo-2", artist_id: "artist-1", storage_key: "bafyprivatedemo2", media_type: "DEMO" }] });
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    const fullBefore = JSON.stringify(stored(w, "full-track"));
+    await studioSave(w, { experienceAudio: { ...DEMO, assetId: "asset-demo-2" } });
+    expect(stored(w, "experience-audio").media_config.primary).toBe(false); // carried over, not cleared
+    expect(JSON.stringify(stored(w, "full-track"))).toBe(fullBefore);
+    expect(primaryRow(w).map((row) => row.id)).toEqual(["experience-edition-1-full-track"]);
+  });
+
+  it("replacing the full track keeps it primary", async () => {
+    const w = world({ extraAssets: [{ id: "asset-master-2", artist_id: "artist-1", storage_key: "bafyprivatemaster2", media_type: "AUDIO" }] });
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    await studioSave(w, { fullTrack: { ...MASTER, assetId: "asset-master-2" } });
+    expect(assetIdsOf(stored(w, "full-track"))).toEqual(["asset-master-2"]);
+    expect(stored(w, "full-track").media_config.primary).toBe(true);
+    expect(primaryRow(w)).toHaveLength(1);
+  });
+
+  it("repeated saves neither duplicate experiences nor move the primary", async () => {
+    const w = world();
+    for (let index = 0; index < 3; index += 1) await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    await publish(w);
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    expect(w.state.experiences.size).toBe(2);
+    expect(primaryRow(w).map((row) => row.id)).toEqual(["experience-edition-1-full-track"]);
+    expect(mainPlayExperience(w).id).toBe("experience-edition-1-full-track");
+  });
+
+  it("a later edit that does not mention primary keeps the designation", async () => {
+    const w = world();
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    await w.studio.updateExperience({ request, experienceId: "experience-edition-1-full-track", input: { title: "Renamed" } });
+    await w.studio.updateExperience({ request, experienceId: "experience-edition-1-full-track", input: { mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] } } });
+    expect(stored(w, "full-track")).toMatchObject({ title: "Renamed", media_config: expect.objectContaining({ primary: true }) });
+  });
+
+  it("allows only one primary per edition and only true or false", async () => {
+    const w = world({ extraAssets: [{ id: "asset-extra", artist_id: "artist-1", storage_key: "bafyextra", media_type: "AUDIO" }] });
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    const second = { title: "Another", experienceType: "AUDIO", mediaConfig: { protected: true, primary: true, protectedMedia: [{ assetId: "asset-extra", mediaType: "AUDIO" }] } };
+    await expect(w.studio.createExperience({ request, editionId: "edition-1", input: { id: "experience-edition-1-extra", ...second } })).rejects.toMatchObject({ status: 409, code: "PRIMARY_EXPERIENCE_CONFLICT" });
+    await expect(w.studio.updateExperience({ request, experienceId: "experience-edition-1-experience-audio", input: { mediaConfig: { protected: true, primary: true, protectedMedia: [{ assetId: "asset-demo", mediaType: "DEMO" }] } } })).rejects.toMatchObject({ status: 409, code: "PRIMARY_EXPERIENCE_CONFLICT" });
+    await expect(w.studio.createExperience({ request, editionId: "edition-1", input: { id: "experience-edition-1-bad", ...second, mediaConfig: { ...second.mediaConfig, primary: "yes" } } })).rejects.toMatchObject({ status: 400, code: "INVALID_PRIMARY_EXPERIENCE" });
+    expect(w.state.experiences.size).toBe(2);
+    expect(primaryRow(w).map((row) => row.id)).toEqual(["experience-edition-1-full-track"]);
+  });
+
+  it("never resolves the demo as primary when the full track is missing", async () => {
+    const w = world();
+    await studioSave(w, { fullTrack: MASTER, experienceAudio: DEMO });
+    await publish(w);
+    w.state.experiences.delete("experience-edition-1-full-track"); // e.g. withdrawn or never published
+    expect(mainPlayExperience(w)).toBeNull();
+  });
+
+  it("leaves editions without any designation exactly as before", async () => {
+    const legacy = (id, updated) => ({ id, artist_id: "artist-1", release_id: "release-1", edition_id: "edition-1", title: id, description: null, experience_type: "AUDIO", requirements: [], media_config: { protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] }, version: 1, status: "PUBLISHED", updated_at: updated });
+    const w = world({ extraExperiences: [legacy("legacy-old", 1), legacy("legacy-new", 2)] });
+    expect(mainPlayExperience(w).id).toBe("legacy-new"); // first listed, as before designations existed
   });
 });

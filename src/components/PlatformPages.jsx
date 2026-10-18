@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
-import { getArtistCatalog, getEditionCatalog, getReleaseCatalog } from "../domain/models.js";
+import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryExperience } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
@@ -202,8 +202,9 @@ export function ReleasePage({ children = null } = {}) {
           <div className="vc-market-grid">
             {release.tracks.map((track) => {
               const view = tokenView(catalog, { edition: editionItems[0]?.edition, release, tokenId: track.tokenId });
-              const experienceId = track.experienceId || view.token?.experiences?.[0];
-              const experience = catalog.experiences.find((item) => item.id === experienceId);
+              const tokenExperiences = catalog.experiences.filter((item) => (view.token?.experiences || []).includes(item.id));
+              const experience = track.experienceId ? catalog.experiences.find((item) => item.id === track.experienceId) : primaryExperience(tokenExperiences);
+              const experienceId = experience?.id || track.experienceId;
               const to = experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`;
               return <article key={track.tokenId} className="vc-market-card">
                 <Link to={to} style={{ color: "inherit", textDecoration: "none", display: "block" }}>
@@ -251,7 +252,8 @@ export function EditionPage() {
   const price = editionPriceLabel(edition);
   // Non-holders retain the tokenURI preview; entitled holders are upgraded
   // through the same protected experience grant used by the player.
-  const previewExperience = experiences[0] || null;
+  // The edition's designated primary experience (the full track), never just whichever sorts first.
+  const previewExperience = primaryExperience(experiences);
   const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
   const chainId = String(edition.chainId || "");
   const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
@@ -526,7 +528,10 @@ export function MyCollectionPage() {
         <div className="vc-market-grid">
           {owned.map(({ edition, release, artist, quantity, experiences, tokenId }) => {
             const view = tokenView(catalog, { edition, release, tokenId });
-            const experience = experiences.find((item) => (view.token?.experiences || []).includes(item.id)) || catalog.experiences.find((item) => (view.token?.experiences || []).includes(item.id)) || experiences[0];
+            const ofToken = (list) => list.filter((item) => (view.token?.experiences || []).includes(item.id));
+            // Fall back to a wider pool only when this one has nothing for the token; an edition that
+            // designates a primary never falls back to another experience.
+            const experience = ofToken(experiences).length ? primaryExperience(ofToken(experiences)) : ofToken(catalog.experiences).length ? primaryExperience(ofToken(catalog.experiences)) : primaryExperience(experiences);
             return (
             <article key={`${edition.id}:${tokenId ?? ""}`} className="vc-market-card">
               <TokenArtwork sources={view.artworkSources} alt={`${view.name} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />

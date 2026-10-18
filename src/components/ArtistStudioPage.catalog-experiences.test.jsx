@@ -63,8 +63,8 @@ describe("Artist Studio: Save catalog structure with the full song and a demo", 
     const saves = experienceSaves();
     const demo = saves.find((save) => save.payload.productType === "DEMO");
     const full = saves.find((save) => save.payload.productType === "FULL_RECORD");
-    expect(demo.payload).toMatchObject({ experienceType: "DEMO", title: "Stranger Things", mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-demo", mediaType: "DEMO" }] } });
-    expect(full.payload).toMatchObject({ experienceType: "AUDIO", mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] } });
+    expect(demo.payload).toMatchObject({ experienceType: "DEMO", title: "Stranger Things", mediaConfig: { protected: true, primary: false, protectedMedia: [{ assetId: "asset-demo", mediaType: "DEMO" }] } });
+    expect(full.payload).toMatchObject({ experienceType: "AUDIO", mediaConfig: { protected: true, primary: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] } });
     expect(demo.payload.id).not.toBe(full.payload.id);
     expect(JSON.stringify(full.payload)).not.toContain("asset-demo");
     expect(JSON.stringify(demo.payload)).not.toContain("asset-master");

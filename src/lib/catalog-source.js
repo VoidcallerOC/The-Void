@@ -247,6 +247,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       requirements: gated ? [{ type: "erc1155-balance" }] : [],
       media: protectedMedia ? { protected: true, type } : {},
       editionId: row.edition_id || row.editionId || null,
+      // Explicit primary designation (true/false); absent on rows saved before designations existed.
+      ...(typeof row.primary_experience === "boolean" ? { primary: row.primary_experience } : {}),
     });
   });
   const mappedTokens = mappedEditions.flatMap((edition) => (edition.tokenIds || []).map((tokenId) => createToken({

@@ -299,6 +299,7 @@ function jsonObject(value, field) {
 }
 function requireMediaConfig(value) {
   const config = jsonObject(value, "mediaConfig");
+  if (config.primary !== undefined && typeof config.primary !== "boolean") throw new ApiError(400, "INVALID_PRIMARY_EXPERIENCE", "mediaConfig.primary must be true or false.");
   const protectedMedia = Array.isArray(config.protectedMedia) ? config.protectedMedia : [];
   if (config.protected !== true && !protectedMedia.length) return config;
   if (!protectedMedia.length) throw new ApiError(400, "PROTECTED_MEDIA_CONFIGURATION_REQUIRED", "Protected experiences require protectedMedia configuration.");
@@ -309,6 +310,13 @@ function requireMediaConfig(value) {
     if (storageKey && (storageKey.includes("..") || storageKey.startsWith("/"))) throw new ApiError(400, "PROTECTED_MEDIA_CONFIGURATION_INVALID", "Protected media storage keys must be relative and traversal-safe.");
   }
   return config;
+}
+// The explicit primary designation stored in media_config (true, false, or undefined for rows
+// saved before designations existed).
+function primaryOf(mediaConfig) {
+  let config = mediaConfig;
+  if (typeof config === "string") { try { config = JSON.parse(config); } catch { return undefined; } }
+  return typeof config?.primary === "boolean" ? config.primary : undefined;
 }
 // Asset ids a stored experience unlocks (media_config may arrive as JSON text or an object).
 function protectedAssetIds(mediaConfig) {
@@ -1108,6 +1116,10 @@ export class ArtistStudioService {
     const boundAssetIds = protectedAssetIds(bound.mediaConfig);
     const existing = sameId || siblings.find((row) => String(row.edition_id) === String(edition.id) && protectedAssetIds(row.media_config).some((assetId) => boundAssetIds.includes(assetId))) || null;
     const mediaConfig = { ...bound.mediaConfig, ...(productType ? { productType, deliveryType: mappedType } : {}) };
+    // A re-save that does not mention primary keeps the experience's designation.
+    if (existing && mediaConfig.primary === undefined && primaryOf(existing.media_config) !== undefined) mediaConfig.primary = primaryOf(existing.media_config);
+    // An edition has at most one primary experience; the Studio never silently moves it.
+    if (mediaConfig.primary === true && siblings.some((row) => row.id !== (existing?.id || id) && String(row.edition_id) === String(edition.id) && primaryOf(row.media_config) === true)) throw new ApiError(409, "PRIMARY_EXPERIENCE_CONFLICT", "This edition already has a primary experience.");
     const experience = await this.repository.saveExperience({ id: existing?.id || id, artistId: edition.artist_id, releaseId: edition.release_id, editionId: edition.id, title: requiredText(input.title, "experience.title", { max: 256 }), description: optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, ...(existing ? { version: Number(existing.version || 1) + 1, status: existing.status } : { status: "DRAFT" }) });
     await this.audit({ identity, request, eventType: existing ? "STUDIO_EXPERIENCE_UPDATED" : "STUDIO_EXPERIENCE_CREATED", subjectType: "experience", subjectId: experience.id, payload: { editionId: edition.id } });
     return experience;
@@ -1126,7 +1138,12 @@ export class ArtistStudioService {
     const bound = await this.bindProtectedExperience({ artistId: experience.artist_id, mediaConfig: input.mediaConfig === undefined ? experience.media_config : input.mediaConfig, requirements: input.requirements === undefined ? experience.requirements : input.requirements });
     if (Array.isArray(bound.mediaConfig?.protectedMedia) && bound.mediaConfig.protectedMedia.length) await this.assertEditionRequirements(experience.edition_id, bound.requirements);
     assertExperienceMatchesMedia(mappedType, bound.mediaConfig?.protectedMedia);
-    const mediaConfig = productType ? { ...bound.mediaConfig, productType, deliveryType: mappedType } : bound.mediaConfig;
+    const mediaConfig = productType ? { ...bound.mediaConfig, productType, deliveryType: mappedType } : { ...bound.mediaConfig };
+    if (mediaConfig.primary === undefined && primaryOf(experience.media_config) !== undefined) mediaConfig.primary = primaryOf(experience.media_config);
+    if (mediaConfig.primary === true) {
+      const others = (await this.db.query("SELECT id, media_config FROM experiences WHERE edition_id=$1 AND id<>$2", [experience.edition_id, experience.id])).rows;
+      if (others.some((row) => primaryOf(row.media_config) === true)) throw new ApiError(409, "PRIMARY_EXPERIENCE_CONFLICT", "This edition already has a primary experience.");
+    }
     const saved = await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: input.title === undefined ? experience.title : requiredText(input.title, "experience.title", { max: 256 }), description: input.description === undefined ? experience.description : optionalText(input.description, "experience.description", { max: 20000 }), experienceType: enumValue(mappedType, "experience.type", TYPES), requirements: bound.requirements, mediaConfig, version: Number(experience.version || 1) + 1, status });
     await this.audit({ identity, request, eventType: "STUDIO_EXPERIENCE_UPDATED", subjectType: "experience", subjectId: experience.id });
     return saved;

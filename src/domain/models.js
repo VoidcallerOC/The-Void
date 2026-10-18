@@ -61,4 +61,27 @@ export function createCatalog({ artists = [], releases = [], editions = [], toke
 export function catalogById(items = []) { return Object.fromEntries(items.map((item) => [item.id, item])); }
 export function getArtistCatalog(catalog, artistId) { const artist = catalog.artists.find((item) => item.id === artistId); if (!artist) return null; const releases = catalog.releases.filter((item) => item.artistId === artistId); const editions = catalog.editions.filter((edition) => releases.some((release) => release.id === edition.releaseId)); const collections = catalog.collections.filter((collection) => collection.artistIds.includes(artistId)); return { artist, releases, editions, collections }; }
 export function getReleaseCatalog(catalog, releaseId) { const release = catalog.releases.find((item) => item.id === releaseId); if (!release) return null; return { release, artist: catalog.artists.find((item) => item.id === release.artistId), editions: catalog.editions.filter((item) => item.releaseId === releaseId), experiences: catalog.experiences.filter((item) => release.experiences.includes(item.id)) }; }
-export function getEditionCatalog(catalog, editionId) { const edition = catalog.editions.find((item) => item.id === editionId); if (!edition) return null; const release = catalog.releases.find((item) => item.id === edition.releaseId); return { edition, release, artist: catalog.artists.find((item) => item.id === release?.artistId), tokens: catalog.tokens.filter((item) => item.editionId === editionId), experiences: catalog.experiences.filter((item) => (edition.experienceIds || []).includes(item.id) || item.editionId === editionId) }; }
+// An edition's primary experience is the one its main Play button plays. The artist
+// designates it explicitly (experience.primary, from media_config.primary): the full
+// track is primary, the demo is a separate experience that is not.
+//  - exactly one experience is designated  -> that one, wherever it sorts;
+//  - designations exist but none (or more than one) resolves -> null. The edition never
+//    falls back to another experience, so a demo cannot stand in for a missing full track;
+//  - no experience carries a designation (Genesis, older releases) -> the first listed,
+//    which is the behaviour before designations existed.
+export function primaryExperience(experiences = []) {
+  const list = (experiences || []).filter(Boolean);
+  const designated = list.filter((experience) => experience.primary === true);
+  if (designated.length === 1) return designated[0];
+  if (list.some((experience) => typeof experience.primary === "boolean")) return null;
+  return list[0] || null;
+}
+
+// The designated primary first, everything else in its original order.
+export function orderExperiences(experiences = []) {
+  const list = (experiences || []).filter(Boolean);
+  const primary = list.length > 1 ? primaryExperience(list) : null;
+  return primary && list[0] !== primary && primary.primary === true ? [primary, ...list.filter((experience) => experience !== primary)] : list;
+}
+
+export function getEditionCatalog(catalog, editionId) { const edition = catalog.editions.find((item) => item.id === editionId); if (!edition) return null; const release = catalog.releases.find((item) => item.id === edition.releaseId); return { edition, release, artist: catalog.artists.find((item) => item.id === release?.artistId), tokens: catalog.tokens.filter((item) => item.editionId === editionId), experiences: orderExperiences(catalog.experiences.filter((item) => (edition.experienceIds || []).includes(item.id) || item.editionId === editionId)) }; }

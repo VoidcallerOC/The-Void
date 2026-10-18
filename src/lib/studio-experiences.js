@@ -26,8 +26,10 @@ const protectedEntry = (asset) => ({ assetId: asset.assetId, mediaType: asset.me
  *   it delivers audio, otherwise "Full record").
  * - Only the experience file: one experience, as before.
  *
- * The full track is saved last so it is the most recently updated experience,
- * which is the one the public listing puts first.
+ * The full track is designated the edition's primary experience (primary: true) and the
+ * demo is explicitly not (primary: false). Collectors' main Play button follows that
+ * designation, never save order or update times, so editing, replacing or re-saving either
+ * file cannot change which experience is primary.
  */
 export function planCatalogExperiences({ editionId, productType, experienceTitle = "", experienceDescription = "", trackTitle = "", releaseTitle = "", fullTrack = null, experienceAudio = null }) {
   if (!editionId) throw new Error("Save the track draft before configuring its experience.");
@@ -49,7 +51,8 @@ export function planCatalogExperiences({ editionId, productType, experienceTitle
         experienceType: selectedDelivery,
         productType,
         requirements: [],
-        mediaConfig: { protected: true, protectedMedia: [protectedEntry(experienceAudio)] },
+        // Explicitly not primary when the full track is saved with it; a demo saved alone stays undesignated.
+        mediaConfig: { protected: true, protectedMedia: [protectedEntry(experienceAudio)], ...(fullTrack ? { primary: false } : {}) },
       },
     });
   }
@@ -69,7 +72,7 @@ export function planCatalogExperiences({ editionId, productType, experienceTitle
         experienceType: experienceCategory(category).deliveryType,
         productType: category,
         requirements: [],
-        mediaConfig: { protected: true, protectedMedia: [protectedEntry(fullTrack)] },
+        mediaConfig: { protected: true, protectedMedia: [protectedEntry(fullTrack)], primary: true },
       },
     });
   }
