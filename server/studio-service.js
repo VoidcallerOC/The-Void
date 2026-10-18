@@ -467,7 +467,20 @@ export class ArtistStudioService {
     const contractURI = await this.ensureReleaseContractURI(release);
     const expectedParameters = { chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress.toLowerCase(), applicationReleaseId, applicationReleaseRecordId: release.id, releaseKey: expectedKey, artistWallet: identity.wallet.toLowerCase(), name, symbol, contractURI };
     const authorizationDigest = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(expectedParameters)));
-    const provisioning = await this.repository.createReleaseProvisioningRequest({ releaseId: release.id, chainId: factory.chainId, releaseKey: expectedKey, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, authorizationDigest, expectedParameters });
+    const requestInput = { releaseId: release.id, chainId: factory.chainId, releaseKey: expectedKey, artistWallet: identity.wallet, factoryAddress: factory.factoryAddress, authorizationDigest, expectedParameters };
+    let provisioning;
+    if (existingRequest?.authorization_digest && String(existingRequest.authorization_digest).toLowerCase() !== authorizationDigest) {
+      // The parameters changed (for example the on-chain tag). Only a request that was never submitted and
+      // whose key is not deployed may be re-prepared; anything else stays fail-closed.
+      const locked = () => new ApiError(409, "RELEASE_PROVISIONING_LOCKED", "This release deployment was already submitted, so its parameters can no longer change.");
+      if (existingRequest.state !== "PENDING" || existingRequest.transaction_hash) throw locked();
+      const deployed = await this.db.query("SELECT 1 FROM factory_releases WHERE chain_id=$1 AND lower(release_key)=lower($2) LIMIT 1", [factory.chainId, expectedKey]);
+      if (deployed.rows.length) throw locked();
+      provisioning = await this.repository.refreshReleaseProvisioningRequest(requestInput);
+      await this.audit({ identity, request, eventType: "STUDIO_RELEASE_PROVISIONING_REPREPARED", subjectType: "release", subjectId: release.id, payload: { requestId: provisioning.request_id, previousDigest: existingRequest.authorization_digest, authorizationDigest, previousSymbol: existingRequest.expected_parameters?.symbol ?? null, symbol } });
+    } else {
+      provisioning = await this.repository.createReleaseProvisioningRequest(requestInput);
+    }
     return { requestId: provisioning.request_id, state: provisioning.state, releaseId: release.id, applicationReleaseId, releaseKey: expectedKey, chainId: Number(factory.chainId), factoryAddress: factory.factoryAddress, artistWallet: identity.wallet, name, symbol, contractURI, authorizationDigest, authorization: "DIRECT_ARTIST_TRANSACTION", gasPayer: identity.wallet };
   }
 
@@ -522,7 +535,7 @@ export class ArtistStudioService {
     if (!provisioning.transaction_hash) await this.repository.updateReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId, transactionHash: txHash, state: "RECONCILING" });
     const binding = await this.bindReleaseContract({ request, releaseId: id, input: { chainId: Number(factory.chainId), releaseContractAddress: deployment.release_contract_address, releaseKey: provisioning.release_key } });
     const confirmed = await this.repository.confirmReleaseProvisioningRequest({ releaseId: id, chainId: factory.chainId, transactionHash: txHash, releaseContractAddress: deployment.release_contract_address, primarySaleAddress: deployment.primary_sale_address, provenanceAnchorAddress: deployment.provenance_anchor_address, deploymentBlockNumber: deployment.deployment_block_number, creationLogIndex: null });
-    return { requestId: confirmed.request_id, state: "CONFIRMED", transactionHash: txHash, ...binding };
+    return { requestId: confirmed.request_id, state: "CONFIRMED", transactionHash: txHash, symbol, name, ...binding };
   }
 
   async bindProtectedAssets(artistId, protectedMedia) {
@@ -806,6 +819,17 @@ export class ArtistStudioService {
     return { ...release, releaseKey: metadata.releaseKey, chainId: PROVISIONING_CHAIN_ID };
   }
 
+  // The symbol is copied into the clone by createRelease, so it can change only while no contract
+  // exists and no deployment transaction has been submitted for this release.
+  async assertContractSymbolEditable(release) {
+    const locked = () => new ApiError(409, "CONTRACT_SYMBOL_LOCKED", "The on-chain tag is fixed once the release is submitted or created on-chain.");
+    if (release.status !== "DRAFT") throw locked();
+    const bound = await this.db.query("SELECT 1 FROM release_contracts WHERE release_id=$1 LIMIT 1", [release.id]);
+    if (bound.rows.length) throw locked();
+    const requests = await this.db.query("SELECT state, transaction_hash FROM release_provisioning_requests WHERE release_id=$1", [release.id]);
+    if (requests.rows.some((row) => row.transaction_hash || !["PENDING", "FAILED"].includes(row.state))) throw locked();
+  }
+
   async updateRelease({ request, releaseId, input }) {
     const identity = await this.identity(request);
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
@@ -820,6 +844,13 @@ export class ArtistStudioService {
       throw new ApiError(409, "MINTABLE_RELEASE_LOCKED", "A published release collectors can still buy stays on the site.");
     }
     const metadata = input.metadata === undefined ? { ...(release.release_metadata || {}) } : jsonObject(input.metadata, "release.metadata");
+    if (input.symbol !== undefined) {
+      const symbol = contractSymbolInput(input.symbol);
+      if ((symbol || null) !== (contractSymbolInput(release.release_metadata?.contractSymbol) || null)) {
+        await this.assertContractSymbolEditable(release);
+        if (symbol) metadata.contractSymbol = symbol; else delete metadata.contractSymbol;
+      }
+    }
     const requestedType = input.releaseType ?? (input.metadata === undefined ? undefined : metadata.releaseType);
     if (requestedType !== undefined) metadata.releaseType = releaseType(requestedType);
     else if (release.release_metadata?.releaseType !== undefined) metadata.releaseType = release.release_metadata.releaseType;

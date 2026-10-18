@@ -186,6 +186,8 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       // Persisted Studio release type (server releaseType()): SINGLE, EP or ALBUM.
       // Legacy rows have no releaseType and stay EP.
       releaseType: releaseTypeOf(meta.releaseType),
+      // The artist's chosen on-chain tag, if any (empty when derived from the title).
+      contractSymbol: typeof meta.contractSymbol === "string" ? meta.contractSymbol : "",
       experiences: asArray(meta.experiences),
       tracks: asArray(meta.tracks),
     });

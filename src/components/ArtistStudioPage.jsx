@@ -19,6 +19,7 @@ import { boundReleaseContract, editionHasGatedTrack, resumeOwnedRelease, selectR
 import { RELEASE_TYPES, RELEASE_TYPE_LABELS, albumSingleCandidates, linkedAlbumSingles, nextAlbumTrackPosition, releaseTypeOf, singleIsComplete } from "../lib/release-types.js";
 import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactory, readCurrentReleaseEditions, readReleaseLifecycle, releaseTypeChangeBlocker } from "../lib/release-lifecycle.js";
 import { tracksOnRelease } from "../lib/studio-tracks.js";
+import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState } from "../lib/contract-symbol.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
@@ -386,6 +387,8 @@ export function ArtistStudioPage() {
   const [releaseId, setReleaseId] = useState("");
   const [provisioning, setProvisioning] = useState(null);
   const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
+  // The symbol read from the deployed contract once creation is confirmed; the draft value is never shown then.
+  const [onChainSymbol, setOnChainSymbol] = useState("");
   // Album state is read from the release clone, never assumed locally: clones of the
   // pre-album implementation cannot run album transactions at all.
   const [albumState, setAlbumState] = useState({ status: "idle" });
@@ -418,6 +421,7 @@ export function ArtistStudioPage() {
   const editionGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
+  const symbolState = symbolFieldState({ input: form.releaseSymbol, provisioning, provisioningState, onChainSymbol });
   const existingReleases = useMemo(() => studioReleaseChoices(ownedStudioCatalog || {}), [ownedStudioCatalog]);
   const ownedArtists = useMemo(() => studioArtistChoices(ownedStudioCatalog?.artists || []), [ownedStudioCatalog]);
   const activeArtist = ownedArtists.find((artist) => artist.id === artistId) || ownedArtists[0] || null;
@@ -475,15 +479,17 @@ export function ArtistStudioPage() {
     setReleaseId(requestedReleaseId);
     setSelectedReleaseId(requestedReleaseId);
     setArtistId(release.artistId || "");
-    setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseType: release.releaseType || prior.releaseType, releaseDescription: release.description || "", releaseArtwork: release.artwork || "" }));
+    setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseType: release.releaseType || prior.releaseType, releaseDescription: release.description || "", releaseArtwork: release.artwork || "", releaseSymbol: normalizeContractSymbol(release.contractSymbol) || prior.releaseSymbol }));
     studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers })
       .then(async (prepared) => {
         if (cancelled) return;
         setProvisioning(prepared);
+        setForm((prior) => ({ ...prior, releaseSymbol: prior.releaseSymbol || normalizeContractSymbol(prepared.symbol) }));
         const status = await studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers });
         if (cancelled) return;
         setProvisioningState(status.state || prepared.state || "PENDING");
         if (status.state === "CONFIRMED") {
+          setOnChainSymbol(status.symbol || "");
           setActiveReleaseAsset({ chainId: Number(status.chainId || prepared.chainId), releaseContractAddress: status.releaseContractAddress, primarySaleAddress: status.primarySaleAddress, provenanceAnchorAddress: status.provenanceAnchorAddress });
           setStep("track");
         } else if (status.transactionHash) {
@@ -533,14 +539,14 @@ export function ArtistStudioPage() {
         const [draft] = drafts;
         setSelectedReleaseId(draft.id);
         setReleaseId(draft.id);
-        setForm((prior) => ({ ...prior, releaseTitle: draft.title || prior.releaseTitle, releaseType: draft.releaseType || prior.releaseType, releaseDescription: draft.description || "", releaseArtwork: draft.artwork || "" }));
+        setForm((prior) => ({ ...prior, releaseTitle: draft.title || prior.releaseTitle, releaseType: draft.releaseType || prior.releaseType, releaseDescription: draft.description || "", releaseArtwork: draft.artwork || "", releaseSymbol: normalizeContractSymbol(draft.contractSymbol) || prior.releaseSymbol }));
         throw Object.assign(new Error(`A draft named "${draft.title}" already exists (${draft.id}). It is loaded; review it, then select Create release again to prepare it.`), { code: "DRAFT_ALREADY_EXISTS" });
       }
       if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Open the one you want at /studio?release=<id> so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
     }
     const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: releaseId ? "PATCH" : "POST",
-      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(releaseId || !form.releaseSymbol.trim() ? {} : { symbol: form.releaseSymbol.trim() }) },
+      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(!normalizeContractSymbol(form.releaseSymbol) || symbolState.locked ? {} : { symbol: normalizeContractSymbol(form.releaseSymbol) }) },
       headers,
     });
     nextReleaseId = release.id;
@@ -557,6 +563,7 @@ export function ArtistStudioPage() {
       const prepared = await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
       setProvisioning(prepared);
       setProvisioningState(prepared.state || "PENDING");
+      setForm((prior) => ({ ...prior, releaseSymbol: normalizeContractSymbol(prepared.symbol) || prior.releaseSymbol }));
       setNotice("Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.");
     } catch (error) {
       setNotice(error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : `Release draft saved. ${error.message}`);
@@ -570,6 +577,7 @@ export function ArtistStudioPage() {
     const status = await studioFetch(`/studio/releases/${encodeURIComponent(targetReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers });
     setProvisioningState(status.state || "NOT_STARTED");
     if (status.state === "CONFIRMED") {
+      setOnChainSymbol(status.symbol || "");
       setActiveReleaseAsset({ chainId: Number(status.chainId || FUJI_RELEASE_FACTORY_V2_CONFIG.chainId), releaseContractAddress: status.releaseContractAddress, primarySaleAddress: status.primarySaleAddress, provenanceAnchorAddress: status.provenanceAnchorAddress });
       setStep("track");
       setNotice("Release infrastructure confirmed and bound. Configure editions and metadata next.");
@@ -593,6 +601,14 @@ export function ArtistStudioPage() {
         return;
       }
       if (String(expected.artistWallet).toLowerCase() !== String(wallet.account).toLowerCase()) throw new Error("The connected wallet is not the canonical artist OWNER authorized for this release.");
+      if (symbolState.stale) throw new Error("The on-chain tag changed after this release was prepared. Select Prepare to save and re-prepare it before creating the release.");
+      // Re-prepare is idempotent; if anything differs from what was reviewed, never open the wallet.
+      const fresh = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
+      if (!preparedParametersAreCurrent(expected, fresh)) {
+        setProvisioning(fresh);
+        setNotice("The release parameters changed since you reviewed them. Review the updated parameters, then select Create release on-chain again.");
+        return;
+      }
       const walletProvider = wallet.getProvider?.();
       if (!walletProvider?.request) throw new Error("The artist wallet provider is unavailable.");
       const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
@@ -1106,7 +1122,10 @@ export function ArtistStudioPage() {
             canUseStudio && ownedStudioCatalog && <TextField title="Your artist name (creates your artist profile — add bio and links on your profile page)" value={form.artistName} onChange={(value) => set("artistName", value)} required />
           )}
           <TextField title="Release title" value={form.releaseTitle} onChange={(value) => set("releaseTitle", value)} required />
-          {!releaseId && <TextField title="Contract symbol (optional, up to 11 letters or digits; fixed once the release is created on-chain)" value={form.releaseSymbol} onChange={(value) => set("releaseSymbol", value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))} placeholder="Derived from the title if left empty" />}
+          {symbolState.locked
+            ? <TextField title="On-chain tag (fixed — read from the deployed contract)" value={symbolState.displayed} onChange={() => {}} readOnly />
+            : <TextField title="On-chain tag / contract symbol (1 to 11 letters or digits; fixed once the release is created on-chain)" value={form.releaseSymbol} onChange={(value) => set("releaseSymbol", normalizeContractSymbol(value))} placeholder="Derived from the title if left empty" />}
+          {symbolState.stale && <p role="alert" style={{ color: "var(--vc-crimson)" }}>The on-chain tag changed. Select Create release (or Prepare) to save it to this draft and re-prepare before creating the release on-chain.</p>}
           <label style={label}>Release type
             <select value={form.releaseType} onChange={(event) => set("releaseType", event.target.value)} style={field}>
               {RELEASE_TYPES.map((type) => <option key={type} value={type}>{RELEASE_TYPE_LABELS[type]}</option>)}
@@ -1131,7 +1150,7 @@ export function ArtistStudioPage() {
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh" : "Prepare"}</button>
-              {provisioning && provisioningState !== "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
+              {provisioning && provisioningState !== "CONFIRMED" && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Check status</button> : null}
             </div>
