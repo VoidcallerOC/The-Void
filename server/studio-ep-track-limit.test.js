@@ -85,9 +85,11 @@ describe("EP track cap", () => {
   it("never lets a client set, clear or restore the removedDraft marker", async () => {
     // A published edition taken off the site must not be hidden or stop counting toward the cap.
     const published = service({ release: release("EP", {}, "PUBLISHED"), edition: { id: "edition-1", release_id: "ep-1", status: "PUBLISHED", application_metadata: {}, owner_wallet: owner } });
-    await published.instance.updateEdition({ request, editionId: "edition-1", input: { status: "ARCHIVED", metadata: { removedDraft: true, note: "x" } } });
-    expect(published.repo.saveEdition.mock.calls[0][0]).toMatchObject({ status: "ARCHIVED", metadata: { note: "x" } });
+    await published.instance.updateEdition({ request, editionId: "edition-1", input: { status: "ARCHIVED", metadata: { removedDraft: true } } });
+    expect(published.repo.saveEdition.mock.calls[0][0]).toMatchObject({ status: "ARCHIVED", metadata: {} });
     expect(published.repo.saveEdition.mock.calls[0][0].metadata).not.toHaveProperty("removedDraft");
+    // Smuggling other metadata changes in alongside it is refused outright for a published edition.
+    await expect(published.instance.updateEdition({ request, editionId: "edition-1", input: { status: "ARCHIVED", metadata: { removedDraft: true, note: "x" } } })).rejects.toMatchObject({ code: "PUBLISHED_EDITION_IMMUTABLE" });
 
     const created = service({ release: release("EP"), tracks: 0 });
     await created.instance.createEdition({ request, releaseId: "ep-1", input: { ...newTrack, metadata: { removedDraft: true } } });
