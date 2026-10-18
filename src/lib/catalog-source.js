@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { releaseTypeOf } from "./release-types.js";
-import { portfolioImageSrc, profileSocials } from "./artist-profile.js";
+import { DEFAULT_ARTIST_AVATAR, portfolioImageSrc, profileSocials } from "./artist-profile.js";
 import {
   createArtist,
   createCatalog,
@@ -160,7 +160,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       name: row.display_name || row.name || row.slug || row.id,
       handle: row.slug || row.handle || row.id,
       bio: row.bio || "",
-      avatar: portfolioImageSrc(meta.profileArtwork || meta.artwork) || "/assets/voidcaller_art_4.png",
+      avatar: portfolioImageSrc(meta.profileArtwork || meta.artwork) || DEFAULT_ARTIST_AVATAR,
       banner: portfolioImageSrc(meta.banner || meta.profileArtwork) || "/assets/voidcaller_art_6.png",
       socials: profileSocials(row.social_links, row.website_url),
       verified: row.verified === true || row.verification_status === "VERIFIED",

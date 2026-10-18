@@ -16,7 +16,7 @@ import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
 import { PurchasePanel } from "./PurchasePanel.jsx";
 import { ListingPanel } from "./ListingPanel.jsx";
-import { ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
+import { ArtistAvatar, ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
@@ -124,6 +124,7 @@ export function ArtistPage({ children = null } = {}) {
     <section style={shell}>
       {children}
       <div style={{ ...card, minHeight: 280, backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.2), rgba(0,0,0,.85)), url(${artist.banner})`, backgroundSize: "cover", backgroundPosition: "center", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+        <ArtistAvatar artist={artist} size={104} />
         <Status>{artist.verified ? "Verified artist" : "Artist"}</Status>
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 10vw, 100px)", margin: "12px 0 4px", textTransform: "uppercase" }}>{artist.name}</h1>
         <p style={{ fontFamily: "var(--font-mono)", color: "var(--vc-bone-dim)", margin: 0 }}>@{artist.handle}</p>
@@ -131,7 +132,7 @@ export function ArtistPage({ children = null } = {}) {
       <div style={{ maxWidth: 650, margin: "28px 0 56px", color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>
         <p>{artist.bio}</p>
         {(artist.socials || []).map((social) => <a key={social.name} href={social.href} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)", marginRight: 18 }}>{social.name}</a>)}
-        <ArtistProfileEditor artistId={result.artist.id} onSaved={(saved) => setProfileOverride((prior) => ({ ...(prior || {}), ...Object.fromEntries(Object.entries(saved).filter(([key, value]) => !((key === "avatar" || key === "banner") && !value))) }))} />
+        <ArtistProfileEditor artistId={result.artist.id} onSaved={(saved) => setProfileOverride((prior) => ({ ...(prior || {}), ...Object.fromEntries(Object.entries(saved).filter(([key, value]) => !(key === "banner" && !value))) }))} />
       </div>
       {/* One section: each release appears once, as its collectible edition card
           (which names and links the release); a release with no edition yet
