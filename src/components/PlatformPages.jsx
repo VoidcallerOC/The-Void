@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
-import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryExperience, primaryExperienceUnresolved, resolvePrimaryExperience } from "../domain/models.js";
+import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
@@ -22,6 +22,7 @@ import { WalletButton } from "./WalletButton.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
 import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
+import { PrimaryPlayButton } from "./PrimaryPlayButton.jsx";
 import { releaseBindingFor } from "../lib/claim-state.js";
 import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
 
@@ -203,7 +204,10 @@ export function ReleasePage({ children = null } = {}) {
             {release.tracks.map((track) => {
               const view = tokenView(catalog, { edition: editionItems[0]?.edition, release, tokenId: track.tokenId });
               const tokenExperiences = catalog.experiences.filter((item) => (view.token?.experiences || []).includes(item.id));
-              const experience = track.experienceId ? catalog.experiences.find((item) => item.id === track.experienceId) : primaryExperience(tokenExperiences);
+              // A track that names its experience keeps it; otherwise the token's primary resolves by the shared rules.
+              const explicit = track.experienceId ? catalog.experiences.find((item) => item.id === track.experienceId) : null;
+              const playback = track.experienceId ? { state: "explicit", experience: explicit, unavailable: false } : primaryPlayback(tokenExperiences);
+              const experience = playback.experience;
               const experienceId = experience?.id || track.experienceId;
               const to = experienceId ? `/experience/${experienceId}` : `/edition/${editionItems[0]?.edition.id || "voidcaller-chapter-i"}`;
               return <article key={track.tokenId} className="vc-market-card">
@@ -215,7 +219,7 @@ export function ReleasePage({ children = null } = {}) {
                   <h3 style={{ fontFamily: "var(--font-display)", fontSize: 26, margin: "10px 0 6px" }}><Link to={to} style={{ color: "inherit", textDecoration: "none" }}>{track.title}</Link></h3>
                   <p style={{ color: "var(--vc-bone-dim)", margin: "0 0 14px" }}>{track.time}</p>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <PlayTokenButton track={playableTrackFor(view.token, { protectedExperience: experience })} protectedExperience={experience} queueId={`token:${view.token?.id || track.tokenId}`} collection={release.title} primary />
+                    <PrimaryPlayButton token={view.token} playback={playback} queueId={`token:${view.token?.id || track.tokenId}`} collection={release.title} primary />
                     <Link to={to} style={ghostBtn}>Song experience</Link>
                   </div>
                 </div>
@@ -255,9 +259,9 @@ export function EditionPage() {
   // The edition's designated primary experience (the full track), never just whichever sorts first.
   // When an edition designates a primary that is missing, invalid or ambiguous, the gated main Play is
   // withheld; the public preview stays available as its own labelled control.
-  const { state: primaryState, experience: previewExperience } = resolvePrimaryExperience(experiences);
-  const primaryUnresolved = primaryExperienceUnresolved(primaryState);
-  const previewTrack = playableTrackFor(tokenView(catalog, { edition, release }).token, { protectedExperience: previewExperience });
+  const playback = primaryPlayback(experiences);
+  const previewToken = tokenView(catalog, { edition, release }).token;
+  const hasPreview = Boolean(playableTrackFor(previewToken));
   const chainId = String(edition.chainId || "");
   const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
   // Release-scoped editions follow their own sale: supply 0 is an open edition.
@@ -277,13 +281,10 @@ export function EditionPage() {
           <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyLabel}{price ? ` · ${price}` : ""}</p>
           <div style={{ margin: "18px 0" }}>
             <Eyebrow>Listen</Eyebrow>
-            {previewTrack && primaryUnresolved ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <p className="vc-card-meta" data-primary-state={primaryState}>Full-track playback is unavailable for this edition right now.</p>
-                <PlayTokenButton track={previewTrack} queueId={`public-preview:${edition.id}`} collection={release.title} label="Play public preview" />
-              </div>
-            ) : previewTrack ? (
-              <PlayTokenButton track={previewTrack} protectedExperience={previewExperience} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
+            {hasPreview ? (
+              playback.unavailable
+                ? <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}><PrimaryPlayButton token={previewToken} playback={playback} queueId={`public-preview:${edition.id}`} collection={release.title} /></div>
+                : <PrimaryPlayButton token={previewToken} playback={playback} queueId={`preview:${edition.id}`} collection={release.title} label="Play preview" />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <p className="vc-card-meta">Public track previews for this release are available on the record page.</p>
@@ -539,7 +540,9 @@ export function MyCollectionPage() {
             const ofToken = (list) => list.filter((item) => (view.token?.experiences || []).includes(item.id));
             // Fall back to a wider pool only when this one has nothing for the token; an edition that
             // designates a primary never falls back to another experience.
-            const experience = ofToken(experiences).length ? primaryExperience(ofToken(experiences)) : ofToken(catalog.experiences).length ? primaryExperience(ofToken(catalog.experiences)) : primaryExperience(experiences);
+            const pool = ofToken(experiences).length ? ofToken(experiences) : ofToken(catalog.experiences).length ? ofToken(catalog.experiences) : experiences;
+            const playback = primaryPlayback(pool);
+            const experience = playback.experience;
             return (
             <article key={`${edition.id}:${tokenId ?? ""}`} className="vc-market-card">
               <TokenArtwork sources={view.artworkSources} alt={`${view.name} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
@@ -548,7 +551,7 @@ export function MyCollectionPage() {
                 <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{view.token ? view.name : release?.title || edition.title}</h3>
                 <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-                  <PlayTokenButton track={playableTrackFor(view.token, { protectedExperience: experience })} protectedExperience={experience} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
+                  <PrimaryPlayButton token={view.token} playback={playback} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
                   <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>
                   {experience && <Link to={`/experience/${experience.id}`} style={ghostBtn}>Open experience</Link>}
                 </div>

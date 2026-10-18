@@ -85,6 +85,12 @@ export const primaryExperienceUnresolved = (state) => state === "missing" || sta
 export function primaryExperience(experiences = []) {
   return resolvePrimaryExperience(experiences).experience;
 }
+// What a Play control should do for an edition's experiences: the experience to play, or
+// `unavailable` when a designation exists that does not resolve (missing, invalid, ambiguous).
+export function primaryPlayback(experiences = []) {
+  const { state, experience } = resolvePrimaryExperience(experiences);
+  return { state, experience, unavailable: primaryExperienceUnresolved(state) };
+}
 
 // The designated primary first, everything else in its original order.
 export function orderExperiences(experiences = []) {

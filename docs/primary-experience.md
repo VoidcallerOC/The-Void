@@ -29,10 +29,15 @@ The designation lives in the experience's existing `media_config` JSON: `primary
 | more than one is `true` | `ambiguous` | gated Play withheld |
 | a non-boolean flag, or the `true` one is not a gated experience | `invalid` | gated Play withheld |
 
-When the gated Play is withheld the page shows "Full-track playback is unavailable for this
-edition right now." and, as a separate control labelled **Play public preview**, the public preview
-clip. That control never carries a protected experience, so it can never request a grant for the demo
-or the full track. The other experiences stay reachable on their own pages.
+The same rules apply to every Play control that stands for an edition's full track: the edition
+page, the release tile and the owned-collection tile (`primaryPlayback` in `src/domain/models.js`,
+rendered by `PrimaryPlayButton`). A release track that names its own `experienceId` keeps it.
+
+When the primary is `missing`, `invalid` or `ambiguous` the control is a button labelled **Play public
+preview** next to the notice "Full track unavailable". Its track is built without any protected
+experience (a protected media reference attached to a built-in track is removed), so it can never
+request a grant for the demo or the full track. Wallet ownership and authorization are unchanged. The
+other experiences stay reachable on their own pages.
 
 The public listing is ordered by `updated_at DESC`, and publishing rewrites every experience's
 `updated_at`, so order and timestamps are never used when a designation exists.

@@ -107,7 +107,7 @@ describe("edition page main Play button", () => {
     expect(pub.protectedExperience ?? null).toBeNull();
     expect(pub.track.previewSrc).toContain("bafypublicpreviewclip");
     expect(markup).toContain(`data-primary-state="${state}"`);
-    expect(markup).toContain("Full-track playback is unavailable");
+    expect(markup).toContain("Full track unavailable");
   };
 
   it("withholds the gated Play when the designated primary is missing (only the demo is published)", async () => {
