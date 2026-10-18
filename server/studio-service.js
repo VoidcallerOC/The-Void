@@ -5,6 +5,7 @@ import { ApiError } from "./api-errors.js";
 import { assertWalletMatches, requireWalletAuth } from "./api-runtime.js";
 import { chainId, editionQuantity, enumValue, nonNegativeBigInt, optionalText, positiveBigInt, requiredText, walletAddress } from "./validation.js";
 import { RELEASE_DEPLOYMENT as deployment, RELEASE_PER_CONTRACT, anchorsProvenanceAtCreation, releaseDeploymentForFactory, releaseRoyaltyPolicyForChain, releaseRoyaltyPolicyViolation } from "../config/release-network.js";
+import { EP_TRACK_LIMIT_MESSAGE, MAX_EP_TRACKS } from "../src/lib/release-types.js";
 import { ALBUM_NOT_SUPPORTED_MESSAGE, RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectations, readReleaseLifecycle, releaseTypeChangeBlocker } from "../src/lib/release-lifecycle.js";
 import { canonicalMetadata, collectionMetadata } from "./metadata-storage.js";
 import { canonicalProvenanceManifest, protectedMediaCommitments, provenanceCommitment } from "./provenance-manifest.js";
@@ -56,6 +57,23 @@ function releaseType(value) {
 function storedReleaseType(release) {
   return releaseType(release?.release_metadata?.releaseType);
 }
+// Legacy `metadata.tracks` list some clients send with a release. Only growth past the cap is refused,
+// so an over-limit draft can still be saved while the artist trims it.
+function assertReleaseTrackList(type, metadata, previousMetadata = {}, { typeChanged = false } = {}) {
+  const next = Array.isArray(metadata?.tracks) ? metadata.tracks.length : 0;
+  const previous = Array.isArray(previousMetadata?.tracks) ? previousMetadata.tracks.length : 0;
+  if (type === "EP" && next > MAX_EP_TRACKS && next > previous) throw new ApiError(409, "EP_TRACK_LIMIT_EXCEEDED", EP_TRACK_LIMIT_MESSAGE);
+  if (type === "SINGLE" && next > (typeChanged ? 1 : Math.max(previous, 1))) throw new ApiError(409, "SINGLE_REQUIRES_ONE_TRACK", SINGLE_ONE_TRACK_MESSAGE);
+}
+// `removedDraft` is server-owned: a client cannot set it (that would hide a published track and free a cap slot) or clear it.
+function withoutRemovedDraftFlag(metadata) {
+  const rest = { ...(metadata || {}) };
+  delete rest.removedDraft;
+  return rest;
+}
+const SINGLE_ONE_TRACK_MESSAGE = "A single is exactly one standalone track. Remove the extra tracks before choosing Single.";
+// Tracks are the release's editions. A draft the artist removed stays stored as ARCHIVED but no longer counts.
+const TRACK_COUNT_SQL = "SELECT count(*)::int AS track_count FROM editions WHERE release_id=$1 AND ($2::text IS NULL OR id<>$2) AND NOT (status='ARCHIVED' AND application_metadata->>'removedDraft'='true')";
 
 function normalizedSlug(value, field) {
   const slug = requiredText(value, field, { max: 96 }).toLowerCase();
@@ -322,7 +340,7 @@ export class ArtistStudioService {
       this.db.query("SELECT a.id, a.slug, a.display_name, a.status, ao.owner_wallet, p.bio, p.website_url, p.social_links, p.profile_metadata FROM artists a JOIN artist_owners ao ON ao.artist_id=a.id LEFT JOIN artist_profiles p ON p.artist_id=a.id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY a.display_name LIMIT 100", [owner]),
       this.db.query("SELECT r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY r.created_at DESC LIMIT 500", [owner]),
       // token_id only for PUBLISHED editions: a draft's token does not exist on-chain yet.
-      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.address AS release_contract_address, factory.address AS factory_address, sale.address AS primary_sale_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY e.created_at DESC LIMIT 500", [owner]),
+      this.db.query("SELECT e.id, e.release_id, e.title, e.description, e.supply, e.status, e.application_metadata, c.address AS contract_address, c.address AS release_contract_address, factory.address AS factory_address, sale.address AS primary_sale_address, c.chain_id, CASE WHEN e.status='PUBLISHED' THEN (SELECT t.token_id::text FROM tokens t WHERE t.edition_id=e.id ORDER BY t.created_at DESC LIMIT 1) END AS token_id, EXISTS (SELECT 1 FROM primary_purchases p JOIN tokens pt ON pt.edition_id = e.id AND pt.token_id = p.token_id JOIN contracts pc ON pc.id = pt.contract_id WHERE pc.chain_id = p.chain_id AND lower(pc.address) = lower(p.token_contract_address) AND p.status NOT IN ('FAILED', 'REORGED')) AS buyable_sale FROM editions e JOIN releases r ON r.id=e.release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id LEFT JOIN contracts c ON c.id=e.contract_id LEFT JOIN release_contracts rc ON rc.release_id=e.release_id AND rc.release_contract_id=e.contract_id AND rc.status IN ('DEPLOYED','VERIFIED') LEFT JOIN contracts factory ON factory.id=rc.factory_contract_id LEFT JOIN contracts sale ON sale.id=rc.primary_sale_contract_id WHERE lower(ao.owner_wallet)=lower($1) AND NOT (e.status='ARCHIVED' AND e.application_metadata->>'removedDraft'='true') ORDER BY e.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT x.id, x.artist_id, x.release_id, x.edition_id, x.title, x.description, x.experience_type, x.requirements, x.media_config, x.status FROM experiences x JOIN artist_owners ao ON ao.artist_id=x.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY x.created_at DESC LIMIT 500", [owner]),
       this.db.query("SELECT s.album_release_id, s.single_release_id, s.single_edition_id, s.track_position FROM release_album_singles s JOIN releases r ON r.id=s.album_release_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE lower(ao.owner_wallet)=lower($1) ORDER BY s.album_release_id, s.track_position LIMIT 1000", [owner]),
       // Every factory binding (any factory version) so Studio can read each sale contract's balances.
@@ -602,6 +620,8 @@ export class ArtistStudioService {
     if (!edition && release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
     await this.assertSingleOpenForEdition(release, edition.id);
+    // An over-limit EP draft stays editable but cannot be submitted until it is back within the cap.
+    if (storedReleaseType(release) === "EP" && await this.releaseTrackCount(release.id) > MAX_EP_TRACKS) throw new ApiError(409, "EP_TRACK_LIMIT_EXCEEDED", EP_TRACK_LIMIT_MESSAGE);
     const experiences = await this.db.query("SELECT id, title, description, experience_type, media_config, version FROM experiences WHERE edition_id=$1 ORDER BY created_at ASC LIMIT 100", [edition.id]);
     const mediaAssets = await this.db.query("SELECT id, media_type, metadata FROM media_assets WHERE artist_id=$1", [release.artist_id]);
     const previewAudio = await this.vettedPreviewAudio({ artistId: release.artist_id, uri: input.previewAudio ?? edition.application_metadata?.previewAudio });
@@ -800,7 +820,9 @@ export class ArtistStudioService {
     // Release slugs become the on-chain releaseId (bytes32), which is shared by every
     // artist on the canonical contract, so they are allocated platform-wide.
     const slug = await availableSlug(this.db, { table: "releases", value: title, field: "release title" });
-    const metadata = { ...(input.metadata || {}), releaseType: releaseType(input.releaseType), publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}), ...(contractSymbolInput(input.symbol) ? { contractSymbol: contractSymbolInput(input.symbol) } : {}) };
+    const type = releaseType(input.releaseType);
+    assertReleaseTrackList(type, input.metadata);
+    const metadata = { ...(input.metadata || {}), releaseType: type, publicationArchitecture: "release-per-contract", chainId: PROVISIONING_CHAIN_ID, applicationReleaseId: deriveStudioApplicationReleaseId(id), releaseKey: null, ...(input.artwork ? { artwork: optionalText(input.artwork, "artwork", { max: 2048 }) } : {}), ...(contractSymbolInput(input.symbol) ? { contractSymbol: contractSymbolInput(input.symbol) } : {}) };
     const release = await this.repository.saveRelease({ id, artistId: artist.id, slug, title, description: optionalText(input.description, "release.description", { max: 20000 }), status: "DRAFT", metadata: jsonObject(metadata, "release.metadata") });
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_CREATED", subjectType: "release", subjectId: release.id, payload: { artistId: artist.id } });
     return { ...release, releaseKey: metadata.releaseKey, chainId: PROVISIONING_CHAIN_ID };
@@ -827,7 +849,10 @@ export class ArtistStudioService {
     if (releaseType(metadata.releaseType) !== storedReleaseType(release)) {
       if (await this.hasPublishedEdition(release.id)) throw new ApiError(409, "RELEASE_TYPE_LOCKED", "The release type cannot change after an edition has been published.");
       await this.assertReleaseTypeMatchesChain(release, releaseType(metadata.releaseType));
+      // Switching to Single keeps the release (same id, slug and contract); it only needs a single track.
+      if (releaseType(metadata.releaseType) === "SINGLE" && await this.releaseTrackCount(release.id) > 1) throw new ApiError(409, "SINGLE_REQUIRES_ONE_TRACK", SINGLE_ONE_TRACK_MESSAGE);
     }
+    assertReleaseTrackList(releaseType(metadata.releaseType), metadata, release.release_metadata, { typeChanged: releaseType(metadata.releaseType) !== storedReleaseType(release) });
     const saved = await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: input.title === undefined ? release.title : requiredText(input.title, "release.title", { max: 256 }), description: input.description === undefined ? release.description : optionalText(input.description, "release.description", { max: 20000 }), status, metadata, publishedAt: status === "PUBLISHED" ? (release.published_at || new Date()) : status === "ARCHIVED" ? (release.published_at ?? null) : null });
     if (status === "ARCHIVED") await this.archiveReleaseChildren(release.id);
     await this.audit({ identity, request, eventType: "STUDIO_RELEASE_UPDATED", subjectType: "release", subjectId: release.id });
@@ -873,6 +898,17 @@ export class ArtistStudioService {
   async hasPublishedEdition(releaseId, exceptEditionId = null) {
     const { rows } = await this.db.query("SELECT 1 FROM editions WHERE release_id=$1 AND status='PUBLISHED' AND ($2::text IS NULL OR id<>$2) LIMIT 1", [releaseId, exceptEditionId]);
     return Boolean(rows[0]);
+  }
+
+  async releaseTrackCount(releaseId, exceptEditionId = null, query = (sql, params) => this.db.query(sql, params)) {
+    const { rows } = await query(TRACK_COUNT_SQL, [releaseId, exceptEditionId]);
+    return Number(rows[0]?.track_count ?? 0);
+  }
+
+  // The EP cap: a new track is refused at the cap, but editing or removing tracks of an over-limit draft is not.
+  async assertEpHasTrackSlot(release, query) {
+    if (storedReleaseType(release) !== "EP") return;
+    if (await this.releaseTrackCount(release.id, null, query) >= MAX_EP_TRACKS) throw new ApiError(409, "EP_TRACK_LIMIT_EXCEEDED", EP_TRACK_LIMIT_MESSAGE);
   }
 
   // A SINGLE is exactly one standalone edition: once one is published, no other edition may be created or published.
@@ -926,16 +962,24 @@ export class ArtistStudioService {
     const tokenId = binding ? releaseCloneTokenId(editionSlug) : certifiedTokenId(release.slug, editionSlug);
     await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: address, chainId: selectedChainId, tokenId });
     const id = input.id ? requiredText(input.id, "edition.id", { max: 128 }) : `edition-${randomUUID()}`;
+    let existing = null;
     if (input.id) {
       // saveEdition upserts by id; never let a re-post reopen a published edition or move one across releases.
-      const existing = (await this.db.query("SELECT release_id, status FROM editions WHERE id=$1 LIMIT 1", [id])).rows[0];
+      existing = (await this.db.query("SELECT release_id, status FROM editions WHERE id=$1 LIMIT 1", [id])).rows[0] || null;
       if (existing && (existing.release_id !== release.id || !["DRAFT", "REVIEW"].includes(existing.status))) throw new ApiError(409, "EDITION_ALREADY_EXISTS", "This edition already exists and can no longer be replaced.");
     }
+    // Re-posting an existing draft edits it; only a genuinely new track needs a free slot.
+    if (!existing) await this.assertEpHasTrackSlot(release);
     const edition = await this.repository.inTransaction(async (repository) => {
+      // Re-check under a release row lock so two concurrent requests cannot both take the last slot.
+      if (!existing && repository.db?.query) {
+        await repository.db.query("SELECT id FROM releases WHERE id=$1 FOR UPDATE", [release.id]);
+        await this.assertEpHasTrackSlot(release, (sql, params) => repository.db.query(sql, params));
+      }
       const contract = binding
         ? { id: binding.release_contract_id }
         : await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
-      const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: editionQuantity(input.quantity, "edition.quantity") ?? "0", status: "DRAFT", metadata: jsonObject({ ...(input.metadata || {}), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
+      const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: editionQuantity(input.quantity, "edition.quantity") ?? "0", status: "DRAFT", metadata: jsonObject({ ...withoutRemovedDraftFlag(input.metadata), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
       await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
       return saved;
     });
@@ -949,8 +993,13 @@ export class ArtistStudioService {
     const edition = rows[0];
     if (!edition) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this edition.");
     assertPublishedMayChange(edition.status, input, "Published editions cannot return to an earlier lifecycle state.");
-    const status = patchStatus(input, edition.status, "edition");
-    const saved = await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: input.name === undefined && input.title === undefined ? edition.title : requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: input.tier === undefined ? edition.tier : optionalText(input.tier, "edition.tier", { max: 128 }), description: input.description === undefined ? edition.description : optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? edition.supply : editionQuantity(input.quantity, "edition.quantity"), status, metadata: input.metadata === undefined ? edition.application_metadata : jsonObject(input.metadata, "edition.metadata") });
+    // A removed draft stays archived: restoring it would add a track without passing the EP cap.
+    if (edition.status === "ARCHIVED" && edition.application_metadata?.removedDraft === true) throw new ApiError(409, "TRACK_REMOVED", "This draft track was removed from the release. Add it again as a new track.");
+    // Removing a draft track (so an over-limit EP can be trimmed): the row is kept as ARCHIVED, never deleted.
+    const removingDraft = String(input.status ?? "").trim().toUpperCase() === "ARCHIVED" && ["DRAFT", "REVIEW"].includes(edition.status);
+    if (removingDraft && await this.releaseContractBinding(edition.release_id)) throw new ApiError(409, "TRACK_REMOVAL_UNAVAILABLE", "A track on a release that already has its contract cannot be removed here.");
+    const status = removingDraft ? "ARCHIVED" : patchStatus(input, edition.status, "edition");
+    const saved = await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: input.name === undefined && input.title === undefined ? edition.title : requiredText(input.name || input.title, "edition.name", { max: 256 }), tier: input.tier === undefined ? edition.tier : optionalText(input.tier, "edition.tier", { max: 128 }), description: input.description === undefined ? edition.description : optionalText(input.description, "edition.description", { max: 20000 }), supply: input.quantity === undefined ? edition.supply : editionQuantity(input.quantity, "edition.quantity"), status, metadata: { ...withoutRemovedDraftFlag(input.metadata === undefined ? edition.application_metadata : jsonObject(input.metadata, "edition.metadata")), ...(removingDraft ? { removedDraft: true } : {}) } });
     await this.audit({ identity, request, eventType: "STUDIO_EDITION_UPDATED", subjectType: "edition", subjectId: edition.id });
     return saved;
   }

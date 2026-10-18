@@ -3,17 +3,31 @@
 // Album Contract. Releases saved before types existed have none and stay EP.
 export const RELEASE_TYPES = Object.freeze(["SINGLE", "EP", "ALBUM"]);
 
+// Hard cap on tracks in an EP. The server enforces it on every create/update/submit path; the
+// Studio only mirrors it. An existing draft above the cap stays editable so tracks can be removed.
+export const MAX_EP_TRACKS = 5;
+
 export const RELEASE_TYPE_LABELS = Object.freeze({
   SINGLE: "Single · one standalone track on its own contract",
-  EP: "EP / multi-track release",
+  EP: `EP / multi-track release · up to ${MAX_EP_TRACKS} tracks`,
   // D2 Option A: 13 / 4 are the contract's defaults. The release admin (the artist) can approve
   // higher limits on-chain with approveExpandedRelease until the album is closed.
   ALBUM: "Album Contract · 13 tracks / 4 singles by default",
 });
 
+export const EP_TRACK_LIMIT_MESSAGE = `An EP holds at most ${MAX_EP_TRACKS} tracks. Remove a track, or create an Album Contract for a longer record.`;
+
 export function releaseTypeOf(value) {
   const type = String(value ?? "").trim().toUpperCase();
   return RELEASE_TYPES.includes(type) ? type : "EP";
+}
+
+// Studio view of the EP cap: `atLimit` blocks adding another track; `overLimit` is a draft created
+// before the cap, which stays editable so the artist can remove tracks (nothing is deleted for them).
+export function epTrackLimit(type, trackCount) {
+  const count = Math.max(0, Number(trackCount) || 0);
+  const limited = releaseTypeOf(type) === "EP";
+  return { limited, max: MAX_EP_TRACKS, count, atLimit: limited && count >= MAX_EP_TRACKS, overLimit: limited && count > MAX_EP_TRACKS };
 }
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
