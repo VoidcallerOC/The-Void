@@ -211,7 +211,7 @@ describe("Artist Studio standalone singles", () => {
     // Only the artist's published singles are offered, never an EP.
     expect([...choice.querySelectorAll("option")].map((option) => option.value)).toEqual(["", "rel-single"]);
     fireEvent.change(choice, { target: { value: "rel-single" } });
-    fireEvent.change(screen.getByLabelText(/Track position/), { target: { value: "3" } });
+    fireEvent.change(await screen.findByLabelText(/Track position/), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Add single to album" }));
     expect(await screen.findByText("Lead Single · track 3")).toBeTruthy();
     const post = calls.find((call) => call.path === "/studio/releases/rel-draft/album-singles");
