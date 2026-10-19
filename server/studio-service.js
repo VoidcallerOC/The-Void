@@ -631,7 +631,7 @@ export class ArtistStudioService {
       const tx = repository.db || this.db;
       for (const assetId of ids) await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`void:media-asset:${assetId}`]);
       for (const assetId of ids) {
-        const { rows } = await tx.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [editionId, `%${assetId}%`]);
+        const { rows } = await tx.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [editionId, `%"${assetId}"%`]);
         if (rows.length) throw new ApiError(409, "PROTECTED_MEDIA_IN_USE", "This file is already used by a different edition. Upload a separate file for this one.");
       }
       return save(repository);
@@ -1200,16 +1200,51 @@ export class ArtistStudioService {
 
   async publishReleaseExperiences(release) {
     const { rows } = await this.db.query("SELECT id, artist_id, release_id, edition_id, title, description, experience_type, requirements, media_config, version, status FROM experiences WHERE release_id=$1", [release.id]);
-    for (const experience of rows) {
-      let bound;
-      try {
-        bound = await this.bindProtectedExperience({ artistId: release.artist_id, mediaConfig: experience.media_config || {}, requirements: Array.isArray(experience.requirements) ? experience.requirements : [] });
-      } catch (error) {
-        this.logger.error?.("studio.publication.experience_blocked", { releaseId: release.id, experienceId: experience.id, detail: error.message });
-        continue;
-      }
-      await this.repository.saveExperience({ id: experience.id, artistId: experience.artist_id, releaseId: experience.release_id, editionId: experience.edition_id, title: experience.title, description: experience.description, experienceType: experience.experience_type, requirements: bound.requirements, mediaConfig: bound.mediaConfig, version: Number(experience.version || 1), status: "PUBLISHED" });
+    for (const experience of rows) await this.publishExperience(release, experience);
+  }
+
+  /**
+   * Marks one experience PUBLISHED without ever writing a stale snapshot. The list above is only a
+   * starting point: the row is re-read FOR UPDATE inside a transaction, after taking the advisory locks
+   * for the files it unlocks (sorted, then the row: the same order the create/update path uses, so the
+   * two cannot deadlock), and what is written is the row's CURRENT title, requirements and media
+   * configuration. If the current configuration needs a lock that was not taken, the transaction ends
+   * and starts again with the union (a few tries; then the experience is left as it was and logged).
+   * A file another edition has claimed blocks only this experience, never the whole publication.
+   */
+  async publishExperience(release, snapshot) {
+    const blocked = (detail) => this.logger.error?.("studio.publication.experience_blocked", { releaseId: release.id, experienceId: snapshot.id, detail });
+    const bindCurrent = (row) => this.bindProtectedExperience({ artistId: release.artist_id, mediaConfig: row.media_config || {}, requirements: Array.isArray(row.requirements) ? row.requirements : [] });
+    let locked;
+    try {
+      locked = [...new Set(protectedAssetIds((await bindCurrent(snapshot)).mediaConfig))].sort();
+    } catch (error) {
+      blocked(error.message);
+      return;
     }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const outcome = await this.repository.inTransaction(async (repository) => {
+        const tx = repository.db || this.db;
+        for (const assetId of locked) await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`void:media-asset:${assetId}`]);
+        const { rows } = await tx.query("SELECT id, artist_id, release_id, edition_id, title, description, experience_type, requirements, media_config, version, status FROM experiences WHERE id=$1 FOR UPDATE", [snapshot.id]);
+        const current = rows[0];
+        if (!current) return { state: "gone" };
+        let bound;
+        try { bound = await bindCurrent(current); } catch (error) { return { state: "blocked", detail: error.message }; }
+        const needed = [...new Set(protectedAssetIds(bound.mediaConfig))].sort();
+        if (needed.some((assetId) => !locked.includes(assetId))) return { state: "relock", locked: [...new Set([...locked, ...needed])].sort() };
+        for (const assetId of needed) {
+          const claimed = await tx.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [current.edition_id, `%"${assetId}"%`]);
+          if (claimed.rows.length) return { state: "blocked", detail: "A file this experience unlocks is already used by a different edition." };
+        }
+        await repository.saveExperience({ id: current.id, artistId: current.artist_id, releaseId: current.release_id, editionId: current.edition_id, title: current.title, description: current.description, experienceType: current.experience_type, requirements: bound.requirements, mediaConfig: bound.mediaConfig, version: Number(current.version || 1), status: "PUBLISHED" });
+        return { state: "saved" };
+      });
+      if (outcome.state === "relock") { locked = outcome.locked; continue; }
+      if (outcome.state === "blocked") blocked(outcome.detail);
+      return;
+    }
+    blocked("The experience's files kept changing while publishing; it was left as it was.");
   }
 
   async uploadProtectedMedia({ request, artistId, input }) {
@@ -1238,7 +1273,7 @@ export class ArtistStudioService {
   async listRegisteredMedia({ request, artistId }) {
     const { artist } = await this.ownedArtist({ artistId, request });
     const [assets, previews] = await Promise.all([
-      this.db.query("SELECT a.id, a.media_type, a.created_at, (a.metadata->>'byteSize') AS byte_size, (SELECT i.payload->>'contentType' FROM audit_events u JOIN audit_events i ON i.event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND i.subject_type='artist' AND i.subject_id=a.artist_id AND i.payload->>'uploadId'=u.payload->>'uploadId' WHERE u.event_type='STUDIO_MEDIA_UPLOADED' AND u.subject_type='media_asset' AND u.subject_id=a.id LIMIT 1) AS content_type FROM media_assets a WHERE a.artist_id=$1 AND a.visibility='PROTECTED' AND NOT EXISTS (SELECT 1 FROM experiences x WHERE x.media_config::text LIKE '%' || a.id || '%') ORDER BY a.created_at DESC LIMIT 100", [artist.id]),
+      this.db.query("SELECT a.id, a.media_type, a.created_at, (a.metadata->>'byteSize') AS byte_size, (SELECT i.payload->>'contentType' FROM audit_events u JOIN audit_events i ON i.event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND i.subject_type='artist' AND i.subject_id=a.artist_id AND i.payload->>'uploadId'=u.payload->>'uploadId' WHERE u.event_type='STUDIO_MEDIA_UPLOADED' AND u.subject_type='media_asset' AND u.subject_id=a.id LIMIT 1) AS content_type FROM media_assets a WHERE a.artist_id=$1 AND a.visibility='PROTECTED' AND NOT EXISTS (SELECT 1 FROM experiences x WHERE x.media_config::text LIKE '%\"' || a.id || '\"%') ORDER BY a.created_at DESC LIMIT 100", [artist.id]),
       this.db.query("SELECT payload->>'uri' AS uri, max(payload->>'contentType') AS content_type, max(payload->>'byteSize') AS byte_size, max(created_at) AS uploaded_at FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uri' IS NOT NULL GROUP BY payload->>'uri' ORDER BY max(created_at) DESC LIMIT 20", [artist.id]),
     ]);
     const size = (value) => (value === null || value === undefined ? null : Number(value));
