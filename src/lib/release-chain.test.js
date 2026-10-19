@@ -8,6 +8,7 @@ import {
   readWalletChainId,
   releaseChainDescriptor,
   releaseNetworkRequiredMessage,
+  releaseNetworkSwitchAllowed,
   releaseNetworkSwitchLabel,
   toChainHexId,
 } from "./release-chain.js";
@@ -134,6 +135,37 @@ describe("release-chain helpers", () => {
     expect(message).toMatch(new RegExp(String(RELEASE_DEPLOYMENT.chainId)));
     expect(message).toMatch(/Ethereum is not supported/i);
     expect(releaseNetworkSwitchLabel({ networkName: "Avalanche C-Chain", chainId: 43114 })).toBe("SWITCH TO AVALANCHE");
-    expect(releaseNetworkSwitchLabel({ networkName: "Avalanche Fuji", chainId: 43113 })).toBe("SWITCH TO FUJI");
+    expect(releaseNetworkSwitchLabel({ networkName: "Avalanche Fuji", chainId: 43113 }, { allowSwitch: false })).toBe("WRONG NETWORK");
+  });
+});
+
+describe("collector-facing network switch gating", () => {
+  const MAINNET = { networkName: "Avalanche C-Chain", chainId: 43114 };
+  const FUJI = { networkName: "Avalanche Fuji", chainId: 43113 };
+
+  it("always offers the production Avalanche switch on a mainnet build", () => {
+    expect(releaseNetworkSwitchAllowed(MAINNET, { dev: false })).toBe(true);
+    expect(releaseNetworkSwitchAllowed(MAINNET, { dev: true })).toBe(true);
+    expect(releaseNetworkSwitchLabel(MAINNET, { allowSwitch: true })).toBe("SWITCH TO AVALANCHE");
+  });
+
+  it("never offers a testnet switch outside the dev server", () => {
+    expect(releaseNetworkSwitchAllowed(FUJI, { dev: false })).toBe(false);
+    expect(releaseNetworkSwitchLabel(FUJI, { allowSwitch: false })).toBe("WRONG NETWORK");
+  });
+
+  it("keeps a developer-only switch on the dev server that never names the testnet", () => {
+    expect(releaseNetworkSwitchAllowed(FUJI, { dev: true })).toBe(true);
+    expect(releaseNetworkSwitchLabel(FUJI, { allowSwitch: true })).toBe("SWITCH NETWORK");
+    for (const allowSwitch of [true, false]) {
+      expect(releaseNetworkSwitchLabel(FUJI, { allowSwitch })).not.toMatch(/fuji/i);
+    }
+  });
+
+  it("keeps each build isolated to its own chain id", () => {
+    expect(isOnReleaseChain(43114, MAINNET)).toBe(true);
+    expect(isOnReleaseChain(43113, MAINNET)).toBe(false);
+    expect(isOnReleaseChain(43113, FUJI)).toBe(true);
+    expect(isOnReleaseChain(43114, FUJI)).toBe(false);
   });
 });
