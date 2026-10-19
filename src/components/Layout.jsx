@@ -10,6 +10,11 @@ import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-so
 import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
 import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
+import { pageTitle } from "../lib/page-title.js";
+import { VOID_LIVE } from "../data.js";
+
+// Same gates as the route table in App.jsx.
+const ROUTE_FLAGS = Object.freeze({ voidLive: VOID_LIVE, summitDemo: import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1" });
 
 // Minimal in-theme placeholder shown while a lazily-loaded section chunk
 // is fetched. Sized to the viewport so the footer doesn't jump up.
@@ -43,6 +48,16 @@ function ScrollToTop() {
   return null;
 }
 
+// The document title names the current page (and the record, artist, edition or experience it
+// shows) so the tab, history list and bookmarks distinguish routes that share a layout.
+export function DocumentTitle({ catalog }) {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = pageTitle(pathname, catalog, ROUTE_FLAGS);
+  }, [pathname, catalog]);
+  return null;
+}
+
 // Persistent shell — Nav, Footer, and the sticky audio bar stay mounted across
 // route changes so playback continues as you navigate.
 export function Layout() {
@@ -53,6 +68,7 @@ export function Layout() {
       <ReviewerNotificationsProvider>
         <PreviewHostBridge />
         <ScrollToTop />
+        <DocumentTitle catalog={catalog} />
         {/* The whole shell is one isolated stacking context so the ambient
             starfield (z-index -1) sits above the black page ground and beneath
             every page, the nav, footer and player. */}

@@ -47,6 +47,12 @@ export function Nav() {
     ...(notifications.reviewer ? [[REVIEWER_NAV_LABEL, REVIEWER_NAV_PATH]] : []),
   ];
   const badge = (path) => (path === REVIEWER_NAV_PATH ? <ReviewerBadge count={notifications.count} /> : null);
+  // Collector destinations first, then the artist-facing pair (VERIFY, ARTIST STUDIO) after a rule.
+  // The mobile menu lists the same links in the same order as the desktop header.
+  const isSecondary = ([, path]) => ["/verify", "/studio"].includes(path);
+  const primaryLinks = links.filter((link) => !isSecondary(link));
+  const secondaryLinks = links.filter(isSecondary);
+  const orderedLinks = [...primaryLinks, ...secondaryLinks];
 
   return (
     <nav
@@ -72,14 +78,14 @@ export function Nav() {
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
-          {links.filter(([, path]) => !["/verify", "/studio"].includes(path)).map(([label, path]) => (
+          {primaryLinks.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
               {label}
               {badge(path)}
             </NavLink>
           ))}
           <span className="vc-nav-rule" aria-hidden="true" />
-          {links.filter(([, path]) => ["/verify", "/studio"].includes(path)).map(([label, path]) => (
+          {secondaryLinks.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink vc-nav-secondary">
               {label}
               {badge(path)}
@@ -129,7 +135,7 @@ export function Nav() {
             gap: 4,
           }}
         >
-          {links.map(([label, path]) => (
+          {orderedLinks.map(([label, path]) => (
             <NavLink
               key={label}
               to={path}

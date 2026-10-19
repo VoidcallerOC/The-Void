@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
@@ -117,6 +117,11 @@ export function ArtistPage({ children = null } = {}) {
   const [profileOverride, setProfileOverride] = useState(null);
   const result = getArtistCatalog(catalog, artistId);
   const secondary = resolveSecondaryStatus();
+  // Like the release and edition pages: an artist that only the published catalog knows must not be
+  // sent to /artists on a direct load or refresh before that catalog has arrived.
+  if (!result && catalog.publishedLoading) {
+    return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading artist…</p></section>;
+  }
   if (!result) return <Navigate to="/artists" replace />;
   const { releases, editions } = result;
   const artist = { ...result.artist, ...(profileOverride || {}) };
@@ -577,6 +582,24 @@ export function CollectorsPage() {
         <p style={{ color: "var(--vc-bone-dim)" }}>A home for collector identity and earned experiences.</p>
       </PlatformHeader>
       <Link style={primaryBtn} to="/my-collection">View my collection</Link>
+    </section>
+  );
+}
+
+// The catch-all route. An unknown URL used to be replaced with the home page, so a mistyped or stale
+// link looked like a working link to a different page. The URL now stays as typed and says so.
+export function NotFoundPage() {
+  const { pathname } = useLocation();
+  return (
+    <section style={shell} data-testid="not-found">
+      <PlatformHeader eyebrow="† Not found" title="Nothing here">
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>There is no page at <code style={{ fontFamily: "var(--font-mono)", color: "var(--vc-bone)" }}>{pathname}</code>. The link may be old or mistyped.</p>
+      </PlatformHeader>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Link to="/discover" style={primaryBtn}>Discover</Link>
+        <Link to="/marketplace" style={ghostBtn}>Marketplace</Link>
+        <Link to="/" style={ghostBtn}>Home</Link>
+      </div>
     </section>
   );
 }
