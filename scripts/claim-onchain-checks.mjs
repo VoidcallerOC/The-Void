@@ -8,7 +8,7 @@ import { Interface, getAddress } from "ethers";
 export const CLAIM_INTERFACE = new Interface([
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
   "function allocation() view returns (uint256)", "function publicAllocation() view returns (uint256)", "function claimStart() view returns (uint256)",
-  "function claimEnd() view returns (uint256)", "function publicSaleEnd() view returns (uint256)", "function publicPriceWei() view returns (uint256)",
+  "function claimEnd() view returns (uint256)", "function publicSaleStart() view returns (uint256)", "function publicSaleEnd() view returns (uint256)", "function publicPriceWei() view returns (uint256)",
   "function claimWindow() view returns (uint256)", "function publicWindow() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)", "function admin() view returns (address)", "function signer() view returns (address)",
   "function paused() view returns (bool)",
@@ -25,7 +25,7 @@ export function expectedClaimParameters(plan) {
     releaseContract: plan.target.releaseContract, primarySale: plan.target.primarySale, tokenId: plan.target.tokenId,
     allocation: plan.supply.claimAllocation, publicAllocation: plan.supply.publicAllocation,
     claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds,
-    claimEnd: plan.schedule.claimEnd, publicSaleEnd: plan.schedule.publicSaleEnd, publicPriceWei: plan.schedule.publicPriceWei,
+    claimEnd: plan.schedule.claimEnd, publicSaleStart: plan.schedule.publicSaleStart, publicSaleEnd: plan.schedule.publicSaleEnd, publicPriceWei: plan.schedule.publicPriceWei,
     ELIGIBILITY_RULE: plan.eligibility.rule, admin: plan.roles.admin, signer: plan.roles.signer,
   };
 }

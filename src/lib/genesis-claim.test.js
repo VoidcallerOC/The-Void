@@ -7,6 +7,7 @@ import {
   readGenesisClaimSaleGuard,
   requestGenesisVoucher,
   genesisClaimPhase,
+  genesisSaleOpen,
 } from "./genesis-claim.js";
 import { Interface } from "ethers";
 
@@ -122,11 +123,13 @@ describe("Genesis claim sale guard", () => {
     "function publicAllocation() view returns (uint256)",
     "function claimStart() view returns (uint256)",
     "function claimEnd() view returns (uint256)",
+    "function publicSaleStart() view returns (uint256)",
     "function publicSaleEnd() view returns (uint256)",
     "function publicPriceWei() view returns (uint256)",
     "function claimedSupply() view returns (uint256)",
   ]);
-  const onchain = { releaseContract: RELEASE, primarySale: SALE, tokenId: 55n, allocation: 0n, publicAllocation: 0n, claimStart: 1_791_000_000n, claimEnd: 1_791_086_400n, publicSaleEnd: 1_791_691_199n, publicPriceWei: 250_000_000_000_000_000n, claimedSupply: 4n };
+  // Concurrent phases: the sale opens with the claims (publicSaleStart == claimStart) and runs 7 days.
+  const onchain = { releaseContract: RELEASE, primarySale: SALE, tokenId: 55n, allocation: 0n, publicAllocation: 0n, claimStart: 1_791_000_000n, claimEnd: 1_791_086_400n, publicSaleStart: 1_791_000_000n, publicSaleEnd: 1_791_604_799n, publicPriceWei: 250_000_000_000_000_000n, claimedSupply: 4n };
   const provider = {
     request: vi.fn(async ({ method, params }) => {
       if (method === "eth_chainId") return "0xa869";
@@ -138,7 +141,7 @@ describe("Genesis claim sale guard", () => {
 
   it("reads the claim invariants when the claim targets this sale", async () => {
     await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target, nowSec: 1_791_086_399 })).resolves.toMatchObject({
-      state: "active", claimContract: CLAIM, allocation: 0n, publicAllocation: 0n, claimEnd: 1_791_086_400n, publicSaleEnd: 1_791_691_199n, publicPriceWei: 250_000_000_000_000_000n, live: true,
+      state: "active", claimContract: CLAIM, allocation: 0n, publicAllocation: 0n, claimStart: 1_791_000_000n, claimEnd: 1_791_086_400n, publicSaleStart: 1_791_000_000n, publicSaleEnd: 1_791_604_799n, publicPriceWei: 250_000_000_000_000_000n, live: true,
     });
     // Once the claim window closes, the sale is the artist's again.
     await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target, nowSec: 1_791_086_400 })).resolves.toMatchObject({ state: "active", live: false });
@@ -155,11 +158,35 @@ describe("Genesis claim sale guard", () => {
 });
 
 describe("Genesis claim phases", () => {
-  const schedule = { claimStart: "1000", claimEnd: "87400", publicSaleEnd: String(87_400 + 7 * 86_400 - 1) };
+  // claimStart + 24h claims, sale open from claimStart for 7 days (endTime inclusive).
+  const claimStart = 1000;
+  const claimEnd = claimStart + 86_400;
+  const publicSaleEnd = claimStart + 7 * 86_400 - 1;
+  const schedule = { claimStart: String(claimStart), claimEnd: String(claimEnd), publicSaleStart: String(claimStart), publicSaleEnd: String(publicSaleEnd) };
   it.each([
-    [999, "upcoming"], [1000, "genesis"], [87_399, "genesis"], [87_400, "public"],
-    [87_400 + 7 * 86_400 - 1, "public"], [87_400 + 7 * 86_400, "closed"],
+    [claimStart - 1, "upcoming"], [claimStart, "genesis"], [claimEnd - 1, "genesis"], [claimEnd, "public"],
+    [publicSaleEnd, "public"], [publicSaleEnd + 1, "closed"],
   ])("at %i the phase is %s", (now, phase) => {
     expect(genesisClaimPhase(schedule, now)).toBe(phase);
+  });
+
+  it("is in the Genesis phase while the paid mint is already open in the first window", () => {
+    for (const now of [claimStart, claimStart + 3600, claimEnd - 1]) {
+      expect(genesisClaimPhase(schedule, now)).toBe("genesis");
+      expect(genesisSaleOpen(schedule, now)).toBe(true);
+    }
+  });
+
+  it.each([
+    [claimStart - 1, false], [claimStart, true], [claimEnd - 1, true], [claimEnd, true],
+    [publicSaleEnd, true], [publicSaleEnd + 1, false],
+  ])("at %i the paid mint open is %s", (now, open) => {
+    expect(genesisSaleOpen(schedule, now)).toBe(open);
+  });
+
+  it("falls back to claimStart when the target has no publicSaleStart", () => {
+    const legacy = { claimStart: schedule.claimStart, claimEnd: schedule.claimEnd, publicSaleEnd: schedule.publicSaleEnd };
+    expect(genesisSaleOpen(legacy, claimStart - 1)).toBe(false);
+    expect(genesisSaleOpen(legacy, claimStart)).toBe(true);
   });
 });

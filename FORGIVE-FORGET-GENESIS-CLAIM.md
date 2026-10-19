@@ -172,17 +172,17 @@ The contract changes only its `ELIGIBILITY_RULE` text (`v3`) and comments.
 
 ## 3. Schedule and supply (contract-enforced)
 
-**Phases** (`T` = `claimStart`):
+**Phases** (`T` = `claimStart`). The free Genesis claim and the paid public mint open **together** at `T`; the claim closes after 24 hours while the public mint continues, and both close 7 days after `T` (`claimWindow < publicWindow` is required by the constructor):
 
 | Phase | Window | Enforced by |
 |---|---|---|
-| Genesis claim, free | `T ≤ t < T + 24h` | `GenesisHolderClaim.claim` (`ClaimNotOpen`, `ClaimWindowClosed`) |
-| Public mint, ungated, 0.25 AVAX | `T + 24h ≤ t ≤ T + 8d − 1` (exactly 7 days) | the token's own `VoidPrimarySale` (`SaleNotStarted`, `SaleEnded`, `WrongPayment`) |
-| Closed | `t ≥ T + 8d` | `SaleEnded` and the closed claim window. With option A, the edition's `mintEnd = T + 8d − 1` also refuses a direct issuer mint (`MintingEnded`); ‑28 (option A0) has no `mintEnd`. |
+| 1: Genesis claim (free) **and** public mint (ungated, 0.25 AVAX), both open | `T ≤ t < T + 24h` | `GenesisHolderClaim.claim` (`ClaimNotOpen`, `ClaimWindowClosed`) for the claim; the token's own `VoidPrimarySale` (`SaleNotStarted`, `WrongPayment`) for the mint |
+| 2: Public mint only, ungated, 0.25 AVAX | `T + 24h ≤ t ≤ T + 7d − 1` | `ClaimWindowClosed` on the claim; `VoidPrimarySale` (`SaleEnded`, `WrongPayment`) for the mint |
+| Closed | `t ≥ T + 7d` | `SaleEnded` and the closed claim window. With option A, the edition's `mintEnd = T + 7d − 1` also refuses a direct issuer mint (`MintingEnded`); ‑28 (option A0) has no `mintEnd`. |
 
 **On every claim, the claim contract re-checks the sale:**
-- the sale opens exactly at `claimEnd`;
-- it closes at `publicSaleEnd`;
+- the sale opens exactly at `claimStart` (together with the claims; `publicSaleStart == claimStart`);
+- it closes at `publicSaleEnd = claimStart + publicWindow − 1`;
 - its price is `publicPriceWei`;
 - its cap equals `publicAllocation`;
 - minted supply equals sold + claimed.
@@ -293,7 +293,7 @@ Each step needs the owner's explicit approval of its exact calldata, prepared as
 None of these rules disables a timing, price, signature, eligibility, role or replay check.
 
 **Fuji ‑28 test parameters** for a chosen start `T`:
-- sale: `configureSale(2567…3312, 10000000000000000, 0, 0, T + 300, T + 899, false)`;
+- sale: `configureSale(2567…3312, 10000000000000000, 0, 0, T, T + 599, false)`;
 - claim constructor: windows `300` and `600`, price `10000000000000000`;
 - API: `GENESIS_CLAIM_WINDOW_SECONDS=300`, `GENESIS_PUBLIC_WINDOW_SECONDS=600`.
 
@@ -332,8 +332,8 @@ Read-only facts:
 **Order on mainnet, each step a separate authorization:**
 1. A reviewed factory on 43114: Factory V2 source `3861d74` (live-proven on Fuji), or V3 after its audit and independent-review gates.
 2. Artist creates the release.
-3. Artist creates the open edition: `maxSupply 0`, royalty 250 bps to the artist, `mintEnd = T + 8d − 1` optional.
-4. `configureSale(token, 250000000000000000, 0, 0, T + 86400, T + 691199, false)`.
+3. Artist creates the open edition: `maxSupply 0`, royalty 250 bps to the artist, `mintEnd = T + 7d − 1` optional.
+4. `configureSale(token, 250000000000000000, 0, 0, T, T + 604799, false)` (the sale opens at `T` together with the claims and closes 7 days later).
 5. Dry run, then broadcast of the claim with windows 86,400 and 604,800.
 6. `grantRole(ISSUER_ROLE, claim)` before `T`.
 7. Mainnet API, indexer and frontend deployment and configuration.

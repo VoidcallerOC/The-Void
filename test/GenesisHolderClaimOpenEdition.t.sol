@@ -39,7 +39,8 @@ contract GenesisHolderClaimOpenEditionTest {
     uint256 internal constant T0 = 1_800_000_000;
     uint256 internal constant CLAIM_START = T0 + 1 hours;
     uint256 internal constant CLAIM_END = CLAIM_START + 1 days;
-    uint256 internal constant PUBLIC_END = CLAIM_END + 7 days - 1;
+    // The public sale opens with the claims at CLAIM_START and lasts exactly 7 days; claims close after 24h.
+    uint256 internal constant PUBLIC_END = CLAIM_START + 7 days - 1;
 
     VoidRelease1155V4 internal release;
     VoidPrimarySale internal sale;
@@ -63,7 +64,7 @@ contract GenesisHolderClaimOpenEditionTest {
         );
         // Sale cap 0 and per-wallet limit 0: no cap on an open edition.
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         claimContract = _deploy(CLAIM_START);
         bytes32 issuerRole = release.ISSUER_ROLE();
         vm.prank(ARTIST);
@@ -95,12 +96,12 @@ contract GenesisHolderClaimOpenEditionTest {
         vm.prank(ARTIST);
         uint256 capped = release.createEdition(RELEASE_KEY, cappedId, 10, "ipfs://capped", ARTIST, 0);
         vm.prank(ARTIST);
-        sale.configureSale(capped, PRICE, 10, 10, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(capped, PRICE, 10, 10, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
         new GenesisHolderClaim(address(release), address(sale), capped, 0, 10, CLAIM_START, 1 days, 7 days, PRICE, ADMIN, signer);
     }
 
-    // ---- Genesis phase: free, exactly 24 hours ----
+    // ---- Genesis claims: free, exactly 24 hours, concurrent with the public mint ----
 
     function testClaimRejectedBeforeTheClaimWindowOpens() public {
         vm.warp(CLAIM_START - 1);
@@ -170,18 +171,18 @@ contract GenesisHolderClaimOpenEditionTest {
         claimContract.claim(voucher, abi.encodePacked(r, s, v));
     }
 
-    // ---- public phase: ungated, 0.25 AVAX, exactly 7 days ----
+    // ---- public mint: ungated, 0.25 AVAX, exactly 7 days from the shared start ----
 
-    function testPublicMintBlockedUntilTheGenesisWindowEnds() public {
+    function testPublicMintRejectedBeforeTheSharedStart() public {
         vm.deal(COLLECTOR, PRICE);
-        vm.warp(CLAIM_END - 1);
+        vm.warp(CLAIM_START - 1);
         vm.expectPartialRevert(VoidPrimarySale.SaleNotStarted.selector);
         vm.prank(COLLECTOR);
         sale.purchase{value: PRICE}(tokenId, 1);
     }
 
     function testPublicMintIsUngatedAtExactlyQuarterAvaxFromTheFirstSecond() public {
-        vm.warp(CLAIM_END);
+        vm.warp(CLAIM_START);
         vm.deal(COLLECTOR, PRICE);
         vm.prank(COLLECTOR);
         sale.purchase{value: PRICE}(tokenId, 1);
@@ -193,7 +194,7 @@ contract GenesisHolderClaimOpenEditionTest {
     }
 
     function testWrongPaymentIsRejectedWithoutMintingOrKeepingFunds() public {
-        vm.warp(CLAIM_END);
+        vm.warp(CLAIM_START);
         vm.deal(COLLECTOR, 1 ether);
         uint256[2] memory wrong = [PRICE - 1, PRICE + 1];
         for (uint256 i = 0; i < wrong.length; i++) {
@@ -214,7 +215,8 @@ contract GenesisHolderClaimOpenEditionTest {
         vm.prank(COLLECTOR);
         sale.purchase{value: PRICE}(tokenId, 1);
         vm.warp(PUBLIC_END + 1);
-        require(PUBLIC_END + 1 - CLAIM_END == 7 days, "public window is not exactly 7 days");
+        require(PUBLIC_END + 1 - CLAIM_START == 7 days, "public window is not exactly 7 days");
+        require(claimContract.publicSaleStart() == CLAIM_START && claimContract.claimEnd() < claimContract.publicSaleEnd(), "schedule");
         vm.expectPartialRevert(VoidPrimarySale.SaleEnded.selector);
         vm.prank(COLLECTOR);
         sale.purchase{value: PRICE}(tokenId, 1);
@@ -238,16 +240,20 @@ contract GenesisHolderClaimOpenEditionTest {
     function testScheduleOrPriceDriftDuringClaimsFailsClosed() public {
         vm.warp(CLAIM_START);
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE - 1, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE - 1, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 10, 1), GenesisHolderClaim.PublicPriceChanged.selector);
+        // A sale that opens later than the claims (including the old sequential claimEnd) fails closed.
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END - 1), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START + 1), uint64(PUBLIC_END), false);
         _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 11, 1), GenesisHolderClaim.PublicSaleSchedule.selector);
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END + 1 days), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 15, 1), GenesisHolderClaim.PublicSaleSchedule.selector);
+        vm.prank(ARTIST);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END + 1 days), false);
         _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 12, 1), GenesisHolderClaim.PublicSaleSchedule.selector);
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         _claim(CLAIMANT, 13);
     }
 
@@ -258,15 +264,97 @@ contract GenesisHolderClaimOpenEditionTest {
         _deploy(CLAIM_START + 1);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
         new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 1 days, 7 days, 0, ADMIN, signer);
+        // Claims must close strictly before the public sale does.
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 7 days, 7 days, PRICE, ADMIN, signer);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 8 days, 7 days, PRICE, ADMIN, signer);
     }
 
+    // ---- concurrent phases: free claims and paid mints at the same time, one token, one supply ----
+
+    /// At one timestamp inside the claim window a Genesis holder claims for free (no value) and a
+    /// stranger pays exactly 0.25 AVAX; both receive the same token id of the same edition.
+    function testFreeClaimAndPaidMintAreBothOpenAtTheSameTimestamp() public {
+        vm.warp(CLAIM_START);
+        uint256 claimantBefore = CLAIMANT.balance;
+        _claim(CLAIMANT, 40);
+        vm.deal(COLLECTOR, PRICE);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(CLAIMANT.balance == claimantBefore, "free claim charged the claimant");
+        require(release.balanceOf(CLAIMANT, tokenId) == 1 && release.balanceOf(COLLECTOR, tokenId) == 1, "same token id for both paths");
+        require(claimContract.claimedSupply() == 1, "claimed supply");
+        (,, uint256 sold,,,,,) = sale.sales(tokenId);
+        require(sold == 1, "sold supply");
+        require(release.edition(tokenId).mintedSupply == 2, "shared edition supply");
+        require(address(sale).balance == PRICE && address(claimContract).balance == 0, "funds");
+    }
+
+    /// A wallet that claimed for free may still buy at the public price during the claim window.
+    function testClaimantCanAlsoBuyDuringTheClaimWindow() public {
+        vm.warp(CLAIM_START);
+        _claim(CLAIMANT, 41);
+        vm.deal(CLAIMANT, PRICE);
+        vm.prank(CLAIMANT);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(release.balanceOf(CLAIMANT, tokenId) == 2, "one free + one bought");
+        require(claimContract.claimedSupply() == 1, "the purchase is not a claim");
+        (,, uint256 sold,,,,,) = sale.sales(tokenId);
+        require(sold == 1, "the claim is not a sale");
+        _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 42, 1), GenesisHolderClaim.AlreadyClaimed.selector);
+    }
+
+    /// A wallet that bought first keeps its free claim; the purchase neither consumes nor disables it.
+    function testBuyerKeepsTheFreeClaim() public {
+        vm.warp(CLAIM_START);
+        vm.deal(CLAIMANT, PRICE);
+        vm.prank(CLAIMANT);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(!claimContract.hasClaimed(CLAIMANT), "a purchase must not mark the wallet as claimed");
+        _claim(CLAIMANT, 43);
+        require(release.balanceOf(CLAIMANT, tokenId) == 2, "one bought + one free");
+        require(claimContract.hasClaimed(CLAIMANT) && claimContract.claimedSupply() == 1, "claim recorded once");
+        (,, uint256 sold,,,,,) = sale.sales(tokenId);
+        require(sold == 1, "exactly one sale");
+    }
+
+    /// Hour 24: free claims close while paid minting continues until the sale's own end.
+    function testAtClaimEndClaimsCloseWhilePaidMintingContinues() public {
+        vm.deal(COLLECTOR, PRICE * 3);
+        vm.warp(CLAIM_END - 1);
+        _claim(CLAIMANT, 44);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        vm.warp(CLAIM_END);
+        _expectClaimRevert(CLAIMANT_TWO, _voucher(CLAIMANT_TWO, 45, 1), GenesisHolderClaim.ClaimWindowClosed.selector);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        vm.warp(PUBLIC_END);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(release.balanceOf(COLLECTOR, tokenId) == 3 && claimContract.claimedSupply() == 1, "balances");
+    }
+
+    /// Interleaved claims and purchases at the same timestamps keep mintedSupply == sold + claimed.
     function testMixedClaimAndPublicSaleAccountingRemainsExact() public {
         vm.warp(CLAIM_START);
-        _claim(CLAIMANT, 14);
-        vm.warp(CLAIM_END);
-        vm.deal(CLAIMANT_TWO, PRICE * 3);
-        vm.prank(CLAIMANT_TWO);
-        sale.purchase{value: PRICE * 3}(tokenId, 3);
+        vm.deal(CLAIMANT_TWO, PRICE * 25);
+        vm.deal(COLLECTOR, PRICE * 25);
+        for (uint256 i = 0; i < 6; i++) {
+            address claimant = address(uint160(0x20000 + i));
+            _claim(claimant, 50 + i);
+            _assertAccounting();
+            vm.prank(i % 2 == 0 ? CLAIMANT_TWO : COLLECTOR);
+            sale.purchase{value: PRICE * (i + 1)}(tokenId, i + 1);
+            _assertAccounting();
+            vm.warp(block.timestamp + 1 hours);
+        }
+        (,, uint256 sold,,,,,) = sale.sales(tokenId);
+        require(claimContract.claimedSupply() == 6 && sold == 21 && release.edition(tokenId).mintedSupply == 27, "totals");
+    }
+
+    function _assertAccounting() internal view {
         (,, uint256 sold,,,,,) = sale.sales(tokenId);
         require(release.edition(tokenId).mintedSupply == claimContract.claimedSupply() + sold, "mixed accounting mismatch");
     }
@@ -283,7 +371,6 @@ contract GenesisHolderClaimOpenEditionTest {
         _claim(CLAIMANT_TWO, 22);
         _expectClaimRevert(address(0xCA13), _voucher(address(0xCA13), 23, 1), GenesisHolderClaim.AllocationExhausted.selector);
         require(claimContract.claimedSupply() == 2, "claim cap not applied");
-        vm.warp(CLAIM_END);
         vm.deal(CLAIMANT, PRICE * 50);
         vm.prank(CLAIMANT);
         sale.purchase{value: PRICE * 50}(tokenId, 50);

@@ -62,7 +62,8 @@ contract GenesisHolderClaimTest {
         vm.prank(ARTIST);
         uint256 actualTokenId = release.createEdition(RELEASE_KEY, EDITION_ID, 10, "ipfs://claim-edition", ARTIST, 0);
         tokenId = actualTokenId;
-        uint64 saleStart = uint64(block.timestamp + 1 days);
+        // The public sale opens together with the claims and lasts 7 days; claims close after 1 day.
+        uint64 saleStart = uint64(block.timestamp);
         vm.prank(ARTIST);
         sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, saleStart, saleStart + 7 days - 1, false);
         claimContract = _deploy(block.timestamp);
@@ -300,17 +301,28 @@ contract GenesisHolderClaimTest {
         );
     }
 
-    function testPublicSaleMustOpenExactlyWhenClaimsClose() public {
-        uint64 tooSoon = uint64(block.timestamp + 1 hours);
+    function testPublicSaleMustOpenTogetherWithTheClaims() public {
+        uint64 start = uint64(block.timestamp);
+        // Later than the claims (one hour) and the old sequential handover (claimEnd) both fail closed.
+        uint64[2] memory wrongStarts = [start + 1 hours, start + 1 days];
+        for (uint256 i = 0; i < wrongStarts.length; i++) {
+            vm.prank(ARTIST);
+            sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, wrongStarts[i], start + 7 days - 1, false);
+            vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
+            _deploy(block.timestamp);
+        }
+        // A sale that ends at any other time fails closed too.
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, tooSoon, tooSoon + 7 days - 1, false);
+        sale.configureSale(tokenId, PRICE, PUBLIC_ALLOCATION, PUBLIC_ALLOCATION, start, start + 7 days, false);
         vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
         _deploy(block.timestamp);
     }
 
-    function testClaimRedemptionClosesWhenPublicSaleOpens() public {
-        (,,,, uint64 saleStart,,,) = sale.sales(tokenId);
-        vm.warp(saleStart);
+    function testClaimRedemptionClosesAtClaimEndWhileTheSaleStaysOpen() public {
+        (,,,, uint64 saleStart, uint64 saleEnd,,) = sale.sales(tokenId);
+        require(uint256(saleStart) == claimContract.publicSaleStart() && claimContract.publicSaleStart() == claimContract.claimStart(), "sale opens with the claims");
+        require(claimContract.claimEnd() < uint256(saleEnd) && uint256(saleEnd) == claimContract.publicSaleEnd(), "claims close before the sale");
+        vm.warp(claimContract.claimEnd());
         GenesisHolderClaim.ClaimVoucher memory voucher = _voucher(CLAIMANT, 33, 1, block.timestamp + 300);
         _expectClaimRevert(
             CLAIMANT, voucher, _sign(claimContract, voucher, signerKey), GenesisHolderClaim.ClaimWindowClosed.selector

@@ -26,7 +26,8 @@ const TEST_SIGNATURE = `0x${"ab".repeat(65)}`;
 const NOW = 1_800_000_000;
 const CLAIM_START = NOW - 60;
 const CLAIM_END = CLAIM_START + 86_400;
-const PUBLIC_END = CLAIM_END + 7 * 86_400 - 1;
+// The paid sale opens with the claims; its inclusive end gives exactly seven days.
+const PUBLIC_END = CLAIM_START + 7 * 86_400 - 1;
 const PRICE = 250_000_000_000_000_000n; // 0.25 AVAX
 const ISSUER_ROLE = id("ISSUER_ROLE");
 
@@ -388,6 +389,7 @@ describe("Genesis claim vouchers", () => {
       publicAllocation: "0",
       claimStart: String(CLAIM_START),
       claimEnd: String(CLAIM_END),
+      publicSaleStart: String(CLAIM_START),
       publicSaleEnd: String(PUBLIC_END),
       publicPriceWei: PRICE.toString(),
       eligibility: "live",
@@ -442,6 +444,14 @@ describe("Genesis claim vouchers", () => {
     expect(issued.voucher.deadline).toBe(String(CLAIM_END - 1));
   });
 
+  it("still issues a voucher capped at the claim window while the concurrent paid sale is open", async () => {
+    // Real binding verification against a sale that opened at claimStart, together with the claims.
+    const { instance } = service({ clock: CLAIM_END - 10, destinationProvider: fujiChain(), bindingReader: undefined });
+    const issued = await instance.issueVoucher(WALLET);
+    expect(issued.voucher.deadline).toBe(String(CLAIM_END - 1));
+    expect(issued.target).toMatchObject({ publicSaleStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleEnd: String(PUBLIC_END) });
+  });
+
   it("rejects already-claimed wallets on the destination contract", async () => {
     const { instance, signTypedData } = service({ alreadyClaimed: true });
     await expect(instance.issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
@@ -467,7 +477,7 @@ describe("Genesis claim vouchers", () => {
 const claimIface = new Interface([
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
   "function allocation() view returns (uint256)", "function publicAllocation() view returns (uint256)", "function destinationChainId() view returns (uint256)",
-  "function claimStart() view returns (uint256)", "function claimEnd() view returns (uint256)", "function publicSaleEnd() view returns (uint256)",
+  "function claimStart() view returns (uint256)", "function claimEnd() view returns (uint256)", "function publicSaleStart() view returns (uint256)", "function publicSaleEnd() view returns (uint256)",
   "function claimWindow() view returns (uint256)", "function publicWindow() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)", "function GENESIS_CONTRACT() view returns (address)", "function GENESIS_CHAIN_ID() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)", "function signer() view returns (address)", "function claimedSupply() view returns (uint256)",
@@ -484,13 +494,14 @@ const saleIface = new Interface(["function sales(uint256 tokenId) view returns (
 function fujiChain(drift = {}) {
   const claimValues = {
     releaseContract: RELEASE, primarySale: SALE, tokenId: 987654321n, allocation: 0n, publicAllocation: 0n, destinationChainId: 43113n,
-    claimStart: BigInt(CLAIM_START), claimEnd: BigInt(CLAIM_END), publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE,
+    claimStart: BigInt(CLAIM_START), claimEnd: BigInt(CLAIM_END), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE,
     claimWindow: 86_400n, publicWindow: 604_800n,
     GENESIS_CONTRACT, GENESIS_CHAIN_ID: 43114n,
     ELIGIBILITY_RULE,
     signer: SIGNER, claimedSupply: 3n, ...drift.claim,
   };
-  const sale = { priceWei: PRICE, maxSupply: 0n, sold: 4n, perWalletLimit: 0n, startTime: BigInt(CLAIM_END), endTime: BigInt(PUBLIC_END), paused: false, configured: true, ...drift.sale };
+  // The paid sale runs concurrently with the claims: it opens at claimStart, not at claimEnd.
+  const sale = { priceWei: PRICE, maxSupply: 0n, sold: 4n, perWalletLimit: 0n, startTime: BigInt(CLAIM_START), endTime: BigInt(PUBLIC_END), paused: false, configured: true, ...drift.sale };
   const minted = drift.minted ?? 7n;
   return {
     getNetwork: async () => ({ chainId: 43113n }),
@@ -521,8 +532,10 @@ describe("live claim binding verification", () => {
 
   it.each([
     ["a different sale price", { sale: { priceWei: PRICE - 1n } }],
-    ["a public start before the claim window ends", { sale: { startTime: BigInt(CLAIM_END - 1) } }],
+    ["a public start after the claims open", { sale: { startTime: BigInt(CLAIM_START + 1) } }],
+    ["a public start at the old claimEnd", { sale: { startTime: BigInt(CLAIM_END) } }],
     ["a public end after seven days", { sale: { endTime: BigInt(PUBLIC_END + 1) } }],
+    ["a claim whose public start is not its claim start", { claim: { publicSaleStart: BigInt(CLAIM_END) } }],
     ["an invented sale cap", { sale: { maxSupply: 100n } }],
     ["an unconfigured sale", { sale: { configured: false } }],
     ["supply accounting drift", { minted: 8n }],
@@ -547,7 +560,7 @@ describe("GET /api/claims/config with the real claim service", () => {
     await handlerFor(fujiChain())(requestDouble(), response);
     expect(response.status).toBe(200);
     const data = JSON.parse(response.body).data;
-    expect(data).toMatchObject({ enabled: true, destinationChainId: 43113, releaseContract: getAddress(RELEASE), primarySale: getAddress(SALE), claimContract: getAddress(CLAIM), tokenId: "987654321", allocation: "0", publicAllocation: "0", claimEnd: String(CLAIM_END), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString(), eligibility: "live" });
+    expect(data).toMatchObject({ enabled: true, destinationChainId: 43113, releaseContract: getAddress(RELEASE), primarySale: getAddress(SALE), claimContract: getAddress(CLAIM), tokenId: "987654321", allocation: "0", publicAllocation: "0", claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleStart: String(CLAIM_START), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString(), eligibility: "live" });
     expect(response.body).not.toContain("11".repeat(32));
   });
 
@@ -564,7 +577,14 @@ describe("environment schedule and price", () => {
 
   it("lets Fuji run an accelerated 5-minute claim and 10-minute public sale at 0.01 AVAX", () => {
     const loaded = loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" });
-    expect(loaded).toMatchObject({ destinationChainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleEnd: BigInt(CLAIM_START + 899), publicPriceWei: 10_000_000_000_000_000n });
+    expect(loaded).toMatchObject({ destinationChainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(CLAIM_START + 599), publicPriceWei: 10_000_000_000_000_000n });
+  });
+
+  it.each([
+    ["equal to", { GENESIS_CLAIM_WINDOW_SECONDS: "600", GENESIS_PUBLIC_WINDOW_SECONDS: "600" }],
+    ["longer than", { GENESIS_CLAIM_WINDOW_SECONDS: "601", GENESIS_PUBLIC_WINDOW_SECONDS: "600" }],
+  ])("refuses a Fuji claim window %s the public window", (_label, override) => {
+    expect(() => loadGenesisClaimConfig({ ...ENV, ...override })).toThrow(/before the public sale ends/i);
   });
 
   it("defaults to the production 24 hours and 7 days when no windows are set", () => {
@@ -596,7 +616,7 @@ describe("Genesis claim configuration", () => {
 
   it("loads an uncapped open-edition target with its fixed schedule and the live-ownership rule", () => {
     const loaded = loadGenesisClaimConfig(ENV);
-    expect(loaded).toMatchObject({ allocation: 0n, publicAllocation: 0n, claimStart: BigInt(CLAIM_START), claimEnd: BigInt(CLAIM_END), publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE, eligibilityRule: ELIGIBILITY_RULE });
+    expect(loaded).toMatchObject({ allocation: 0n, publicAllocation: 0n, claimStart: BigInt(CLAIM_START), claimEnd: BigInt(CLAIM_END), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE, eligibilityRule: ELIGIBILITY_RULE });
   });
 
   it("ignores obsolete snapshot settings", () => {

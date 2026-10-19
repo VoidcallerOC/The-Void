@@ -464,10 +464,12 @@ describe("Artist Studio live primary sale", () => {
   });
 
   it("warns about a Genesis holder claim and blocks edits that break its invariants", async () => {
-    const claimEnd = NOW_SEC - 3600n + 86_400n;
-    const publicSaleEnd = claimEnd + 7n * 86_400n - 1n;
-    const sale = chainSale({ maxSupply: 20n, startTime: claimEnd, endTime: publicSaleEnd, remaining: 20n });
-    const claim = { state: "active", claimContract: "0x6666666666666666666666666666666666666666", allocation: 5n, publicAllocation: 20n, claimEnd, publicSaleEnd, publicPriceWei: sale.priceWei, claimedSupply: 1n, live: true };
+    const claimStart = NOW_SEC - 3600n;
+    const claimEnd = claimStart + 86_400n;
+    const publicSaleStart = claimStart; // the paid mint opens together with the claims
+    const publicSaleEnd = claimStart + 7n * 86_400n - 1n;
+    const sale = chainSale({ maxSupply: 20n, startTime: publicSaleStart, endTime: publicSaleEnd, remaining: 20n });
+    const claim = { state: "active", claimContract: "0x6666666666666666666666666666666666666666", allocation: 5n, publicAllocation: 20n, claimStart, claimEnd, publicSaleStart, publicSaleEnd, publicPriceWei: sale.priceWei, claimedSupply: 1n, live: true };
     renderSaleStep({ sale, editionSupply: 25n, claim });
     const warning = await screen.findByText(/Genesis holder claim is configured for this token/);
     expect(warning.closest("[role=alert]").textContent).toContain("The sale cap must stay 20");

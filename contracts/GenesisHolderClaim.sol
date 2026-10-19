@@ -35,8 +35,10 @@ interface IGenesisClaimSale {
 /// @title GenesisHolderClaim
 /// @notice One release-specific voucher redemption gate. Minting is delegated to the
 /// release's existing ISSUER_ROLE path; this contract can mint only its immutable token.
-/// @dev Fixed schedule: free Genesis claims for exactly claimWindow from claimStart, then the
-/// token's own primary sale must open at claimEnd and close publicWindow later at publicPriceWei.
+/// @dev Fixed schedule, concurrent phases: the token's own primary sale opens at claimStart and stays
+/// open for exactly publicWindow at publicPriceWei; free Genesis claims run concurrently for the first
+/// claimWindow of that sale (claimStart <= t < claimEnd) and then close while paid minting continues
+/// until publicSaleEnd, when both paths close. claimWindow must be shorter than publicWindow.
 /// On C-Chain (43114) the windows must be the production 24 hours and 7 days at the production
 /// 0.25 AVAX price; only Fuji may use shorter test windows (never below MINIMUM_TEST_WINDOW) and
 /// another price.
@@ -97,8 +99,10 @@ contract GenesisHolderClaim {
     uint256 public immutable claimWindow;
     uint256 public immutable publicWindow;
     uint256 public immutable claimEnd;
+    /// @notice The sale's startTime: the public sale opens together with the claims, at claimStart.
+    uint256 public immutable publicSaleStart;
     /// @notice The sale's endTime. VoidPrimarySale accepts purchases while startTime <= now <= endTime,
-    /// so endTime = claimEnd + publicWindow - 1 gives a public window of exactly publicWindow.
+    /// so endTime = claimStart + publicWindow - 1 gives a public window of exactly publicWindow.
     uint256 public immutable publicSaleEnd;
     uint256 public immutable publicPriceWei;
 
@@ -165,7 +169,7 @@ contract GenesisHolderClaim {
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         if (block.chainid == GENESIS_CHAIN_ID) {
-            // Production: exactly 24 hours of Genesis claims, then exactly 7 days of public sale at 0.25 AVAX.
+            // Production: a 7-day public sale at 0.25 AVAX, with free Genesis claims during its first 24 hours.
             if (
                 claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW
                     || publicPriceWei_ != PRODUCTION_PUBLIC_PRICE_WEI
@@ -173,6 +177,8 @@ contract GenesisHolderClaim {
         } else if (claimWindow_ < MINIMUM_TEST_WINDOW || publicWindow_ < MINIMUM_TEST_WINDOW) {
             revert InvalidConfiguration();
         }
+        // Claims close strictly before the sale does: claimEnd < publicSaleEnd.
+        if (claimWindow_ >= publicWindow_) revert InvalidConfiguration();
         uint256 releaseMaxSupply = IGenesisClaimRelease(releaseContract_).maxSupplyOf(tokenId_);
         if (releaseMaxSupply != 0) {
             // A capped edition needs finite, non-overlapping claim and public allocations.
@@ -192,7 +198,8 @@ contract GenesisHolderClaim {
         claimWindow = claimWindow_;
         publicWindow = publicWindow_;
         claimEnd = claimStart_ + claimWindow_;
-        publicSaleEnd = claimStart_ + claimWindow_ + publicWindow_ - 1;
+        publicSaleStart = claimStart_;
+        publicSaleEnd = claimStart_ + publicWindow_ - 1;
         publicPriceWei = publicPriceWei_;
         admin = admin_;
         signer = signer_;
@@ -264,16 +271,17 @@ contract GenesisHolderClaim {
         );
     }
 
-    /// @dev The public sale must be exactly the scheduled phase: it opens when claims close, stays open
-    /// for publicWindow at publicPriceWei, and its cap is publicAllocation (0 = uncapped).
+    /// @dev The public sale must be exactly the scheduled phase: it opens with the claims at claimStart,
+    /// stays open for publicWindow at publicPriceWei, and its cap is publicAllocation (0 = uncapped).
+    /// Claims run concurrently with the sale and close at claimEnd without affecting it.
     function _assertPublicAllocation() private view {
         (uint256 salePrice, uint256 saleMaxSupply, uint256 saleSold,, uint64 saleStart, uint64 saleEnd,, bool configured) =
             IGenesisClaimSale(primarySale).sales(tokenId);
         if (!configured || saleMaxSupply != publicAllocation) {
             revert PublicAllocationChanged(publicAllocation, saleMaxSupply);
         }
-        if (uint256(saleStart) != claimEnd || uint256(saleEnd) != publicSaleEnd) {
-            revert PublicSaleSchedule(saleStart, saleEnd, claimEnd, publicSaleEnd);
+        if (uint256(saleStart) != publicSaleStart || uint256(saleEnd) != publicSaleEnd) {
+            revert PublicSaleSchedule(saleStart, saleEnd, publicSaleStart, publicSaleEnd);
         }
         if (salePrice != publicPriceWei) revert PublicPriceChanged(publicPriceWei, salePrice);
         IGenesisClaimRelease.EditionData memory editionData = IGenesisClaimRelease(releaseContract).edition(tokenId);

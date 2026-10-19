@@ -12,7 +12,8 @@ import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError,
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
 // C-Chain mainnet (production 24 hours / 7 days at 0.25 AVAX only, enforced here, by the API and
 // by the contract). The token's VoidPrimarySale must already be
-// configured as the public phase (open at claimStart + 24 h, close 7 days later, at the public price),
+// configured as the public phase (open at claimStart together with the claims, close 7 days after
+// claimStart, at the public price; claims close 24 h in while the sale continues),
 // and the edition must have no mints other than sale purchases. Everything is read-only until a
 // broadcast is explicitly confirmed; the default path is a dry run that simulates the constructor.
 // The script never grants roles, edits config/ or touches the API: those follow-ups are printed.
@@ -48,7 +49,7 @@ const SALE = new Interface([
 const CLAIM = new Interface([
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
   "function allocation() view returns (uint256)", "function publicAllocation() view returns (uint256)", "function claimStart() view returns (uint256)",
-  "function claimEnd() view returns (uint256)", "function publicSaleEnd() view returns (uint256)", "function publicPriceWei() view returns (uint256)",
+  "function claimEnd() view returns (uint256)", "function publicSaleStart() view returns (uint256)", "function publicSaleEnd() view returns (uint256)", "function publicPriceWei() view returns (uint256)",
   "function claimWindow() view returns (uint256)", "function publicWindow() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)", "function admin() view returns (address)", "function signer() view returns (address)",
 ]);
@@ -161,7 +162,9 @@ export function validateClaimDeploymentEnv(env = process.env) {
     claimWindow: schedule.claimWindow,
     publicWindow: schedule.publicWindow,
     claimEnd: claimStart + schedule.claimWindow,
-    publicSaleEnd: claimStart + schedule.claimWindow + schedule.publicWindow - 1n,
+    // The sale opens together with the claims and outlives them (claimWindow < publicWindow).
+    publicSaleStart: claimStart,
+    publicSaleEnd: claimStart + schedule.publicWindow - 1n,
     publicPriceWei,
     expectOpenEdition: openText === "yes",
     admin,
@@ -213,10 +216,10 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
   const [bound] = await read(provider, SALE, config.primarySale, "releases");
   if (getAddress(bound) !== config.releaseContract) throw new DeploymentError(`The primary sale ${config.primarySale} sells release ${getAddress(bound)}, not ${config.releaseContract}.`);
   const sale = await read(provider, SALE, config.primarySale, "sales", [config.tokenId]);
-  const expected = { configured: true, priceWei: config.publicPriceWei, maxSupply: config.publicAllocation, startTime: config.claimEnd, endTime: config.publicSaleEnd };
+  const expected = { configured: true, priceWei: config.publicPriceWei, maxSupply: config.publicAllocation, startTime: config.publicSaleStart, endTime: config.publicSaleEnd };
   if (!sale.configured) throw new DeploymentError("The token's primary sale is not configured. Configure the public phase before deploying the claim.");
   for (const field of ["priceWei", "maxSupply", "startTime", "endTime"]) {
-    if (BigInt(sale[field]) !== expected[field]) throw new DeploymentError(`Sale ${field} is ${sale[field]}, expected ${expected[field]} (public phase: opens at claimStart + ${config.claimWindow}s, lasts ${config.publicWindow}s, at the public price).`);
+    if (BigInt(sale[field]) !== expected[field]) throw new DeploymentError(`Sale ${field} is ${sale[field]}, expected ${expected[field]} (public phase: opens at claimStart together with the claims, lasts ${config.publicWindow}s, at the public price).`);
   }
   if (BigInt(edition.mintedSupply) !== BigInt(sale.sold)) throw new DeploymentError(`The edition has ${edition.mintedSupply} minted but the sale sold ${sale.sold}: another mint path exists, so claim accounting would fail.`);
 
@@ -258,7 +261,7 @@ export function buildPlan(config, facts) {
     deployerNonce: facts.deployerNonce,
     predictedClaimAddress: facts.predictedClaim,
     target: { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, edition: facts.edition, sale: facts.sale },
-    schedule: { claimStart: config.claimStart, claimWindowSeconds: config.claimWindow, claimEnd: config.claimEnd, publicSaleOpens: config.claimEnd, publicWindowSeconds: config.publicWindow, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, sale: `configureSale(tokenId, ${config.publicPriceWei}, ${config.publicAllocation}, 0, ${config.claimEnd}, ${config.publicSaleEnd}, false)` },
+    schedule: { claimStart: config.claimStart, claimWindowSeconds: config.claimWindow, claimEnd: config.claimEnd, publicSaleStart: config.publicSaleStart, publicSaleOpens: config.publicSaleStart, publicWindowSeconds: config.publicWindow, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, sale: `configureSale(tokenId, ${config.publicPriceWei}, ${config.publicAllocation}, 0, ${config.publicSaleStart}, ${config.publicSaleEnd}, false)` },
     supply: { claimAllocation: config.allocation, publicAllocation: config.publicAllocation, meaning: config.allocation === 0n && config.publicAllocation === 0n ? "uncapped open edition: one claim per eligible wallet, no sale cap" : "finite allocations" },
     eligibility: { chainId: GENESIS_CHAIN_ID, genesisContract: GENESIS_CONTRACT, source: facts.eligibility.source, ruleText: facts.eligibility.text, rule: facts.eligibility.rule },
     roles: { admin: config.admin, signer: config.signer },
@@ -392,8 +395,8 @@ export async function broadcastClaim(config, provider, facts, { artifact, log = 
   log({ step: "CLAIM_MINED", claimAddress, transaction: receipt.hash, block: receipt.blockNumber, from: receipt.from });
   if (claimAddress !== facts.predictedClaim) throw new DeploymentError(`GenesisHolderClaim was mined at ${claimAddress}, not the predicted ${facts.predictedClaim}.`);
   const onchain = {};
-  for (const name of ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "admin", "signer"]) [onchain[name]] = await read(provider, CLAIM, claimAddress, name);
-  const expected = { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, allocation: config.allocation, publicAllocation: config.publicAllocation, claimStart: config.claimStart, claimWindow: config.claimWindow, publicWindow: config.publicWindow, claimEnd: config.claimEnd, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, ELIGIBILITY_RULE: facts.eligibility.rule, admin: config.admin, signer: config.signer };
+  for (const name of ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "admin", "signer"]) [onchain[name]] = await read(provider, CLAIM, claimAddress, name);
+  const expected = { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, allocation: config.allocation, publicAllocation: config.publicAllocation, claimStart: config.claimStart, claimWindow: config.claimWindow, publicWindow: config.publicWindow, claimEnd: config.claimEnd, publicSaleStart: config.publicSaleStart, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, ELIGIBILITY_RULE: facts.eligibility.rule, admin: config.admin, signer: config.signer };
   const mismatched = Object.keys(expected).filter((name) => String(onchain[name]).toLowerCase() !== String(expected[name]).toLowerCase());
   if (mismatched.length) throw new DeploymentError(`The mined claim does not match the reviewed parameters: ${mismatched.join(", ")}.`);
   const recordPath = `deployments/genesis-claim-${config.network}-${claimAddress}.json`;

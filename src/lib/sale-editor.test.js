@@ -38,15 +38,20 @@ describe("sale editor", () => {
   });
 
   it("enforces Genesis claim invariants only while they apply", () => {
-    const claimEnd = BigInt(NOW + 86_400);
-    const publicSaleEnd = claimEnd + 7n * 86_400n - 1n;
-    const claim = { state: "active", publicAllocation: 0n, claimEnd, publicSaleEnd, publicPriceWei: 25n * 10n ** 16n, live: true };
-    const values = { maxSupply: 0n, startTime: claimEnd, endTime: publicSaleEnd, priceWei: 25n * 10n ** 16n };
+    // Concurrent phases: the paid sale opens together with the claims and outlives them by 6 days.
+    const claimStart = BigInt(NOW - 3600);
+    const claimEnd = claimStart + 86_400n;
+    const publicSaleStart = claimStart;
+    const publicSaleEnd = claimStart + 7n * 86_400n - 1n;
+    const claim = { state: "active", publicAllocation: 0n, claimStart, claimEnd, publicSaleStart, publicSaleEnd, publicPriceWei: 25n * 10n ** 16n, live: true };
+    const values = { maxSupply: 0n, startTime: publicSaleStart, endTime: publicSaleEnd, priceWei: 25n * 10n ** 16n };
     expect(claimGuardErrors(values, claim)).toEqual([]);
     expect(claimGuardErrors({ ...values, maxSupply: 50n }, claim)[0]).toMatch(/must stay uncapped/);
     expect(claimGuardErrors({ ...values, maxSupply: 0n }, { ...claim, publicAllocation: 20n })[0]).toMatch(/sale cap must stay 20/);
-    expect(claimGuardErrors({ ...values, startTime: 0n }, claim)[0]).toMatch(/must open exactly when they close/);
-    expect(claimGuardErrors({ ...values, endTime: publicSaleEnd + 1n }, claim)[0]).toMatch(/must open exactly when they close/);
+    expect(claimGuardErrors({ ...values, startTime: 0n }, claim)[0]).toMatch(/open together with the claims/);
+    // The old sequential schedule (sale opening when the claims close) is now a broken sale.
+    expect(claimGuardErrors({ ...values, startTime: claimEnd }, claim)[0]).toMatch(/open together with the claims/);
+    expect(claimGuardErrors({ ...values, endTime: publicSaleEnd + 1n }, claim)[0]).toMatch(/open together with the claims/);
     expect(claimGuardErrors({ ...values, priceWei: 1n }, claim)[0]).toMatch(/public price can't change/);
     expect(claimGuardErrors({ ...values, startTime: 0n, priceWei: 1n }, { ...claim, live: false })).toEqual([]);
     expect(claimGuardErrors(values, { state: "unknown", message: "offline" })[0]).toMatch(/could not be checked: offline/);

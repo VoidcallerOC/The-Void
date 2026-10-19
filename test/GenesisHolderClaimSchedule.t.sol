@@ -51,7 +51,9 @@ contract GenesisHolderClaimScheduleTest {
 
     function _configure(uint256 price, uint256 claimWindow, uint256 publicWindow) internal {
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, price, 0, 0, uint64(START + claimWindow), uint64(START + claimWindow + publicWindow - 1), false);
+        // The sale opens with the claims at START and lasts publicWindow; claimWindow only bounds the free claims.
+        claimWindow;
+        sale.configureSale(tokenId, price, 0, 0, uint64(START), uint64(START + publicWindow - 1), false);
     }
 
     function _deploy(uint256 price, uint256 claimWindow, uint256 publicWindow) internal returns (GenesisHolderClaim claim) {
@@ -80,18 +82,24 @@ contract GenesisHolderClaimScheduleTest {
         claim.claim(voucher, signature);
     }
 
-    function testFujiAcceleratedFiveMinuteClaimThenTenMinutePublicAtOneCent() public {
+    function testFujiAcceleratedFiveMinuteClaimInsideATenMinutePublicSaleAtOneCent() public {
         _setUpChain(43113);
         uint256 price = 0.01 ether;
         _configure(price, 5 minutes, 10 minutes);
         GenesisHolderClaim claim = _deploy(price, 5 minutes, 10 minutes);
-        require(claim.claimEnd() == START + 5 minutes && claim.publicSaleEnd() == START + 15 minutes - 1, "schedule");
-        vm.warp(START + 5 minutes - 1);
-        _claim(claim, 1);
+        require(claim.publicSaleStart() == START && claim.claimEnd() == START + 5 minutes && claim.publicSaleEnd() == START + 10 minutes - 1, "schedule");
         vm.deal(COLLECTOR, 1 ether);
+        // Before the shared start neither path is open.
+        vm.warp(START - 1);
         vm.expectPartialRevert(VoidPrimarySale.SaleNotStarted.selector);
         vm.prank(COLLECTOR);
         sale.purchase{value: price}(tokenId, 1);
+        // Inside the claim window both paths are open at the same timestamp.
+        vm.warp(START + 5 minutes - 1);
+        _claim(claim, 1);
+        vm.prank(COLLECTOR);
+        sale.purchase{value: price}(tokenId, 1);
+        // At claimEnd the free claim closes while the paid mint continues.
         vm.warp(START + 5 minutes);
         (GenesisHolderClaim.ClaimVoucher memory late, bytes memory lateSignature) = _signed(claim, 2);
         vm.expectPartialRevert(GenesisHolderClaim.ClaimWindowClosed.selector);
@@ -102,15 +110,29 @@ contract GenesisHolderClaimScheduleTest {
         vm.expectPartialRevert(VoidPrimarySale.WrongPayment.selector);
         vm.prank(COLLECTOR);
         sale.purchase{value: 0.25 ether}(tokenId, 1);
-        vm.warp(START + 15 minutes - 1);
+        vm.warp(START + 10 minutes - 1);
         vm.prank(COLLECTOR);
         sale.purchase{value: price}(tokenId, 1);
-        vm.warp(START + 15 minutes);
+        // At publicSaleEnd + 1 both paths are closed.
+        vm.warp(START + 10 minutes);
         vm.expectPartialRevert(VoidPrimarySale.SaleEnded.selector);
         vm.prank(COLLECTOR);
         sale.purchase{value: price}(tokenId, 1);
-        require(release.balanceOf(COLLECTOR, tokenId) == 2 && release.balanceOf(CLAIMANT, tokenId) == 1, "balances");
-        require(address(sale).balance == 2 * price, "funds");
+        (GenesisHolderClaim.ClaimVoucher memory closed, bytes memory closedSignature) = _signed(claim, 3);
+        vm.expectPartialRevert(GenesisHolderClaim.ClaimWindowClosed.selector);
+        vm.prank(CLAIMANT);
+        claim.claim(closed, closedSignature);
+        require(release.balanceOf(COLLECTOR, tokenId) == 3 && release.balanceOf(CLAIMANT, tokenId) == 1, "balances");
+        require(address(sale).balance == 3 * price, "funds");
+    }
+
+    function testRefusesAClaimWindowThatDoesNotCloseBeforeThePublicSale() public {
+        _setUpChain(43113);
+        _configure(0.01 ether, 10 minutes, 10 minutes);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 10 minutes, 10 minutes, 0.01 ether, ADMIN, signer);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+        new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, START, 11 minutes, 10 minutes, 0.01 ether, ADMIN, signer);
     }
 
     function testFujiRefusesWindowsShorterThanOneMinute() public {
@@ -144,6 +166,8 @@ contract GenesisHolderClaimScheduleTest {
         GenesisHolderClaim claim = _deploy(0.25 ether, 1 days, 7 days);
         require(claim.claimWindow() == 1 days && claim.publicWindow() == 7 days, "windows");
         require(claim.publicPriceWei() == claim.PRODUCTION_PUBLIC_PRICE_WEI(), "price");
-        require(claim.publicSaleEnd() - claim.claimEnd() + 1 == 7 days, "public window");
+        require(claim.publicSaleStart() == START && claim.claimEnd() == START + 1 days, "claims open with the sale and close after 24h");
+        require(claim.publicSaleEnd() - claim.publicSaleStart() + 1 == 7 days, "public window");
+        require(claim.claimEnd() < claim.publicSaleEnd(), "claims close before the sale");
     }
 }
