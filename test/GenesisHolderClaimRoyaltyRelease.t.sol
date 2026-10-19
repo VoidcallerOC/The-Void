@@ -35,7 +35,7 @@ contract GenesisHolderClaimRoyaltyReleaseTest {
     uint256 internal constant T0 = 1_800_000_000;
     uint256 internal constant CLAIM_START = T0 + 1 hours;
     uint256 internal constant CLAIM_END = CLAIM_START + 1 days;
-    uint256 internal constant PUBLIC_END = CLAIM_END + 7 days - 1;
+    uint256 internal constant PUBLIC_END = CLAIM_START + 7 days - 1;
 
     VoidReleaseFactoryV2Royalty internal factory;
     ReleaseMarketplaceV4 internal market;
@@ -58,7 +58,7 @@ contract GenesisHolderClaimRoyaltyReleaseTest {
         vm.prank(ARTIST);
         tokenId = release.createEditionWithMintEnd(releaseKey, EDITION_ID, 0, "ipfs://fnf-edition", ARTIST, 250, uint64(PUBLIC_END));
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         claimContract = new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 1 days, 7 days, PRICE, ADMIN, vm.addr(SIGNER_KEY));
         bytes32 issuerRole = release.ISSUER_ROLE();
         vm.prank(ARTIST);
@@ -121,7 +121,7 @@ contract GenesisHolderClaimRoyaltyReleaseTest {
             (ok,) = address(claimContract).call(abi.encodeCall(GenesisHolderClaim.pause, ()));
             require(!ok, "outsider paused the claim");
             vm.prank(outsider);
-            (ok,) = address(sale).call(abi.encodeCall(sale.configureSale, (tokenId, 0, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false)));
+            (ok,) = address(sale).call(abi.encodeCall(sale.configureSale, (tokenId, 0, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false)));
             require(!ok, "outsider reconfigured the sale");
         }
         require(release.hasRole(issuerRole, address(claimContract)), "claim lost ISSUER_ROLE");
@@ -147,17 +147,19 @@ contract GenesisHolderClaimRoyaltyReleaseTest {
         require(release.balanceOf(CLAIMANT, tokenId) == 1 && release.edition(tokenId).mintedSupply == 1, "exactly one token minted");
     }
 
-    function testClaimWindowHandsOverToThePublicSaleWithTheTwoPointFivePercentFee() public {
+    function testClaimWindowRunsInsideThePublicSaleWithTheTwoPointFivePercentFee() public {
         vm.warp(CLAIM_START);
         require(claim(CLAIMANT, voucher(CLAIMANT, 1)), "claim during the window");
-        vm.deal(COLLECTOR, PRICE);
+        vm.deal(COLLECTOR, PRICE * 2);
+        // The public sale is open at the same time as the claims.
         vm.prank(COLLECTOR);
-        try sale.purchase{value: PRICE}(tokenId, 1) { revert("public sale must wait for the claim window to end"); } catch {}
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(sale.balances(NANO) == 0.00625 ether && sale.balances(ARTIST) == 0.24375 ether, "primary 2.5% to the Nano, 97.5% to the artist");
         vm.warp(CLAIM_END);
         require(!claim(COLLECTOR, voucher(COLLECTOR, 3)), "no free claim after the window");
         vm.prank(COLLECTOR);
         sale.purchase{value: PRICE}(tokenId, 1);
-        require(sale.balances(NANO) == 0.00625 ether && sale.balances(ARTIST) == 0.24375 ether, "primary 2.5% to the Nano, 97.5% to the artist");
+        require(release.balanceOf(COLLECTOR, tokenId) == 2, "paid minting continues after the claims close");
         vm.warp(PUBLIC_END + 1);
         vm.deal(BUYER, PRICE);
         vm.prank(BUYER);

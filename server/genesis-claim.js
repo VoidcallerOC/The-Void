@@ -10,6 +10,9 @@ export const GENESIS_TOKEN_IDS = Object.freeze([0n, 1n, 2n, 3n]);
 export const LEGACY_FUJI_SINGLETON = "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6";
 // Production schedule. C-Chain (43114) must use exactly these and the production price; only Fuji
 // may configure shorter test windows (never below one minute), as the claim contract also enforces.
+// The free claim and the paid public sale run CONCURRENTLY: both open at claimStart, free claims stop
+// at claimEnd = claimStart + claimWindow while paid minting continues until publicSaleEnd =
+// claimStart + publicWindow - 1 (inclusive), when both close. claimWindow must be shorter than publicWindow.
 export const CLAIM_WINDOW_SECONDS = 86_400n;
 export const PUBLIC_WINDOW_SECONDS = 7n * 86_400n;
 export const MINIMUM_TEST_WINDOW_SECONDS = 60n;
@@ -18,6 +21,7 @@ export const MAINNET_PUBLIC_PRICE_WEI = 250_000_000_000_000_000n; // 0.25 AVAX
 /**
  * Validates the schedule and price for the destination chain. Mainnet always gets the production
  * 24 hours / 7 days at 0.25 AVAX; anything else fails closed. Fuji windows default to production.
+ * On every chain the claim window must be shorter than the public window, as the contract requires.
  */
 export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_SECONDS, publicWindow = PUBLIC_WINDOW_SECONDS, publicPriceWei }) {
   if (destinationChainId === GENESIS_CHAIN_ID) {
@@ -26,6 +30,8 @@ export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_S
   } else if (claimWindow < MINIMUM_TEST_WINDOW_SECONDS || publicWindow < MINIMUM_TEST_WINDOW_SECONDS) {
     throw new GenesisClaimConfigurationError("Claim and public windows must each be at least 60 seconds.");
   }
+  // Claims run concurrently with the sale and must close strictly before the public sale ends.
+  if (claimWindow >= publicWindow) throw new GenesisClaimConfigurationError("The Genesis claim window must be shorter than the public window: claims must close before the public sale ends.");
   return Object.freeze({ claimWindow, publicWindow });
 }
 
@@ -53,6 +59,7 @@ const CLAIM_ABI = [
   "function claimEnd() view returns (uint256)",
   "function claimWindow() view returns (uint256)",
   "function publicWindow() view returns (uint256)",
+  "function publicSaleStart() view returns (uint256)",
   "function publicSaleEnd() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)",
   "function GENESIS_CONTRACT() view returns (address)",
@@ -206,7 +213,9 @@ export function loadGenesisClaimConfig(env = process.env) {
     claimWindow,
     publicWindow,
     claimEnd: claimStart + claimWindow,
-    publicSaleEnd: claimStart + claimWindow + publicWindow - 1n,
+    // The paid sale opens with the claims and its inclusive end gives a window of exactly publicWindow.
+    publicSaleStart: claimStart,
+    publicSaleEnd: claimStart + publicWindow - 1n,
     publicPriceWei,
     eligibilityRule: ELIGIBILITY_RULE,
     signerAddress,
@@ -234,6 +243,7 @@ function toPublicConfig(config) {
     claimEnd: config.claimEnd.toString(),
     claimWindow: config.claimWindow.toString(),
     publicWindow: config.publicWindow.toString(),
+    publicSaleStart: config.publicSaleStart.toString(),
     publicSaleEnd: config.publicSaleEnd.toString(),
     publicPriceWei: config.publicPriceWei.toString(),
   });
@@ -301,10 +311,10 @@ export function createGenesisClaimService({
 
   async function verifyContractBindings() {
     const [network, claimRelease, claimSale, claimToken, claimAllocation, claimPublicAllocation, claimChain, claimStartAt, claimEndAt,
-      claimWindowAt, publicWindowAt, claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await Promise.all([
+      claimWindowAt, publicWindowAt, claimPublicStart, claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await Promise.all([
       targetProvider.getNetwork(), claim.releaseContract(), claim.primarySale(), claim.tokenId(), claim.allocation(),
       claim.publicAllocation(), claim.destinationChainId(), claim.claimStart(), claim.claimEnd(), claim.claimWindow(), claim.publicWindow(),
-      claim.publicSaleEnd(), claim.publicPriceWei(),
+      claim.publicSaleStart(), claim.publicSaleEnd(), claim.publicPriceWei(),
       claim.GENESIS_CONTRACT(), claim.GENESIS_CHAIN_ID(), claim.ELIGIBILITY_RULE(), claim.signer(), claim.claimedSupply(),
       release.maxSupplyOf(config.tokenId), release.edition(config.tokenId), sale.sales(config.tokenId),
     ]);
@@ -324,6 +334,7 @@ export function createGenesisClaimService({
       || BigInt(claimEndAt) !== config.claimEnd
       || BigInt(claimWindowAt) !== config.claimWindow
       || BigInt(publicWindowAt) !== config.publicWindow
+      || BigInt(claimPublicStart) !== config.publicSaleStart
       || BigInt(claimPublicEnd) !== config.publicSaleEnd
       || BigInt(claimPrice) !== config.publicPriceWei
       || getAddress(claimGenesis) !== GENESIS_CONTRACT
@@ -335,7 +346,8 @@ export function createGenesisClaimService({
       || BigInt(editionData.mintedSupply ?? editionData[0]?.mintedSupply ?? editionData[0]?.[4] ?? editionData[4]) !== BigInt(saleData.sold ?? saleData[2]) + BigInt(claimedSupply)
       || BigInt(saleData.priceWei ?? saleData[0]) !== config.publicPriceWei
       || BigInt(saleData.maxSupply ?? saleData[1]) !== config.publicAllocation
-      || BigInt(saleData.startTime ?? saleData[4]) !== config.claimEnd
+      // The paid sale opens together with the claims, not when they close.
+      || BigInt(saleData.startTime ?? saleData[4]) !== config.publicSaleStart
       || BigInt(saleData.endTime ?? saleData[5]) !== config.publicSaleEnd
       || !(saleData.configured ?? saleData[7])) {
       throw new ApiError(503, "CLAIM_BINDING_MISMATCH", "The configured claim contract, release, supply, or chain does not match the authorized target.");

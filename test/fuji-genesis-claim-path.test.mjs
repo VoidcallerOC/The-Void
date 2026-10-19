@@ -22,7 +22,8 @@ const TOKEN = 777n;
 const NOW = 1_800_000_000;
 const CLAIM_START = NOW + 3600;
 const CLAIM_END = CLAIM_START + 300;
-const PUBLIC_END = CLAIM_END + 600 - 1;
+// The sale opens with the claims and closes 600 s after CLAIM_START (inclusive end).
+const PUBLIC_END = CLAIM_START + 600 - 1;
 const PRICE = 10_000_000_000_000_000n;
 const NONCE = 72;
 const PREDICTED = getCreateAddress({ from: DEPLOYER, nonce: NONCE });
@@ -41,7 +42,7 @@ const sale = new Interface([
 ]);
 
 /** Fuji with the artist's open-edition release and its scheduled sale; the deployer sits at nonce 72. */
-function fuji({ now = NOW, owner = ARTIST, adminHolders = [ARTIST], maxSupply = 0n, saleStart = CLAIM_END, constructorReverts = false, chainId = 43113n, nonce = NONCE, pendingNonce, balance } = {}) {
+function fuji({ now = NOW, owner = ARTIST, adminHolders = [ARTIST], maxSupply = 0n, saleStart = CLAIM_START, constructorReverts = false, chainId = 43113n, nonce = NONCE, pendingNonce, balance } = {}) {
   const chain = fakeChain({ chainId, nonce, pendingNonce, balance, code: { [RELEASE]: "0x6001", [SALE]: "0x6001" } });
   const base = chain.call;
   chain.call = async (tx) => {
@@ -86,7 +87,7 @@ describe("Fuji claim plan", () => {
     expect(plan.roles).toEqual({ admin: FUJI_CLAIM_ARTIST, signer: FUJI_GENESIS_VOUCHER_SIGNER });
     expect(plan.supply).toMatchObject({ claimAllocation: "0", publicAllocation: "0" });
     expect(plan.followUps.issuerGrant.from).toBe(ARTIST);
-    expect(plan.schedule).toMatchObject({ claimStart: String(CLAIM_START), claimWindowSeconds: "300", publicWindowSeconds: "600", publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() });
+    expect(plan.schedule).toMatchObject({ claimStart: String(CLAIM_START), claimWindowSeconds: "300", claimEnd: String(CLAIM_END), publicSaleStart: String(CLAIM_START), publicWindowSeconds: "600", publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() });
     expect(BigInt(plan.cost.maxCostWei)).toBe(BigInt(request.gasLimit) * 10_000_000_000n);
     // The deployer and artist stay separate; neither the Nano nor the placeholder holds any role.
     expect(new Set([DEPLOYER, ARTIST, RECIPIENT, FUJI_GENESIS_VOUCHER_SIGNER]).size).toBe(4);
@@ -99,7 +100,8 @@ describe("Fuji claim plan", () => {
     ["a release the deployer also administers", () => fuji({ adminHolders: [ARTIST, DEPLOYER] }), /deployer holds DEFAULT_ADMIN_ROLE/],
     ["a release the Nano administers", () => fuji({ adminHolders: [ARTIST, RECIPIENT] }), /fee recipient holds DEFAULT_ADMIN_ROLE/],
     ["a capped edition", () => fuji({ maxSupply: 10n }), /capped edition/],
-    ["a sale that does not open when claims close", () => fuji({ saleStart: CLAIM_END + 1 }), /Sale startTime/],
+    ["a sale that does not open with the claims", () => fuji({ saleStart: CLAIM_START + 1 }), /Sale startTime/],
+    ["a sale that only opens when claims close", () => fuji({ saleStart: CLAIM_END }), /Sale startTime/],
     ["a claim start under ten minutes ahead", () => fuji({ now: CLAIM_START - 599 }), /less than 600 seconds/],
     ["a constructor that reverts", () => fuji({ constructorReverts: true }), /constructor reverted/],
     ["another chain", () => fuji({ chainId: 43114n }), /chain|Refusing|43114/i],

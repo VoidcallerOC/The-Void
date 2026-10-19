@@ -46,8 +46,9 @@ creations from the deployer only; the artist-wallet transactions are not on it y
 
 ## Preparing the plan (after the artist has done steps 1-3 on Fuji)
 
-1. The artist creates the release, the open edition (`maxSupply 0`, `mintEnd = claimStart + 300 + 600 - 1`)
-   and the sale (`configureSale(token, 0.01 AVAX, 0, 0, claimStart + 300, claimStart + 899, false)`) in
+1. The artist creates the release, the open edition (`maxSupply 0`, `mintEnd = claimStart + 600 - 1`)
+   and the sale (`configureSale(token, 0.01 AVAX, 0, 0, claimStart, claimStart + 599, false)`: the sale
+   opens at `claimStart` together with the claims and runs for 600 s, while free claims close after 300 s) in
    Studio, and sends the release address, sale address and token ID.
 2. `node scripts/fuji-genesis-claim-plan.mjs --release 0x… --sale 0x… --token <id> --claim-start <unix>`
    (key-less; refuses any `*PRIVATE_KEY` variable). It reads the release, edition and sale from Fuji,

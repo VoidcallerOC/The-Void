@@ -16,7 +16,8 @@ const TOKEN = 123456789n;
 const NOW = 1_800_000_000;
 const CLAIM_START = NOW + 3600;
 const CLAIM_END = CLAIM_START + 86_400;
-const PUBLIC_END = CLAIM_END + 7 * 86_400 - 1;
+// The sale opens with the claims at CLAIM_START and closes 7 days after it (inclusive end).
+const PUBLIC_END = CLAIM_START + 7 * 86_400 - 1;
 const PRICE = 250_000_000_000_000_000n;
 const NONCE = 61;
 const PREDICTED = getCreateAddress({ from: DEPLOYER, nonce: NONCE });
@@ -52,7 +53,7 @@ const sale = new Interface([
 /** A Fuji chain holding an open-edition token whose sale is the scheduled public phase. */
 function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE, mintEnd = BigInt(PUBLIC_END), maxSupply = 0n, missingToken = false, constructorReverts = false, now = NOW, nonce = NONCE, pending = nonce, codeless = [] } = {}) {
   const calls = [];
-  const state = { priceWei: PRICE, maxSupply: 0n, sold: 0n, perWalletLimit: 0n, startTime: BigInt(CLAIM_END), endTime: BigInt(PUBLIC_END), paused: false, configured: true, ...saleState };
+  const state = { priceWei: PRICE, maxSupply: 0n, sold: 0n, perWalletLimit: 0n, startTime: BigInt(CLAIM_START), endTime: BigInt(PUBLIC_END), paused: false, configured: true, ...saleState };
   return {
     calls,
     send: async (method) => { if (method !== "eth_chainId") throw new Error(`unexpected ${method}`); return `0x${chainId.toString(16)}`; },
@@ -91,12 +92,14 @@ const preflight = (env = ENV, provider = fuji(), genesisProvider = cChain()) => 
 
 describe("Genesis claim deployment: environment", () => {
   it("dry-runs by default on Fuji with an uncapped open-edition configuration", () => {
-    expect(validateClaimDeploymentEnv(ENV)).toMatchObject({ chainId: 43113, broadcast: false, allocation: 0n, publicAllocation: 0n, claimEnd: BigInt(CLAIM_END), publicSaleEnd: BigInt(PUBLIC_END), expectOpenEdition: true });
+    expect(validateClaimDeploymentEnv(ENV)).toMatchObject({ chainId: 43113, broadcast: false, allocation: 0n, publicAllocation: 0n, claimEnd: BigInt(CLAIM_END), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(PUBLIC_END), expectOpenEdition: true });
   });
 
   it.each([
     [{ DEPLOY_NETWORK: "devnet" }, /exactly "fuji" or "mainnet"/],
     [{ GENESIS_CLAIM_WINDOW_SECONDS: "30" }, /at least 60 seconds/],
+    // Claims must close while the sale is still open: a claim window as long as the public window is refused.
+    [{ GENESIS_CLAIM_WINDOW_SECONDS: "600", GENESIS_PUBLIC_WINDOW_SECONDS: "600" }, /before the public sale ends/i],
     [{ GENESIS_CLAIM_RELEASE_CONTRACT: "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6" }, /legacy Fuji V2 singleton/],
     [{ GENESIS_CLAIM_PRIMARY_SALE: RELEASE }, /must differ/],
     [{ GENESIS_PUBLIC_PRICE_WEI: "0" }, /GENESIS_PUBLIC_PRICE_WEI must be a positive/],
@@ -122,7 +125,7 @@ describe("Genesis claim deployment: environment schedule", () => {
   const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER };
 
   it("accepts an accelerated Fuji schedule at the Fuji price", () => {
-    expect(validateClaimDeploymentEnv(FUJI_TEST)).toMatchObject({ network: "fuji", chainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleEnd: BigInt(CLAIM_START + 899), publicPriceWei: 10_000_000_000_000_000n });
+    expect(validateClaimDeploymentEnv(FUJI_TEST)).toMatchObject({ network: "fuji", chainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(CLAIM_START + 599), publicPriceWei: 10_000_000_000_000_000n });
   });
 
   it("accepts mainnet only with 24 hours, 7 days and 0.25 AVAX", () => {
@@ -158,9 +161,9 @@ describe("Genesis claim deployment: environment schedule", () => {
   });
 
   it("checks the accelerated sale schedule against the chain", async () => {
-    const provider = fuji({ saleState: { priceWei: 10_000_000_000_000_000n, startTime: BigInt(CLAIM_START + 300), endTime: BigInt(CLAIM_START + 899) }, mintEnd: 0n });
+    const provider = fuji({ saleState: { priceWei: 10_000_000_000_000_000n, startTime: BigInt(CLAIM_START), endTime: BigInt(CLAIM_START + 599) }, mintEnd: 0n });
     const facts = await preflight(FUJI_TEST, provider);
-    expect(buildPlan(validateClaimDeploymentEnv(FUJI_TEST), facts).schedule).toMatchObject({ claimWindowSeconds: "300", publicWindowSeconds: "600", publicSaleOpens: String(CLAIM_START + 300), publicSaleEnd: String(CLAIM_START + 899), publicPriceWei: "10000000000000000" });
+    expect(buildPlan(validateClaimDeploymentEnv(FUJI_TEST), facts).schedule).toMatchObject({ claimWindowSeconds: "300", claimEnd: String(CLAIM_START + 300), publicWindowSeconds: "600", publicSaleStart: String(CLAIM_START), publicSaleOpens: String(CLAIM_START), publicSaleEnd: String(CLAIM_START + 599), publicPriceWei: "10000000000000000", sale: `configureSale(tokenId, 10000000000000000, 0, 0, ${CLAIM_START}, ${CLAIM_START + 599}, false)` });
     await expect(preflight(FUJI_TEST, fuji({ mintEnd: 0n }))).rejects.toThrow(/priceWei/);
   });
 });
@@ -188,7 +191,8 @@ describe("Genesis claim deployment: read-only preflight", () => {
     ["an unconfigured sale", { provider: fuji({ saleState: { configured: false } }) }, /not configured/],
     ["a different price", { provider: fuji({ saleState: { priceWei: PRICE - 1n } }) }, /priceWei/],
     ["an invented sale cap", { provider: fuji({ saleState: { maxSupply: 1000n } }) }, /maxSupply/],
-    ["a public start before the claim ends", { provider: fuji({ saleState: { startTime: BigInt(CLAIM_END - 1) } }) }, /startTime/],
+    ["a public start after the claims open", { provider: fuji({ saleState: { startTime: BigInt(CLAIM_START + 1) } }) }, /startTime/],
+    ["a public start at the old claim-end handover", { provider: fuji({ saleState: { startTime: BigInt(CLAIM_END) } }) }, /startTime/],
     ["a public end that is not seven days later", { provider: fuji({ saleState: { endTime: BigInt(PUBLIC_END + 1) } }) }, /endTime/],
     ["mints outside the sale", { provider: fuji({ edition: { mintedSupply: 2n } }) }, /another mint path/],
     ["a claim start too close to now", { provider: fuji({ now: CLAIM_START - 60 }) }, /choose a later start/],
@@ -202,7 +206,7 @@ describe("Genesis claim deployment: read-only preflight", () => {
     const plan = buildPlan(config, await preflight());
     expect(plan).toMatchObject({
       predictedClaimAddress: PREDICTED,
-      schedule: { claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleOpens: String(CLAIM_END), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() },
+      schedule: { claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleStart: String(CLAIM_START), publicSaleOpens: String(CLAIM_START), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString() },
       supply: { claimAllocation: "0", publicAllocation: "0", meaning: expect.stringMatching(/uncapped/) },
       eligibility: { chainId: 43114, genesisContract: GENESIS_CONTRACT, source: expect.stringMatching(/live/), ruleText: ELIGIBILITY_RULE_TEXT, rule: ELIGIBILITY_RULE },
       followUps: { issuerGrant: { from: ARTIST, to: RELEASE, note: expect.stringMatching(/never does/) }, apiConfiguration: { GENESIS_CLAIM_CONTRACT: PREDICTED, note: expect.stringMatching(/owner authorization/) } },
@@ -247,7 +251,7 @@ describe("compiled GenesisHolderClaim artifact", () => {
     const constructor = artifact.abi.find((item) => item.type === "constructor");
     expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
-    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
+    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });
 });
 
@@ -257,7 +261,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const { DEPLOYER_PRIVATE_KEY: _unused, ...KEYLESS_ENV } = ENV;
   const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST };
   const roles = new Interface(["function owner() view returns (address)", "function hasRole(bytes32 role,address account) view returns (bool)"]);
-  const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
+  const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 
   /** C-Chain holding the artist's release; owner and DEFAULT_ADMIN_ROLE holders are configurable. */
   function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [] } = {}) {
@@ -291,7 +295,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
         state.claim = getAddress(request.predictedAddress);
         state.claimValues = {
           releaseContract: plan.target.releaseContract, primarySale: plan.target.primarySale, tokenId: plan.target.tokenId, allocation: plan.supply.claimAllocation, publicAllocation: plan.supply.publicAllocation,
-          claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds, claimEnd: plan.schedule.claimEnd, publicSaleEnd: plan.schedule.publicSaleEnd,
+          claimStart: plan.schedule.claimStart, claimWindow: plan.schedule.claimWindowSeconds, publicWindow: plan.schedule.publicWindowSeconds, claimEnd: plan.schedule.claimEnd, publicSaleStart: plan.schedule.publicSaleStart, publicSaleEnd: plan.schedule.publicSaleEnd,
           publicPriceWei: plan.schedule.publicPriceWei, ELIGIBILITY_RULE: plan.eligibility.rule, admin: plan.roles.admin, signer: plan.roles.signer, ...values,
         };
         return hash;

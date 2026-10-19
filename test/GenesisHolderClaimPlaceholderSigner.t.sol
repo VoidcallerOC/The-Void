@@ -35,7 +35,7 @@ contract GenesisHolderClaimPlaceholderSignerTest {
     uint256 internal constant T0 = 1_800_000_000;
     uint256 internal constant CLAIM_START = T0 + 1 hours;
     uint256 internal constant CLAIM_END = CLAIM_START + 300;
-    uint256 internal constant PUBLIC_END = CLAIM_END + 600 - 1;
+    uint256 internal constant PUBLIC_END = CLAIM_START + 600 - 1;
 
     VoidRelease1155V4 internal release;
     VoidPrimarySale internal sale;
@@ -54,7 +54,7 @@ contract GenesisHolderClaimPlaceholderSignerTest {
         vm.prank(ARTIST);
         tokenId = release.createEditionWithMintEnd(releaseKey, EDITION_ID, 0, "ipfs://fnf-edition", ARTIST, 250, uint64(PUBLIC_END));
         vm.prank(ARTIST);
-        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_END), uint64(PUBLIC_END), false);
+        sale.configureSale(tokenId, PRICE, 0, 0, uint64(CLAIM_START), uint64(PUBLIC_END), false);
         // The deployer deploys the claim; the artist is its admin; the voucher signer is the placeholder.
         vm.prank(DEPLOYER);
         claimContract = new GenesisHolderClaim(address(release), address(sale), tokenId, 0, 0, CLAIM_START, 300, 600, PRICE, ARTIST, PLACEHOLDER);
