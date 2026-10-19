@@ -25,7 +25,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
-import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
+import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
 const pollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
@@ -494,7 +494,7 @@ export function ListingPanel({ edition }) {
       {!candidate && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{statusCopy("unsupported")}</p>}
       {candidate && !marketplaceConfigured && <p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`Marketplace unavailable: this build has no matching live ${RELEASE_DEPLOYMENT.networkName} marketplace configuration. No transaction can be submitted.`}</p>}
       {stage === "disconnected" && <div style={{ margin: "18px 0" }}><WalletButton /><span style={{ display: "block", marginTop: 8, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</span></div>}
-      {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p><Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn></div>}
+      {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p>{releaseNetworkSwitchAllowed(RELEASE_DEPLOYMENT) && <Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn>}</div>}
       {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && !wallet.needsNetworkSwitch && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
 
       {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (

@@ -113,10 +113,33 @@ export function releaseNetworkRequiredMessage(deployment = RELEASE_DEPLOYMENT, {
   return `${name} (${deployment.chainId}) is required to ${action}. Ethereum is not supported.`;
 }
 
-export function releaseNetworkSwitchLabel(deployment = RELEASE_DEPLOYMENT) {
-  const name = String(deployment.networkName || deployment.network || "network");
-  if (/fuji/i.test(name)) return "SWITCH TO FUJI";
-  if (/avalanche|c-chain/i.test(name)) return "SWITCH TO AVALANCHE";
+/** The production release network. Only this network is ever advertised to collectors. */
+export const PRODUCTION_RELEASE_CHAIN_ID = 43114;
+
+export function isProductionReleaseDeployment(deployment = RELEASE_DEPLOYMENT) {
+  return Number(deployment?.chainId) === PRODUCTION_RELEASE_CHAIN_ID;
+}
+
+function isDevServer() {
+  // Vite dev server only (`vite`); every `vite build` output, previews included, is false.
+  return typeof import.meta !== "undefined" && import.meta.env ? import.meta.env.DEV === true : false;
+}
+
+/**
+ * Whether the collector-facing UI may offer a one-click wallet network switch. The mainnet build
+ * offers "SWITCH TO AVALANCHE" (the wallet still has to approve the switch). A testnet build never
+ * advertises the testnet to collectors: its switch control exists only on the Vite dev server, so
+ * Fuji and preview deployments show a wrong-network notice instead.
+ */
+export function releaseNetworkSwitchAllowed(deployment = RELEASE_DEPLOYMENT, { dev = isDevServer() } = {}) {
+  if (isProductionReleaseDeployment(deployment)) return true;
+  return dev === true;
+}
+
+/** Wallet-button copy for a wrong-chain wallet. Never names a testnet. */
+export function releaseNetworkSwitchLabel(deployment = RELEASE_DEPLOYMENT, { allowSwitch = releaseNetworkSwitchAllowed(deployment) } = {}) {
+  if (!allowSwitch) return "WRONG NETWORK";
+  if (isProductionReleaseDeployment(deployment)) return "SWITCH TO AVALANCHE";
   return "SWITCH NETWORK";
 }
 

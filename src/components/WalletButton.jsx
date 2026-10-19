@@ -3,7 +3,7 @@ import { Wallet, LogOut, Network } from "lucide-react";
 import { useWallet } from "../lib/wallet-context.js";
 import { shortAddr } from "../lib/web3.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
-import { releaseNetworkRequiredMessage, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
+import { releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 // Brand-styled connect button + wallet picker dropdown for the Nav.
 export function WalletButton({ compact }) {
@@ -18,12 +18,15 @@ export function WalletButton({ compact }) {
   }, []);
 
   const needsNetwork = Boolean(w.needsNetworkSwitch);
-  const switchLabel = releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT);
+  // Collectors only ever see a switch control for the production network. On a testnet build the
+  // wrong-network state is a notice: the wallet must be moved to the release network by hand.
+  const switchAllowed = releaseNetworkSwitchAllowed(RELEASE_DEPLOYMENT);
+  const switchLabel = releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT, { allowSwitch: switchAllowed });
   const networkHint = releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "use The Void" });
 
   const onClick = async () => {
     if (needsNetwork) {
-      await w.ensureNetwork?.({ thenAuthenticate: true });
+      if (switchAllowed) await w.ensureNetwork?.({ thenAuthenticate: true });
       return;
     }
     if (w.connected && w.authenticated) { w.disconnect(); return; }
@@ -44,7 +47,7 @@ export function WalletButton({ compact }) {
   const accessibleName = w.authenticating
     ? "Authenticating wallet"
     : needsNetwork
-      ? `Switch wallet to ${RELEASE_DEPLOYMENT.networkName}`
+      ? (switchAllowed ? `Switch wallet to ${RELEASE_DEPLOYMENT.networkName}` : `Wrong network. ${networkHint}`)
       : w.connected
         ? (w.authenticated ? `Disconnect wallet ${shortAddr(w.account)}` : "Authenticate wallet")
         : "Connect wallet";
@@ -63,8 +66,10 @@ export function WalletButton({ compact }) {
         type="button"
         onClick={onClick}
         aria-label={accessibleName}
+        aria-disabled={needsNetwork && !switchAllowed ? "true" : undefined}
         title={title}
         data-needs-network={needsNetwork ? "true" : "false"}
+        data-network-switch={needsNetwork && switchAllowed ? "true" : "false"}
         style={{
           fontFamily: "var(--font-mono)",
           fontWeight: 500,
@@ -74,16 +79,19 @@ export function WalletButton({ compact }) {
           padding: compact ? "10px 14px" : "12px 16px",
           background: "transparent",
           border: "1px solid",
-          borderColor: needsNetwork ? "var(--vc-crimson)" : w.connected ? "var(--vc-crimson)" : "var(--vc-smoke)",
-          color: needsNetwork || w.connected ? "var(--vc-bone)" : "var(--vc-bone-dim)",
-          cursor: "pointer",
+          borderColor: needsNetwork ? (switchAllowed ? "var(--vc-crimson)" : "var(--vc-ash)") : w.connected ? "var(--vc-crimson)" : "var(--vc-smoke)",
+          color: needsNetwork ? (switchAllowed ? "var(--vc-bone)" : "var(--vc-bone-dim)") : w.connected ? "var(--vc-bone)" : "var(--vc-bone-dim)",
+          cursor: needsNetwork && !switchAllowed ? "default" : "pointer",
           display: "inline-flex",
           alignItems: "center",
           gap: 8,
           whiteSpace: "nowrap",
           transition: "all 120ms cubic-bezier(0.6,0,0.2,1)",
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--vc-crimson)"; e.currentTarget.style.color = "var(--vc-bone)"; }}
+        onMouseEnter={(e) => {
+          if (needsNetwork && !switchAllowed) return;
+          e.currentTarget.style.borderColor = "var(--vc-crimson)"; e.currentTarget.style.color = "var(--vc-bone)";
+        }}
         onMouseLeave={(e) => {
           if (!w.connected && !needsNetwork) {
             e.currentTarget.style.borderColor = "var(--vc-smoke)";
