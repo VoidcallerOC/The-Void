@@ -163,6 +163,20 @@ describe("HTTP API boundary", () => {
     expect(studioService.uploadArtwork).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", input: { data: "iVBORw==" } }));
   });
 
+  it("routes the registered-media listing to the owner-only service call and has no write route", async () => {
+    const studioService = { listRegisteredMedia: vi.fn().mockResolvedValue({ protected: [], previews: [] }) };
+    const handler = createApiHandler({ service: {}, studioService });
+    const response = responseDouble();
+    await handler(requestDouble({ method: "GET", url: "/api/studio/artists/artist-1/media/registered", headers: { authorization: "Bearer opaque" } }), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toEqual({ protected: [], previews: [] });
+    expect(studioService.listRegisteredMedia).toHaveBeenCalledWith(expect.objectContaining({ artistId: "artist-1", request: expect.objectContaining({ requestId: expect.any(String) }) }));
+    const write = responseDouble();
+    await handler(requestDouble({ method: "POST", url: "/api/studio/artists/artist-1/media/registered", body: "{}", headers: { authorization: "Bearer opaque" } }), write);
+    expect(write.status).toBeGreaterThanOrEqual(400);
+    expect(studioService.listRegisteredMedia).toHaveBeenCalledTimes(1);
+  });
+
   it("routes public preview uploads to the artist's audio-preview endpoint", async () => {
     const studioService = { uploadTrackPreview: vi.fn().mockResolvedValue({ uri: "ipfs://bafyaudio", contentType: "audio/mpeg", byteSize: 5 }) };
     const handler = createApiHandler({ service: {}, studioService });

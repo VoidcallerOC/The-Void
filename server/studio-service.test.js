@@ -221,6 +221,7 @@ describe("Artist Studio", () => {
       const text = String(sql);
       if (text.includes("media_assets")) return { rows: [{ id: "asset-1", artist_id: "artist-1", storage_key: "records/full-record.mp3", media_type: "AUDIO" }] };
       if (text.includes("FROM tokens")) return { rows: [{ token_id: "7", contract_address: contract, chain_id: 43113 }] };
+      if (text.includes("edition_id<>$1")) return { rows: [] }; // no other edition uses the file
       return { rows: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }] };
     });
     const experience = await experienceService.instance.createExperience({ request, editionId: "edition-1", input: { id: "experience-1", title: "Full Record", type: "AUDIO", requirements: [{ type: "erc1155-balance", contract, tokenIds: ["7"] }], mediaConfig: { protected: true, protectedMedia: [{ mediaType: "AUDIO", storageKey: "records/full-record.mp3" }] } } });
@@ -300,6 +301,7 @@ describe("Artist Studio", () => {
       const text = String(sql);
       if (text.includes("media_assets")) return { rows: [{ id: "asset-1", artist_id: "artist-1", storage_key: "bafyprivatefulltrack", media_type: "AUDIO" }] };
       if (text.includes("FROM tokens")) return { rows: [{ token_id: "7", contract_address: contract, chain_id: 43113 }] };
+      if (text.includes("edition_id<>$1")) return { rows: [] }; // no other edition uses the file
       return { rows: [edition] };
     });
     await harness.instance.createExperience({ request, editionId: "edition-1", input: { title: "Full track", type: "AUDIO", requirements: [], mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-1", mediaType: "AUDIO", contentType: "audio/mpeg" }] } } });
@@ -319,6 +321,7 @@ describe("Artist Studio", () => {
         const text = String(sql);
         if (text.includes("media_assets")) return { rows: assets };
         if (text.includes("FROM tokens")) return { rows: tokens };
+        if (text.includes("edition_id<>$1")) return { rows: [] }; // no other edition uses the file
         return { rows: [edition] };
       });
       return harness;

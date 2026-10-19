@@ -596,14 +596,16 @@ export class ArtistStudioService {
     return { requestId: confirmed.request_id, state: "CONFIRMED", transactionHash: txHash, symbol, name, ...binding };
   }
 
-  async bindProtectedAssets(artistId, protectedMedia) {
-    const { rows } = await this.db.query("SELECT id, artist_id, storage_key, media_type FROM media_assets WHERE artist_id=$1", [artistId]);
-    return protectedMedia.map((asset) => {
+  async bindProtectedAssets(artistId, protectedMedia, { editionId = null } = {}) {
+    const { rows } = await this.db.query("SELECT id, artist_id, storage_key, media_type, visibility FROM media_assets WHERE artist_id=$1", [artistId]);
+    const bound = protectedMedia.map((asset) => {
       const assetId = String(asset.assetId || "").trim();
       const storageKey = String(asset.storageKey || "").trim();
       const match = rows.find((row) => (assetId && row.id === assetId) || (!assetId && storageKey && row.storage_key === storageKey));
       if (!match || String(match.artist_id) !== String(artistId)) throw new ApiError(400, "PROTECTED_MEDIA_NOT_OWNED", "Protected media must reference a file uploaded for this artist.");
       if (assetId && storageKey && match.storage_key !== storageKey) throw new ApiError(400, "PROTECTED_MEDIA_NOT_OWNED", "Protected media storage key does not match the artist's uploaded asset.");
+      // Only a privately stored file can be token-gated; a file registered any other way is never attached.
+      if (match.visibility && String(match.visibility).toUpperCase() !== "PROTECTED") throw new ApiError(400, "PROTECTED_MEDIA_NOT_PROTECTED", "Only a file stored privately can be attached to a protected experience.");
       // The stored asset's own type is authoritative: a client-supplied label may not re-type a file.
       const storedType = String(match.media_type || "").trim().toUpperCase();
       const declaredType = String(asset.mediaType || "").trim().toUpperCase();
@@ -612,6 +614,17 @@ export class ArtistStudioService {
       if (!mediaType) throw new ApiError(400, "PROTECTED_MEDIA_CONFIGURATION_INVALID", "Every protected media object requires a media type.");
       return { assetId: match.id, mediaType, ...(asset.contentType ? { contentType: String(asset.contentType) } : {}) };
     });
+    if (editionId) await this.assertAssetsNotUsedElsewhere(bound.map((entry) => entry.assetId), editionId);
+    return bound;
+  }
+
+  // A registered file belongs to one edition: it may be re-attached to that edition's experiences, but
+  // not to a second edition's, so reusing an asset never links one release's file to another release.
+  async assertAssetsNotUsedElsewhere(assetIds, editionId) {
+    for (const assetId of assetIds) {
+      const { rows } = await this.db.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [editionId, `%${assetId}%`]);
+      if (rows.length) throw new ApiError(409, "PROTECTED_MEDIA_IN_USE", "This file is already used by a different edition. Upload a separate file for this one.");
+    }
   }
 
   async assertArtistRequirements(artistId, requirements) {
@@ -654,12 +667,12 @@ export class ArtistStudioService {
     return [...byContract.values()];
   }
 
-  async bindProtectedExperience({ artistId, mediaConfig, requirements }) {
+  async bindProtectedExperience({ artistId, mediaConfig, requirements, editionId = null }) {
     const config = requireMediaConfig(mediaConfig);
     const normalizedRequirements = requireRequirements(requirements);
     const protectedMedia = Array.isArray(config.protectedMedia) ? config.protectedMedia : [];
     if (protectedMedia.length && !normalizedRequirements.length) throw new ApiError(400, "PROTECTED_MEDIA_REQUIREMENTS_REQUIRED", "Protected media requires at least one ownership requirement.");
-    const boundMedia = protectedMedia.length ? await this.bindProtectedAssets(artistId, protectedMedia) : [];
+    const boundMedia = protectedMedia.length ? await this.bindProtectedAssets(artistId, protectedMedia, { editionId }) : [];
     if (normalizedRequirements.length) await this.assertArtistRequirements(artistId, normalizedRequirements);
     return { mediaConfig: protectedMedia.length ? { ...config, protected: true, protectedMedia: boundMedia } : config, requirements: normalizedRequirements };
   }
@@ -1109,7 +1122,7 @@ export class ArtistStudioService {
     const sameId = siblings.find((row) => row.id === id) || null;
     if (sameId && (String(sameId.edition_id) !== String(edition.id) || String(sameId.artist_id) !== String(edition.artist_id))) throw new ApiError(409, "EXPERIENCE_ID_CONFLICT", "That experience id belongs to a different edition or artist.");
     const requirements = await this.defaultEditionRequirements({ editionId: edition.id, mediaConfig: input.mediaConfig, requirements: input.requirements });
-    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements });
+    const bound = await this.bindProtectedExperience({ artistId: edition.artist_id, mediaConfig: input.mediaConfig, requirements, editionId: edition.id });
     if (Array.isArray(bound.mediaConfig?.protectedMedia) && bound.mediaConfig.protectedMedia.length) await this.assertEditionRequirements(edition.id, bound.requirements);
     assertExperienceMatchesMedia(mappedType, bound.mediaConfig?.protectedMedia);
     // A file already unlocked by an experience on this edition is not given a second experience.
@@ -1135,7 +1148,7 @@ export class ArtistStudioService {
     const productType = input.productType ? String(input.productType).toUpperCase() : null;
     const mappedType = productType ? PRODUCT_TYPES[productType] : (input.type === undefined && input.experienceType === undefined ? experience.experience_type : String(input.type || input.experienceType).toUpperCase());
     if (productType && !mappedType) throw new ApiError(400, "UNSUPPORTED_EXPERIENCE_CATEGORY", `Unsupported experience category: ${productType}`);
-    const bound = await this.bindProtectedExperience({ artistId: experience.artist_id, mediaConfig: input.mediaConfig === undefined ? experience.media_config : input.mediaConfig, requirements: input.requirements === undefined ? experience.requirements : input.requirements });
+    const bound = await this.bindProtectedExperience({ artistId: experience.artist_id, mediaConfig: input.mediaConfig === undefined ? experience.media_config : input.mediaConfig, requirements: input.requirements === undefined ? experience.requirements : input.requirements, editionId: experience.edition_id });
     if (Array.isArray(bound.mediaConfig?.protectedMedia) && bound.mediaConfig.protectedMedia.length) await this.assertEditionRequirements(experience.edition_id, bound.requirements);
     assertExperienceMatchesMedia(mappedType, bound.mediaConfig?.protectedMedia);
     const mediaConfig = productType ? { ...bound.mediaConfig, productType, deliveryType: mappedType } : { ...bound.mediaConfig };
@@ -1204,6 +1217,24 @@ export class ArtistStudioService {
     const asset = await this.repository.saveMediaAsset({ id, artistId: artist.id, storageKey, mediaType, contentSha256, byteSize: body.length });
     await this.audit({ identity, request, eventType: "STUDIO_MEDIA_UPLOADED", subjectType: "media_asset", subjectId: asset.id, payload: { mediaType, contentSha256 } });
     return { id: asset.id, mediaType: asset.media_type || mediaType, createdAt: asset.created_at || null };
+  }
+
+  /**
+   * The artist's already-registered private files that no experience uses yet, and the public preview
+   * clips they uploaded before, so Studio can attach them again without a new upload. Read-only and
+   * owner-only. It returns ids, types and sizes only: never a storage key, link or hash.
+   */
+  async listRegisteredMedia({ request, artistId }) {
+    const { artist } = await this.ownedArtist({ artistId, request });
+    const [assets, previews] = await Promise.all([
+      this.db.query("SELECT a.id, a.media_type, a.created_at, (a.metadata->>'byteSize') AS byte_size, (SELECT i.payload->>'contentType' FROM audit_events u JOIN audit_events i ON i.event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND i.subject_type='artist' AND i.subject_id=a.artist_id AND i.payload->>'uploadId'=u.payload->>'uploadId' WHERE u.event_type='STUDIO_MEDIA_UPLOADED' AND u.subject_type='media_asset' AND u.subject_id=a.id LIMIT 1) AS content_type FROM media_assets a WHERE a.artist_id=$1 AND a.visibility='PROTECTED' AND NOT EXISTS (SELECT 1 FROM experiences x WHERE x.media_config::text LIKE '%' || a.id || '%') ORDER BY a.created_at DESC LIMIT 100", [artist.id]),
+      this.db.query("SELECT payload->>'uri' AS uri, max(payload->>'contentType') AS content_type, max(payload->>'byteSize') AS byte_size, max(created_at) AS uploaded_at FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uri' IS NOT NULL GROUP BY payload->>'uri' ORDER BY max(created_at) DESC LIMIT 20", [artist.id]),
+    ]);
+    const size = (value) => (value === null || value === undefined ? null : Number(value));
+    return {
+      protected: assets.rows.map((row) => ({ assetId: row.id, mediaType: String(row.media_type || "").toUpperCase(), byteSize: size(row.byte_size), contentType: row.content_type || null, registeredAt: row.created_at || null })),
+      previews: previews.rows.map((row) => ({ uri: row.uri, contentType: row.content_type || null, byteSize: size(row.byte_size), uploadedAt: row.uploaded_at || null })),
+    };
   }
 
   // Step 1 of a direct upload: a short-lived, private-only, size- and

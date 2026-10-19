@@ -22,10 +22,11 @@ import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactor
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState } from "../lib/contract-symbol.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
-import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
+import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, fetchRegisteredMedia, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings } from "../lib/sale-earnings.js";
 import { StudioEarnings } from "./StudioEarnings.jsx";
+import { RegisteredFilePicker } from "./RegisteredFilePicker.jsx";
 import { ARTIST_ROYALTY_POLICY } from "../../config/release-network.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: 24 };
@@ -417,6 +418,8 @@ export function ArtistStudioPage() {
   // Outcome of "Save catalog structure", shown beside the button (the page notice is far above it).
   const [catalogStatus, setCatalogStatus] = useState(null);
   const [uploads, setUploads] = useState({});
+  // Private files and previews this artist already registered, offered instead of uploading them again.
+  const [registered, setRegistered] = useState({ protected: [], previews: [] });
   const [mintReleaseId, setMintReleaseId] = useState("");
   const canUseStudio = wallet.connected && wallet.authenticated;
   const editionGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
@@ -475,6 +478,15 @@ export function ArtistStudioPage() {
       .catch((error) => { if (!cancelled) setNotice(error.message); });
     return () => { cancelled = true; };
   }, [canUseStudio, headers, requestedReleaseId, wallet.account]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canUseStudio || !artistId || workflow !== "catalog" || (step !== "track" && step !== "experience")) return undefined;
+    fetchRegisteredMedia({ artistId, headers })
+      .then((media) => { if (!cancelled) setRegistered(media); })
+      .catch(() => { if (!cancelled) setRegistered({ protected: [], previews: [] }); });
+    return () => { cancelled = true; };
+  }, [canUseStudio, artistId, headers, workflow, step, gatedEditionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -942,6 +954,18 @@ export function ArtistStudioPage() {
     return uploadPrivateAudio("experience-audio", file, setExperienceAudio, (uploaded) => `Experience ${noun} stored privately: ${file.name} (${formatBytes(uploaded.byteSize ?? file.size)}) · asset ${uploaded.assetId}. Save the catalog structure to unlock it for holders.`, mediaType);
   };
 
+  // Reattach a file this artist already registered: same state an upload would set, no new copy.
+  const registeredLabel = (item) => `${item.mediaType} · ${formatBytes(item.byteSize ?? 0)} · registered ${String(item.registeredAt || "").slice(0, 10)} · ${item.assetId.slice(0, 14)}…`;
+  const attachRegisteredFile = (key, setter, item, describe) => {
+    setter({ assetId: item.assetId, mediaType: item.mediaType, ...(item.contentType ? { contentType: item.contentType } : {}), filename: "", byteSize: item.byteSize ?? undefined });
+    setUploads((prior) => ({ ...prior, [key]: { state: "done", message: describe } }));
+  };
+  const attachRegisteredPreview = (item) => {
+    set("trackPreview", item.uri);
+    setUploads((prior) => ({ ...prior, preview: { state: "done", message: `Using the preview already uploaded: ${item.uri}. No new upload.` } }));
+  };
+  const unattachedFor = (mediaType, otherAssetId) => registered.protected.filter((item) => item.mediaType === mediaType && item.assetId !== otherAssetId);
+
   const takeReleaseOffSite = async (record) => {
     const id = record?.release?.id;
     if (!id || busy) return;
@@ -1225,6 +1249,7 @@ export function ArtistStudioPage() {
               <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>~30 s clip · 5 MB max · public</span>
             </div>
             <UploadStatus status={uploads.preview} signedIn={canUseStudio} />
+            <RegisteredFilePicker label="Use a preview already uploaded" disabled={busy !== "" || !canUseStudio} options={registered.previews.map((item) => ({ value: item.uri, uri: item.uri, label: `${item.uri.replace("ipfs://", "").slice(0, 16)}… · ${formatBytes(item.byteSize ?? 0)} · uploaded ${String(item.uploadedAt || "").slice(0, 10)}` }))} onChoose={attachRegisteredPreview} />
             {form.trackPreview && <audio controls preload="none" src={ipfsToHttp(form.trackPreview)} style={{ width: "100%", marginTop: 12 }} />}
           </div>
           <div style={{ marginTop: 16 }}>
@@ -1237,6 +1262,7 @@ export function ArtistStudioPage() {
               <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`WAV, AIFF, FLAC or MP3 · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · token-gated`}</span>
             </div>
             <UploadStatus status={uploads["full-track"]} signedIn={canUseStudio} />
+            <RegisteredFilePicker label="Use a full track already registered" disabled={busy !== "" || !canUseStudio} options={unattachedFor("AUDIO", experienceAudio?.assetId).map((item) => ({ ...item, value: item.assetId, label: registeredLabel(item) }))} onChoose={(item) => attachRegisteredFile("full-track", setFullTrack, item, `Using the registered full track ${item.assetId} (${formatBytes(item.byteSize ?? 0)}). No new upload.`)} />
           </div>
           <TextField title="Collector receives (one per line)" value={form.includes} onChange={(value) => set("includes", value)} multiline />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
@@ -1278,6 +1304,7 @@ export function ArtistStudioPage() {
               <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{`${hint} · ${formatMegabytes(MAX_FULL_TRACK_BYTES)} max · private · holders only`}</span>
             </div>
             <UploadStatus status={uploads["experience-audio"]} signedIn={canUseStudio} />
+            <RegisteredFilePicker label={`Use a ${label.toLowerCase()} already registered`} disabled={busy !== "" || !canUseStudio} options={unattachedFor(deliveryType, fullTrack?.assetId).map((item) => ({ ...item, value: item.assetId, label: registeredLabel(item) }))} onChoose={(item) => attachRegisteredFile("experience-audio", setExperienceAudio, item, `Using the registered ${label.toLowerCase()} ${item.assetId} (${formatBytes(item.byteSize ?? 0)}). No new upload.`)} />
           </div>
             );
           })()}
