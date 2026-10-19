@@ -44,6 +44,9 @@ function world({ extraExperiences = [], extraAssets = [] } = {}) {
       if (text.includes("FROM experiences WHERE edition_id=$1 OR id=$2")) return { rows: rows().filter((row) => row.edition_id === params[0] || row.id === params[1]) };
       if (text.includes("FROM experiences x JOIN artist_owners")) return { rows: params[1] === owner ? rows().filter((row) => row.id === params[0]).map((row) => ({ ...row, owner_wallet: owner })) : [] };
       if (text.includes("FROM experiences WHERE edition_id=$1 AND id<>$2")) return { rows: rows().filter((row) => row.edition_id === params[0] && row.id !== params[1]) };
+      if (text.includes("FROM experiences WHERE edition_id=$1 ORDER BY id")) return { rows: rows().filter((row) => row.edition_id === params[0]).sort((a, b) => a.id.localeCompare(b.id)) };
+      if (text.includes("FROM experiences WHERE id=$1 FOR UPDATE")) return { rows: rows().filter((row) => row.id === params[0]) };
+      if (text.includes("FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2")) return { rows: rows().filter((row) => row.edition_id !== params[0] && JSON.stringify(row.media_config).includes(String(params[1]).replaceAll("%", ""))).slice(0, 1) };
       if (text.includes("FROM experiences WHERE release_id=$1")) return { rows: rows().filter((row) => row.release_id === params[0]) };
       if (text.includes("FROM experiences WHERE id=$1 AND status='PUBLISHED'")) return { rows: rows().filter((row) => row.id === params[0] && row.status === "PUBLISHED") };
       if (text.includes("FROM tokens")) return { rows: tokens };

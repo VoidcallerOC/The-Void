@@ -240,6 +240,14 @@ export async function tagPrivateMaster(file, tag) {
 // to the artist's wallet, the browser sends the file straight to private
 // storage, and the API then records it. Only an asset id comes back, never a
 // storage address.
+// Files this artist already stored and has not attached yet, and the public previews they uploaded
+// before. Metadata only: ids, types and sizes. Nothing here is a storage key or link.
+export async function fetchRegisteredMedia({ artistId, headers, fetchImpl = fetch }) {
+  if (!artistId) return { protected: [], previews: [] };
+  const data = await studioFetch(`/studio/artists/${encodeURIComponent(artistId)}/media/registered`, { headers, fetchImpl });
+  return { protected: Array.isArray(data?.protected) ? data.protected : [], previews: Array.isArray(data?.previews) ? data.previews : [] };
+}
+
 export async function uploadStudioFullTrack({ artistId, file, headers, mediaType = "AUDIO", fetchImpl = fetch, send = xhrSend, hash = sha256Hex, onProgress }) {
   const kind = String(mediaType || "AUDIO").toUpperCase();
   if (!artistId) throw new Error("Create the release before uploading the full track.");
