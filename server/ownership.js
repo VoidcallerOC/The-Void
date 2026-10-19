@@ -42,13 +42,25 @@ function mediaIsProtected(mediaConfig) {
   return Array.isArray(config.protectedMedia) && config.protectedMedia.length > 0;
 }
 
+// Freshness is judged against the last run that completed successfully. The
+// indexer writes the current chain head into `latest_known_block` when a run
+// starts, before `last_processed_block` moves, so while a row is RUNNING those
+// two columns describe different runs and their difference is not an indexing
+// lag. A run that completed ended at head minus confirmations, so its lag was
+// within bounds by construction; what still matters while the next run is in
+// flight is how long ago that completion happened. A checkpoint that has never
+// completed a run successfully is stale no matter how recently it was written.
 function checkpointFresh(row, { maxLagBlocks, maxStalenessMs, now }) {
-  if (!row || !["IDLE", "RUNNING"].includes(String(row.status || "").toUpperCase())) return false;
-  const latest = Number(row.latest_known_block);
-  const current = Number(row.last_processed_block);
-  if (!Number.isSafeInteger(latest) || !Number.isSafeInteger(current) || latest - current > maxLagBlocks) return false;
-  const successfulAt = new Date(row.last_successful_run_at || row.updated_at || 0).getTime();
-  return Number.isFinite(successfulAt) && successfulAt > 0 && now().getTime() - successfulAt <= maxStalenessMs;
+  const status = String(row?.status || "").toUpperCase();
+  if (!row || !["IDLE", "RUNNING"].includes(status)) return false;
+  const successfulAt = row.last_successful_run_at ? new Date(row.last_successful_run_at).getTime() : NaN;
+  if (!Number.isFinite(successfulAt) || successfulAt <= 0 || now().getTime() - successfulAt > maxStalenessMs) return false;
+  if (status === "RUNNING") return true;
+  // A missing progress column is not block 0: a row that cannot state its own lag is not fresh.
+  const block = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
+  const latest = block(row.latest_known_block);
+  const current = block(row.last_processed_block);
+  return Number.isSafeInteger(latest) && Number.isSafeInteger(current) && latest - current <= maxLagBlocks;
 }
 
 /**
