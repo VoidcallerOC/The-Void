@@ -40,7 +40,9 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
   let clock = 0;
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   const advisory = new Map(); // lock key -> promise released when the holder's transaction ends
-  const lockLog = []; // advisory locks in the order they were acquired
+  const writes = { inFlight: 0, max: 0 }; // overlapping experience writes, to show what is serialized
+  const lockLog = []; // file (asset) advisory locks in the order they were acquired
+  const lockKeys = []; // every advisory lock key, edition locks included, in acquisition order
   const rows = () => [...state.experiences.values()];
   const db = {
     query: vi.fn(async (sql, params = []) => {
@@ -50,6 +52,7 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
       if (text.includes("FROM experiences x JOIN artist_owners")) return { rows: params[1] === owner ? rows().filter((row) => row.id === params[0]).map((row) => ({ ...row, owner_wallet: owner })) : [] };
       if (text.includes("FROM experiences WHERE edition_id=$1 AND id<>$2")) return { rows: rows().filter((row) => row.edition_id === params[0] && row.id !== params[1]) };
       if (text.includes("FROM experiences WHERE edition_id=$1 OR id=$2")) return { rows: rows().filter((row) => row.edition_id === params[0] || row.id === params[1]) };
+      if (text.includes("FROM experiences WHERE edition_id=$1 ORDER BY id")) return { rows: rows().filter((row) => row.edition_id === params[0]).sort((a, b) => a.id.localeCompare(b.id)) };
       if (text.includes("FROM experiences WHERE release_id=$1")) return { rows: rows().filter((row) => row.release_id === params[0]) };
       if (text.includes("FROM experiences WHERE id=$1 FOR UPDATE")) return { rows: rows().filter((row) => row.id === params[0]) };
       if (text.includes("FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2")) return { rows: rows().filter((row) => row.edition_id !== params[0] && JSON.stringify(row.media_config).includes(String(params[1]).replaceAll("%", ""))).slice(0, 1) };
@@ -67,7 +70,9 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
   };
   const repository = {
     saveExperience: vi.fn(async (input) => {
-      await tick(); // a real write takes time: this is the window the lock must cover
+      writes.inFlight += 1;
+      writes.max = Math.max(writes.max, writes.inFlight);
+      try { await tick(); } finally { writes.inFlight -= 1; } // a real write takes time: this is the window the lock must cover
       clock += 1;
       const row = { id: input.id, artist_id: input.artistId, release_id: input.releaseId, edition_id: input.editionId, title: input.title, description: input.description || null, experience_type: input.experienceType, requirements: input.requirements, media_config: input.mediaConfig, version: (state.experiences.get(input.id)?.version || 0) + 1, status: input.status || state.experiences.get(input.id)?.status || "DRAFT", updated_at: clock };
       state.experiences.set(row.id, row);
@@ -86,7 +91,8 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
             while (advisory.has(key)) await advisory.get(key).done;
             let release;
             advisory.set(key, { done: new Promise((resolve) => { release = resolve; }) });
-            lockLog.push(key.replace('void:media-asset:', ''));
+            lockKeys.push(key);
+            if (key.startsWith('void:media-asset:')) lockLog.push(key.replace('void:media-asset:', ''));
             held.push([key, release]);
             return { rows: [] };
           }
@@ -100,7 +106,7 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
   const logger = { info() {}, error() {} };
   const studio = new ArtistStudioService({ db: verifiedArtistDb(db), repository, authenticator: vi.fn(async () => ({ wallet: state.wallet })), logger });
   const uploads = ["createMediaUploadUrl", "registerMediaUpload", "uploadProtectedMedia"].map((name) => vi.spyOn(studio, name));
-  return { state, db, repository, studio, uploads, lockLog, advisory };
+  return { state, db, repository, studio, uploads, lockLog, lockKeys, advisory, writes };
 }
 
 const save = async (w, files, editionId = "edition-1") => {
@@ -349,5 +355,140 @@ describe("publication cannot restore a file another edition has claimed", () => 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1); // exactly one edition wins both files
     for (let index = 0; index < w.lockLog.length; index += 2) expect(w.lockLog.slice(index, index + 2)).toEqual(["asset-master", "asset-master-2"]);
     expect(w.advisory.size).toBe(0);
+  });
+});
+
+describe("one primary experience per edition under concurrent saves", () => {
+  const ASSETS = { a: "asset-master", b: "asset-master-2" };
+  // A full-track experience (planner payload: primary true) with its own id and file.
+  const save = (w, editionId, id, assetId, primary) => w.studio.createExperience({ request, editionId, input: (() => {
+    const payload = planCatalogExperiences({ ...FORM, editionId, fullTrack: { ...FULL, assetId } })[0].payload;
+    return { ...payload, id, mediaConfig: { ...payload.mediaConfig, ...(primary === undefined ? {} : { primary }) } };
+  })() });
+  const primaries = (w, editionId) => [...w.state.experiences.values()].filter((row) => row.edition_id === editionId && row.media_config.primary === true).map((row) => row.id);
+  const world2 = (options = {}) => world({ extraAssets: [SECOND_MASTER], ...options });
+  const codes = (results) => results.filter((result) => result.status === "rejected").map((result) => result.reason.code);
+
+  it("lets only one of two simultaneous saves make a different experience primary", async () => {
+    const w = world2();
+    const results = await Promise.allSettled([save(w, "edition-1", "exp-a", ASSETS.a, true), save(w, "edition-1", "exp-b", ASSETS.b, true)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(codes(results)).toEqual(["PRIMARY_EXPERIENCE_CONFLICT"]);
+    expect(primaries(w, "edition-1")).toHaveLength(1);
+    expect(w.state.experiences.size).toBe(1); // the refused save wrote nothing
+    expect(w.writes.max).toBe(1); // writes in one edition never overlapped
+    expect(w.advisory.size).toBe(0);
+  });
+
+  it("holds for many simultaneous saves in any order", async () => {
+    const w = world2();
+    const results = await Promise.allSettled([save(w, "edition-1", "exp-b", ASSETS.b, true), save(w, "edition-1", "exp-a", ASSETS.a, true), save(w, "edition-1", "exp-b", ASSETS.b, true), save(w, "edition-1", "exp-a", ASSETS.a, true)]);
+    expect(primaries(w, "edition-1")).toHaveLength(1);
+    expect(new Set(codes(results))).toEqual(new Set(["PRIMARY_EXPERIENCE_CONFLICT"]));
+    expect(w.state.experiences.size).toBe(1);
+  });
+
+  it("cannot make two experiences primary through simultaneous updates", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, false);
+    await save(w, "edition-1", "exp-b", ASSETS.b, false);
+    const update = (id) => w.studio.updateExperience({ request, experienceId: id, input: { mediaConfig: { protected: true, protectedMedia: [{ assetId: id === "exp-a" ? ASSETS.a : ASSETS.b, mediaType: "AUDIO" }], primary: true } } });
+    const results = await Promise.allSettled([update("exp-a"), update("exp-b")]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(codes(results)).toEqual(["PRIMARY_EXPERIENCE_CONFLICT"]);
+    expect(primaries(w, "edition-1")).toHaveLength(1);
+  });
+
+  it("a carried-over designation is read under the lock, not from a stale read", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, true);
+    await save(w, "edition-1", "exp-b", ASSETS.b, false);
+    const noMention = (id, assetId) => w.studio.updateExperience({ request, experienceId: id, input: { title: "Retitled", mediaConfig: { protected: true, protectedMedia: [{ assetId, mediaType: "AUDIO" }] } } });
+    // exp-a hands the designation over while exp-b is being retitled (it mentions no primary): exp-b stays false.
+    const handOver = w.studio.updateExperience({ request, experienceId: "exp-a", input: { mediaConfig: { protected: true, protectedMedia: [{ assetId: ASSETS.a, mediaType: "AUDIO" }], primary: false } } });
+    await Promise.all([handOver, noMention("exp-b", ASSETS.b)]);
+    expect(primaries(w, "edition-1")).toEqual([]);
+    await save(w, "edition-1", "exp-b", ASSETS.b, true); // now it can be taken
+    expect(primaries(w, "edition-1")).toEqual(["exp-b"]);
+  });
+
+  it("refuses a second primary next to an existing one, and the first stays primary", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, true);
+    await expect(save(w, "edition-1", "exp-b", ASSETS.b, true)).rejects.toMatchObject({ code: "PRIMARY_EXPERIENCE_CONFLICT" });
+    expect(primaries(w, "edition-1")).toEqual(["exp-a"]);
+    expect(w.state.experiences.has("exp-b")).toBe(false);
+  });
+
+  it("re-saving the same primary designation, even simultaneously, stays valid and idempotent", async () => {
+    const w = world2();
+    const results = await Promise.allSettled([save(w, "edition-1", "exp-a", ASSETS.a, true), save(w, "edition-1", "exp-a", ASSETS.a, true), save(w, "edition-1", "exp-a", ASSETS.a, true)]);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(w.state.experiences.size).toBe(1);
+    expect(primaries(w, "edition-1")).toEqual(["exp-a"]);
+    expect(w.state.experiences.get("exp-a").media_config.protectedMedia.map((entry) => entry.assetId)).toEqual([ASSETS.a]);
+  });
+
+  it("saving the demo as non-primary never displaces or duplicates the full track's designation", async () => {
+    for (const order of ["full-first", "demo-first", "together"]) {
+      const w = world2();
+      const [full, demo] = planCatalogExperiences({ ...FORM, fullTrack: FULL, experienceAudio: DEMO }).sort((a) => (a.role === "full-track" ? -1 : 1));
+      const run = (plan) => w.studio.createExperience({ request, editionId: "edition-1", input: plan.payload });
+      if (order === "full-first") { await run(full); await run(demo); }
+      else if (order === "demo-first") { await run(demo); await run(full); }
+      else await Promise.all([run(full), run(demo)]);
+      await run(demo); // and again
+      expect(primaries(w, "edition-1")).toEqual(["experience-edition-1-full-track"]);
+      expect(w.state.experiences.get("experience-edition-1-experience-audio").media_config.primary).toBe(false);
+      expect(w.state.experiences.size).toBe(2);
+    }
+  });
+
+  it("different editions designate their primaries at the same time, without waiting on each other", async () => {
+    const w = world2();
+    const results = await Promise.allSettled([save(w, "edition-1", "exp-1", ASSETS.a, true), save(w, "edition-2", "exp-2", ASSETS.b, true)]);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(primaries(w, "edition-1")).toEqual(["exp-1"]);
+    expect(primaries(w, "edition-2")).toEqual(["exp-2"]);
+    expect(w.writes.max).toBe(2); // the two writes overlapped: no global serialization
+    expect(w.lockKeys.filter((key) => key.startsWith("void:edition-experiences:")).sort()).toEqual(["void:edition-experiences:edition-1", "void:edition-experiences:edition-2"]);
+  });
+
+  it("takes the edition lock before the file locks, always, and releases everything", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, true);
+    expect(w.lockKeys).toEqual(["void:edition-experiences:edition-1", "void:media-asset:asset-master"]);
+    w.lockKeys.length = 0;
+    await w.studio.publishReleaseExperiences(RELEASE_1); // publication takes file locks and its row, never the edition lock
+    expect(w.lockKeys.every((key) => key.startsWith("void:media-asset:"))).toBe(true);
+    expect(w.advisory.size).toBe(0);
+  });
+
+  it("a failed write releases its locks, leaves a valid state, and the next primary save works", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, false);
+    w.repository.saveExperience.mockRejectedValueOnce(new Error("disk full"));
+    await expect(save(w, "edition-1", "exp-b", ASSETS.b, true)).rejects.toThrow("disk full");
+    expect(w.advisory.size).toBe(0);
+    expect(primaries(w, "edition-1")).toEqual([]);
+    expect(w.state.experiences.has("exp-b")).toBe(false);
+    await save(w, "edition-1", "exp-b", ASSETS.b, true);
+    expect(primaries(w, "edition-1")).toEqual(["exp-b"]);
+  });
+
+  it("a refused save (validation) leaves no partial write and releases its locks", async () => {
+    const w = world2();
+    await save(w, "edition-1", "exp-a", ASSETS.a, true);
+    const before = JSON.stringify([...w.state.experiences.values()]);
+    await expect(save(w, "edition-1", "exp-b", ASSETS.b, true)).rejects.toMatchObject({ code: "PRIMARY_EXPERIENCE_CONFLICT" });
+    expect(JSON.stringify([...w.state.experiences.values()])).toBe(before);
+    expect(w.advisory.size).toBe(0);
+  });
+
+  it("control: without the locks the same two saves both become primary (the race this guards against)", async () => {
+    const w = world2({ locks: false });
+    const results = await Promise.allSettled([save(w, "edition-1", "exp-a", ASSETS.a, true), save(w, "edition-1", "exp-b", ASSETS.b, true)]);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(primaries(w, "edition-1")).toHaveLength(2);
   });
 });

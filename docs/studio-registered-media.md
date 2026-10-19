@@ -27,11 +27,15 @@ artist's own registered files instead of asking for the same upload again.
   (`studio.publication.experience_blocked`); the rest of the release still publishes.
   Locks are always taken file locks first (sorted), then the row, so the paths cannot deadlock.
 
-  Known gap: the one-primary-per-edition check is still check-then-write. Two simultaneous saves in one
-  edition can both set `primary: true`; the collector page then shows no gated Play (fail-safe) until it
-  is fixed in Studio. A partial unique index or an edition-scoped lock would close it.
-- A preview is accepted only if this artist uploaded it before and it is not a private object
-  (`PREVIEW_AUDIO_NOT_REGISTERED`, `PREVIEW_AUDIO_IS_PRIVATE`).
+  One primary per edition is enforced the same way. `createExperience` and `updateExperience` run in
+  `withEditionExperiences`: one transaction, one connection, with the lock order **edition lock, then
+  file locks (sorted), then the row write**. The edition's experiences are read after the locks, so the
+  "carry over the stored designation" and the "no other primary" check use committed state; a
+  competing save waits for the lock and then gets `PRIMARY_EXPERIENCE_CONFLICT` instead of committing a
+  second primary. Saves for different editions do not wait on each other. Publication takes file locks
+  and its own row only (it never changes a designation), so it cannot form a lock cycle with these paths.
+  Collectors still fail closed on an ambiguous or missing designation (`resolvePrimaryExperience`) for
+  legacy or corrupted rows.
 
 Re-uploading a WAV master would not reuse the stored file: each upload is tagged with its own bytes, so
 it would register a new, separate copy.
