@@ -322,6 +322,49 @@ describe("Genesis holding cannot be reused across wallets (adversarial)", () => 
     await expect(instance.issueVoucher(C)).resolves.toMatchObject({ voucher: { claimant: getAddress(C) } });
   });
 
+  it("burns remove the used unit first and never free a consumed unit: claims never exceed units ever held", async () => {
+    // A holds two units of ID 0. One claim uses one of them.
+    const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 2n } });
+    await expect(instance.issueVoucher(A)).resolves.toMatchObject({ voucher: { claimant: getAddress(A), quantity: "1" } });
+    dest.redeem(A);
+    // A burns one unit: the ledger treats the used unit as the one burned, so A's remaining unit is unused, but A can
+    // never claim again (hasClaimed) and the burn did not give A a second claim.
+    chain.transfer(A, ZERO, 0n);
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+    // The eligibility read reports the issued voucher (settled to REDEEMED by reconciliation); no new voucher is signed.
+    await expect(instance.checkEligibility(A)).resolves.toMatchObject({ claimIssued: true });
+    // The unit that never backed a claim still qualifies its next holder: two units, two claims, no more.
+    chain.transfer(A, B, 0n);
+    await expect(instance.issueVoucher(B)).resolves.toMatchObject({ voucher: { claimant: getAddress(B) } });
+    dest.redeem(B);
+    chain.transfer(B, C, 0n);
+    await expect(instance.issueVoucher(C)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+  });
+
+  it("burning the only unit after a claim leaves nothing for anyone and does not reopen the claim", async () => {
+    const { instance, chain, dest } = service({ holdings: { [`${A}:2`]: 1n } });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    chain.transfer(A, ZERO, 2n);
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 403, code: "ACCESS_DENIED" });
+  });
+
+  it("a used unit cannot be re-presented with a fresh nonce, a fresh voucher or another wallet", async () => {
+    const { instance, chain, dest, signTypedData } = service({ holdings: { [`${A}:1`]: 1n } });
+    const first = await instance.issueVoucher(A);
+    // Before redemption a repeat request returns the identical voucher and nonce; nothing new is signed.
+    const repeat = await instance.issueVoucher(A);
+    expect(repeat.voucher.nonce).toBe(first.voucher.nonce);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    dest.redeem(A);
+    // After redemption the same wallet gets no voucher at all, and the unit's new holder is refused.
+    await expect(instance.issueVoucher(A)).rejects.toMatchObject({ status: 409, code: "ALREADY_CLAIMED" });
+    chain.transfer(A, B, 1n);
+    await expect(instance.issueVoucher(B)).rejects.toMatchObject({ status: 403, code: "GENESIS_HOLDING_ALREADY_USED" });
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+  });
+
   it("releases the holding when a voucher expires unredeemed, and only then", async () => {
     const { instance, chain, dest } = service({ holdings: { [`${A}:0`]: 1n } });
     const issued = await instance.issueVoucher(A);
