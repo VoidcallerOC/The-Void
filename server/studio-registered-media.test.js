@@ -18,7 +18,7 @@ const FULL = { assetId: "asset-master", mediaType: "AUDIO", contentType: "audio/
 const DEMO = { assetId: "asset-demo", mediaType: "DEMO", contentType: "audio/wav" };
 const FORM = { editionId: "edition-1", productType: "DEMO", experienceTitle: "Stranger Things", experienceDescription: "", trackTitle: "Forgive & Forget", releaseTitle: "Forgive & Forget" };
 
-function world({ wallet = owner, assets, experiences = [] } = {}) {
+function world({ wallet = owner, assets, experiences = [], locks = true } = {}) {
   const state = {
     wallet,
     editions: [{ id: "edition-1", release_id: "release-1", artist_id: "artist-1" }, { id: "edition-2", release_id: "release-2", artist_id: "artist-1" }],
@@ -36,12 +36,16 @@ function world({ wallet = owner, assets, experiences = [] } = {}) {
   };
   const tokens = [{ token_id: "7", contract_address: contract, chain_id: 43113 }];
   let clock = 0;
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const advisory = new Map(); // lock key -> promise released when the holder's transaction ends
   const rows = () => [...state.experiences.values()];
   const db = {
     query: vi.fn(async (sql, params = []) => {
       const text = String(sql);
       if (text.includes("FROM artists a JOIN artist_owners")) return { rows: params[0] === "artist-1" && String(params[1]).toLowerCase() === owner ? [{ id: "artist-1", owner_wallet: owner }] : [] };
       if (text.includes("FROM editions e JOIN releases r")) return { rows: params[1] === owner ? state.editions.filter((edition) => edition.id === params[0]) : [] };
+      if (text.includes("FROM experiences x JOIN artist_owners")) return { rows: params[1] === owner ? rows().filter((row) => row.id === params[0]).map((row) => ({ ...row, owner_wallet: owner })) : [] };
+      if (text.includes("FROM experiences WHERE edition_id=$1 AND id<>$2")) return { rows: rows().filter((row) => row.edition_id === params[0] && row.id !== params[1]) };
       if (text.includes("FROM experiences WHERE edition_id=$1 OR id=$2")) return { rows: rows().filter((row) => row.edition_id === params[0] || row.id === params[1]) };
       if (text.includes("FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2")) return { rows: rows().filter((row) => row.edition_id !== params[0] && JSON.stringify(row.media_config).includes(String(params[1]).replaceAll("%", ""))).slice(0, 1) };
       if (text.includes("FROM tokens")) return { rows: tokens };
@@ -58,6 +62,7 @@ function world({ wallet = owner, assets, experiences = [] } = {}) {
   };
   const repository = {
     saveExperience: vi.fn(async (input) => {
+      await tick(); // a real write takes time: this is the window the lock must cover
       clock += 1;
       const row = { id: input.id, artist_id: input.artistId, release_id: input.releaseId, edition_id: input.editionId, title: input.title, description: input.description || null, experience_type: input.experienceType, requirements: input.requirements, media_config: input.mediaConfig, version: (state.experiences.get(input.id)?.version || 0) + 1, status: state.experiences.get(input.id)?.status || input.status || "DRAFT", updated_at: clock };
       state.experiences.set(row.id, row);
@@ -65,7 +70,26 @@ function world({ wallet = owner, assets, experiences = [] } = {}) {
     }),
     saveMediaAsset: vi.fn(),
     appendAuditEvent: vi.fn(async () => ({})),
-    inTransaction: vi.fn(async (operation) => operation(repository)),
+    // A transaction whose connection honours advisory locks until it ends, like Postgres.
+    inTransaction: vi.fn(async (operation) => {
+      const held = [];
+      const connection = {
+        query: async (sql, params = []) => {
+          if (String(sql).includes("pg_advisory_xact_lock")) {
+            if (!locks) return { rows: [] };
+            const key = params[0];
+            while (advisory.has(key)) await advisory.get(key).done;
+            let release;
+            advisory.set(key, { done: new Promise((resolve) => { release = resolve; }) });
+            held.push([key, release]);
+            return { rows: [] };
+          }
+          await tick();
+          return db.query(sql, params);
+        },
+      };
+      try { return await operation({ ...repository, db: connection }); } finally { for (const [key, release] of held) { advisory.delete(key); release(); } }
+    }),
   };
   const studio = new ArtistStudioService({ db: verifiedArtistDb(db), repository, authenticator: vi.fn(async () => ({ wallet: state.wallet })), logger: { info() {}, error() {} } });
   const uploads = ["createMediaUploadUrl", "registerMediaUpload", "uploadProtectedMedia"].map((name) => vi.spyOn(studio, name));
@@ -173,5 +197,53 @@ describe("server checks that make reuse safe", () => {
     expect([...w.state.experiences.values()].every((row) => row.edition_id === "edition-1")).toBe(true);
     await expect(save(w, { fullTrack: FULL, experienceAudio: DEMO }, "edition-1")).resolves.toHaveLength(2);
     expect(w.state.experiences.size).toBe(2);
+  });
+});
+
+describe("cross-edition exclusivity under concurrent saves", () => {
+  const attach = (w, editionId) => w.studio.createExperience({ request, editionId, input: planCatalogExperiences({ ...FORM, editionId, fullTrack: FULL })[0].payload });
+  const owners = (w) => [...w.state.experiences.values()].filter((row) => JSON.stringify(row.media_config).includes("asset-master")).map((row) => row.edition_id);
+
+  it("lets exactly one of two simultaneous saves to different editions claim the file", async () => {
+    const w = world();
+    const results = await Promise.allSettled([attach(w, "edition-1"), attach(w, "edition-2")]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected.reason).toMatchObject({ status: 409, code: "PROTECTED_MEDIA_IN_USE" });
+    expect(owners(w)).toHaveLength(1);
+    expect(new Set(owners(w)).size).toBe(1);
+  });
+
+  it("holds the same for many simultaneous saves, whatever the order", async () => {
+    const w = world();
+    const results = await Promise.allSettled([attach(w, "edition-2"), attach(w, "edition-1"), attach(w, "edition-2"), attach(w, "edition-1")]);
+    const winner = owners(w);
+    expect(new Set(winner).size).toBe(1); // never attached to both editions
+    expect(results.filter((result) => result.status === "rejected").every((result) => result.reason.code === "PROTECTED_MEDIA_IN_USE")).toBe(true);
+  });
+
+  it("takes the per-file lock before the check and saves inside the same transaction", async () => {
+    const w = world();
+    await attach(w, "edition-1");
+    expect(w.repository.inTransaction).toHaveBeenCalledTimes(1);
+    const statements = w.db.query.mock.calls.map(([sql]) => String(sql));
+    // The fake routes transaction statements through db.query after the lock, so the check ran on the transaction connection.
+    expect(statements.some((sql) => sql.includes("edition_id<>$1 AND media_config::text LIKE $2"))).toBe(true);
+  });
+
+  it("control: without the lock the same two saves both pass the check (the race this guards against)", async () => {
+    const w = world({ locks: false });
+    const results = await Promise.allSettled([attach(w, "edition-1"), attach(w, "edition-2")]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(new Set(owners(w)).size).toBe(2);
+  });
+
+  it("the update path is guarded the same way", async () => {
+    const w = world();
+    await attach(w, "edition-1");
+    await w.studio.createExperience({ request, editionId: "edition-2", input: planCatalogExperiences({ ...FORM, editionId: "edition-2", experienceAudio: DEMO })[0].payload });
+    const demoId = "experience-edition-2-experience-audio";
+    await expect(w.studio.updateExperience({ request, experienceId: demoId, input: { mediaConfig: { protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] }, productType: "FULL_RECORD" } })).rejects.toMatchObject({ code: "PROTECTED_MEDIA_IN_USE" });
+    expect(owners(w)).toEqual(["edition-1"]);
   });
 });

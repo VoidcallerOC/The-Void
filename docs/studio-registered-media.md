@@ -17,6 +17,9 @@ artist's own registered files instead of asking for the same upload again.
   is `PROTECTED` (`PROTECTED_MEDIA_NOT_PROTECTED`), has the declared type
   (`PROTECTED_MEDIA_TYPE_MISMATCH`), and is not already used by a different edition
   (`PROTECTED_MEDIA_IN_USE`). Re-saving the same edition is allowed and creates no duplicate.
+  The exclusivity check and the save run in one transaction behind a per-file Postgres advisory lock
+  (`saveExperienceExclusively`), so two simultaneous saves of the same file for different editions
+  cannot both succeed: the second waits for the first to commit, then is refused.
 - A preview is accepted only if this artist uploaded it before and it is not a private object
   (`PREVIEW_AUDIO_NOT_REGISTERED`, `PREVIEW_AUDIO_IS_PRIVATE`).
 
