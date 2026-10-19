@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
@@ -12,6 +12,7 @@ import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
+import { NotFoundPage } from "./components/NotFoundPage.jsx";
 
 const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 
@@ -105,7 +106,7 @@ export default function App() {
           <Route path="choir" element={<ChoirPage />} />
           <Route path="reliquary" element={<ReliquaryPage />} />
           {VOID_LIVE && <Route path="covenant" element={<CovenantPage />} />}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
       <Analytics />

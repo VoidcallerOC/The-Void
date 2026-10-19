@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { WalletButton } from "./WalletButton.jsx";
@@ -34,6 +34,21 @@ export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const notifications = useReviewerNotifications();
   const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+  // Any route change closes the mobile menu: the logo, footer and in-page
+  // links, and browser back/forward all navigate without a menu-item click.
+  // Left open, the full-width menu hid the new page so it looked unchanged.
+  const [menuRoute, setMenuRoute] = useState(location.key);
+  if (menuRoute !== location.key) {
+    setMenuRoute(location.key);
+    if (menuOpen) setMenuOpen(false);
+  }
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", onScroll);
@@ -95,6 +110,8 @@ export function Nav() {
         <button
           className="vc-nav-burger"
           aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          aria-controls="vc-mobile-menu"
           onClick={() => setMenuOpen((v) => !v)}
           style={{
             display: "none",
@@ -114,6 +131,7 @@ export function Nav() {
 
       {menuOpen && (
         <div
+          id="vc-mobile-menu"
           className="vc-nav-menu"
           style={{
             position: "absolute",
