@@ -43,10 +43,11 @@ function validateTarget(target) {
 export const GENESIS_CLAIM_PHASES = Object.freeze({ UPCOMING: "upcoming", GENESIS: "genesis", PUBLIC: "public", CLOSED: "closed" });
 
 /**
- * Which phase the schedule is in at nowSec (unix seconds): Genesis claims while
- * claimStart <= now < claimEnd, the ungated public mint while claimEnd <= now <= publicSaleEnd
- * (VoidPrimarySale accepts its endTime), then closed. The contracts enforce the same boundaries;
- * this only decides what the page offers.
+ * Which phase the schedule is in at nowSec (unix seconds). The free claim and the paid mint run
+ * concurrently: GENESIS while claimStart <= now < claimEnd (free claims for eligible Genesis holders
+ * AND the ungated paid mint are both open), PUBLIC while claimEnd <= now <= publicSaleEnd (claims
+ * closed, the paid mint still open; VoidPrimarySale accepts its endTime), then CLOSED. The contracts
+ * enforce the same boundaries; this only decides what the page offers.
  */
 export function genesisClaimPhase(target, nowSec) {
   const now = BigInt(nowSec);
@@ -54,6 +55,16 @@ export function genesisClaimPhase(target, nowSec) {
   if (now < BigInt(target.claimEnd)) return GENESIS_CLAIM_PHASES.GENESIS;
   if (now <= BigInt(target.publicSaleEnd)) return GENESIS_CLAIM_PHASES.PUBLIC;
   return GENESIS_CLAIM_PHASES.CLOSED;
+}
+
+/**
+ * Whether the paid public mint is open at nowSec: publicSaleStart <= now <= publicSaleEnd. The sale
+ * opens together with the claims, so a target without publicSaleStart falls back to claimStart.
+ */
+export function genesisSaleOpen(target, nowSec) {
+  const now = BigInt(nowSec);
+  const start = BigInt(target.publicSaleStart ?? target.claimStart);
+  return now >= start && now <= BigInt(target.publicSaleEnd);
 }
 
 export function fetchGenesisClaimConfig(options = {}) {
@@ -68,6 +79,7 @@ const CLAIM_GUARD_INTERFACE = new Interface([
   "function publicAllocation() view returns (uint256)",
   "function claimStart() view returns (uint256)",
   "function claimEnd() view returns (uint256)",
+  "function publicSaleStart() view returns (uint256)",
   "function publicSaleEnd() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)",
   "function claimedSupply() view returns (uint256)",
@@ -94,8 +106,8 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
     const result = await provider.request({ method: "eth_call", params: [{ to: getAddress(target.claimContract), data: CLAIM_GUARD_INTERFACE.encodeFunctionData(name, []) }, "latest"] });
     return CLAIM_GUARD_INTERFACE.decodeFunctionResult(name, result)[0];
   };
-  const [claimRelease, claimSale, claimToken, allocation, publicAllocation, claimStart, claimEnd, publicSaleEnd, publicPriceWei, claimedSupply] = await Promise.all(
-    ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimStart", "claimEnd", "publicSaleEnd", "publicPriceWei", "claimedSupply"].map(read),
+  const [claimRelease, claimSale, claimToken, allocation, publicAllocation, claimStart, claimEnd, publicSaleStart, publicSaleEnd, publicPriceWei, claimedSupply] = await Promise.all(
+    ["releaseContract", "primarySale", "tokenId", "allocation", "publicAllocation", "claimStart", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "claimedSupply"].map(read),
   );
   if (getAddress(claimRelease) !== getAddress(releaseContractAddress) || BigInt(claimToken) !== BigInt(tokenId)) return { state: "none" };
   if (getAddress(claimSale) !== getAddress(primarySaleAddress)) return { state: "none" };
@@ -106,6 +118,7 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
     publicAllocation: BigInt(publicAllocation),
     claimStart: BigInt(claimStart),
     claimEnd: BigInt(claimEnd),
+    publicSaleStart: BigInt(publicSaleStart),
     publicSaleEnd: BigInt(publicSaleEnd),
     publicPriceWei: BigInt(publicPriceWei),
     claimedSupply: BigInt(claimedSupply),

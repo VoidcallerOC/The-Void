@@ -164,14 +164,14 @@ function ClaimGuardNotice({ claim }) {
       </div>
     );
   }
-  const opens = formatSaleInstant(claim.claimEnd);
+  const opens = formatSaleInstant(claim.publicSaleStart);
   const claimed = claim.allocation === 0n ? `${claim.claimedSupply.toString()} claimed` : `${claim.claimedSupply.toString()} of ${claim.allocation.toString()} claimed`;
   return (
     <div role="alert" style={warnPanel}>
       <strong>Genesis holder claim is configured for this token</strong>
       <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, marginBottom: 0 }}>
         Claim contract {claim.claimContract}. {claim.publicAllocation === 0n ? "The sale must stay uncapped." : `The sale cap must stay ${claim.publicAllocation.toString()} (the public allocation).`}
-        {claim.live ? ` Claims are still open (${claimed}), so the public sale must open exactly at ${opens.local} your time (${opens.utc}) with its scheduled end and price.` : " Holder claims are closed."}
+        {claim.live ? ` Claims are still open (${claimed}), so the public sale must open together with them at ${opens.local} your time (${opens.utc}) with its scheduled end and price.` : " Holder claims are closed."}
         {" "}Edits that break these rules are blocked.
       </p>
     </div>

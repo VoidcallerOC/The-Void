@@ -17,7 +17,7 @@ function claimNetworkLabel(chainId) {
   if (!Number.isSafeInteger(id) || id <= 0) return "—";
   try { return resolveChainDescriptor({ id }).networkName; } catch { return `Chain ${id}`; }
 }
-import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
+import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, genesisSaleOpen, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
 import { formatSaleInstant } from "../lib/sale-editor.js";
 
 const CLAIM_PHASES = Object.freeze({
@@ -98,13 +98,16 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
-/** The schedule as the server-verified target states it; the contracts enforce the same windows. */
+/**
+ * The schedule as the server-verified target states it; the contracts enforce the same windows.
+ * The paid mint opens together with the free claim (publicSaleStart == claimStart) and outlives it.
+ */
 function ClaimSchedule({ target }) {
   if (!target?.claimEnd) return null;
   return (
     <>
       <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
-      <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.claimEnd)} → {instant(target.publicSaleEnd)}</InfoRow>
+      <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.publicSaleStart ?? target.claimStart)} → {instant(target.publicSaleEnd)}</InfoRow>
       <InfoRow label="Eligibility">Currently holds Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, checked when you claim. One free claim per wallet, and each claim uses one Genesis unit's eligibility; a used unit does not qualify again after a transfer. Your Genesis tokens are never moved, burned or locked.</InfoRow>
       <InfoRow label="Supply">{String(target.publicAllocation) === "0" && String(target.allocation) === "0" ? "Open edition · uncapped" : `Claim ${target.allocation} · public ${target.publicAllocation}`}</InfoRow>
     </>
@@ -112,7 +115,8 @@ function ClaimSchedule({ target }) {
 }
 
 function phaseMessage(phase, target) {
-  if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return `The free Genesis claim opens ${instant(target.claimStart)}.`;
+  if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return `The free Genesis claim and the public mint open ${instant(target.claimStart)}.`;
+  if (phase === GENESIS_CLAIM_PHASES.GENESIS) return `Genesis holders can claim one copy for free. The public mint is also open now to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}.`;
   if (phase === GENESIS_CLAIM_PHASES.PUBLIC) return `The Genesis claim has closed. The public mint is open to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}. No Genesis token or voucher is needed.`;
   if (phase === GENESIS_CLAIM_PHASES.CLOSED) return "Minting is closed. The Genesis claim and the public mint have both ended.";
   return "";
@@ -155,7 +159,7 @@ function GenesisClaimLanding({ catalog }) {
         {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
         {state.status === "ready" && (
           <>
-            <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phase === GENESIS_CLAIM_PHASES.GENESIS ? "Genesis holders can claim one copy for free." : phaseMessage(phase, target)}</p>
+            <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phaseMessage(phase, target)}</p>
             <div className="vc-claim-action">
               {match ? <Link to={`/claim/${match.id}`} style={primaryBtn}>OPEN THE RELEASE CLAIM</Link> : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
             </div>
@@ -207,6 +211,8 @@ export function ClaimPage() {
   const schedulePhase = schedule ? genesisClaimPhase(schedule, nowSeconds()) : null;
   const scheduleMatches = Boolean(schedule && binding.valid && sameAddress(schedule.releaseContract, binding.releaseContractAddress) && String(schedule.tokenId) === String(binding.tokenId));
   const outsideGenesisWindow = scheduleMatches && schedulePhase !== GENESIS_CLAIM_PHASES.GENESIS;
+  // The paid mint runs concurrently with the free claim (GENESIS) and outlives it (PUBLIC).
+  const saleOpen = scheduleMatches && genesisSaleOpen(schedule, nowSeconds());
 
   useEffect(() => {
     let live = true;
@@ -393,13 +399,15 @@ export function ClaimPage() {
           </div>
 
           <div className="vc-claim-action">
-            {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.PUBLIC
-              ? <Link to={`/edition/${edition.id}`} style={primaryBtn}>MINT · {avax(schedule.publicPriceWei)}</Link>
-              : (
-                <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
-                  {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.CLOSED ? "MINTING CLOSED" : actionText}
-                </button>
-              )}
+            {/* Claims closed but the paid mint still open: the mint is the only action left. */}
+            {!(scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.PUBLIC) && (
+              <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
+                {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.CLOSED ? "MINTING CLOSED" : actionText}
+              </button>
+            )}
+            {/* The paid mint is open alongside the free claim during GENESIS and alone during PUBLIC; the
+                claim stays the primary action for a wallet that can still claim, the mint for every other. */}
+            {saleOpen && <Link to={`/edition/${edition.id}`} style={schedulePhase === GENESIS_CLAIM_PHASES.GENESIS && !actionDisabled ? ghostBtn : primaryBtn}>MINT · {avax(schedule.publicPriceWei)}</Link>}
             <Link to={`/edition/${edition.id}`} style={ghostBtn}>View release</Link>
           </div>
 
