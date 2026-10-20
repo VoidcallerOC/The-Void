@@ -31,7 +31,7 @@ node scripts/prepare-legacy-marketplace-deployment.mjs   # prints the hashes bel
 |---|---|
 | creation bytecode keccak256 | `0x3bd6aa5a42b26b2e11e22f92478669768d3a55c88de87e739ec22ec62ae39677` |
 | runtime bytecode keccak256 | `0xc245a1574b1a50435dae4b5ea53a55fefe7767355ecbb05ed2467ce39747a5b1` |
-Two consecutive `forge clean && forge build` runs produced identical hashes. The deployed runtime embeds the immutables
+Two consecutive `forge clean && forge build` runs produced identical hashes, and building with Foundry v1.3.1 (the version CI installs) instead of 1.5.1 produced the same two hashes. The deployed runtime embeds the immutables
 (`feeRecipient`, `platformFeeBps`, `deploymentChainId`), so compare with immutables masked, or deploy the same constructor
 arguments on a fork and compare.
 
@@ -94,7 +94,7 @@ Emergency: Safe calls `setPaused(true)` and/or `disableCollection(Genesis)`. The
 ## 9. Verification results for this candidate [commands from the repo root; exit codes recorded]
 | Class | Command | Exit | Result |
 |---|---|---|---|
-| UNIT + adversarial (Solidity) | `forge test` | 0 | **295 passed, 0 failed, 7 skipped** (6 = pre-existing claim-fork suite, 1 = this candidate's fork suite; both skip without an RPC and are reported as skipped) |
+| UNIT + adversarial (Solidity) | `forge test` | 0 | **295 passed, 0 failed, 7 skipped** (identical under Foundry 1.5.1 and 1.3.1) (6 = pre-existing claim-fork suite, 1 = this candidate's fork suite; both skip without an RPC and are reported as skipped) |
 | FUZZ, heavy | `FOUNDRY_FUZZ_RUNS=20000 forge test --match-path "test/LegacyCollectionMarketplace*.t.sol"` | 0 | **57 passed, 0 failed, 1 skipped** (the fork suite) |
 | FORK (local fork of real mainnet state, **nothing broadcast**) | `MAINNET_FORK_RPC=https://api.avax.network/ext/bc/C/rpc forge test --match-path test/LegacyCollectionMarketplaceMainnetFork.t.sol` | 0 | **6 passed** — real Genesis holder lists, second account buys, exact 2.5/5/92.5; ids 0–3 sell, id 4 refused; real Genesis owner raising the royalty to 7% reverts a protected purchase; V4 still refuses Genesis. *Not production evidence.* |
 | FORK suite without an RPC | same command, no env | 0 | **0 passed, 1 skipped** (cannot pass silently) |
