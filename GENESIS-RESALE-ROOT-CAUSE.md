@@ -15,7 +15,7 @@ registry = factory `0x262B774cf9a1949170B58E2d57F6189980FE757b`, platformFeeBps 
 | `factory.isRelease(Genesis)` | `false` → `list()` reverts `UnsupportedRelease` |
 | `Genesis.royaltyBpsOf(0..3)` | reverts (function absent) → `RoyaltyPolicyViolation` |
 | `Genesis.payoutOf(0..3)` | reverts (function absent) |
-| `Genesis.royaltyInfo(0..3, 10000)` | `0x284C09a7…2180a`, 250 bps (ERC-2981 present) |
+| `Genesis.royaltyInfo(0..3, 1e18)` | `0x284C09a7…2180a`, `5e16` = **500 bps (5%)** (ERC-2981 present; an earlier version of this note wrongly said 250 bps) |
 
 Both gates are in `contracts/ReleaseMarketplaceV4.sol` (`_requireSupportedRelease`, royalty check) and are
 immutable on the deployed marketplace. This is a genuine contract limitation, not stale indexer data or an
@@ -30,3 +30,6 @@ Enabling Genesis resale needs a new marketplace that accepts an explicit allowli
 (Genesis only) and pays royalty via `royaltyInfo` — new contract, audit, deploy, then the manifest/indexer/UI
 addresses. No contract was deployed or changed. Acceptance steps (list, second-account buy, balances, fee and
 royalty settlement on mainnet) are UNVERIFIED: they need funded wallets and signed transactions.
+
+
+See `docs/adr/0001-genesis-legacy-collection-marketplace.md` for the compatibility design.
