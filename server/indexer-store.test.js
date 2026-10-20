@@ -70,10 +70,12 @@ describe("marketplace event projection storage", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ event_data: canonicalEvent }] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] }) };
     const store = new IndexerStore(db);
     const replay = vi.spyOn(store, "applyMarketplaceEvent").mockResolvedValue({ state: "ACTIVE" });
-    await expect(store.rebuildDerivedState({ chainId: 43114 })).resolves.toEqual({ chainId: 43114, replayedMarketplaceEvents: 1, replayedPrimaryPurchases: 0 });
+    await expect(store.rebuildDerivedState({ chainId: 43114 })).resolves.toEqual({ chainId: 43114, replayedMarketplaceEvents: 1, replayedPrimaryPurchases: 0, replayedPrimarySaleSettlements: 0 });
+    expect(client.query.mock.calls.map(([sql]) => String(sql))).toEqual(expect.arrayContaining([expect.stringContaining("DELETE FROM primary_sale_platform_transfers"), expect.stringContaining("DELETE FROM primary_sale_withdrawals")]));
     expect(client.query.mock.calls.map(([sql]) => String(sql))).toEqual(expect.arrayContaining([expect.stringContaining("DELETE FROM ownership_snapshots"), expect.stringContaining("DELETE FROM purchases"), expect.stringContaining("DELETE FROM primary_purchases"), expect.stringContaining("DELETE FROM listings"), expect.stringContaining("DELETE FROM marketplace_event_projections") ]));
     expect(db.query).toHaveBeenCalledWith(expect.stringContaining("is_canonical=true"), [43114]);
     expect(replay).toHaveBeenCalledWith(canonicalEvent);

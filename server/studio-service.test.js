@@ -636,6 +636,42 @@ describe("Studio catalog wallet ownership", () => {
     const sql = db.query.mock.calls.map(([text]) => text).find((text) => text.includes("FROM release_contracts rc JOIN releases r"));
     expect(sql).toContain("lower(ao.owner_wallet)=lower($1)");
     expect(sql).not.toContain("factory_contract_id=$");
+    // Earned to date: the indexer's sum of artist cuts for this sale, from finalized purchases only.
+    expect(sql).toContain("SUM(pp.artist_cut_wei)");
+    expect(sql).toContain("lower(pp.sale_contract_address)=lower(sale_contract.address)");
+    expect(sql).toContain("pp.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED')");
+    expect(sql).toContain("AS artist_earned_wei");
+    // Withdrawn: indexed Withdrawn events by the release's artist wallet only (the platform's withdrawals are not
+    // the artist's), never a REORGED row.
+    expect(sql).toContain("FROM primary_sale_withdrawals w");
+    expect(sql).toContain("lower(w.account_wallet)=lower(rc.artist_wallet)");
+    expect(sql).toContain("w.status <> 'REORGED'");
+    expect(sql).toContain("AS artist_withdrawn_wei");
+  });
+
+  it("listCatalog adds owner-scoped releaseSales and secondaryRoyalties with artist fields only", async () => {
+    const artistWallet = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
+    const { instance, db } = service({ authenticatedWallet: artistWallet });
+    const releaseSales = [{ chain_id: "43114", release_contract_address: "0x9aa6165b493ac50d0f8cdee2fd48a3c5155fd103", sale_contract_address: "0x6ae84a51f100f10f0535a514555043ae9edf9aa3", artist_earned_wei: "243750000000000000", artist_withdrawn_wei: "0", sales: 1 }];
+    const secondaryRoyalties = [{ chain_id: "43114", token_contract_address: "0x9aa6165b493ac50d0f8cdee2fd48a3c5155fd103", token_id: "7", royalty_wei: "25000000000000000", sales: 1 }];
+    db.query.mockImplementation(async (sql) => {
+      if (sql.includes("WITH sold AS")) return { rows: releaseSales };
+      if (sql.includes("FROM purchases p JOIN contracts c")) return { rows: secondaryRoyalties };
+      return { rows: [] };
+    });
+    const catalog = await instance.listCatalog({ request });
+    expect(catalog.releaseSales).toEqual(releaseSales);
+    expect(catalog.secondaryRoyalties).toEqual(secondaryRoyalties);
+    const sold = db.query.mock.calls.find(([text]) => text.includes("WITH sold AS"));
+    const royalties = db.query.mock.calls.find(([text]) => text.includes("FROM purchases p JOIN contracts c"));
+    for (const [text, params] of [sold, royalties]) {
+      expect(text).toContain("lower(ao.owner_wallet)=lower($1)");
+      expect(params).toEqual([artistWallet]);
+      expect(text).not.toMatch(/platform/i);
+    }
+    expect(sold[0]).toContain("pp.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED')");
+    expect(sold[0]).toContain("w.status <> 'REORGED'");
+    expect(royalties[0]).toContain("p.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED')");
   });
   it("listCatalog selects each edition's release clone, factory and dedicated sale so Studio can resume a published release", async () => {
     const { instance, db } = service({ authenticatedWallet: "0x284c09a7cc187e096cbbdc88d99defe6df32180a" });

@@ -30,12 +30,18 @@ const ERC1155_EVENT_TOPICS = Object.freeze({
   // VoidRelease1155V5 (Factory V3) records the provenance root when an edition is created.
   ProvenanceAnchored: id("ProvenanceAnchored(bytes32,bytes32,bytes32,uint256,address,address)")
 });
+// PlatformPaid is emitted only by VoidPrimarySaleSettled (the platform share pushed inside the
+// purchase); Withdrawn by withdraw() on every sale implementation.
 const PRIMARY_SALE_EVENT_TOPICS = Object.freeze({
-  Purchased: id("Purchased(uint256,address,uint256,uint256,uint256,uint256)")
+  Purchased: id("Purchased(uint256,address,uint256,uint256,uint256,uint256)"),
+  PlatformPaid: id("PlatformPaid(address,uint256)"),
+  Withdrawn: id("Withdrawn(address,uint256)")
 });
 // VoidPrimarySaleV2 (per-collection contracts): Purchased also carries the collection.
 const PRIMARY_SALE_V2_EVENT_TOPICS = Object.freeze({
-  Purchased: id("Purchased(address,uint256,address,uint256,uint256,uint256,uint256)")
+  Purchased: id("Purchased(address,uint256,address,uint256,uint256,uint256,uint256)"),
+  PlatformPaid: id("PlatformPaid(address,uint256)"),
+  Withdrawn: id("Withdrawn(address,uint256)")
 });
 const COLLECTION_FACTORY_EVENT_TOPICS = Object.freeze({
   CollectionCreated: id("CollectionCreated(address,address,uint256,string,string,string)")
