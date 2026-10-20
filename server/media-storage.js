@@ -1,4 +1,5 @@
 import { createReadStream, promises as fs } from "node:fs";
+import { Readable } from "node:stream";
 import { extname, resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -34,6 +35,25 @@ function allowedPrefix(key, prefixes) {
   return prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`));
 }
 
+function upstreamUnavailable(message, code, status) {
+  return Object.assign(new Error(message), { status: 502, code, upstream: { endpoint: "GET signed object link", status } });
+}
+
+// Yields only bytes [start, end] of a byte stream whose server ignored the
+// Range header, then stops reading (which cancels the upstream fetch).
+async function* sliceBytes(source, start, end) {
+  let offset = 0;
+  for await (const chunk of source) {
+    const chunkStart = offset;
+    offset += chunk.length;
+    if (offset <= start) continue;
+    const from = Math.max(0, start - chunkStart);
+    const to = Math.min(chunk.length, end + 1 - chunkStart);
+    if (to > from) yield chunk.subarray(from, to);
+    if (offset > end) return;
+  }
+}
+
 export class PrivateMediaStorage {
   constructor({ config, signer = null } = {}) {
     if (!config?.driver) throw new TypeError("PrivateMediaStorage requires media configuration.");
@@ -50,7 +70,7 @@ export class PrivateMediaStorage {
   // A 200 here only proves the key may CREATE links; it says nothing about
   // whether the gateway will serve the object (that is sha256OfPrivateObject).
   createPinataSigner(config) {
-    return async (cid) => {
+    return async (cid, { fetchImpl = fetch } = {}) => {
       if (!/^(?:baf[a-z0-9]+|Qm[1-9A-HJ-NP-Za-km-z]+)$/.test(cid)) throw new Error("Pinata protected media reference must be a CID.");
       const date = Math.floor(Date.now() / 1000);
       const gateway = (() => { try { return new URL(config.pinata.gateway).host; } catch { return null; } })();
@@ -59,7 +79,7 @@ export class PrivateMediaStorage {
       const linkFailure = (message, code, status, body = "") => Object.assign(new Error(message), { status: 502, code, upstream: { endpoint: "POST /v3/files/private/download_link", status, gateway, error: redactUpstreamBody(body) || undefined } });
       let response;
       try {
-        response = await fetch(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
+        response = await fetchImpl(config.pinata.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.pinata.jwt}` }, body: JSON.stringify({ url: `${config.pinata.gateway}/files/${cid}`, expires: config.signedUrlTtlSeconds, date, method: "GET" }) });
       } catch (error) {
         throw linkFailure(`Pinata private download-link request could not be reached: ${redactUpstreamBody(error?.message)}`, "MEDIA_LINK_FAILED", null);
       }
@@ -180,7 +200,49 @@ export class PrivateMediaStorage {
     return { sha256: hash.digest("hex"), bytes, download };
   }
 
-  async open({ storageKey, range = null, contentType = null }) {
+  // Relays a signed object link through the API. The browser keeps only the
+  // opaque grant URL, which stays valid for the grant TTL and is re-checked on
+  // every byte-range request; the storage link (valid for seconds) is created
+  // per request and never leaves the server. Byte ranges are honored upstream
+  // when the gateway supports them and cut here when it does not.
+  async streamSignedObject({ url, range = null, contentType = null, totalLength = null, fetchImpl = fetch }) {
+    const headers = { "accept-encoding": "identity" };
+    if (range) headers.range = String(range);
+    let upstream;
+    try {
+      upstream = await fetchImpl(url, { headers, redirect: "follow" });
+    } catch (error) {
+      throw upstreamUnavailable(`Protected media object could not be reached: ${redactUpstreamBody(error?.message)}`, "MEDIA_OBJECT_UNAVAILABLE", null);
+    }
+    if (upstream.status !== 200 && upstream.status !== 206) {
+      await upstream.body?.cancel?.().catch(() => {});
+      if (upstream.status === 416) throw Object.assign(new Error("Requested media range is unsatisfiable."), { status: 416, code: "INVALID_MEDIA_RANGE" });
+      const denied = upstream.status === 401 || upstream.status === 403;
+      throw upstreamUnavailable(`Protected media object is unavailable from storage (HTTP ${upstream.status}).`, denied ? "MEDIA_DOWNLOAD_FORBIDDEN" : "MEDIA_OBJECT_UNAVAILABLE", upstream.status);
+    }
+    if (!upstream.body) throw upstreamUnavailable("Protected media object response had no body.", "MEDIA_OBJECT_UNAVAILABLE", upstream.status);
+    const type = contentType || upstream.headers.get("content-type") || "application/octet-stream";
+    const body = Readable.fromWeb(upstream.body);
+    const hinted = Number.isSafeInteger(Number(totalLength)) && Number(totalLength) > 0 ? Number(totalLength) : null;
+    if (upstream.status === 206) {
+      const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec(String(upstream.headers.get("content-range") || "").trim());
+      if (!match) { body.destroy(); throw upstreamUnavailable("Protected media object returned an invalid partial response.", "MEDIA_OBJECT_UNAVAILABLE", 206); }
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      const total = match[3] === "*" ? hinted : Number(match[3]);
+      return { type: "stream", stream: body, contentType: type, contentLength: end - start + 1, totalLength: total, start, end, partial: true };
+    }
+    const declared = upstream.headers.get("content-length");
+    const size = declared !== null && Number.isSafeInteger(Number(declared)) && Number(declared) >= 0 ? Number(declared) : hinted;
+    const whole = { type: "stream", stream: body, contentType: type, contentLength: size, totalLength: size, start: 0, end: size === null ? null : size - 1, partial: false };
+    // The upstream ignored the Range header. Without a known size the whole
+    // object is the only correct answer; with one, cut the range here.
+    if (!range || size === null) return whole;
+    const selected = fileRange(range, size);
+    return { ...whole, stream: Readable.from(sliceBytes(body, selected.start, selected.end)), contentLength: selected.end - selected.start + 1, start: selected.start, end: selected.end, partial: true };
+  }
+
+  async open({ storageKey, range = null, contentType = null, totalLength = null, fetchImpl = fetch }) {
     const key = safeStorageKey(storageKey);
     if (this.config.driver === "filesystem") {
       const root = resolve(this.config.privateRoot);
@@ -194,8 +256,10 @@ export class PrivateMediaStorage {
     }
     if (this.config.driver === "object" && !allowedPrefix(key, this.config.protectedPrefixes)) throw new Error("Protected media storage key is outside the configured media prefixes.");
     let signedUrl;
-    try { signedUrl = await this.signer(key); } catch (error) { throw new Error(`Object storage signing failed: ${error.message}`, { cause: error }); }
-    return { type: "redirect", url: allowedSignedUrl(signedUrl, this.config.objectUrlHosts) };
+    try { signedUrl = await this.signer(key, { fetchImpl }); } catch (error) { throw new Error(`Object storage signing failed: ${error.message}`, { cause: error }); }
+    const url = allowedSignedUrl(signedUrl, this.config.objectUrlHosts);
+    if (this.config.delivery === "stream") return this.streamSignedObject({ url, range, contentType, totalLength, fetchImpl });
+    return { type: "redirect", url };
   }
 }
 

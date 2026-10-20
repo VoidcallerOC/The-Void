@@ -86,6 +86,7 @@ All **20 tracked full-duration audio files** were removed from static serving, i
 | `PINATA_JWT` | Server-only Pinata credential | Required secret for production metadata and protected media; never client-exposed. |
 | `PINATA_GATEWAY_URL` | Pinata private-media gateway | Required HTTPS gateway in production. |
 | `MEDIA_OBJECT_URL_HOSTS` | Approved Pinata gateway host | Must include the configured Pinata gateway host. |
+| `MEDIA_DELIVERY` | Protected media delivery | Optional. `stream` (default for Pinata): the API relays the private object under the opaque grant URL, so byte ranges, seeking and resume keep working for the grant lifetime and the signed storage link never reaches the browser. `redirect`: the previous 302 to the signed link, whose seconds-long lifetime cannot cover a long track. |
 
 ## External infrastructure dependencies
 

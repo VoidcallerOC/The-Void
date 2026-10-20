@@ -37,8 +37,9 @@ async function sendMedia(response, media, cors = {}) {
     response.end();
     return;
   }
-  const mediaHeaders = { "content-type": media.contentType, "content-length": String(media.contentLength), "accept-ranges": "bytes", "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-disposition": "inline" };
-  if (media.partial) mediaHeaders["content-range"] = `bytes ${media.start}-${media.end}/${media.totalLength}`;
+  const mediaHeaders = { "content-type": media.contentType, "accept-ranges": "bytes", "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-disposition": "inline" };
+  if (Number.isSafeInteger(media.contentLength)) mediaHeaders["content-length"] = String(media.contentLength);
+  if (media.partial) mediaHeaders["content-range"] = `bytes ${media.start}-${media.end}/${Number.isSafeInteger(media.totalLength) ? media.totalLength : "*"}`;
   response.writeHead(media.partial ? 206 : 200, { ...mediaHeaders, ...cors });
   await pipeline(media.stream, response);
 }

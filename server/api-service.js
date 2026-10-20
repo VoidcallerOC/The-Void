@@ -125,6 +125,8 @@ const EXPERIENCE_PUBLIC_FIELDS = ["id", "artist_id", "release_id", "edition_id",
 const RELEASE_PUBLIC_FIELDS = ["id", "artist_id", "slug", "title", "description", "status", "release_metadata", "published_at", "created_at", "updated_at", "artist_slug", "artist_name"];
 const EDITION_PUBLIC_FIELDS = ["id", "release_id", "title", "tier", "description", "supply", "status", "application_metadata", "created_at", "updated_at", "release_title", "artist_id", "chain_id", "contract_address", "release_contract_address", "factory_address", "primary_sale_address", "token_id"];
 const EXPERIENCE_PUBLIC_SELECT = `id, artist_id, release_id, edition_id, title, description, experience_type, version, status, created_at, updated_at, (jsonb_typeof(requirements) = 'array' AND jsonb_array_length(requirements) > 0) AS gated, (COALESCE(media_config->>'protected', '') = 'true' OR (jsonb_typeof(media_config->'protectedMedia') = 'array' AND jsonb_array_length(media_config->'protectedMedia') > 0)) AS protected, CASE WHEN media_config->>'primary' = 'true' THEN true WHEN media_config->>'primary' = 'false' THEN false END AS primary_experience`;
+// A published experience is public only while its edition is published (a draft edition's experiences may carry superseded assets); legacy rows without an edition stay visible.
+const EXPERIENCE_EDITION_PUBLISHED = "(edition_id IS NULL OR EXISTS (SELECT 1 FROM editions e WHERE e.id=experiences.edition_id AND e.status='PUBLISHED'))";
 const RELEASE_PUBLIC_SELECT = `r.id, r.artist_id, r.slug, r.title, r.description, r.status, r.release_metadata, r.published_at, r.created_at, r.updated_at, a.slug AS artist_slug, a.display_name AS artist_name`;
 const EDITION_PUBLIC_SELECT = `e.id, e.release_id, e.title, e.tier, e.description, e.supply, e.status, e.application_metadata, e.created_at, e.updated_at, r.title AS release_title, r.artist_id, c.chain_id, c.address AS contract_address, c.address AS release_contract_address, factory.address AS factory_address, sale.address AS primary_sale_address, t.token_id::text AS token_id, t.metadata_uri AS token_metadata_uri, t.metadata AS token_metadata, album_track.is_single AS album_is_single, album_track.mint_end::text AS album_mint_end, (album.closed_block_number IS NOT NULL) AS album_closed`;
 // Chain-indexed VoidRelease1155V4 album state; editions without an AlbumTrackCreated row are unaffected.
@@ -271,13 +273,13 @@ export class ApiService {
 
   async getExperience({ id }) {
     const key = requiredText(id, "experience");
-    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND id=$2 LIMIT 1`, [PUBLIC_STATUS, key]);
+    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND id=$2 AND ${EXPERIENCE_EDITION_PUBLISHED} LIMIT 1`, [PUBLIC_STATUS, key]);
     if (!rows[0] || isWithdrawnPublicListing(rows[0])) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
     return toPublicRow(rows[0], EXPERIENCE_PUBLIC_FIELDS);
   }
 
   async listExperiences({ editionId = null, releaseId = null, limit, offset }) {
-    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND ($2::text IS NULL OR edition_id=$2) AND ($3::text IS NULL OR release_id=$3) ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, [PUBLIC_STATUS, editionId, releaseId, limitValue(limit), offsetValue(offset)]);
+    const { rows } = await this.db.query(`SELECT ${EXPERIENCE_PUBLIC_SELECT} FROM experiences WHERE status=$1 AND ($2::text IS NULL OR edition_id=$2) AND ($3::text IS NULL OR release_id=$3) AND ${EXPERIENCE_EDITION_PUBLISHED} ORDER BY updated_at DESC LIMIT $4 OFFSET $5`, [PUBLIC_STATUS, editionId, releaseId, limitValue(limit), offsetValue(offset)]);
     return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicRow(row, EXPERIENCE_PUBLIC_FIELDS));
   }
 

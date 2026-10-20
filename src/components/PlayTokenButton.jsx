@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAudio } from "../lib/audio.js";
+import { sameTrack, useAudio } from "../lib/audio.js";
 import { useWallet } from "../lib/wallet-context.js";
 import { requestProtectedMediaGrant } from "../lib/media-auth.js";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
@@ -11,16 +11,25 @@ export function PlayTokenButton({ track, queueId, collection = "", primary = fal
   const wallet = useWallet() || {};
   const [error, setError] = useState("");
   if (!track) return null;
-  const active = audio.queueId === queueId && audio.queue?.[audio.idx] === track;
+  const active = audio.queueId === queueId && sameTrack(audio.queue?.[audio.idx], track);
   const playing = active && audio.playing;
+  const trackLabel = (active || audio.isBearer(track)) && track.protectedTitle ? track.protectedTitle : track.title;
   const onClick = async (event) => {
     event.preventDefault();
     event.stopPropagation();
     setError("");
     if (playing) { audio.pause(); return; }
     try {
+      // Resuming a bearer stream that is already loaded never asks for a new
+      // grant (and never restarts the track).
+      if (active && audio.isBearer(track)) { await audio.play(); return; }
       const protectedHolder = Boolean(track.protectedMedia && audio.isProtectedHolder(track));
       if (track.protectedMedia && (protectedOnly || protectedHolder)) {
+        if (audio.hasAuthorizedSource(track)) {
+          audio.setQueue([track], queueId, collection);
+          await audio.play(0);
+          return;
+        }
         if (!wallet.connected || !wallet.account) throw new Error("Connect the wallet that holds this edition to play the full track.");
         if (!wallet.authenticated) {
           const authentication = await wallet.authenticate?.();
@@ -40,7 +49,7 @@ export function PlayTokenButton({ track, queueId, collection = "", primary = fal
   };
   return (
     <>
-      <button type="button" aria-label={`${playing ? "Pause" : label} ${track.title}`} style={{ ...(primary ? primaryBtn : ghostBtn), ...style }} onClick={onClick}>
+      <button type="button" aria-label={`${playing ? "Pause" : label} ${trackLabel}`} style={{ ...(primary ? primaryBtn : ghostBtn), ...style }} onClick={onClick}>
         {playing ? "❚❚ Pause" : `▶ ${label}`}
       </button>
       {error && <span role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{error}</span>}

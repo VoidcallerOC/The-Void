@@ -48,6 +48,10 @@ export function StickyPlayer() {
   const dur = audio.el?.duration || 0;
   const preview = audio.isPreview(cur);
   const bearer = audio.isBearer(cur);
+  // A bearer stream of an experience with its own audio (a demo attached to a
+  // token) is named after that experience, not the token's song.
+  const title = bearer && cur?.protectedTitle ? cur.protectedTitle : cur.title;
+  const playbackError = audio.lastError && audio.lastError.track === cur ? audio.lastError.message : "";
   const t = audio.el?.currentTime || 0;
   const total = dur ? fmt(dur) : cur.time;
   const frac = dur ? t / dur : 0;
@@ -85,7 +89,7 @@ export function StickyPlayer() {
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <span style={{ fontFamily: "var(--font-display)", fontWeight: 400, fontSize: 18, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
-            {cur.title}
+            {title}
           </span>
           {preview && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em", color: "var(--vc-crimson)", border: "1px solid var(--vc-crimson)", padding: "1px 5px", flexShrink: 0 }}>
@@ -94,6 +98,7 @@ export function StickyPlayer() {
           )}
           {bearer && <Mark on>BEARER</Mark>}
         </span>
+        {playbackError && <span role="status" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--vc-crimson)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playbackError}</span>}
       </div>
       <div
         className="vc-sticky-seek"
