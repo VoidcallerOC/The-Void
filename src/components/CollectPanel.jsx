@@ -303,7 +303,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}
         {variant === "hero" && linkedExperience && !primaryOpensExperience && <Link to={`/experience/${linkedExperience.id}`} style={ghostBtn}>Open experience</Link>}
-        {owned && <Link to={`/edition/${edition.id}#secondary-listing`} style={primaryBtn}>List for sale</Link>}
+        {owned && resaleCandidate && <Link to={`/edition/${edition.id}#secondary-listing`} style={primaryBtn}>List for sale</Link>}
         {variant !== "hero" && owned && (
           <>
             <Link to={experienceHref} style={ghostBtn}>{experienceLabel}</Link>
@@ -311,7 +311,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
           </>
         )}
       </div>
-      {owned && <p style={{ marginTop: 12, color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>{resaleCandidate ? "You own this edition. You can list it for resale." : "You own this edition. Secondary resale is unavailable for this release."}</p>}
+      {owned && <p style={{ marginTop: 12, color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>{resaleCandidate ? "You own this edition. You can list it for resale." : "You own this edition. Secondary resale is not available: The Void marketplace lists only releases created by The Void release factory, and this edition is not one."}</p>}
       {notCreated && (
         <div role="status" style={{ marginTop: 18, color: "var(--vc-crimson)", lineHeight: 1.6 }}>
           <strong style={{ display: "block", letterSpacing: ".08em" }}>NOT YET PUBLISHED</strong>

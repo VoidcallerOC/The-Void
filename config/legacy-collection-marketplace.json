@@ -1,0 +1,23 @@
+{
+  "network": "mainnet",
+  "networkName": "Avalanche C-Chain",
+  "chainId": 43114,
+  "deployed": false,
+  "marketplaceAddress": null,
+  "deploymentBlock": null,
+  "ownerAddress": null,
+  "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+  "platformFeeBps": 250,
+  "source": "LegacyCollectionMarketplace",
+  "record": null,
+  "collections": [
+    {
+      "name": "Voidcaller Genesis",
+      "address": "0xD1B4367dd9f235f9ee61878019d66E31511E98eE",
+      "minTokenId": 0,
+      "maxTokenId": 3,
+      "maxRoyaltyBps": 500,
+      "expectedRoyaltyReceiver": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a"
+    }
+  ]
+}
