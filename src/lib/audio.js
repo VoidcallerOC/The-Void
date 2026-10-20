@@ -5,6 +5,25 @@ import { requestProtectedMediaGrant, revokeProtectedMediaGrant } from "./media-a
 
 function grantKey(track) { return `${track?.protectedMedia?.experienceId || ""}:${track?.protectedMedia?.mediaType || "AUDIO"}:${track?.n || ""}`; }
 
+// Two track objects describe the same playback when they name the same
+// token and protected experience (pages rebuild track objects on render).
+export function sameTrack(left, right) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  return String(left.n ?? "") === String(right.n ?? "")
+    && (left.src || "") === (right.src || "")
+    && (left.protectedMedia?.experienceId || "") === (right.protectedMedia?.experienceId || "")
+    && (left.protectedMedia?.mediaType || "AUDIO") === (right.protectedMedia?.mediaType || "AUDIO");
+}
+
+const MEDIA_ERROR_MESSAGES = Object.freeze({
+  1: "Playback was interrupted.",
+  2: "The stream was interrupted. Press play to resume.",
+  3: "This audio could not be decoded.",
+  4: "The audio source could not be loaded.",
+});
+export function playbackErrorMessage(code) { return MEDIA_ERROR_MESSAGES[Number(code)] || "Playback could not continue."; }
+
 // Percent, not basis points. 80 is audible and not muted when nothing is stored.
 export const MASTER_VOLUME_STORAGE_KEY = "the-void.master-volume";
 export const DEFAULT_MASTER_VOLUME_PERCENT = 80;
@@ -62,6 +81,13 @@ export const VC_AUDIO = {
   mediaAuthorization: null,
   mediaGrants: new Map(),
   mediaRequests: new Map(),
+  // Grant keys this wallet session has already been issued: a bearer stream
+  // that stops when its grant lapses is renewed without re-checking the
+  // browser-side ownership heuristics (the gateway decides on every grant).
+  grantedKeys: new Set(),
+  renewals: new Map(),
+  // The last element error for the current track, for the UI to report.
+  lastError: null,
   // null until the first read so a stored level wins over the default.
   volumePercent: null,
 
@@ -93,7 +119,7 @@ export const VC_AUDIO = {
 
   setMediaAuthorization({ wallet = null, authHeaders = {} } = {}) {
     const normalizedWallet = wallet?.toLowerCase() || null;
-    if (normalizedWallet !== this.mediaAuthorization?.wallet) this.mediaGrants.clear();
+    if (normalizedWallet !== this.mediaAuthorization?.wallet) { this.mediaGrants.clear(); this.grantedKeys.clear(); }
     this.mediaAuthorization = normalizedWallet ? { wallet: normalizedWallet, authHeaders } : null;
     this.notify();
   },
@@ -103,6 +129,7 @@ export const VC_AUDIO = {
     const grants = [...this.mediaGrants.values()];
     this.mediaGrants.clear();
     this.mediaRequests.clear();
+    this.grantedKeys.clear();
     if (!authorization) { this.notify(); return; }
     await Promise.allSettled(grants.map((grant) => revokeProtectedMediaGrant({ wallet: authorization.wallet, grantId: grant.grantId, authHeaders: authorization.authHeaders })));
     this.notify();
@@ -140,14 +167,20 @@ export const VC_AUDIO = {
     return !!(track?.protectedMedia && this.hasAuthorizedSource(track));
   },
 
+  // A track whose grant may be requested here: a browser-side holder, or any
+  // track this wallet session was already granted (renewal after expiry).
+  canRequestGrant(track) {
+    return Boolean(track?.protectedMedia && this.mediaAuthorization?.wallet && (this.isProtectedHolder(track) || this.grantedKeys.has(grantKey(track))));
+  },
+
   async resolveProtectedSource(track) {
-    if (!track?.protectedMedia || !this.isProtectedHolder(track) || !this.mediaAuthorization?.wallet) return null;
+    if (!this.canRequestGrant(track)) return null;
     const key = grantKey(track);
     const existing = this.mediaGrants.get(key);
     if (existing && new Date(existing.expiresAt).getTime() > Date.now()) return existing.accessUrl;
     if (!this.mediaRequests.has(key)) {
       const request = requestProtectedMediaGrant({ wallet: this.mediaAuthorization.wallet, experienceId: track.protectedMedia.experienceId, mediaType: track.protectedMedia.mediaType || "AUDIO", authHeaders: this.mediaAuthorization.authHeaders })
-        .then((grant) => { this.mediaGrants.set(key, grant); return grant; })
+        .then((grant) => { this.mediaGrants.set(key, grant); this.grantedKeys.add(key); return grant; })
         .finally(() => this.mediaRequests.delete(key));
       this.mediaRequests.set(key, request);
     }
@@ -158,9 +191,57 @@ export const VC_AUDIO = {
   // Play a track whose protected source was already authorized elsewhere
   // (e.g. the experience page's unlock), through the one shared player.
   playGranted(track, grant, queueId, queueLabel = null) {
-    this.mediaGrants.set(grantKey(track), grant);
+    const key = grantKey(track);
+    this.mediaGrants.set(key, grant);
+    this.grantedKeys.add(key);
     this.setQueue([track], queueId, queueLabel);
     return this.play(0);
+  },
+
+  // Swap the element onto a newly authorized source, keeping position and state.
+  swapSource(audio, source) {
+    const wasPlaying = !audio.paused;
+    const time = audio.currentTime || 0;
+    audio.src = source;
+    this.applyMasterVolume(audio);
+    const resume = () => {
+      try { audio.currentTime = Math.min(time, audio.duration || time); } catch { /* Metadata may not be available yet. */ }
+      if (wasPlaying) audio.play().catch(() => {});
+    };
+    audio.addEventListener("loadedmetadata", resume, { once: true });
+    this.notify();
+  },
+
+  // The element failed on the current track. A bearer stream whose grant has
+  // lapsed (a long track outlives the grant TTL, or playback resumed after a
+  // pause) is renewed once and resumed where it stopped; anything else is
+  // reported for the UI, never hidden behind the public preview.
+  async handleElementError() {
+    const audio = this.el;
+    const track = this.queue?.[this.idx];
+    const code = audio?.error?.code ?? null;
+    if (track?.protectedMedia && this.grantedKeys.has(grantKey(track)) && this.mediaAuthorization?.wallet) {
+      const key = grantKey(track);
+      const last = this.renewals.get(key) || 0;
+      if (Date.now() - last > 10_000) {
+        this.renewals.set(key, Date.now());
+        this.mediaGrants.delete(key);
+        try {
+          const source = await this.resolveProtectedSource(track);
+          if (source && this.queue?.[this.idx] === track) {
+            this.lastError = null;
+            this.swapSource(audio, source);
+            return;
+          }
+        } catch (error) {
+          this.lastError = { track, code, message: error?.message || playbackErrorMessage(code) };
+          this.notify();
+          return;
+        }
+      }
+    }
+    this.lastError = { track, code, message: playbackErrorMessage(code) };
+    this.notify();
   },
 
   setOwnership(tokenIds) {
@@ -178,7 +259,8 @@ export const VC_AUDIO = {
     audio.crossOrigin = "anonymous";
     audio.addEventListener("ended", () => this.play((this.idx + 1) % this.queue.length));
     audio.addEventListener("timeupdate", () => this.notify());
-    audio.addEventListener("play", () => { this.playing = true; this.notify(); });
+    audio.addEventListener("play", () => { this.playing = true; this.lastError = null; this.notify(); });
+    audio.addEventListener("error", () => { void this.handleElementError(); });
     audio.addEventListener("pause", () => { this.playing = false; this.notify(); });
     audio.addEventListener("loadedmetadata", () => this.notify());
     this.el = audio;
@@ -191,6 +273,7 @@ export const VC_AUDIO = {
     this.queueId = queueId || "queue";
     this.queueLabel = queueLabel || null;
     this.idx = 0;
+    this.lastError = null;
     if (this.el) {
       this.el.pause();
       this.el.removeAttribute("src");
@@ -212,28 +295,19 @@ export const VC_AUDIO = {
       audio.load();
     }
     this.applyMasterVolume(audio);
-    if (track.protectedMedia && this.isProtectedHolder(track)) {
+    if (this.canRequestGrant(track)) {
       void this.resolveProtectedSource(track).then((authorizedSource) => {
         if (!authorizedSource || this.queue?.[this.idx] !== track) return;
         const currentSource = audio.getAttribute("src") || audio.src || "";
         if (currentSource.endsWith(authorizedSource.split("/").pop())) return;
-        const wasPlaying = !audio.paused;
-        const time = audio.currentTime || 0;
-        audio.src = authorizedSource;
-        this.applyMasterVolume(audio);
-        const resume = () => {
-          try { audio.currentTime = Math.min(time, audio.duration || time); } catch { /* Metadata may not be available yet. */ }
-          if (wasPlaying) audio.play().catch(() => {});
-        };
-        audio.addEventListener("loadedmetadata", resume, { once: true });
-        this.notify();
+        this.swapSource(audio, authorizedSource);
       }).catch(() => this.notify());
     }
   },
 
   async play(index) {
     const track = this.queue?.[typeof index === "number" ? index : this.idx];
-    if (track?.protectedMedia && this.isProtectedHolder(track)) {
+    if (track?.protectedMedia && (this.isProtectedHolder(track) || this.grantedKeys.has(grantKey(track)))) {
       if (!this.hasAuthorizedSource(track)) {
         if (!this.mediaAuthorization?.wallet) throw new Error("Authenticate the holder wallet before playing protected media.");
         await this.resolveProtectedSource(track);
@@ -243,6 +317,12 @@ export const VC_AUDIO = {
     else {
       this.ensure();
       if (!this.el.src) this.setTrack(this.idx);
+      else if (track?.protectedMedia) {
+        // Resuming after the grant lapsed: move onto the renewed grant in place.
+        const source = this.srcFor(track);
+        const current = this.el.getAttribute("src") || this.el.src || "";
+        if (source && !current.endsWith(source.split("/").pop())) this.swapSource(this.el, source);
+      }
     }
     this.applyMasterVolume();
     return this.el.play().catch((error) => {

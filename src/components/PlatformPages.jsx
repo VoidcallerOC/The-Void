@@ -361,7 +361,10 @@ export function ExperiencePage() {
   const tracks = tracksForRelease(release, experience);
   const view = tokenView(catalog, { edition, release, experience });
   // A one-token experience plays that token's song; the full-EP experience keeps the queue below.
-  const tokenTrack = playableTrackFor(view.token, { protectedExperience: protectedMedia ? experience : null });
+  // A protected experience with its own audio (e.g. a demo attached to the token) is named after
+  // the experience while its bearer stream plays; the public preview keeps the token's name.
+  const baseTrack = playableTrackFor(view.token, { protectedExperience: protectedMedia ? experience : null });
+  const tokenTrack = baseTrack && protectedMedia && baseTrack.protectedMedia ? { ...baseTrack, protectedTitle: experienceTrackTitle({ experience, tokenTrack: baseTrack, view }) } : baseTrack;
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
@@ -413,7 +416,7 @@ export function ExperiencePage() {
             </ol>
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            {tokenTrack && <PlayTokenButton track={tokenTrack} protectedExperience={protectedMedia ? experience : null} protectedOnly={Boolean(protectedMedia)} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
+            {tokenTrack && <PlayTokenButton track={tokenTrack} protectedExperience={protectedMedia ? experience : null} protectedOnly={Boolean(protectedMedia)} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.protectedTitle || tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
             {!tokenTrack && tracks.length > 0 && (
               <button type="button" style={primaryBtn} onClick={hear}>
                 {isPlaying ? "Pause experience" : owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}

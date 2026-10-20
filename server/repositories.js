@@ -300,7 +300,7 @@ export class PersistenceRepository {
 
   async revokeMediaGrant({ grantId, wallet, reason = "wallet_requested" }) {
     const values = [requiredText(grantId, "grant.grantId", { max: 256 }), walletAddress(wallet, "grant.wallet"), optionalText(reason, "grant.reason", { max: 2000 }) || "wallet_requested"];
-    const { rows } = await this.db.query(`UPDATE experience_grants SET revoked_at=now(), metadata=metadata || jsonb_build_object('revocationReason',$3) WHERE grant_id=$1 AND wallet_address=$2 AND revoked_at IS NULL RETURNING *`, values);
+    const { rows } = await this.db.query(`UPDATE experience_grants SET revoked_at=now(), metadata=metadata || jsonb_build_object('revocationReason',$3::text) WHERE grant_id=$1 AND wallet_address=$2 AND revoked_at IS NULL RETURNING *`, values);
     if (!rows[0]) throw new PersistenceConflictError("Grant is missing, already revoked, or belongs to another wallet.");
     return rows[0];
   }

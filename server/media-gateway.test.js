@@ -70,7 +70,7 @@ describe("protected media gateway", () => {
     const storage = { open: vi.fn().mockResolvedValue({ type: "redirect", url: "https://media.example/protected?sig=opaque" }) };
     const { gateway, repository } = harness({ grant: activeGrant, storage });
     await expect(gateway.openMedia({ request: request(), grantId: "grant-1" })).resolves.toMatchObject({ type: "redirect" });
-    expect(storage.open).toHaveBeenCalledWith({ storageKey: "voidcaller-full-ep/ep1-01-the-hollow.mp3", range: null, contentType: "audio/mpeg" });
+    expect(storage.open).toHaveBeenCalledWith({ storageKey: "voidcaller-full-ep/ep1-01-the-hollow.mp3", range: null, contentType: "audio/mpeg", totalLength: null });
     expect(repository.recordMediaAuthorization).toHaveBeenCalledWith(expect.objectContaining({ action: "MEDIA_AUTHORIZED", reason: "SIGNED_OBJECT_URL" }));
   });
 
@@ -238,7 +238,7 @@ describe("private storage and old public paths", () => {
     const signer = vi.fn().mockResolvedValue("https://media.example/audio?signature=opaque");
     const allowed = new PrivateMediaStorage({ config, signer });
     await expect(allowed.open({ storageKey: "record/track.mp3" })).resolves.toMatchObject({ type: "redirect", url: "https://media.example/audio?signature=opaque" });
-    expect(signer).toHaveBeenCalledWith("record/track.mp3");
+    expect(signer).toHaveBeenCalledWith("record/track.mp3", expect.objectContaining({ fetchImpl: expect.any(Function) }));
     await expect(allowed.open({ storageKey: "other/track.mp3" })).rejects.toThrow(/outside the configured media prefixes/);
     const blocked = new PrivateMediaStorage({ config, signer: vi.fn().mockResolvedValue("https://untrusted.example/audio") });
     await expect(blocked.open({ storageKey: "record/track.mp3" })).rejects.toThrow(/unapproved/);

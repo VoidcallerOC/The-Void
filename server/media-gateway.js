@@ -79,17 +79,23 @@ export class ProtectedMediaGateway {
     this.mediaConfig = mediaConfig;
   }
 
+  // Only an experience of a published edition (or one bound to no edition)
+  // is served: a draft edition's experiences may still carry superseded
+  // assets, and the public catalog does not list them either.
   async loadExperience(experienceId) {
-    const { rows } = await this.db.query("SELECT id, artist_id, requirements, media_config, status FROM experiences WHERE id=$1 AND status='PUBLISHED' LIMIT 1", [requiredText(experienceId, "experienceId")]);
+    const { rows } = await this.db.query("SELECT id, artist_id, requirements, media_config, status FROM experiences WHERE id=$1 AND status='PUBLISHED' AND (edition_id IS NULL OR EXISTS (SELECT 1 FROM editions e WHERE e.id=experiences.edition_id AND e.status='PUBLISHED')) LIMIT 1", [requiredText(experienceId, "experienceId")]);
     if (!rows[0]) throw new ApiError(404, "EXPERIENCE_NOT_FOUND", "Experience was not found.");
     return rows[0];
   }
 
   async resolveOwnedAsset(experience, reference) {
-    const { rows } = await this.db.query("SELECT id, artist_id, storage_key FROM media_assets WHERE ($1 <> '' AND id=$1) OR ($1 = '' AND $2 <> '' AND storage_key=$2) LIMIT 1", [reference.assetId, reference.storageKey]);
+    const { rows } = await this.db.query("SELECT id, artist_id, storage_key, metadata FROM media_assets WHERE ($1 <> '' AND id=$1) OR ($1 = '' AND $2 <> '' AND storage_key=$2) LIMIT 1", [reference.assetId, reference.storageKey]);
     const row = rows[0];
     if (!row?.storage_key || !row.artist_id || !experience.artist_id || String(row.artist_id) !== String(experience.artist_id)) throw new ApiError(403, "PROTECTED_MEDIA_NOT_OWNED", "Protected media is not an asset owned by this experience's artist.");
-    return { storageKey: String(row.storage_key), contentType: reference.contentType, assetId: row.id };
+    // The registered size lets a relayed stream answer byte ranges even when
+    // the storage gateway does not.
+    const byteSize = Number(parseMediaConfig(row.metadata || {})?.byteSize);
+    return { storageKey: String(row.storage_key), contentType: reference.contentType, assetId: row.id, byteSize: Number.isSafeInteger(byteSize) && byteSize > 0 ? byteSize : null };
   }
 
   async assertEntitlement({ wallet, experience }) {
@@ -117,7 +123,7 @@ export class ProtectedMediaGateway {
     const grantId = randomUUID();
     const context = accessContext(request, this.mediaConfig.auditHashSecret);
     const grant = await this.repository.inTransaction(async (repository) => {
-      const created = await repository.createGrant({ grantId, experienceId: experience.id, wallet, mediaType: requestedMediaType, issuedAt, expiresAt, ownershipChainId: ownership.chainId ?? null, ownershipWatermark: ownership.watermark ?? null, metadata: { ...objectReference, contentType: asset.contentType, entitlementState: String(ownership.state).toUpperCase() } });
+      const created = await repository.createGrant({ grantId, experienceId: experience.id, wallet, mediaType: requestedMediaType, issuedAt, expiresAt, ownershipChainId: ownership.chainId ?? null, ownershipWatermark: ownership.watermark ?? null, metadata: { ...objectReference, contentType: asset.contentType, ...(asset.byteSize ? { byteSize: asset.byteSize } : {}), entitlementState: String(ownership.state).toUpperCase() } });
       await repository.recordMediaAuthorization({ grantId, wallet, experienceId: experience.id, mediaType: requestedMediaType, action: "GRANT_ISSUED", ...context });
       await repository.appendAuditEvent({ eventType: "MEDIA_GRANT_ISSUED", actorWallet: wallet, subjectType: "experience", subjectId: experience.id, requestId: context.requestId, chainId: ownership.chainId ?? null, payload: { grantId, mediaType: requestedMediaType, expiresAt: expiresAt.toISOString(), ownershipWatermark: ownership.watermark ?? null } });
       return created;
@@ -161,7 +167,7 @@ export class ProtectedMediaGateway {
       reason = "PUBLIC_IPFS_URL";
     } else {
       if (!metadata.storageKey) throw new ApiError(500, "MEDIA_GRANT_CONFIGURATION_INVALID", "Protected media grant is missing its immutable object reference.");
-      media = await this.storage.open({ storageKey: metadata.storageKey, range: request.headers?.range || null, contentType: metadata.contentType || null });
+      media = await this.storage.open({ storageKey: metadata.storageKey, range: request.headers?.range || null, contentType: metadata.contentType || null, totalLength: Number(metadata.byteSize) || null });
       reason = media.type === "redirect" ? "SIGNED_OBJECT_URL" : "PRIVATE_STREAM";
     }
     await this.repository.recordMediaAuthorization({ grantId: grant.grant_id, wallet: grant.wallet_address, experienceId: grant.experience_id, mediaType: grant.media_type, action: "MEDIA_AUTHORIZED", reason, ...context });

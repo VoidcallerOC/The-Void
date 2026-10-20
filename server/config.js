@@ -321,6 +321,11 @@ export function loadMediaConfig(env = process.env) {
   if (signedUrlTtlSeconds > grantTtlSeconds) throw new ConfigurationError("MEDIA_SIGNED_URL_TTL_SECONDS may not exceed MEDIA_GRANT_TTL_SECONDS.");
   const maxBytes = boundedPositiveInteger(env.MEDIA_MAX_BYTES, 524288000, "MEDIA_MAX_BYTES", { min: 1, max: 1073741824 });
   const auditHashSecret = secret(env.MEDIA_AUDIT_HASH_SECRET, "MEDIA_AUDIT_HASH_SECRET", { required: appEnvironment === "production" });
+  // How a granted private object reaches the browser: "stream" relays it
+  // through the API under the opaque grant URL (default for Pinata, whose
+  // signed links expire in seconds); "redirect" sends the signed link itself.
+  const delivery = String(env.MEDIA_DELIVERY || "").trim().toLowerCase() || (driver === "pinata" ? "stream" : "redirect");
+  if (delivery !== "stream" && delivery !== "redirect") throw new ConfigurationError("MEDIA_DELIVERY must be stream or redirect.");
   if (driver === "filesystem") return Object.freeze({ driver, privateRoot: resolve(String(env.MEDIA_PRIVATE_ROOT || resolve(process.cwd(), "server/private-media"))), grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret });
   if (driver === "pinata") {
     const jwt = secret(env.PINATA_JWT, "PINATA_JWT", { required: true });
@@ -328,7 +333,7 @@ export function loadMediaConfig(env = process.env) {
     if (appEnvironment === "production" && gateway.protocol !== "https:") throw new ConfigurationError("Production PINATA_GATEWAY_URL must use HTTPS.");
     const objectUrlHosts = hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS || gateway.host, "MEDIA_OBJECT_URL_HOSTS");
     if (!objectUrlHosts.includes(gateway.host.toLowerCase())) throw new ConfigurationError("MEDIA_OBJECT_URL_HOSTS must include the PINATA_GATEWAY_URL host.");
-    return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, pinata: Object.freeze({ jwt, gateway: gateway.toString().replace(/\/$/, ""), endpoint: "https://api.pinata.cloud/v3/files/private/download_link" }), objectUrlHosts });
+    return Object.freeze({ driver, delivery, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, pinata: Object.freeze({ jwt, gateway: gateway.toString().replace(/\/$/, ""), endpoint: "https://api.pinata.cloud/v3/files/private/download_link" }), objectUrlHosts });
   }
   const accountId = String(env.R2_ACCOUNT_ID || "").trim().toLowerCase();
   if (!/^[a-f0-9]{32}$/.test(accountId)) throw new ConfigurationError("R2_ACCOUNT_ID must be a 32-character Cloudflare account ID.");
@@ -339,7 +344,7 @@ export function loadMediaConfig(env = process.env) {
   const secretAccessKey = secret(env.R2_SECRET_ACCESS_KEY, "R2_SECRET_ACCESS_KEY", { required: true });
   const endpoint = normalizedUrl(env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`, "R2_ENDPOINT");
   if (appEnvironment === "production" && endpoint.protocol !== "https:") throw new ConfigurationError("Production R2_ENDPOINT must use HTTPS.");
-  return Object.freeze({ driver, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, r2: Object.freeze({ accountId, bucket, accessKeyId, secretAccessKey, endpoint: endpoint.toString() }), objectUrlHosts: hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS, "MEDIA_OBJECT_URL_HOSTS"), protectedPrefixes: protectedPrefixes(env.MEDIA_OBJECT_PREFIXES, "MEDIA_OBJECT_PREFIXES") });
+  return Object.freeze({ driver, delivery, grantTtlSeconds, signedUrlTtlSeconds, maxBytes, auditHashSecret, r2: Object.freeze({ accountId, bucket, accessKeyId, secretAccessKey, endpoint: endpoint.toString() }), objectUrlHosts: hostAllowlist(env.MEDIA_OBJECT_URL_HOSTS, "MEDIA_OBJECT_URL_HOSTS"), protectedPrefixes: protectedPrefixes(env.MEDIA_OBJECT_PREFIXES, "MEDIA_OBJECT_PREFIXES") });
 }
 
 export function loadMetadataConfig(env = process.env) {
