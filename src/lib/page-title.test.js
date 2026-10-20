@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { VOIDCALLER_CATALOG } from "../data.js";
-import { SITE_TITLE, normalizePathname, pageLabel, pageTitle } from "./page-title.js";
+import { NOT_FOUND_TITLE, SITE_TITLE, normalizePathname, pageLabel, pageTitle } from "./page-title.js";
 
 const catalog = VOIDCALLER_CATALOG;
 
@@ -47,7 +47,8 @@ describe("page titles · one per route", () => {
   });
 
   it("titles unknown routes as not found and ignores a trailing slash", () => {
-    expect(pageTitle("/does-not-exist")).toBe("Not found · The Void");
+    expect(pageTitle("/does-not-exist")).toBe(NOT_FOUND_TITLE);
+    expect(NOT_FOUND_TITLE).toBe("Not found · The Void");
     expect(normalizePathname("/discover/")).toBe("/discover");
     expect(pageTitle("/discover/")).toBe("Discover · The Void");
     expect(pageTitle("/studio/profile/voidcaller")).toBe("Edit artist profile · The Void");

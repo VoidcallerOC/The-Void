@@ -3,6 +3,7 @@
 // through the single-artist catalog had no page-level signal that the route had changed.
 export const SITE_TITLE = "The Void — Music-native platform · Featured: Voidcaller";
 const SITE = "The Void";
+export const NOT_FOUND_TITLE = `Not found · ${SITE}`;
 
 const STATIC_TITLES = Object.freeze({
   "/discover": "Discover",
@@ -70,5 +71,21 @@ export function pageLabel(pathname, catalog = {}, flags = {}) {
 export function pageTitle(pathname, catalog = {}, flags = {}) {
   if (normalizePathname(pathname) === "/") return SITE_TITLE;
   const label = pageLabel(pathname, catalog, flags);
-  return `${label || "Not found"} · ${SITE}`;
+  return label ? `${label} · ${SITE}` : NOT_FOUND_TITLE;
+}
+
+// A page that knows it is a not-found state overrides the route-derived title for as long as it is
+// mounted. Module-level so the shell's title effect and the page need no shared provider.
+let titleOverride = null;
+const titleListeners = new Set();
+export function setPageTitleOverride(title) {
+  titleOverride = title || null;
+  for (const listener of titleListeners) listener();
+}
+export function getPageTitleOverride() {
+  return titleOverride;
+}
+export function subscribePageTitleOverride(listener) {
+  titleListeners.add(listener);
+  return () => titleListeners.delete(listener);
 }

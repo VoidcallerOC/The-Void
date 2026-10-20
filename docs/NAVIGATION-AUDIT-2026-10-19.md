@@ -5,6 +5,12 @@ desktop 1280×900 and mobile 390×844) against the mainnet production origin
 `https://www.thevoidstudio.xyz` at commit `f075b39` (Vercel project `the-void-vercel-mainnet`,
 deployment READY, bundle built with `VITE_RELEASE_NETWORK=mainnet`, Avalanche C-Chain 43114).
 
+A second, independent walkthrough in a live Chrome session (PR #228) reproduced two further defects
+at a 375px viewport that the first crawl's click paths did not exercise: the mobile menu staying
+open over a page reached through the logo, a footer or in-page link, or browser back/forward; and
+unresolved record ids being replaced by a list page with no message. Both were re-confirmed on
+production before the fixes below were reconciled into one change set (PR #227).
+
 ## 1. Navigation inventory and route matrix
 
 Route table: `src/App.jsx` (`AppRoutes`). Header: `src/components/Nav.jsx`. Footer:
@@ -95,20 +101,27 @@ Near-duplicates that exist (content, not routing):
    (`My collection` and `Your records`, eyebrow `† My collection` on both). Two implementations of
    one purpose. Not changed before launch; consolidation is a product decision.
 5. **`/the-call` and `/the-bleed`** render the same component by design (alias). Left as is.
-6. **Unknown URLs replaced by the home page** (defect, fixed). `*` navigated to `/` with `replace`,
-   so a mistyped or stale link looked like a working link to a different page, and the typed URL
-   was lost.
+6. **Unknown URLs replaced by the home page, and unknown record ids replaced by a list page**
+   (defect, fixed). `*` navigated to `/` with `replace`; an unknown artist, release, edition,
+   experience or collection id navigated to `/artists`, `/discover`, `/marketplace`, `/discover` or
+   `/collection` with `replace`. Eight addresses in all swapped the URL for a different page with no
+   message, so a mistyped, stale or not-yet-published link looked like a working link elsewhere.
 7. **Mobile menu order differed from the desktop header** (defect, fixed). Desktop:
    DISCOVER, MARKETPLACE, CLAIM, ARTISTS, COLLECTION | VERIFY, ARTIST STUDIO. Mobile listed VERIFY
    between ARTISTS and COLLECTION.
-8. **Artist page had no catalog-loading guard** (latent defect, fixed). Release, edition and
-   experience pages wait for the published catalog before redirecting an unknown id; the artist
-   page redirected to `/artists` immediately, so a direct load or refresh of a published-only
-   artist would have bounced before the catalog arrived. Only the static Voidcaller artist exists
-   today, so it was not reachable in production.
-9. **Orphan legacy pages with stale narrative**: `/chronicle`, `/the-call`, `/the-bleed`, `/choir`
-   ("Trading now", "Chapter II · Tunnel Vision", "Answer the call") and the stub `/collectors`.
-   Reachable only by URL. Not changed; retire or redirect is a product decision.
+8. **Artist and collection pages had no catalog-loading guard** (latent defect, fixed). Release,
+   edition and experience pages wait for the published catalog before deciding an id is unknown;
+   the artist and collection pages decided immediately, so a direct load or refresh of a
+   published-only record would have been declared missing before the catalog arrived. Only the
+   static Voidcaller records exist today, so it was not reachable in production.
+9. **Unlinked pages**: `/chronicle`, `/the-call`, `/the-bleed`, `/choir` and the stub
+   `/collectors` are reachable only by URL. `/the-call` and `/the-bleed` carry the Tunnel Vision
+   release path (the release after Forgive & Forget) and are preserved as they are. Not changed.
+10. **Mobile menu stayed open across navigation** (defect, fixed; reproduced on production at
+   375px). The menu closed only when one of its own items was clicked. The logo, a footer or
+   in-page link, and browser back/forward changed the route underneath the full-width menu, so
+   the new page was hidden and the site looked unchanged. Escape did nothing and the burger
+   exposed no expanded state.
 
 ## 3. Walkthrough reproduction
 
@@ -116,26 +129,36 @@ Reproduced: on production, clicking ARTISTS, then the single artist card, then t
 card, or COLLECTION, its single card, then its single release card, shows pages whose large type
 reads VOIDCALLER three or four times in a row with the same tab title, while DISCOVER, ARTISTS and
 COLLECTION each show one Voidcaller card centered on an otherwise short page. The URL changed
-correctly at every step and each page's content was different. Not reproduced: any control that
-failed to navigate, navigated to the wrong route, needed a second click, or left stale content from
-the previous page.
+correctly at every step and each page's content was different.
+
+Also reproduced (375px, production): open the mobile menu on `/discover`, tap the logo → URL `/`,
+menu still covering the page; open the menu, browser back → URL `/discover`, menu still covering
+the page; Escape leaves the menu open. Not reproduced: any desktop control that failed to navigate,
+navigated to the wrong route, or needed a second click.
 
 ## 4. Changes
 
 - `src/lib/page-title.js` + `Layout.jsx` `DocumentTitle`: a document title per route, naming the
-  artist, record, edition, experience or collection shown; flag-gated routes title as not found.
-- `src/components/PlatformPages.jsx` `NotFoundPage`, `src/App.jsx` `*` route: the URL stays as typed
-  and the page says nothing lives there, with Discover / Marketplace / Home links. `AppRoutes` is
-  exported so tests mount the real route table.
-- `src/components/Nav.jsx`: the mobile menu lists the same links in the same order as the header.
-- `src/components/PlatformPages.jsx` `ArtistPage`: waits for the published catalog before
-  redirecting an unknown artist id.
+  artist, record, edition, experience or collection shown; flag-gated routes and not-found pages
+  title as `Not found · The Void`.
+- `src/components/NotFoundPage.jsx`, `src/App.jsx` `*` route, `PlatformPages.jsx`: an unknown URL
+  or an unresolved artist, release, edition, experience or collection id keeps its URL and says
+  what is missing, with a link back to the right list. `AppRoutes` is exported so tests mount the
+  real route table.
+- `src/components/Nav.jsx`: the mobile menu lists the same links in the same order as the header,
+  closes on any route change (logo, footer and in-page links, back/forward) and on Escape, and the
+  burger carries `aria-expanded` / `aria-controls`.
+- `src/components/PlatformPages.jsx` `ArtistPage`, `CollectionDetailPage`: wait for the published
+  catalog before deciding an id is unknown.
 
 Regression tests: `src/lib/page-title.test.js`, `src/components/Nav.inventory.test.jsx`,
 `src/App.routes.test.jsx` (route table in a memory router with the real header and footer: page
 identity per primary destination, no duplicate identities, header clicks incl. rapid adjacent
-clicks, back/forward, mobile menu, in-page card journey, unknown routes and ids, loading guard,
-trailing slash).
+clicks, back/forward, mobile menu incl. logo and back, in-page card journey, unknown routes and
+ids with their not-found kinds and titles, loading guards, trailing slash) and
+`src/navigation-integrity.test.jsx` (from PR #228: menu closes on menu item, logo, outside link,
+browser back and Escape with ARIA state; each unresolved id keeps its URL with its not-found
+kind; artist and collection loading guards; real records still render).
 
 Unchanged: network configuration, contract addresses, claim logic, sale configuration, Genesis
 eligibility, wallet authentication and chain validation.

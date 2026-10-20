@@ -4,7 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { VOID_LIVE } from "./data.js";
-import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectionDetailPage, MyCollectionPage, CollectorsPage, NotFoundPage } from "./components/PlatformPages.jsx";
+import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectionDetailPage, MyCollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
 import { ArtistProfileEditPage } from "./components/ArtistProfileEditPage.jsx";
 import { ContractRolesPage } from "./components/ContractRolesPage.jsx";
@@ -12,6 +12,7 @@ import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
+import { NotFoundPage } from "./components/NotFoundPage.jsx";
 
 const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 

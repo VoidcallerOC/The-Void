@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useLocation, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
@@ -19,6 +19,7 @@ import { ListingPanel } from "./ListingPanel.jsx";
 import { ArtistAvatar, ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
+import { NotFoundPage } from "./NotFoundPage.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
 import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
@@ -118,11 +119,11 @@ export function ArtistPage({ children = null } = {}) {
   const result = getArtistCatalog(catalog, artistId);
   const secondary = resolveSecondaryStatus();
   // Like the release and edition pages: an artist that only the published catalog knows must not be
-  // sent to /artists on a direct load or refresh before that catalog has arrived.
+  // declared missing on a direct load or refresh before that catalog has arrived.
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading artist…</p></section>;
   }
-  if (!result) return <Navigate to="/artists" replace />;
+  if (!result) return <NotFoundPage kind="artist" backTo="/artists" backLabel="All artists" />;
   const { releases, editions } = result;
   const artist = { ...result.artist, ...(profileOverride || {}) };
   const editionItems = flattenMarketplaceEditions([catalog]).filter((item) => editions.some((edition) => edition.id === item.edition.id));
@@ -173,7 +174,7 @@ export function ReleasePage({ children = null } = {}) {
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading release…</p></section>;
   }
-  if (!result) return <Navigate to="/discover" replace />;
+  if (!result) return <NotFoundPage kind="release" backTo="/discover" backLabel="Discover releases" />;
   const { release, artist } = result;
   // A release's own (factory) edition leads; a shared-contract edition never takes its place.
   const editionItems = releaseScopedFirst(flattenMarketplaceEditions([catalog]).filter((item) => item.release?.id === release.id));
@@ -254,7 +255,7 @@ export function EditionPage() {
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading edition…</p></section>;
   }
-  if (!result) return <Navigate to="/marketplace" replace />;
+  if (!result) return <NotFoundPage kind="edition" backTo="/marketplace" backLabel="Marketplace" />;
   const { edition, release, artist, experiences } = result;
   const releaseMarketplaceAsset = isReleasePerContractCandidate(edition);
   const secondary = resolveSecondaryStatus();
@@ -350,7 +351,7 @@ export function ExperiencePage() {
   if (!experience && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading experience…</p></section>;
   }
-  if (!experience) return <Navigate to="/discover" replace />;
+  if (!experience) return <NotFoundPage kind="experience" backTo="/discover" backLabel="Discover releases" />;
   const edition = catalog.editions.find((item) => (item.experienceIds || []).includes(experience.id) || experience.editionId === item.id);
   const release = catalog.releases.find((item) => item.id === edition?.releaseId || (item.experiences || []).includes(experience.id));
   const artist = catalog.artists.find((item) => item.id === release?.artistId);
@@ -434,7 +435,10 @@ export function CollectionDetailPage() {
   const catalog = useMarketplaceCatalogs();
   const { collection: collectionId } = useParams();
   const collection = catalog.collections.find((item) => item.id === collectionId);
-  if (!collection) return <Navigate to="/collection" replace />;
+  if (!collection && catalog.publishedLoading) {
+    return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading collection…</p></section>;
+  }
+  if (!collection) return <NotFoundPage kind="collection" backTo="/collection" backLabel="All collections" />;
   const artist = catalog.artists.find((item) => collection.artistIds.includes(item.id));
   const releases = catalog.releases.filter((item) => collection.releaseIds.includes(item.id));
   // Published releases by the collection's artist that the collection does not list stay reachable.
@@ -582,24 +586,6 @@ export function CollectorsPage() {
         <p style={{ color: "var(--vc-bone-dim)" }}>A home for collector identity and earned experiences.</p>
       </PlatformHeader>
       <Link style={primaryBtn} to="/my-collection">View my collection</Link>
-    </section>
-  );
-}
-
-// The catch-all route. An unknown URL used to be replaced with the home page, so a mistyped or stale
-// link looked like a working link to a different page. The URL now stays as typed and says so.
-export function NotFoundPage() {
-  const { pathname } = useLocation();
-  return (
-    <section style={shell} data-testid="not-found">
-      <PlatformHeader eyebrow="† Not found" title="Nothing here">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>There is no page at <code style={{ fontFamily: "var(--font-mono)", color: "var(--vc-bone)" }}>{pathname}</code>. The link may be old or mistyped.</p>
-      </PlatformHeader>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link to="/discover" style={primaryBtn}>Discover</Link>
-        <Link to="/marketplace" style={ghostBtn}>Marketplace</Link>
-        <Link to="/" style={ghostBtn}>Home</Link>
-      </div>
     </section>
   );
 }

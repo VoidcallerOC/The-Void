@@ -1,4 +1,4 @@
-import { useEffect, useMemo, Suspense } from "react";
+import { useEffect, useMemo, useSyncExternalStore, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
 import { VoidStarfield } from "./VoidStarfield.jsx";
@@ -10,7 +10,7 @@ import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-so
 import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
 import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
-import { pageTitle } from "../lib/page-title.js";
+import { getPageTitleOverride, pageTitle, subscribePageTitleOverride } from "../lib/page-title.js";
 import { VOID_LIVE } from "../data.js";
 
 // Same gates as the route table in App.jsx.
@@ -52,9 +52,10 @@ function ScrollToTop() {
 // shows) so the tab, history list and bookmarks distinguish routes that share a layout.
 export function DocumentTitle({ catalog }) {
   const { pathname } = useLocation();
+  const override = useSyncExternalStore(subscribePageTitleOverride, getPageTitleOverride, getPageTitleOverride);
   useEffect(() => {
-    document.title = pageTitle(pathname, catalog, ROUTE_FLAGS);
-  }, [pathname, catalog]);
+    document.title = override || pageTitle(pathname, catalog, ROUTE_FLAGS);
+  }, [pathname, catalog, override]);
   return null;
 }
 

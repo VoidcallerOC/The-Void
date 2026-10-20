@@ -139,13 +139,14 @@ describe("route table · the single-artist catalog", () => {
   });
 });
 
+function mountRouter(path) {
+  const router = createMemoryRouter([{ path: "*", element: <><AppRoutes /><LocationProbe /></> }], { initialEntries: [path] });
+  render(<RouterProvider router={router} />);
+  return router;
+}
+const headerLink = (label) => within(document.querySelector(".vc-nav-links")).getByText(label);
+
 describe("route table · client-side navigation, history, mobile menu", () => {
-  function mountRouter(path) {
-    const router = createMemoryRouter([{ path: "*", element: <><AppRoutes /><LocationProbe /></> }], { initialEntries: [path] });
-    render(<RouterProvider router={router} />);
-    return router;
-  }
-  const headerLink = (label) => within(document.querySelector(".vc-nav-links")).getByText(label);
 
   it("changes both the URL and the page on each header click, including rapid adjacent clicks", async () => {
     mountRouter("/");
@@ -187,6 +188,20 @@ describe("route table · client-side navigation, history, mobile menu", () => {
     expect(document.querySelector(".vc-nav-menu")).toBeNull();
   });
 
+  it("closes the mobile menu when the logo or browser back changes the route", async () => {
+    const router = mountRouter("/discover");
+    fireEvent.click(document.querySelector("button[aria-label='Open menu']"));
+    expect(document.querySelector(".vc-nav-menu")).not.toBeNull();
+    fireEvent.click(document.querySelector("nav a[href='/']"));
+    await waitFor(() => expect(location()).toBe("/"));
+    expect(document.querySelector(".vc-nav-menu")).toBeNull();
+    fireEvent.click(document.querySelector("button[aria-label='Open menu']"));
+    await act(async () => { await router.navigate(-1); });
+    await waitFor(() => expect(location()).toBe("/discover"));
+    expect(document.querySelector(".vc-nav-menu")).toBeNull();
+    expect(document.querySelector(".vc-nav-burger").getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("follows an in-page card from the artists list to the artist and on to the edition", async () => {
     mountRouter("/artists");
     await waitFor(() => expect(heading()).toMatch(/^Artists$/i));
@@ -203,26 +218,41 @@ describe("route table · unknown routes and ids", () => {
   it("keeps an unknown URL and says the page does not exist instead of showing the home page", async () => {
     mount("/does-not-exist");
     expect(await screen.findByTestId("not-found")).toBeTruthy();
-    expect(heading()).toMatch(/Nothing here/i);
+    expect(heading()).toMatch(/Nothing at this address/i);
     expect(within(screen.getByTestId("not-found")).getByText("/does-not-exist")).toBeTruthy();
     expect(location()).toBe("/does-not-exist");
-    expect(document.title).toBe("Not found · The Void");
-    expect(within(screen.getByTestId("not-found")).getByText("Discover").getAttribute("href")).toBe("/discover");
+    await waitFor(() => expect(document.title).toBe("Not found · The Void"));
+    expect(within(screen.getByTestId("not-found")).getByText("Back to The Void").getAttribute("href")).toBe("/");
   });
 
-  it("sends an unknown artist, record, edition, experience or collection id to its list page", async () => {
-    for (const [path, listPath, h1] of [
-      ["/artist/nope", "/artists", /^Artists$/i],
-      ["/release/nope", "/discover", /Currently featuring Voidcaller/i],
-      ["/edition/nope", "/marketplace", /Releases/i],
-      ["/experience/nope", "/discover", /Currently featuring Voidcaller/i],
-      ["/collection/nope", "/collection", /^The Void$/i],
+  it("keeps the URL of an unknown artist, record, edition, experience or collection id and names the list to go back to", async () => {
+    for (const [path, kind, backTo] of [
+      ["/artist/nope", "artist", "/artists"],
+      ["/release/nope", "release", "/discover"],
+      ["/edition/nope", "edition", "/marketplace"],
+      ["/experience/nope", "experience", "/discover"],
+      ["/collection/nope", "collection", "/collection"],
     ]) {
       mount(path);
-      await waitFor(() => expect(location()).toBe(listPath));
-      await waitFor(() => expect(heading()).toMatch(h1));
+      const notFound = await screen.findByTestId("not-found");
+      expect(notFound.getAttribute("data-not-found-kind")).toBe(kind);
+      expect(location()).toBe(path);
+      expect(notFound.querySelector(`a[href="${backTo}"]`)).not.toBeNull();
+      await waitFor(() => expect(document.title).toBe("Not found · The Void"));
       cleanup();
     }
+  });
+
+  it("keeps the not-found title after the catalog finishes loading, and drops it when leaving the page", async () => {
+    state.publishedLoading = true;
+    const router = mountRouter("/release/published-later");
+    expect(await screen.findByText("Loading release…")).toBeTruthy();
+    state.publishedLoading = false;
+    await act(async () => { await router.navigate("/release/published-later", { replace: true }); });
+    expect(await screen.findByTestId("not-found")).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe("Not found · The Void"));
+    fireEvent.click(headerLink("DISCOVER"));
+    await waitFor(() => expect(document.title).toBe("Discover · The Void"));
   });
 
   it("waits for the published catalog before giving up on an artist id (direct load / refresh)", async () => {
