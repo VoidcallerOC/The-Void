@@ -367,6 +367,6 @@ describe.skipIf(!testDatabaseUrl)("019 legacy catalog seed (database)", () => {
     expect(row.metadata).toMatchObject({ storageKey: "test/legacy-track-1-object" });
     expect(row.metadata.publicIpfsUri).toBeUndefined();
     await expect(gateway.openMedia({ request: { headers: {} }, grantId: grant.grantId })).resolves.toEqual({ type: "redirect", url: "https://media.example/files/cid?X-Signature=opaque" });
-    expect(storage.open).toHaveBeenCalledWith({ storageKey: "test/legacy-track-1-object", range: null, contentType: null });
+    expect(storage.open).toHaveBeenCalledWith({ storageKey: "test/legacy-track-1-object", range: null, contentType: null, totalLength: null });
   }, 120000);
 });
