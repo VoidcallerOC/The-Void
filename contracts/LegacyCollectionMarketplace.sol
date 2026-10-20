@@ -71,6 +71,7 @@ contract LegacyCollectionMarketplace {
     error NotOwner(); error PausedMarket(); error UnsupportedCollection(); error UnsupportedToken(); error InvalidCollectionConfig();
     error RoyaltyReadFailed(); error RoyaltyAboveCap(); error InvalidRoyaltyReceiver();
     error MinProceedsRequired(); error MinProceedsTooHigh(); error BelowMinimumProceeds(uint256 sellerProceeds, uint256 required);
+    error SelfPurchase(); error TokensNotDelivered(); error UnknownListing();
 
     constructor(address feeRecipient_, uint256 platformFeeBps_, address owner_) {
         if (feeRecipient_ == address(0) || owner_ == address(0)) revert InvalidAddress();
@@ -178,6 +179,7 @@ contract LegacyCollectionMarketplace {
         if (paused) revert PausedMarket();
         Listing storage listing = listings[listingId];
         if (listing.seller == address(0) || listing.status != Status.ACTIVE) revert ListingNotActive();
+        if (listing.seller == msg.sender) revert SelfPurchase();
         if (listing.expiresAt != 0 && block.timestamp > listing.expiresAt) revert Expired();
         if (quantity == 0 || quantity > listing.amount) revert InsufficientQuantity();
         _requireSupported(listing.tokenContract, listing.tokenId);
@@ -197,17 +199,34 @@ contract LegacyCollectionMarketplace {
     function _settle(uint256 listingId, address seller, address tokenContract, uint256 tokenId, uint256 quantity, uint256 salePrice) private {
         (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds) = _settlement(tokenContract, tokenId, salePrice);
         _requireMinimumProceeds(listingId, quantity, sellerProceeds);
-        IERC1155ReleaseMarketplace(tokenContract).safeTransferFrom(seller, msg.sender, tokenId, quantity, "");
+        _deliver(tokenContract, seller, tokenId, quantity);
         _pay(feeRecipient, platformFee);
         _pay(royaltyReceiver, royaltyAmount);
         _pay(seller, sellerProceeds);
         emit ListingSold(listingId, msg.sender, seller, tokenContract, tokenId, quantity, salePrice, platformFee, royaltyAmount);
     }
 
+    /// @dev Moves the tokens and requires the buyer's balance to rise by at least `quantity`. A token that reports success without
+    /// delivering (or delivers less) reverts the sale before any payout. This guards honest-but-faulty tokens; a malicious
+    /// allowlisted token could still lie about balances, which is why the allowlist is a trust boundary. Self-purchase is refused
+    /// in `buy`, so the buyer's balance can only rise through this transfer.
+    function _deliver(address tokenContract, address seller, uint256 tokenId, uint256 quantity) private {
+        IERC1155ReleaseMarketplace token = IERC1155ReleaseMarketplace(tokenContract);
+        uint256 before = token.balanceOf(msg.sender, tokenId);
+        token.safeTransferFrom(seller, msg.sender, tokenId, quantity, "");
+        if (token.balanceOf(msg.sender, tokenId) < before + quantity) revert TokensNotDelivered();
+    }
+
     // ------------------------------------------------------------------ views
 
     function getListing(uint256 listingId) external view returns (Listing memory) { return listings[listingId]; }
-    function listingStatus(uint256 listingId) external view returns (Status) { return listings[listingId].status; }
+    /// @dev Reverts for an id that was never created (the enum default would otherwise read as ACTIVE). `getListing` keeps the
+    /// V4 shape and returns a zero seller for an unknown id.
+    function listingStatus(uint256 listingId) external view returns (Status) {
+        Listing storage listing = listings[listingId];
+        if (listing.seller == address(0)) revert UnknownListing();
+        return listing.status;
+    }
     function getCollection(address tokenContract) external view returns (Collection memory) { return collections[tokenContract]; }
     function isSupported(address tokenContract, uint256 tokenId) public view returns (bool) {
         Collection storage collection = collections[tokenContract];

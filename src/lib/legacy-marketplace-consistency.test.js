@@ -104,9 +104,14 @@ describe("source tripwire: the contract's owner powers and dangerous constructs 
 
   it("only the buy path pays out, in a fixed order after the seller-floor check and the token transfer", () => {
     const settle = code.slice(code.indexOf("function _settle("), code.indexOf("// ---", code.indexOf("function _settle(")));
-    const order = ["_requireMinimumProceeds(", "safeTransferFrom(", "_pay(feeRecipient", "_pay(royaltyReceiver", "_pay(seller"].map((needle) => settle.indexOf(needle));
+    const order = ["_requireMinimumProceeds(", "_deliver(", "_pay(feeRecipient", "_pay(royaltyReceiver", "_pay(seller"].map((needle) => settle.indexOf(needle));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect((code.match(/_pay\(/g) || []).length).toBe(4); // 3 calls in _settle + the definition
+    expect((code.match(/\.safeTransferFrom\(/g) || []).length).toBe(1); // the only token movement, inside _deliver
+    const deliver = code.slice(code.indexOf("function _deliver("), code.indexOf("// ---", code.indexOf("function _deliver(")));
+    expect(deliver).toMatch(/revert TokensNotDelivered\(\)/); // ... and it verifies the buyer's balance rose
+    expect(code).toMatch(/if \(listing\.seller == msg\.sender\) revert SelfPurchase\(\);/);
+    expect(code).toMatch(/if \(listing\.seller == address\(0\)\) revert UnknownListing\(\);/);
   });
 });
