@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { describe, expect, it, vi } from "vitest";
-import { WITHDRAW_CALLDATA, earningsTargets, explainWithdrawError, mapReleaseBindings, withdrawSaleProceeds } from "./sale-earnings.js";
+import { WITHDRAW_CALLDATA, earningsTargets, explainWithdrawError, formatEarnings, mapReleaseBindings, withdrawnFromReceipt, withdrawSaleProceeds } from "./sale-earnings.js";
 
 const SALE = "0xfb13eed6d3f1457937d845A06f33f2BC0c407Cc3";
 const CLONE = "0x1111111111111111111111111111111111111111";
@@ -15,7 +15,7 @@ describe("sale earnings", () => {
     expect(mapReleaseBindings([
       { release_id: "r1", chain_id: 43113, release_contract_address: CLONE, primary_sale_address: SALE.toLowerCase(), factory_address: "0xa5cba0f91cb0a81e0a9ce89a6722cbe4eec93505", artist_wallet: ARTIST },
       { release_id: "r2", chain_id: 43113, release_contract_address: CLONE, primary_sale_address: null },
-    ])).toEqual([{ releaseId: "r1", chainId: 43113, releaseContractAddress: CLONE, primarySaleAddress: ethers.getAddress(SALE), factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505", artistWallet: ethers.getAddress(ARTIST) }]);
+    ])).toEqual([{ releaseId: "r1", chainId: 43113, releaseContractAddress: CLONE, primarySaleAddress: ethers.getAddress(SALE), factoryAddress: "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505", artistWallet: ethers.getAddress(ARTIST), artistEarnedWei: null }]);
   });
 
   it("keeps one target per sale contract, attaches edition token ids, and labels the factory", () => {
@@ -42,5 +42,27 @@ describe("sale earnings", () => {
 
   it("explains a wallet rejection", () => {
     expect(explainWithdrawError({ code: 4001 })).toBe("Withdrawal rejected in the wallet. Nothing was sent.");
+  });
+
+  it("keeps the indexer's earned-to-date only when it is a whole number", () => {
+    const [row] = mapReleaseBindings([{ release_id: "r1", chain_id: 43114, release_contract_address: CLONE, primary_sale_address: SALE, artist_earned_wei: "243750000000000000" }]);
+    expect(row.artistEarnedWei).toBe("243750000000000000");
+    expect(mapReleaseBindings([{ release_id: "r1", chain_id: 43114, release_contract_address: CLONE, primary_sale_address: SALE, artist_earned_wei: "abc" }])[0].artistEarnedWei).toBeNull();
+  });
+
+  it("formats native AVAX without a trailing .0", () => {
+    expect(formatEarnings(0n)).toBe("0 AVAX");
+    expect(formatEarnings(243750000000000000n)).toBe("0.24375 AVAX");
+    expect(formatEarnings(1000000000000000000n)).toBe("1 AVAX");
+  });
+
+  it("reads the withdrawn amount only from this sale's Withdrawn event for this wallet", () => {
+    const iface = new ethers.Interface(["event Withdrawn(address indexed account, uint256 amount)"]);
+    const encode = (account, amount) => iface.encodeEventLog("Withdrawn", [account, amount]);
+    const good = { address: SALE, ...encode(ARTIST, 5n) };
+    expect(withdrawnFromReceipt({ logs: [good] }, { saleAddress: SALE, account: ARTIST })).toBe(5n);
+    expect(withdrawnFromReceipt({ logs: [{ ...good, address: CLONE }] }, { saleAddress: SALE, account: ARTIST })).toBeNull();
+    expect(withdrawnFromReceipt({ logs: [{ address: SALE, ...encode("0x5555555555555555555555555555555555555555", 5n) }] }, { saleAddress: SALE, account: ARTIST })).toBeNull();
+    expect(withdrawnFromReceipt({ logs: [] }, { saleAddress: SALE, account: ARTIST })).toBeNull();
   });
 });

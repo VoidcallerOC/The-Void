@@ -636,6 +636,11 @@ describe("Studio catalog wallet ownership", () => {
     const sql = db.query.mock.calls.map(([text]) => text).find((text) => text.includes("FROM release_contracts rc JOIN releases r"));
     expect(sql).toContain("lower(ao.owner_wallet)=lower($1)");
     expect(sql).not.toContain("factory_contract_id=$");
+    // Earned to date: the indexer's sum of artist cuts for this sale, from finalized purchases only.
+    expect(sql).toContain("SUM(pp.artist_cut_wei)");
+    expect(sql).toContain("lower(pp.sale_contract_address)=lower(sale_contract.address)");
+    expect(sql).toContain("pp.status IN ('CONFIRMED', 'FINALIZED', 'RECONCILED')");
+    expect(sql).toContain("AS artist_earned_wei");
   });
   it("listCatalog selects each edition's release clone, factory and dedicated sale so Studio can resume a published release", async () => {
     const { instance, db } = service({ authenticatedWallet: "0x284c09a7cc187e096cbbdc88d99defe6df32180a" });
