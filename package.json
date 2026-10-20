@@ -30,7 +30,8 @@
     "deploy:release-factory-v3": "node scripts/deploy-release-factory-v3.mjs",
     "deploy:genesis-claim": "node scripts/deploy-genesis-claim.mjs",
     "deploy:role-granter": "node scripts/deploy-role-granter-fuji.mjs",
-    "deploy:marketplace": "node scripts/deploy-marketplace.mjs"
+    "deploy:marketplace": "node scripts/deploy-marketplace.mjs",
+    "verify:settled-sale": "node scripts/verify-settled-sale-activation.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",

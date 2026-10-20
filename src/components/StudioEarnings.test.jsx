@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StudioEarnings } from "./StudioEarnings.jsx";
 import { WITHDRAW_CALLDATA } from "../lib/sale-earnings.js";
+import { haveSettledArtifact, settledRuntime } from "../lib/test-fixtures/settled-sale.js";
 
 // Observed on Fuji 2026-10-10: forgive-forget-28 after one 0.01 AVAX purchase.
 const ARTIST = ethers.getAddress("0x284c09a7cc187e096cbbdc88d99defe6df32180a");
@@ -13,13 +14,16 @@ const CLONE_NEW = "0x1111111111111111111111111111111111111111";
 const SALE_OLD = "0x2222222222222222222222222222222222222222";
 const CLONE_OLD = "0x3333333333333333333333333333333333333333";
 const OTHER_PAYOUT = "0x5555555555555555555555555555555555555555";
+const SALE_SET = "0x4444444444444444444444444444444444444444";
+const ROGUE = "0x6666666666666666666666666666666666666666";
+const LEGACY_CODE = `0x6080${"60".repeat(200)}a264697066735822${"11".repeat(32)}64736f6c63430008180033`;
 const ACTIVE_FACTORY = "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8";
 const OLD_FACTORY = "0xa5CbA0F91cb0A81e0A9Ce89A6722Cbe4eeC93505";
 const HASH = `0x${"ab".repeat(32)}`;
 
-const iface = new ethers.Interface(["function balances(address) view returns (uint256)", "function payoutOf(uint256) view returns (address)", "function withdraw()", "function releasesOf(address) view returns (address[])", "function primarySaleOf(address) view returns (address)", "function releases() view returns (address)", "function platformRecipient() view returns (address)", "event Withdrawn(address indexed account, uint256 amount)"]);
+const iface = new ethers.Interface(["function balances(address) view returns (uint256)", "function payoutOf(uint256) view returns (address)", "function withdraw()", "function releasesOf(address) view returns (address[])", "function primarySaleOf(address) view returns (address)", "function releases() view returns (address)", "function platformRecipient() view returns (address)", "function PLATFORM_FEE_BPS() view returns (uint256)", "function owner() view returns (address)", "function hasRole(bytes32,address) view returns (bool)", "function isRelease(address) view returns (bool)", "event Withdrawn(address indexed account, uint256 amount)"]);
 const SALE_OF = { [CLONE_NEW.toLowerCase()]: SALE_NEW, [CLONE_OLD.toLowerCase()]: SALE_OLD };
-const RELEASE_OF = { [SALE_NEW.toLowerCase()]: CLONE_NEW, [SALE_OLD.toLowerCase()]: CLONE_OLD };
+const RELEASE_OF = { [SALE_NEW.toLowerCase()]: CLONE_NEW, [SALE_OLD.toLowerCase()]: CLONE_OLD, [SALE_SET.toLowerCase()]: CLONE_NEW };
 const coder = ethers.AbiCoder.defaultAbiCoder();
 
 function catalog({ oldPayoutToken = "9" } = {}) {
@@ -36,10 +40,11 @@ function catalog({ oldPayoutToken = "9" } = {}) {
   };
 }
 
-function chain({ balances, payouts, factoryReleases = {}, log = [], bind = {}, omitWithdrawnEvent = false, receiptDelay = null }) {
+function chain({ balances, payouts, factoryReleases = {}, log = [], bind = {}, omitWithdrawnEvent = false, receiptDelay = null, settled = {} }) {
   const readProvider = {
     request: vi.fn(async ({ method, params }) => {
       if (method === "eth_chainId") return "0xa869";
+      if (method === "eth_getCode") return settled.codes?.[params[0].toLowerCase()] ?? LEGACY_CODE;
       if (method === "eth_getTransactionReceipt") {
         // The withdrawal clears the balance the receipt confirms.
         if (receiptDelay && !receiptDelay.released) return null;
@@ -56,7 +61,11 @@ function chain({ balances, payouts, factoryReleases = {}, log = [], bind = {}, o
       if (parsed.name === "releasesOf") return coder.encode(["address[]"], [(factoryReleases[to.toLowerCase()] || []).map(([release]) => release)]);
       if (parsed.name === "primarySaleOf") return coder.encode(["address"], [bind.primarySaleOf?.[parsed.args[0].toLowerCase()] ?? SALE_OF[parsed.args[0].toLowerCase()]]);
       if (parsed.name === "releases") return coder.encode(["address"], [bind.releases?.[to.toLowerCase()] ?? RELEASE_OF[to.toLowerCase()]]);
-      if (parsed.name === "platformRecipient") return coder.encode(["address"], [PLATFORM]);
+      if (parsed.name === "platformRecipient") return coder.encode(["address"], [settled.recipient?.[to.toLowerCase()] ?? PLATFORM]);
+      if (parsed.name === "PLATFORM_FEE_BPS") return coder.encode(["uint256"], [settled.fee?.[to.toLowerCase()] ?? 250n]);
+      if (parsed.name === "owner") { if (settled.owner?.[to.toLowerCase()]) return coder.encode(["address"], [settled.owner[to.toLowerCase()]]); throw Object.assign(new Error("execution reverted"), { code: 3 }); }
+      if (parsed.name === "hasRole") return coder.encode(["bool"], [settled.issuer?.[parsed.args[1].toLowerCase()] ?? Boolean(settled.codes?.[parsed.args[1].toLowerCase()])]);
+      if (parsed.name === "isRelease") return coder.encode(["bool"], [true]);
       if (parsed.name === "payoutOf") return coder.encode(["address"], [payouts[`${to}:${parsed.args[0]}`.toLowerCase()]]);
       if (parsed.name === "balances") return coder.encode(["uint256"], [balances[`${to}:${parsed.args[0]}`.toLowerCase()] ?? 0n]);
       throw new Error(`unexpected call ${parsed.name}`);
@@ -170,6 +179,7 @@ describe("Studio earnings", () => {
     const ff = await screen.findByRole("listitem", { name: "Earnings for Forgive & Forget 28" });
     expect(within(ff).getByTestId(`earned-${SALE_NEW.toLowerCase()}`).textContent).toBe("0.03 AVAX");
     expect(within(ff).getByTestId(`withdrawn-${SALE_NEW.toLowerCase()}`).textContent).toBe("0.02025 AVAX");
+    expect(within(ff).getByTestId(`withdrawn-derived-${SALE_NEW.toLowerCase()}`).textContent).toMatch(/Derived as earned minus what is still held/);
     // No earnings reported: nothing is invented for the other release.
     const old = screen.getByRole("listitem", { name: "Earnings for Old Factory Single" });
     expect(within(old).queryByText("Already withdrawn")).toBeNull();
@@ -241,5 +251,125 @@ describe("Studio earnings", () => {
     expect((await within(ff).findByTestId(`unverified-${SALE_NEW.toLowerCase()}`)).textContent).toMatch(/could not be verified on-chain/);
     expect(within(ff).queryByRole("button", { name: /Withdraw/ })).toBeNull();
     expect(log.some((entry) => entry.startsWith("send:"))).toBe(false);
+  });
+
+  it("prefers the indexer's confirmed withdrawn figure and does not label it derived", async () => {
+    const withIndexed = catalog();
+    withIndexed.releaseBindings[0].artistEarnedWei = ethers.parseEther("0.03").toString();
+    withIndexed.releaseBindings[0].artistWithdrawnWei = ethers.parseEther("0.02").toString();
+    setup({ catalogValue: withIndexed });
+    const ff = await screen.findByRole("listitem", { name: "Earnings for Forgive & Forget 28" });
+    expect(within(ff).getByTestId(`withdrawn-${SALE_NEW.toLowerCase()}`).textContent).toBe("0.02 AVAX");
+    expect(within(ff).queryByTestId(`withdrawn-derived-${SALE_NEW.toLowerCase()}`)).toBeNull();
+    expect(within(ff).getByText("Already withdrawn")).toBeTruthy();
+  });
+
+  it("never lists the platform fee recipient: a connected platform wallet sees no artist earnings or withdraw", async () => {
+    setup({ account: PLATFORM });
+    await screen.findByTestId("earnings-total");
+    await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0 AVAX"));
+    expect(screen.queryAllByRole("button", { name: /Withdraw/ })).toHaveLength(0);
+    expect(screen.queryByText(new RegExp(PLATFORM, "i"))).toBeNull();
+    expect(screen.queryByText("Platform balance")).toBeNull();
+    // The 0.00025 credited to the platform is excluded: "held" is only the artist payout's 0.00975.
+    expect(screen.getByTestId("earnings-total").textContent).toBe("0.00975 AVAX");
+  });
+
+  it("sends exactly one withdraw() on a double click and does not count a pending transaction as withdrawn", async () => {
+    const receiptDelay = { released: false };
+    const withIndexed = catalog();
+    withIndexed.releaseBindings[0].artistEarnedWei = ethers.parseEther("0.00975").toString();
+    withIndexed.releaseBindings[0].artistWithdrawnWei = "0";
+    const { log } = setup({ catalogValue: withIndexed, chainOptions: { receiptDelay } });
+    const ff = await screen.findByRole("listitem", { name: "Earnings for Forgive & Forget 28" });
+    const button = within(ff).getByRole("button", { name: "Withdraw from Forgive & Forget 28" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await within(ff).findByTestId(`submitted-${SALE_NEW.toLowerCase()}`);
+    expect(log.filter((entry) => entry.startsWith("send:"))).toHaveLength(1);
+    expect(within(ff).getByTestId(`withdrawn-${SALE_NEW.toLowerCase()}`).textContent).toBe("0 AVAX");
+    expect(within(ff).queryByTestId(`confirmed-${SALE_NEW.toLowerCase()}`)).toBeNull();
+    receiptDelay.released = true;
+    await within(ff).findByTestId(`confirmed-${SALE_NEW.toLowerCase()}`, {}, { timeout: 8000 });
+    expect(within(ff).getByTestId(`withdrawn-${SALE_NEW.toLowerCase()}`).textContent).toBe("0.00975 AVAX");
+    expect(log.filter((entry) => entry.startsWith("send:"))).toHaveLength(1);
+  }, 15000);
+
+  describe("secondary-sale royalties", () => {
+    const TOKEN_A = "11";
+    const TOKEN_B = "12";
+    const royalties = () => ({ ...catalog(), secondaryRoyalties: [
+      { chainId: 43113, tokenContractAddress: ethers.getAddress(CLONE_NEW), tokenId: TOKEN_A, royaltyWei: ethers.parseEther("0.0025").toString(), sales: 1 },
+      { chainId: 43113, tokenContractAddress: ethers.getAddress(CLONE_NEW), tokenId: TOKEN_B, royaltyWei: ethers.parseEther("0.005").toString(), sales: 2 },
+    ] });
+    const payouts = { [`${CLONE_NEW}:7`.toLowerCase()]: ARTIST, [`${CLONE_OLD}:9`.toLowerCase()]: ARTIST, [`${CLONE_NEW}:${TOKEN_A}`.toLowerCase()]: ARTIST, [`${CLONE_NEW}:${TOKEN_B}`.toLowerCase()]: OTHER_PAYOUT };
+
+    it("counts only tokens whose live payout is the connected wallet, never claimable, never in the primary totals", async () => {
+      setup({ catalogValue: royalties(), payouts });
+      expect(await screen.findByTestId("royalties-earned")).toBeTruthy();
+      await waitFor(() => expect(screen.getByTestId("royalties-earned").textContent).toBe("0.0025 AVAX"));
+      expect(screen.getByTestId("royalties-claimable").textContent).toBe("0 AVAX");
+      expect(screen.getByTestId(`royalty-${CLONE_NEW}-${TOKEN_A}`)).toBeTruthy();
+      expect(screen.queryByTestId(`royalty-${CLONE_NEW}-${TOKEN_B}`)).toBeNull();
+      expect(screen.getByTestId("royalty-note").textContent).toMatch(/nothing to claim or withdraw/);
+      // Primary figures are untouched by royalties.
+      expect(screen.getByTestId("earnings-total").textContent).toBe("0.00975 AVAX");
+      expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0.00975 AVAX");
+    });
+
+    it("shows the other payout wallet its own royalties only", async () => {
+      setup({ catalogValue: royalties(), payouts, account: OTHER_PAYOUT });
+      await waitFor(() => expect(screen.getByTestId("royalties-earned").textContent).toBe("0.005 AVAX"));
+      expect(screen.queryByTestId(`royalty-${CLONE_NEW}-${TOKEN_A}`)).toBeNull();
+      expect(screen.getByTestId(`royalty-${CLONE_NEW}-${TOKEN_B}`)).toBeTruthy();
+    });
+
+    it("says so when no royalties are recorded", async () => {
+      setup({ payouts });
+      await waitFor(() => expect(screen.getByTestId("royalties-earned").textContent).toBe("0 AVAX"));
+      expect(screen.getByText(/No resale royalties are recorded for this wallet yet/)).toBeTruthy();
+    });
+  });
+
+  describe.skipIf(!haveSettledArtifact)("a settled sale attached to the same release", () => {
+    const withSettled = () => ({
+      ...catalog(),
+      releaseSales: [
+        { chainId: 43113, releaseContractAddress: ethers.getAddress(CLONE_NEW), primarySaleAddress: SALE_NEW, artistEarnedWei: ethers.parseEther("0.00975").toString(), artistWithdrawnWei: "0", sales: 1 },
+        { chainId: 43113, releaseContractAddress: ethers.getAddress(CLONE_NEW), primarySaleAddress: SALE_SET, artistEarnedWei: ethers.parseEther("0.0195").toString(), artistWithdrawnWei: ethers.parseEther("0.01").toString(), sales: 2 },
+      ],
+    });
+    const settledCode = () => ({ [SALE_SET.toLowerCase()]: settledRuntime({ release: CLONE_NEW, platform: PLATFORM }) });
+    const settledBalances = { [`${SALE_SET}:${ARTIST}`.toLowerCase()]: ethers.parseEther("0.0095"), [`${SALE_SET}:${PLATFORM}`.toLowerCase()]: 0n };
+
+    it("shows the legacy and settled sales as separate cards with their own figures and platform lines", async () => {
+      setup({ catalogValue: withSettled(), balances: settledBalances, chainOptions: { settled: { codes: settledCode() } } });
+      const settledKey = SALE_SET.toLowerCase();
+      const legacyKey = SALE_NEW.toLowerCase();
+      expect((await screen.findByTestId(`earned-${settledKey}`)).textContent).toBe("0.0195 AVAX");
+      expect(screen.getByTestId(`withdrawn-${settledKey}`).textContent).toBe("0.01 AVAX");
+      expect(screen.getByTestId(`earned-${legacyKey}`).textContent).toBe("0.00975 AVAX");
+      expect(screen.getByTestId(`withdrawn-${legacyKey}`).textContent).toBe("0 AVAX");
+      expect(screen.getByTestId(`platform-line-${settledKey}`).textContent).toBe("Platform fee is paid to the platform wallet automatically in the same transaction.");
+      expect(screen.getByTestId(`platform-line-${legacyKey}`).textContent).toBe("The platform fee credit in this contract belongs to the platform wallet; it is not part of your balance.");
+      expect(screen.getByText("Settled sale")).toBeTruthy();
+      // Both claimable balances count toward this wallet's withdrawable total, and nothing else does.
+      await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0.01925 AVAX"));
+      expect(screen.queryAllByRole("button", { name: /Withdraw from/ }).filter((button) => !button.disabled)).toHaveLength(2);
+    });
+
+    const refused = async (chainOptions, pattern) => {
+      const { log } = setup({ catalogValue: withSettled(), balances: settledBalances, chainOptions });
+      const warning = await screen.findByTestId(`unverified-${SALE_SET.toLowerCase()}`);
+      expect(warning.textContent).toMatch(pattern);
+      expect(within(warning.closest("li")).queryAllByRole("button", { name: /Withdraw/ })).toHaveLength(0);
+      expect(log.some((entry) => entry.startsWith("send:"))).toBe(false);
+    };
+    it("refuses a settled sale that pays another recipient", () => refused({ settled: { codes: settledCode(), recipient: { [SALE_SET.toLowerCase()]: ROGUE } } }, /not the platform wallet/));
+    it("refuses a settled sale the release has not authorized to mint", () => refused({ settled: { codes: settledCode(), issuer: { [SALE_SET.toLowerCase()]: false } } }, /no ISSUER_ROLE/));
+    it("refuses a settled sale that has an owner", () => refused({ settled: { codes: settledCode(), owner: { [SALE_SET.toLowerCase()]: ROGUE } } }, /has an owner/));
+    it("refuses a settled sale with a different fee", () => refused({ settled: { codes: settledCode(), fee: { [SALE_SET.toLowerCase()]: 0n } } }, /0 basis points, not 250/));
+    it("refuses unknown code that the factory did not register", () => refused({ settled: {} }, /not the reviewed settled sale/));
   });
 });

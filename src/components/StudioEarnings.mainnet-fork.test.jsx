@@ -8,7 +8,10 @@
 //
 // Skipped when MAINNET_FORK_RPC is unset so CI without a fork stays green.
 import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { ethers } from "ethers";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { SETTLED_ARTIFACT_URL, haveSettledArtifact } from "../lib/test-fixtures/settled-sale.js";
 
 configure({ asyncUtilTimeout: 10000 });
 const FORK = globalThis.process?.env?.MAINNET_FORK_RPC || "";
@@ -91,7 +94,7 @@ describe.skipIf(!FORK)("Studio Earnings against a local mainnet fork", () => {
     expect(gained).toBeLessThanOrEqual(243750000000000000n);
     // Refreshed view: nothing left to withdraw, all of it recorded as withdrawn.
     await waitFor(() => expect(screen.getByTestId(`withdrawn-${SALE}`).textContent).toBe("0.24375 AVAX"));
-    expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0 AVAX");
+    await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0 AVAX"));
     expect(screen.getByRole("button", { name: /Withdraw from Forgive & Forget/i }).disabled).toBe(true);
     // The platform's credited share is untouched and still held for it.
     const owed = await rpc("eth_call", [{ to: SALE, data: `0x27e235e3${PLATFORM.slice(2).padStart(64, "0")}` }, "latest"]);
@@ -137,5 +140,94 @@ describe.skipIf(!FORK)("Studio Earnings against a local mainnet fork", () => {
     await screen.findByTestId("earnings-total");
     await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0 AVAX"));
     expect(screen.queryByRole("button", { name: /Withdraw from/i })).toBeNull();
+  });
+
+  // ---- activated state: a VoidPrimarySaleSettled attached to the EXISTING release (fork only) ----
+  describe.skipIf(!haveSettledArtifact)("with a settled sale authorized by the existing release", () => {
+    const DEPLOYER = "0x00000000000000000000000000000000000000d1";
+    const BUYER = "0x00000000000000000000000000000000000000b1";
+    const ROGUE_RECIPIENT = "0x00000000000000000000000000000000000000ba";
+    const ISSUER = ethers.keccak256(ethers.toUtf8Bytes("ISSUER_ROLE"));
+    const roleIface = new ethers.Interface(["function grantRole(bytes32,address)", "function revokeRole(bytes32,address)"]);
+    const saleIface = new ethers.Interface(["function configureSale(uint256,uint256,uint256,uint256,uint64,uint64,bool)", "function purchase(uint256,uint256) payable", "function balances(address) view returns (uint256)"]);
+    const balanceOf = async (address) => BigInt(await rpc("eth_getBalance", [address, "latest"]));
+    const mined = async (tx) => {
+      const hash = await rpc("eth_sendTransaction", [tx]);
+      const receipt = await rpc("eth_getTransactionReceipt", [hash]);
+      expect(receipt.status).toBe("0x1");
+      return receipt;
+    };
+    async function deploySettled(platform) {
+      const artifact = JSON.parse(readFileSync(SETTLED_ARTIFACT_URL, "utf8"));
+      const args = ethers.AbiCoder.defaultAbiCoder().encode(["address", "address"], [RELEASE, platform]).slice(2);
+      return (await mined({ from: DEPLOYER, data: artifact.bytecode.object + args })).contractAddress;
+    }
+    async function authorize(sale) {
+      await mined({ from: ARTIST, to: RELEASE, data: roleIface.encodeFunctionData("grantRole", [ISSUER, sale]) });
+      await mined({ from: ARTIST, to: RELEASE, data: roleIface.encodeFunctionData("revokeRole", [ISSUER, "0x6ae84a51f100f10f0535a514555043ae9edf9aa3"]) });
+    }
+    const catalogWith = (saleAddress, { earned, withdrawn = "0", sales = 1 } = {}) => ({
+      ...apiCatalog(),
+      releaseSales: [
+        { chainId: 43114, releaseContractAddress: ethers.getAddress(RELEASE), primarySaleAddress: ethers.getAddress(SALE), artistEarnedWei: "243750000000000000", artistWithdrawnWei: "0", sales: 1 },
+        { chainId: 43114, releaseContractAddress: ethers.getAddress(RELEASE), primarySaleAddress: ethers.getAddress(saleAddress), artistEarnedWei: earned ?? "0", artistWithdrawnWei: withdrawn, sales },
+      ],
+    });
+    beforeEach(async () => { for (const account of [DEPLOYER, BUYER, ARTIST]) await rpc("anvil_setBalance", [account, "0x56BC75E2D63100000"]); });
+
+    it("pays the platform automatically at purchase, and the artist withdraws only their 97.5% through the UI while the legacy credits stay intact", async () => {
+      const sale = await deploySettled(PLATFORM);
+      await authorize(sale);
+      const block = await rpc("eth_getBlockByNumber", ["latest", false]);
+      await mined({ from: ARTIST, to: sale, data: saleIface.encodeFunctionData("configureSale", [TOKEN_ID, ethers.parseEther("0.1"), 0, 0, 0, BigInt(block.timestamp) + 86400n, false]) });
+      const platformBefore = await balanceOf(PLATFORM);
+      await mined({ from: BUYER, to: sale, value: ethers.toQuantity(ethers.parseEther("0.1")), data: saleIface.encodeFunctionData("purchase", [TOKEN_ID, 1]) });
+      // On-chain facts the UI must agree with: the platform wallet RECEIVED its 2.5% in the purchase transaction.
+      expect((await balanceOf(PLATFORM)) - platformBefore).toBe(ethers.parseEther("0.0025"));
+      expect(await balanceOf(sale)).toBe(ethers.parseEther("0.0975"));
+
+      render(<StudioEarnings catalog={catalogWith(sale, { earned: ethers.parseEther("0.0975").toString() })} wallet={walletFor(ARTIST)} readProvider={readProvider()} />);
+      const key = sale.toLowerCase();
+      expect((await screen.findByTestId(`earned-${key}`)).textContent).toBe("0.0975 AVAX");
+      expect(screen.getByTestId(`platform-line-${key}`).textContent).toMatch(/paid to the platform wallet automatically/);
+      expect(screen.getByTestId(`platform-line-${SALE}`).textContent).toMatch(/belongs to the platform wallet/);
+      await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0.34125 AVAX"));
+      const card = screen.getByTestId(`earned-${key}`).closest("li");
+      const artistBefore = await balanceOf(ARTIST);
+      const platformBeforeWithdraw = await balanceOf(PLATFORM);
+      fireEvent.click(within(card).getByRole("button", { name: /Withdraw from Forgive & Forget/i }));
+      const confirmed = await within(card).findByTestId(`confirmed-${key}`);
+      expect(confirmed.textContent).toMatch(/0\.0975 AVAX was sent to your wallet/);
+      expect((await balanceOf(ARTIST)) - artistBefore).toBeGreaterThan(ethers.parseEther("0.0975") - 1000000000000000n);
+      expect(await balanceOf(sale)).toBe(0n);
+      expect(await balanceOf(PLATFORM)).toBe(platformBeforeWithdraw);
+      // The original sale's 0.25 AVAX (artist 0.24375 + platform 0.00625) was not touched by any of this.
+      expect(await balanceOf(SALE)).toBe(250000000000000000n);
+      expect(BigInt(await rpc("eth_call", [{ to: SALE, data: `0x27e235e3${PLATFORM.slice(2).padStart(64, "0")}` }, "latest"]))).toBe(6250000000000000n);
+    });
+
+    it("refuses a settled sale that routes the platform fee to another wallet and offers no withdraw", async () => {
+      const sale = await deploySettled(ROGUE_RECIPIENT);
+      await authorize(sale);
+      render(<StudioEarnings catalog={catalogWith(sale)} wallet={walletFor(ARTIST)} readProvider={readProvider()} />);
+      const warning = await screen.findByTestId(`unverified-${sale.toLowerCase()}`);
+      expect(warning.textContent).toMatch(/not the platform wallet/);
+      expect(within(warning.closest("li")).queryAllByRole("button", { name: /Withdraw/ })).toHaveLength(0);
+    });
+
+    it("refuses a settled sale the release has not authorized to mint", async () => {
+      const sale = await deploySettled(PLATFORM);
+      render(<StudioEarnings catalog={catalogWith(sale)} wallet={walletFor(ARTIST)} readProvider={readProvider()} />);
+      const warning = await screen.findByTestId(`unverified-${sale.toLowerCase()}`);
+      expect(warning.textContent).toMatch(/no ISSUER_ROLE/);
+    });
+
+    it("shows a connected platform wallet nothing as artist earnings even though the legacy sale holds its 0.00625 AVAX credit", async () => {
+      render(<StudioEarnings catalog={apiCatalog()} wallet={walletFor(PLATFORM)} readProvider={readProvider()} />);
+      await screen.findByTestId("earnings-total");
+      await waitFor(() => expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0 AVAX"));
+      expect(screen.queryAllByRole("button", { name: /Withdraw/ })).toHaveLength(0);
+      expect(screen.queryByText("Platform balance")).toBeNull();
+    });
   });
 });

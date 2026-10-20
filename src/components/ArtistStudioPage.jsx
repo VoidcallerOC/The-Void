@@ -24,7 +24,7 @@ import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, fetchRegisteredMedia, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
-import { mapReleaseBindings } from "../lib/sale-earnings.js";
+import { mapReleaseBindings, mapReleaseSales, mapSecondaryRoyalties } from "../lib/sale-earnings.js";
 import { StudioEarnings } from "./StudioEarnings.jsx";
 import { RegisteredFilePicker } from "./RegisteredFilePicker.jsx";
 import { ARTIST_ROYALTY_POLICY } from "../../config/release-network.js";
@@ -471,7 +471,7 @@ export function ArtistStudioPage() {
     studioFetch("/studio/catalog", { headers })
       .then((payload) => {
         if (cancelled) return;
-        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [], releaseBindings: mapReleaseBindings(payload?.releaseBindings) }, wallet.account);
+        const catalog = studioCatalogForConnectedWallet({ ...mapPublishedCatalog(payload), albumSingles: Array.isArray(payload?.albumSingles) ? payload.albumSingles : [], releaseBindings: mapReleaseBindings(payload?.releaseBindings), releaseSales: mapReleaseSales(payload?.releaseSales), secondaryRoyalties: mapSecondaryRoyalties(payload?.secondaryRoyalties) }, wallet.account);
         setOwnedStudioCatalog(catalog);
         if (requestedReleaseId) openPublishedSale(catalog, requestedReleaseId);
       })

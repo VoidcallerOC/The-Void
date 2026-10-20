@@ -1,8 +1,9 @@
 import { ethers } from "ethers";
 import { FUJI_RELEASE_FACTORY_V2_CONFIG, fujiExplorerUrl, requestWithTimeout } from "./fuji-release.js";
 import { SIMULATION_GAS } from "./primary-sale.js";
-import { ACTIVE_RELEASE_PER_CONTRACT_DEPLOYMENTS, releaseDeploymentForFactory } from "../../config/release-network.js";
+import { ACTIVE_RELEASE_PER_CONTRACT_DEPLOYMENTS, RELEASE_PER_CONTRACT, releaseDeploymentForFactory } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
+import { verifyAuthorizedSale } from "./sale-authorization.js";
 
 // VoidPrimarySale holds proceeds as pull payments: purchase() credits
 // balances[payoutOf(tokenId)] and balances[platformRecipient], and withdraw()
@@ -19,6 +20,8 @@ export const SALE_EARNINGS_ABI = Object.freeze([
 ]);
 const saleIface = new ethers.Interface(SALE_EARNINGS_ABI);
 const releaseIface = new ethers.Interface(["function payoutOf(uint256 tokenId) view returns (address)"]);
+// Mint revenue is primary-sale revenue: the release's mint() is not payable, so AVAX only ever
+// reaches a sale contract. One category, "Primary sales (paid at mint)".
 const factoryIface = new ethers.Interface([
   "function releasesOf(address artist) view returns (address[])",
   "function primarySaleOf(address release) view returns (address)",
@@ -62,7 +65,35 @@ export function mapReleaseBindings(rows) {
     factoryAddress: checksum(row?.factory_address ?? row?.factoryAddress),
     artistWallet: checksum(row?.artist_wallet ?? row?.artistWallet),
     artistEarnedWei: weiText(row?.artist_earned_wei ?? row?.artistEarnedWei),
+    artistWithdrawnWei: weiText(row?.artist_withdrawn_wei ?? row?.artistWithdrawnWei),
   })).filter((binding) => binding.releaseId && binding.primarySaleAddress && binding.releaseContractAddress);
+}
+
+/**
+ * Normalizes catalog `releaseSales`: one row per (release contract, sale contract) that has
+ * indexed primary purchases, artist-only fields. A satellite settled sale shows up here even
+ * though the factory never registered it.
+ */
+export function mapReleaseSales(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    chainId: Number(row?.chain_id ?? row?.chainId ?? 0),
+    releaseContractAddress: checksum(row?.release_contract_address ?? row?.releaseContractAddress),
+    primarySaleAddress: checksum(row?.sale_contract_address ?? row?.primarySaleAddress ?? row?.saleContractAddress),
+    artistEarnedWei: weiText(row?.artist_earned_wei ?? row?.artistEarnedWei),
+    artistWithdrawnWei: weiText(row?.artist_withdrawn_wei ?? row?.artistWithdrawnWei),
+    sales: Number(row?.sales ?? 0) || 0,
+  })).filter((row) => row.chainId && row.primarySaleAddress && row.releaseContractAddress);
+}
+
+/** Normalizes catalog `secondaryRoyalties` (indexed marketplace royalty totals per token). */
+export function mapSecondaryRoyalties(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    chainId: Number(row?.chain_id ?? row?.chainId ?? 0),
+    tokenContractAddress: checksum(row?.token_contract_address ?? row?.tokenContractAddress),
+    tokenId: /^\d+$/.test(String(row?.token_id ?? row?.tokenId ?? "").trim()) ? String(row?.token_id ?? row?.tokenId).trim() : "",
+    royaltyWei: weiText(row?.royalty_wei ?? row?.royaltyWei) ?? "0",
+    sales: Number(row?.sales ?? 0) || 0,
+  })).filter((row) => row.chainId && row.tokenContractAddress && row.tokenId);
 }
 
 /**
@@ -74,7 +105,7 @@ export function mapReleaseBindings(rows) {
 export function earningsTargets(catalog = {}, { chainId = FUJI_RELEASE_FACTORY_V2_CONFIG.chainId } = {}) {
   const titles = new Map((catalog.releases || []).map((release) => [release.id, release.title || release.id]));
   const targets = new Map();
-  const add = ({ releaseId, primarySaleAddress, releaseContractAddress, factoryAddress, artistWallet, artistEarnedWei = null }) => {
+  const add = ({ releaseId, primarySaleAddress, releaseContractAddress, factoryAddress, artistWallet, artistEarnedWei = null, artistWithdrawnWei = null }) => {
     const sale = checksum(primarySaleAddress);
     const release = checksum(releaseContractAddress);
     if (!sale || !release) return null;
@@ -84,25 +115,38 @@ export function earningsTargets(catalog = {}, { chainId = FUJI_RELEASE_FACTORY_V
       existing.factoryAddress ||= checksum(factoryAddress);
       existing.artistWallet ||= checksum(artistWallet);
       existing.artistEarnedWei ??= weiText(artistEarnedWei);
+      existing.artistWithdrawnWei ??= weiText(artistWithdrawnWei);
       return existing;
     }
     const edition = (catalog.editions || []).find((item) => same(item.releaseContractAddress || item.contractAddress, release));
     const knownReleaseId = releaseId || edition?.releaseId || "";
-    const entry = { releaseId: knownReleaseId, title: titles.get(knownReleaseId) || knownReleaseId || `Release ${release.slice(0, 6)}…${release.slice(-4)}`, chainId: Number(chainId), primarySaleAddress: sale, releaseContractAddress: release, factoryAddress: checksum(factoryAddress), artistWallet: checksum(artistWallet), artistEarnedWei: weiText(artistEarnedWei), tokenIds: [] };
+    const entry = { releaseId: knownReleaseId, title: titles.get(knownReleaseId) || knownReleaseId || `Release ${release.slice(0, 6)}…${release.slice(-4)}`, chainId: Number(chainId), primarySaleAddress: sale, releaseContractAddress: release, factoryAddress: checksum(factoryAddress), artistWallet: checksum(artistWallet), artistEarnedWei: weiText(artistEarnedWei), artistWithdrawnWei: weiText(artistWithdrawnWei), tokenIds: [] };
     targets.set(key, entry);
     return entry;
   };
+  // Per-sale rows first, so their indexed earned/withdrawn figures win and a settled sale the
+  // factory never registered still gets its own card. Two sales of one release stay separate.
+  for (const row of catalog.releaseSales || []) {
+    if (Number(row.chainId) !== Number(chainId)) continue;
+    add(row);
+  }
   for (const binding of catalog.releaseBindings || []) {
     if (Number(binding.chainId) !== Number(chainId)) continue;
     add(binding);
   }
+  for (const target of targets.values()) {
+    target.factoryAddress ||= [...targets.values()].find((item) => same(item.releaseContractAddress, target.releaseContractAddress) && item.factoryAddress)?.factoryAddress || "";
+  }
   for (const edition of catalog.editions || []) {
     if (Number(edition.chainId) !== Number(chainId) || !edition.tokenIds?.length) continue;
     const releaseContract = edition.releaseContractAddress || edition.contractAddress;
-    const target = [...targets.values()].find((item) => same(item.releaseContractAddress, releaseContract) && (!edition.primarySaleAddress || same(item.primarySaleAddress, edition.primarySaleAddress)))
-      || add({ releaseId: edition.releaseId, primarySaleAddress: edition.primarySaleAddress, releaseContractAddress: releaseContract, factoryAddress: edition.factoryAddress });
-    if (!target) continue;
-    for (const tokenId of edition.tokenIds) if (!target.tokenIds.includes(String(tokenId))) target.tokenIds.push(String(tokenId));
+    // payoutOf is a release-level read, so every sale of the release gets the token ids.
+    let matches = [...targets.values()].filter((item) => same(item.releaseContractAddress, releaseContract));
+    if (!matches.length) {
+      const created = add({ releaseId: edition.releaseId, primarySaleAddress: edition.primarySaleAddress, releaseContractAddress: releaseContract, factoryAddress: edition.factoryAddress });
+      matches = created ? [created] : [];
+    }
+    for (const target of matches) for (const tokenId of edition.tokenIds) if (!target.tokenIds.includes(String(tokenId))) target.tokenIds.push(String(tokenId));
   }
   return [...targets.values()].map((target) => ({ ...target, factoryLabel: factoryLabel(target.factoryAddress) }));
 }
@@ -145,10 +189,10 @@ export async function readSaleBalance(provider, saleAddress, account) {
  * payoutOf(tokenId); the connected wallet is also read so a balance left under
  * it by an earlier payout is never hidden.
  */
-export async function readSaleEarnings(provider, target, account = "") {
+export async function readSaleEarnings(provider, target, account = "", options = {}) {
   const payouts = [];
   const errors = [];
-  const verification = await verifySaleBinding(provider, target);
+  const verification = await verifySaleBinding(provider, target, options);
   for (const tokenId of target.tokenIds || []) {
     try {
       const payout = checksum(await call(provider, target.releaseContractAddress, releaseIface, "payoutOf", [BigInt(tokenId)]));
@@ -162,69 +206,78 @@ export async function readSaleEarnings(provider, target, account = "") {
   for (const extra of [wallet, target.artistWallet]) if (extra && !candidates.some((item) => same(item, extra))) candidates.push(extra);
   const rows = [];
   for (const address of candidates) {
-    const balanceWei = await readSaleBalance(provider, target.primarySaleAddress, address);
     const isPayout = payouts.some((item) => same(item, address));
-    // The platform fee recipient is not an artist payee. It only appears when it is the
-    // connected wallet, and is labelled as the platform's own balance.
-    const isPlatform = !isPayout && same(address, verification.platformRecipient);
+    // The platform fee recipient is never an artist payee: its credit (legacy sale) or transfer
+    // (settled sale) is the platform's, and is never listed, totalled or withdrawable here.
+    if (!isPayout && same(address, verification.platformRecipient)) continue;
+    const balanceWei = await readSaleBalance(provider, target.primarySaleAddress, address);
     // Non-payout addresses only appear when something is actually held for them.
     if (!isPayout && balanceWei === 0n && (payouts.length || !same(address, wallet))) continue;
-    if (isPlatform && !same(address, wallet)) continue;
-    rows.push({ address, balanceWei, isPayout, isPlatform, canWithdraw: same(address, wallet) && verification.verified });
+    rows.push({ address, balanceWei, isPayout, canWithdraw: same(address, wallet) && verification.verified });
   }
-  // Earned to date is the indexer's sum of artist cuts for this sale. Withdrawn is derived
-  // (earned - still held) and only offered when exactly one payout holds the balance.
+  // Earned to date is the indexer's sum of artist cuts for this sale. Withdrawn is the indexer's
+  // sum of the artist wallet's Withdrawn events when reported; otherwise it is derived (earned -
+  // still held) and flagged as derived, and only when exactly one payout holds the balance.
   const earnedWei = target.artistEarnedWei == null ? null : BigInt(target.artistEarnedWei);
+  const withdrawnIndexedWei = target.artistWithdrawnWei == null ? null : BigInt(target.artistWithdrawnWei);
   const payoutRows = rows.filter((row) => row.isPayout);
-  let withdrawnWei = null;
-  if (earnedWei !== null && payoutRows.length === 1) {
+  let derivedWithdrawnWei = null;
+  if (withdrawnIndexedWei === null && earnedWei !== null && payoutRows.length === 1) {
     const held = payoutRows[0].balanceWei;
-    withdrawnWei = earnedWei > held ? earnedWei - held : 0n;
+    derivedWithdrawnWei = earnedWei > held ? earnedWei - held : 0n;
   }
-  return { ...target, payouts: rows, errors, verification, earnedWei, withdrawnWei };
+  return { ...target, payouts: rows, errors, verification, earnedWei, withdrawnIndexedWei, derivedWithdrawnWei, kind: verification.kind };
 }
 
 /**
- * Live checks that the sale a row points at is the real sale of that release on the expected
- * chain, so a stale config or database row can never route a withdrawal to the wrong contract.
+ * Live authorization of the sale a row points at: either the legacy sale the factory registered
+ * for the release, or the reviewed settled sale the release has authorized as an issuer. A stale
+ * config or database row can never route a withdrawal to any other contract.
  */
-export async function verifySaleBinding(provider, target) {
-  const problems = [];
-  let platformRecipient = "";
-  try {
-    const chain = Number(BigInt(await provider.request({ method: "eth_chainId" })));
-    if (chain !== Number(target.chainId)) problems.push(`The RPC is on chain ${chain}, but this sale is on chain ${target.chainId}.`);
-  } catch (error) {
-    problems.push(`The chain could not be confirmed: ${error?.message || "read failed"}`);
-  }
-  try {
-    const bound = checksum(await call(provider, target.primarySaleAddress, saleIface, "releases", []));
-    if (!same(bound, target.releaseContractAddress)) problems.push(`The sale contract is bound to ${bound || "no release"}, not ${target.releaseContractAddress}.`);
-  } catch (error) {
-    problems.push(`The sale contract could not be read: ${error?.message || "read failed"}`);
-  }
-  if (target.factoryAddress) {
-    try {
-      const registered = checksum(await call(provider, target.factoryAddress, factoryIface, "primarySaleOf", [target.releaseContractAddress]));
-      if (!same(registered, target.primarySaleAddress)) problems.push(`The factory registers ${registered || "no sale"} for this release, not ${target.primarySaleAddress}.`);
-    } catch (error) {
-      problems.push(`The factory could not confirm this sale: ${error?.message || "read failed"}`);
-    }
-  }
-  try {
-    platformRecipient = checksum(await call(provider, target.primarySaleAddress, saleIface, "platformRecipient", []));
-  } catch { /* labelling only */ }
-  return { verified: problems.length === 0, problems, platformRecipient };
+export async function verifySaleBinding(provider, target, { expectedPlatformRecipient = RELEASE_PER_CONTRACT.platformRecipient } = {}) {
+  const result = await verifyAuthorizedSale(provider, {
+    sale: target.primarySaleAddress,
+    release: target.releaseContractAddress,
+    factory: target.factoryAddress,
+    expectedPlatformRecipient,
+    chainId: target.chainId,
+  });
+  return { verified: result.authorized, problems: result.problems, platformRecipient: result.details.platformRecipient, kind: result.kind, details: result.details };
 }
 
-export async function readStudioEarnings(provider, targets, account = "") {
+/**
+ * Secondary-sale royalties for the connected wallet. The marketplace pays each royalty straight
+ * to the edition's payout when the resale settles, so there is nothing to claim. Rows are kept
+ * only where the LIVE payoutOf(tokenId) on the token's release equals the connected wallet.
+ */
+export async function readSecondaryRoyalties(provider, royalties, account = "", { chainId = FUJI_RELEASE_FACTORY_V2_CONFIG.chainId } = {}) {
+  const wallet = checksum(account);
+  const rows = [];
+  let skipped = 0;
+  if (wallet) {
+    for (const royalty of royalties || []) {
+      if (Number(royalty.chainId) !== Number(chainId)) continue;
+      try {
+        const payout = checksum(await call(provider, royalty.tokenContractAddress, releaseIface, "payoutOf", [BigInt(royalty.tokenId)]));
+        if (same(payout, wallet)) rows.push({ ...royalty, payout });
+        else skipped += 1;
+      } catch {
+        skipped += 1;
+      }
+    }
+  }
+  const totalWei = rows.reduce((sum, row) => sum + BigInt(row.royaltyWei), 0n);
+  return { rows, totalWei, skipped };
+}
+
+export async function readStudioEarnings(provider, targets, account = "", options = {}) {
   const results = [];
   for (const target of targets) {
     try {
-      results.push(await readSaleEarnings(provider, target, account));
+      results.push(await readSaleEarnings(provider, target, account, options));
     } catch (error) {
-      const verification = await verifySaleBinding(provider, target).catch(() => ({ verified: false, problems: ["The sale could not be verified."], platformRecipient: "" }));
-      results.push({ ...target, payouts: [], errors: [error?.message || "Balance read failed."], verification, earnedWei: null, withdrawnWei: null });
+      const verification = await verifySaleBinding(provider, target, options).catch(() => ({ verified: false, problems: ["The sale could not be verified."], platformRecipient: "", kind: null }));
+      results.push({ ...target, payouts: [], errors: [error?.message || "Balance read failed."], verification, earnedWei: null, withdrawnIndexedWei: null, derivedWithdrawnWei: null, kind: null });
     }
   }
   return results;
