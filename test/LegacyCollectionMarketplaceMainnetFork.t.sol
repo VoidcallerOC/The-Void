@@ -9,6 +9,9 @@ interface VmLegacyFork {
     function prank(address) external;
     function deal(address, uint256) external;
     function skip(bool) external;
+    function cool(address) external;
+    function snapshotState() external returns (uint256);
+    function revertToState(uint256) external returns (bool);
 }
 
 interface IGenesis {
@@ -33,6 +36,7 @@ interface IV4 {
 /// royaltyInfo on a local fork of Avalanche C-Chain. Nothing is broadcast. Skipped unless MAINNET_FORK_RPC is set.
 contract LegacyCollectionMarketplaceMainnetForkTest {
     VmLegacyFork internal constant vm = VmLegacyFork(address(uint160(uint256(keccak256("hevm cheat code")))));
+    event log_named_uint(string key, uint256 val);
     IGenesis internal constant GENESIS = IGenesis(0xD1B4367dd9f235f9ee61878019d66E31511E98eE);
     address internal constant V4_MARKET = 0x0e77116142844478a55EEd2Ab79de9F93770F8f5;
     address internal constant PLATFORM = 0xb65C575CaE01574296Fab6E620B9A15cC0121ce4;
@@ -158,5 +162,39 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.prank(HOLDER);
         (bool ok,) = address(market).call(abi.encodeCall(market.createListingWithMinProceeds, (address(GENESIS), HOLDER, 4, 1, PRICE, uint64(0), 1)));
         require(!ok, "id 4 is outside the allowlisted scope");
+    }
+
+    /// M-1 triage on the REAL collection: Genesis's royaltyInfo does not depend on the transaction's gas. Every gas limit at which a real
+    /// purchase completes pays the creator exactly 5%, and the seller exactly 92.5%; the lowest completing limit is reported.
+    function testRealGenesisPaysTheSameRoyaltyAtEveryCompletingGasLimit() public {
+        if (!forked) return;
+        vm.prank(HOLDER);
+        GENESIS.setApprovalForAll(address(market), true);
+        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        vm.prank(HOLDER);
+        uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 2, PRICE, 0, floorPerUnit);
+        uint256 minOk; uint256 completed;
+        for (uint256 g = 40_000; g <= 400_000; g += 1_000) {
+            uint256 snap = vm.snapshotState();
+            // a real purchase starts with these cold; a forge test is one long transaction
+            vm.cool(address(GENESIS)); vm.cool(CREATOR); vm.cool(HOLDER); vm.cool(PLATFORM); vm.cool(address(market));
+            uint256 creatorBefore = CREATOR.balance;
+            uint256 holderBefore = HOLDER.balance;
+            vm.prank(BUYER);
+            (bool ok,) = address(market).call{value: PRICE, gas: g}(abi.encodeCall(market.buy, (id, 1)));
+            if (ok) {
+                if (minOk == 0) minOk = g;
+                completed++;
+                require(CREATOR.balance - creatorBefore == 0.05 ether, "creator receives exactly 5% at every completing gas limit");
+                require(HOLDER.balance - holderBefore == 0.925 ether, "seller receives exactly 92.5% at every completing gas limit");
+            } else {
+                require(CREATOR.balance == creatorBefore && HOLDER.balance == holderBefore && address(market).balance == 0, "a failed purchase moves nothing");
+            }
+            vm.revertToState(snap);
+        }
+        emit log_named_uint("lowest completing tx gas limit on real Genesis", minOk);
+        emit log_named_uint("completing gas limits sampled", completed);
+        require(completed > 0, "real purchases complete with enough gas");
+        require(minOk > 40_000, "and too little gas fails (the sweep covers the failing region too)");
     }
 }

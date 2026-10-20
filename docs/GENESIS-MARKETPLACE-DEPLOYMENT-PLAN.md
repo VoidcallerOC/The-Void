@@ -43,6 +43,9 @@ The full package — candidate hashes, build instructions, formulas, invariants,
 - Questions to put to the auditor: reentrancy across `createListingWithMinProceeds`/`cancelListing`/`setMinSellerProceeds` during `buy`; royalty-read assembly (`staticcall`, 100k gas, 64-byte buffer); the floor invariant under partial fills and rounding; forced-AVAX / accounting; interaction with Genesis's operator filter; owner-power liveness (pause/disable/narrow);  the delivery check and the self-purchase rule.
 - The two AI reviews recorded in the ADR and audit package are not a substitute for this audit.
 
+## Allowlist vetting rule for any collection (current and future)
+Allowlisting is the trust boundary (audit package §8a). Before `allowCollection` for any collection the Safe's signers must confirm: (1) its source is verified and its `royaltyInfo` reads no `gasleft`/`tx.origin`/`block.*`/caller-dependent state; (2) its code is immutable or its upgrade authority is accepted as part of the trust; (3) `node scripts/verify-legacy-marketplace.mjs` (invariance check) passes for every allowlisted token id — a sampling aid, not proof; (4) the cap and token range are the smallest that serve the use. Genesis meets (1)–(2) (immutable EIP-1167 clone of a verified implementation).
+
 ## Security gates before any broadcast (all required)
 1. Independent human/third-party audit of `LegacyCollectionMarketplace.sol` including the seller-floor logic. The AI reviews recorded in the ADR are not a substitute.
 2. Reproducible build: `forge build` with `solc 0.8.24`, optimizer 200 runs (see `foundry.toml`); record the bytecode hash and compare with the verified source after deployment.

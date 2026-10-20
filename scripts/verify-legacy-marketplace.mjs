@@ -5,6 +5,7 @@
 import { Contract, JsonRpcProvider, getAddress } from "ethers";
 import { LEGACY_COLLECTION_MARKETPLACE as manifest, legacyMarketplaceActive } from "../config/legacy-collection-marketplace.js";
 import { RELEASE_PER_CONTRACT_MANIFESTS } from "../config/release-network.js";
+import { checkRoyaltyInvariance } from "./lib/royalty-invariance.mjs";
 
 const rpc = process.env.AVALANCHE_MAINNET_RPC_URL || RELEASE_PER_CONTRACT_MANIFESTS.mainnet.rpcUrl;
 const provider = new JsonRpcProvider(rpc, 43114, { staticNetwork: true });
@@ -23,6 +24,10 @@ for (const collection of manifest.collections) {
   const token = new Contract(collection.address, ["function royaltyInfo(uint256,uint256) view returns (address,uint256)", "function operatorFilterRegistry() view returns (address)", "function supportsInterface(bytes4) view returns (bool)"], provider);
   check(`${collection.name}: ERC-1155 and ERC-2981`, (await token.supportsInterface("0xd9b67a26")) && (await token.supportsInterface("0x2a55205a")));
   check(`${collection.name}: not a factory release (V4 correctly refuses it)`, (await v4Factory.isRelease(collection.address)) === false);
+  // M-1 vetting aid: the answer must not depend on the gas supplied or on who asks (sampled; evidence, not proof)
+  const ids = Array.from({ length: collection.maxTokenId - collection.minTokenId + 1 }, (_, index) => collection.minTokenId + index);
+  const invariance = await checkRoyaltyInvariance({ call: ({ to, data, gas, from }) => provider.call({ to, data, from, gasLimit: gas }), token: collection.address, tokenIds: ids });
+  check(`${collection.name}: royaltyInfo identical across ${invariance.samples} gas-limit/caller samples (sampled, not proof)`, invariance.ok, invariance.findings.join("; "));
   for (let id = collection.minTokenId; id <= collection.maxTokenId; id += 1) {
     const [receiver, amount] = await token.royaltyInfo(id, 10_000n);
     check(`${collection.name} #${id}: royalty ${amount} bps to the recorded creator within the ${collection.maxRoyaltyBps} bps cap`, same(receiver, collection.expectedRoyaltyReceiver) && amount <= BigInt(collection.maxRoyaltyBps));
