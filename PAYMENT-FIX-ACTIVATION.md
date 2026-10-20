@@ -76,6 +76,54 @@ Deployment, role transactions and the env change are all human-authorized steps.
 
 `config/mainnet-release.json` fee fields (`platformFeeBps: 500`, the artist wallet as "platformFeeRecipient"): no runtime path reads them. `STUDIO_PLATFORM_ARTIST_WALLET` is exported but unused. Editing a file that drives nothing, without deployment evidence for a value, would be speculative.
 
-## 9. Confirmations
+## 9. What this PR implements (all repository code; nothing deployed)
+
+| Area | Change | Evidence type |
+|---|---|---|
+| Settled sale | `contracts/VoidPrimarySaleSettled.sol`: platform share pushed inside `purchase()`; failed transfer reverts the whole sale; fee is the constant 250 bps; no owner, setter or fee parameter | 13 Foundry tests, local EVM |
+| Secondary sales | `test/MarketplaceV4Settlement.t.sol` (14): exact 95/2.5/2.5, royalty to the edition payout, policy refusals, atomic revert if any recipient rejects, registry refusal, reentrancy | local EVM |
+| Real deployed contracts | `test/SettledSaleMainnetFork.t.sol` (8, needs `MAINNET_FORK_URL`): activation, old-sale credits intact, who can move the historical credit, new-sale fee push, marketplace resale, documented fee-bypass limit | fork of live state, cheatcodes only |
+| Ledger | Migrations 040/041 (`primary_sale_platform_transfers`, `primary_sale_withdrawals`, RLS on); indexer decodes `PlatformPaid` and `Withdrawn` for both sale types with idempotency, reorg, finality and rebuild | real local Postgres |
+| API | `GET /studio/catalog` adds `artist_withdrawn_wei`, `releaseSales` (artist-only) and `secondaryRoyalties` | real local Postgres |
+| Earnings UI | Primary ("paid at mint") and secondary-royalty sections, never summed; submitted is not confirmed; double-click guard; platform fee never an artist balance | jsdom, fork, Chromium |
+| Authorization | `verifyAuthorizedSale` and `npm run verify:settled-sale` (code hash, bindings, recipient, 250 bps, no owner, ISSUER set, rogue-minter detection) | unit tests, fork runs |
+| Reconciliation | `scripts/payment-ledger-reconcile.mjs` | unit tests, live read-only run |
+
+## 10. Test results on the final tree
+
+| Suite | Result | Ran against |
+|---|---|---|
+| Full JS, serial | 2021 passed, 13 skipped, 0 failed | local fixtures and a disposable local Postgres 16 |
+| Full Foundry, no fork variable | 265 passed, 14 skipped, 0 failed | local EVM |
+| Full Foundry, `MAINNET_FORK_URL` set | 273 passed, 6 skipped, 0 failed | fork of live Avalanche state (the 6 skips are existing Genesis fork tests that use a different variable) |
+| `StudioEarnings.mainnet-fork.test.jsx` | 11 passed with `MAINNET_FORK_RPC` set to a local anvil fork | fork |
+| Lint | exit 0 | n/a |
+| Mainnet-config build | succeeded; bundle contains the new sections | n/a |
+
+Skipped counts: the JS skips are the fork file and suites needing other external services. Nothing here shows an actual mainnet transfer. Fork results prove only the conditions tested.
+
+## 11. Known limits and operational notes
+
+- **Deploy order:** run migration 040 before the API deploys. The Studio catalog now reads `primary_sale_withdrawals`; without the table every catalog call fails.
+- **Reorg row gap (existing behaviour, left unchanged):** `recordEvent` is `ON CONFLICT DO NOTHING`, so if a transaction re-lands after a reorg its `blockchain_events` row stays non-canonical until re-indexed. The settlement tables revive their own rows. Relevant to activation monitoring.
+- **Withdrawn attribution:** `artist_withdrawn_wei` counts withdrawals by the release's recorded artist wallet. If a payout wallet differed it would under-report. In production they are the same address.
+- **Unlisted settled sale:** a settled sale with no indexed purchases yet appears in the Earnings view only once the API lists it in `releaseSales`. The balance is zero until then.
+- **RPC log limits:** `api.avax.network` caps `eth_getLogs` at 100 blocks and rate-limits hard. The ISSUER-role scan in the activation verifier needs a larger-range RPC (for example `--rpc https://avalanche-c-chain-rpc.publicnode.com --chunk 50000`) or a paid endpoint. A non-archive RPC goes stale for pinned forks within minutes.
+- **Production DB:** the new SQL has not been run against production because the tables do not exist there. `artist_earned_wei` was validated read-only on production earlier.
+
+## 12. Safe activation checklist (all steps are human-authorized)
+
+1. Review and merge PR #231 (not done by this session).
+2. Apply migrations 040 and 041, then deploy the API. Confirm the catalog still loads.
+3. Deploy the web app.
+4. Deploy `VoidPrimarySaleSettled(release, 0xb65C…)` (requires explicit authorization).
+5. Run `npm run verify:settled-sale -- --sale <address> --rpc <large-range RPC> --chunk 50000`. Expect 12 of 12 passed after the role swap; before it, the role checks fail as designed.
+6. The artist signs `grantRole(ISSUER_ROLE, newSale)` then `revokeRole(ISSUER_ROLE, oldSale)`.
+7. Add the sale to `INDEXER_CONTRACTS_JSON` as `PRIMARY_SALE` with `tokenAddress` equal to the release, and restart the indexer.
+8. The artist runs `configureSale` for the edition.
+9. Re-run the verifier and `node scripts/payment-ledger-reconcile.mjs --settled-sale <address>`.
+10. Decide separately about the artist's 0.24375 AVAX withdrawal and the platform wallet's 0.00625 AVAX withdrawal.
+
+## 13. Confirmations
 
 No deployment, mainnet transaction, wallet signature, production database or environment mutation, role change, or merge was performed. Forks, scratch EVMs and a disposable local Postgres were used for tests; they prove only the conditions tested.
