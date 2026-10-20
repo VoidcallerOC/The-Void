@@ -129,6 +129,36 @@ export function decodePurchasedLog(log, { chainId, blockTimestamp, tokenAddress,
   };
 }
 
+/**
+ * PlatformPaid(address indexed recipient, uint256 amount) and Withdrawn(address indexed account, uint256 amount),
+ * emitted by VoidPrimarySaleSettled / VoidPrimarySale / VoidPrimarySaleV2. Returns null for any other topic.
+ * The log must come from the configured sale; a non-positive amount or malformed layout throws.
+ */
+export function decodePrimarySaleSettlementLog(log, { chainId, blockTimestamp = null, saleAddress, eventTopics = {} }) {
+  const topic = String(log?.topics?.[0] || "").toLowerCase();
+  const eventType = ["PlatformPaid", "Withdrawn"].find((name) => eventTopics[name] && String(eventTopics[name]).toLowerCase() === topic);
+  if (!eventType) return null;
+  if (!Array.isArray(log.topics) || log.topics.length !== 2) throw new Error(`${eventType} requires exactly one indexed address topic.`);
+  if (cleanHex(log.data).length !== 64) throw new Error(`${eventType} data must be exactly one amount word.`);
+  const emitter = String(log.address || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(emitter) || emitter !== String(saleAddress || "").toLowerCase()) throw new Error(`${eventType} did not come from the configured sale.`);
+  const amountWei = uintWord(word(log.data, 0));
+  if (BigInt(amountWei) <= 0n) throw new Error(`${eventType} amount must be positive.`);
+  const wallet = topicAddress(log.topics[1]);
+  return {
+    chainId,
+    eventType,
+    saleAddress: emitter,
+    ...(eventType === "PlatformPaid" ? { recipientWallet: wallet } : { accountWallet: wallet }),
+    amountWei,
+    transactionHash: String(log.transactionHash || "").toLowerCase(),
+    blockNumber: Number(log.blockNumber),
+    blockHash: String(log.blockHash || "").toLowerCase(),
+    logIndex: Number(log.logIndex),
+    blockTimestamp,
+  };
+}
+
 function stringFromOffset(data, offsetWord) {
   const bytesOffset = Number(BigInt(`0x${offsetWord}`));
   if (!Number.isSafeInteger(bytesOffset) || bytesOffset % 32 !== 0) throw new Error("ABI string offset is invalid.");
@@ -313,6 +343,39 @@ export class BlockchainIndexer {
     this.releasesLoaded = true;
   }
 
+  /**
+   * Settlement evidence for a primary sale: PlatformPaid / Withdrawn. Returns undefined when the log is neither,
+   * so the caller falls through to Purchased decoding. Malformed logs follow the MALFORMED_PRIMARY_SALE_EVENT path.
+   */
+  async processPrimarySaleSettlementLog(config, log, base) {
+    let settlement;
+    try {
+      settlement = decodePrimarySaleSettlementLog(log, { chainId: base.chainId, blockTimestamp: base.blockTimestamp, saleAddress: config.address, eventTopics: config.eventTopics });
+    } catch (error) {
+      await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
+      await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_PRIMARY_SALE_EVENT", message: error.message, payload: log });
+      return { duplicate: false, malformed: true };
+    }
+    if (!settlement) return undefined;
+    const inserted = await this.store.recordEvent({ ...base, eventType: settlement.eventType, eventData: settlement, isMalformed: false });
+    try {
+      const projection = await this.store.applyPrimarySaleSettlement(settlement);
+      return { duplicate: !inserted, eventType: settlement.eventType, projectionApplied: !projection?.duplicate, projection };
+    } catch (error) {
+      await this.store.recordIndexerError({ ...base, errorType: "PRIMARY_SALE_SETTLEMENT_FAILED", message: error.message, payload: settlement });
+      throw error;
+    }
+  }
+
+  async finalizePrimarySaleSettlements(config, finalizedBlock) {
+    if ((config.contractType !== "PRIMARY_SALE" && config.contractType !== "PRIMARY_SALE_V2") || typeof this.store.finalizePrimarySaleSettlements !== "function") return;
+    try {
+      await this.store.finalizePrimarySaleSettlements({ chainId: Number(config.chainId), saleAddress: String(config.address).toLowerCase(), finalizedBlock });
+    } catch (error) {
+      this.logger.error?.("indexer.primary-sale-settlement.finalize.failed", { chainId: Number(config.chainId), address: String(config.address).toLowerCase(), error: error.message });
+    }
+  }
+
   // Runs every cycle for a primary sale, so rows indexed before this step existed are promoted too. A
   // failure here never blocks block indexing; the next cycle retries the same idempotent sweep.
   async finalizePrimarySalePurchases(config, finalizedBlock) {
@@ -390,6 +453,7 @@ export class BlockchainIndexer {
       operation = "database";
       await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: nextBlock - 1, finalizedBlock: target, latestKnownBlock: latest, status: "IDLE", lastError: null, markRunSucceeded: true, markRunCompleted: true });
       await this.finalizePrimarySalePurchases(config, target);
+      await this.finalizePrimarySaleSettlements(config, target);
       return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, state: "CONFIRMED" };
     } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: operation === "rpc", databaseFailure: operation === "database" });
@@ -501,6 +565,8 @@ export class BlockchainIndexer {
       return { duplicate: !inserted, eventType: "ReleaseCreated", release: created.releaseContractAddress, added, saleAdded };
     }
     if (config.contractType === "PRIMARY_SALE_V2") {
+      const settled = await this.processPrimarySaleSettlementLog(config, log, base);
+      if (settled) return settled;
       let purchased;
       try {
         purchased = decodePurchasedV2Log(log, { chainId, blockTimestamp: base.blockTimestamp, eventTopic: config.eventTopics?.Purchased });
@@ -528,6 +594,8 @@ export class BlockchainIndexer {
       }
     }
     if (config.contractType === "PRIMARY_SALE") {
+      const settled = await this.processPrimarySaleSettlementLog(config, log, base);
+      if (settled) return settled;
       let purchased;
       try {
         purchased = decodePurchasedLog(log, { chainId, blockTimestamp: base.blockTimestamp, tokenAddress: config.tokenAddress, eventTopic: config.eventTopics?.Purchased });

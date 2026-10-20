@@ -82,6 +82,8 @@ export class IndexerStore {
       await client.query(`UPDATE listings SET status='REORGED', updated_at=now() WHERE chain_id=$1 AND (created_block_number >= $2 OR id IN (SELECT listing_id FROM purchases WHERE chain_id=$1 AND block_number >= $2) OR id IN (SELECT l.id FROM listings l JOIN contracts mc ON mc.id=l.marketplace_contract_id JOIN blockchain_events e ON e.chain_id=l.chain_id AND e.contract_address=mc.address WHERE l.chain_id=$1 AND e.block_number >= $2 AND e.event_type IN ('ListingCreated','ListingCancelled','ListingExpired','ListingSold') AND COALESCE(e.event_data->>'listingId','') ~ '^[0-9]+$' AND l.listing_id=(e.event_data->>'listingId')::numeric))`, [chainId, fromBlock]);
       await client.query("UPDATE purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("UPDATE primary_purchases SET status='REORGED', reconciled_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
+      await client.query("UPDATE primary_sale_platform_transfers SET status='REORGED' WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
+      await client.query("UPDATE primary_sale_withdrawals SET status='REORGED' WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("UPDATE transactions SET status='REORGED', updated_at=now() WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("DELETE FROM release_album_tracks WHERE chain_id=$1 AND block_number >= $2", [chainId, fromBlock]);
       await client.query("DELETE FROM release_albums WHERE chain_id=$1 AND created_block_number >= $2", [chainId, fromBlock]);
@@ -108,6 +110,8 @@ export class IndexerStore {
         await client.query("DELETE FROM purchases WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM primary_purchases WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM primary_sale_projections WHERE chain_id=$1", [chainId]);
+        await client.query("DELETE FROM primary_sale_platform_transfers WHERE chain_id=$1", [chainId]);
+        await client.query("DELETE FROM primary_sale_withdrawals WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM listings WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM marketplace_event_projections WHERE chain_id=$1", [chainId]);
         await client.query("DELETE FROM transactions WHERE chain_id=$1 AND transaction_type IN ('LISTING_CREATE','LISTING_CANCEL','PURCHASE') AND status NOT IN ('PENDING','SUBMITTED')", [chainId]);
@@ -116,8 +120,10 @@ export class IndexerStore {
       for (const event of events) await this.applyMarketplaceEvent(event.event_data);
       const { rows: primaryEvents } = await this.db.query("SELECT event_data FROM blockchain_events WHERE chain_id=$1 AND is_canonical=true AND is_malformed=false AND event_type='Purchased' ORDER BY block_number ASC, log_index ASC", [chainId]);
       for (const event of primaryEvents) await this.applyPrimaryPurchase(event.event_data, { creditOwnership: false });
+      const { rows: settlementEvents } = await this.db.query("SELECT event_type, event_data FROM blockchain_events WHERE chain_id=$1 AND is_canonical=true AND is_malformed=false AND event_type IN ('PlatformPaid','Withdrawn') ORDER BY block_number ASC, log_index ASC", [chainId]);
+      for (const event of settlementEvents) await this.applyPrimarySaleSettlement(event.event_data);
       await this.db.query("UPDATE indexer_rebuild_jobs SET state='COMPLETED', completed_at=now(), updated_at=now() WHERE chain_id=$1", [chainId]);
-      return { chainId, replayedMarketplaceEvents: events.length, replayedPrimaryPurchases: primaryEvents.length };
+      return { chainId, replayedMarketplaceEvents: events.length, replayedPrimaryPurchases: primaryEvents.length, replayedPrimarySaleSettlements: settlementEvents.length };
     } catch (error) {
       await this.db.query("UPDATE indexer_rebuild_jobs SET state='FAILED', last_error=$2, updated_at=now() WHERE chain_id=$1", [chainId, error.message]).catch(() => {});
       throw error;
@@ -166,6 +172,70 @@ export class IndexerStore {
       const purchase = await client.query("INSERT INTO primary_purchases (chain_id, sale_contract_address, token_contract_address, transaction_hash, log_index, buyer_wallet, token_id, quantity, paid_wei, artist_cut_wei, platform_cut_wei, block_number, block_hash, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CONFIRMED') ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET status=CASE WHEN primary_purchases.status IN ('FINALIZED','RECONCILED') THEN primary_purchases.status ELSE 'CONFIRMED' END RETURNING *", [event.chainId, saleAddress, tokenAddress, lower(event.transactionHash), event.logIndex, buyer, tokenId, quantity, paidWei, artistCutWei, platformCutWei, event.blockNumber, lower(event.blockHash)]);
       return { duplicate: false, purchase: purchase.rows[0], transaction: transaction.rows[0], ownershipCredited: creditOwnership };
     });
+  }
+
+  /**
+   * Real settlement evidence, kept apart from the allocations in primary_purchases.
+   * PlatformPaid(recipient, amount) is the platform share a VoidPrimarySaleSettled pushed inside the
+   * purchase; Withdrawn(account, amount) is a pull withdrawal on any sale. Both are idempotent per log.
+   * A replay of a row that a reorg marked REORGED re-points it at its new block and re-confirms it.
+   */
+  async applyPrimarySaleSettlement(event) {
+    if (event.eventType === "PlatformPaid") return this.recordPrimarySalePlatformTransfer(event);
+    if (event.eventType === "Withdrawn") return this.recordPrimarySaleWithdrawal(event);
+    throw new Error(`Unsupported primary-sale settlement event ${event.eventType}.`);
+  }
+
+  async recordPrimarySalePlatformTransfer(event) {
+    return this.upsertSaleSettlement("primary_sale_platform_transfers", "recipient_wallet", event, event.recipientWallet, "recipientWallet");
+  }
+
+  async recordPrimarySaleWithdrawal(event) {
+    return this.upsertSaleSettlement("primary_sale_withdrawals", "account_wallet", event, event.accountWallet, "accountWallet");
+  }
+
+  async upsertSaleSettlement(table, walletColumn, event, walletValue, walletName) {
+    const saleAddress = address(event.saleAddress, "saleAddress");
+    const wallet = address(walletValue, walletName);
+    const amountWei = numeric(event.amountWei, "amountWei", { positive: true });
+    const hash = lower(event.transactionHash);
+    if (!/^0x[0-9a-f]{64}$/.test(hash)) throw new Error("transactionHash is invalid.");
+    const blockNumber = Number(event.blockNumber);
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) throw new Error("blockNumber is invalid.");
+    const logIndex = Number(event.logIndex);
+    if (!Number.isInteger(logIndex) || logIndex < 0) throw new Error("logIndex is invalid.");
+    const blockHash = lower(event.blockHash);
+    const { rows } = await this.db.query(
+      `INSERT INTO ${table} (chain_id, sale_contract_address, transaction_hash, log_index, ${walletColumn}, amount_wei, block_number, block_hash, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CONFIRMED')
+       ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
+         block_number=EXCLUDED.block_number,
+         block_hash=EXCLUDED.block_hash,
+         status=CASE WHEN ${table}.status='FINALIZED' AND ${table}.block_hash=EXCLUDED.block_hash THEN ${table}.status ELSE 'CONFIRMED' END,
+         finalized_at=CASE WHEN ${table}.status='FINALIZED' AND ${table}.block_hash=EXCLUDED.block_hash THEN ${table}.finalized_at ELSE NULL END
+       RETURNING *, (xmax = 0) AS inserted`,
+      [event.chainId, saleAddress, hash, logIndex, wallet, amountWei, blockNumber, blockHash],
+    );
+    return { duplicate: !rows[0].inserted, row: rows[0] };
+  }
+
+  /** Promotes CONFIRMED settlement rows in canonical blocks at or below finalizedBlock. Idempotent. */
+  async finalizePrimarySaleSettlements({ chainId, saleAddress, finalizedBlock }) {
+    const upTo = finalizedBlock === null || finalizedBlock === undefined ? NaN : Number(finalizedBlock);
+    if (!Number.isSafeInteger(upTo) || upTo < 0) return { finalized: 0 };
+    let finalized = 0;
+    for (const table of ["primary_sale_platform_transfers", "primary_sale_withdrawals"]) {
+      const { rows } = await this.db.query(
+        `UPDATE ${table} t SET status='FINALIZED', finalized_at=now()
+         FROM chain_blocks cb
+         WHERE t.chain_id=$1 AND t.sale_contract_address=$2 AND t.status='CONFIRMED' AND t.block_number <= $3
+           AND cb.chain_id=t.chain_id AND cb.block_number=t.block_number AND cb.block_hash=t.block_hash AND cb.is_canonical=true
+         RETURNING t.id`,
+        [chainId, lower(saleAddress), upTo],
+      );
+      finalized += rows.length;
+    }
+    return { finalized };
   }
 
   // VoidRelease1155V4 album lifecycle projection. Every write is an idempotent upsert
