@@ -73,7 +73,7 @@ describe("two independent full-track experiences", () => {
     const [fullGrant, demoGrant] = repository.createGrant.mock.calls.map(([input]) => input);
     expect(fullGrant).toMatchObject({ experienceId: experiences.full.id, mediaType: "AUDIO", metadata: { storageKey: FULL_CID, contentType: "audio/wav", byteSize: 65861868 } });
     expect(demoGrant).toMatchObject({ experienceId: experiences.demo.id, mediaType: "DEMO", metadata: { storageKey: DEMO_CID, contentType: "audio/mpeg", byteSize: 4007809 } });
-    for (const url of [full.accessUrl, demo.accessUrl]) { expect(url).toMatch(/^\/api\/media\//); expect(url).not.toContain("baf"); }
+    for (const url of [full.accessUrl, demo.accessUrl]) { expect(url).toMatch(/^\/api\/media\/[0-9a-f-]{36}$/); expect(url).not.toContain(FULL_CID); expect(url).not.toContain(DEMO_CID); }
   });
 
   it("refuses the demo's AUDIO type and the full record's DEMO type rather than cross-serving", async () => {
