@@ -8,6 +8,7 @@ interface VmLegacyFork {
     function envOr(string calldata, string calldata) external returns (string memory);
     function prank(address) external;
     function deal(address, uint256) external;
+    function skip(bool) external;
 }
 
 interface IGenesis {
@@ -47,7 +48,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
 
     function setUp() public {
         string memory rpc = vm.envOr("MAINNET_FORK_RPC", string(""));
-        if (bytes(rpc).length == 0) return;
+        if (bytes(rpc).length == 0) { vm.skip(true); return; } // reported as skipped, never as a vacuous pass
         vm.createSelectFork(rpc);
         forked = true;
         require(block.chainid == 43114, "not C-Chain");
@@ -135,5 +136,27 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.prank(BUYER);
         market.buy{value: PRICE}(id, 1);
         require(HOLDER.balance - holderAvax == floorPerUnit && GENESIS.balanceOf(BUYER, 0) == 1, "settles at 92.5% once the royalty is back");
+    }
+
+    /// The candidate policy against the real contract: every Genesis id 0-3 lists and sells at the real 5% royalty with the
+    /// seller floor, and id 4 is refused by the marketplace itself.
+    function testRealGenesisIds0To3SellAndOutOfScopeIdsAreRefused() public {
+        if (!forked) return;
+        vm.prank(HOLDER);
+        GENESIS.setApprovalForAll(address(market), true);
+        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        for (uint256 id = 0; id <= 3; id++) {
+            uint256 creatorBefore = CREATOR.balance;
+            uint256 holderBefore = HOLDER.balance;
+            vm.prank(HOLDER);
+            uint256 listingId = market.createListingWithMinProceeds(address(GENESIS), HOLDER, id, 1, PRICE, 0, floorPerUnit);
+            vm.prank(BUYER);
+            market.buy{value: PRICE}(listingId, 1);
+            require(GENESIS.balanceOf(BUYER, id) == 1, "delivered");
+            require(CREATOR.balance - creatorBefore == 0.05 ether && HOLDER.balance - holderBefore == 0.925 ether, "5% / 92.5%");
+        }
+        vm.prank(HOLDER);
+        (bool ok,) = address(market).call(abi.encodeCall(market.createListing, (address(GENESIS), HOLDER, 4, 1, PRICE, uint64(0))));
+        require(!ok, "id 4 is outside the allowlisted scope");
     }
 }

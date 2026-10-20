@@ -1,6 +1,6 @@
 # ADR 0001 — Marketplace for legacy ERC-1155 collections (Genesis)
 
-Status: PROPOSED (not deployed; needs a human security audit, the decisions listed under "Open decisions", and explicit deployment authorization)
+Status: AUDIT CANDIDATE (scope confirmed 2026-10-20; not deployed; needs the owner Safe address, a human security audit and explicit deployment authorization). Audit package: `docs/GENESIS-MARKETPLACE-AUDIT-PACKAGE.md`.
 Date: 2026-10-20
 
 ## Context (verified on Avalanche C-Chain 43114 by `eth_call` at the time of writing)
@@ -93,11 +93,20 @@ For a purchase of `q` units of a listing priced `p` per unit: `S = p·q` (must e
 - Recommended floor (what the app sends): `⌊p · (10000 − 250 − royaltyBps) / 10000⌋`. Because the contract floors fee and royalty, real proceeds are ≥ this value for every `q`, so a sale at today's royalty always clears it and any royalty increase reverts.
 - **Compatibility:** `Listing`, `getListing`, `ListingCreated/Cancelled/Expired/Sold`, `createListing`, `cancelListing`, `expireListing`, `buy` are byte-for-byte the V4 shapes (selectors/topics asserted in `testV4ShapedSelectorsAndEventsAreUnchanged`). The floor lives in a separate mapping; **no new event** was added because the indexer records any unrecognized marketplace event as a malformed-event error. The V4-shaped `createListing` remains and carries **no floor** (documented risk); the app never uses it for the legacy marketplace (`encodeCreateListingWithMinProceeds` throws without a floor). Off-chain observers read the floor with the `minSellerProceedsPerUnit(listingId)` view.
 
-## Open decisions (not decided by this work)
-1. **Genesis royalty:** confirm Genesis resale should honor Genesis's own 5% (the recommended default, since it preserves established contract behavior), versus asking the Genesis owner (`0x284C…180a`) to call `setRoyaltyInfo` for a different value. This work changes neither.
-2. **Cap:** approve `maxRoyaltyBps = 500` for Genesis (a Genesis owner raise above it blocks sales until the Safe raises the cap).
-3. **Owner Safe address** for the marketplace (not the deployer).
-4. **Default seller tolerance:** the app sends a zero-tolerance floor (any royalty increase blocks the sale). Decide whether the UI should offer a tolerance.
+## Confirmed scope and open decisions (2026-10-20)
+Confirmed by the owner as the *implementation scope of the candidate* (not permission to deploy or change production):
+1. Honor Genesis's existing ERC-2981 royalty of **500 bps (5%)**; no royalty percentage or recipient is changed.
+2. Initial scope: Genesis token ids **0–3 only**.
+3. Royalty cap: **500 bps**.
+4. Marketplace fee stays **250 bps**; target settlement at the reported rates 92.5% seller / 5% creator / 2.5% fee.
+5. V4 untouched; ordinary ERC-1155 transfers untouched; explicit deployment gate retained (`deployed:false`).
+
+Still open:
+- **Owner Safe address — BLOCKED.** Not in the repo; not invented; the deployer wallet is not a substitute. Validate with `scripts/prepare-legacy-marketplace-deployment.mjs` once supplied, and confirm identity out of band.
+- **Human security audit** — not started.
+- **Default seller tolerance in the UI** — the app sends a zero-tolerance floor (any royalty increase blocks the sale). Product choice; not a code blocker.
+- **Whether to remove the unprotected V4-shaped `createListing` overload** — retained for client compatibility; flagged for the auditor.
+- **Deployment authorization** and funded wallets for the mainnet acceptance run.
 
 ## Known limitations and trust assumptions (final)
 - Seller floor is only as good as the floor chosen: a listing created through the V4-shaped `createListing` has none and sells at the live royalty (≤ the collection cap).

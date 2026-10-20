@@ -20,21 +20,23 @@ Design record: `docs/adr/0001-genesis-legacy-collection-marketplace.md`. Root ca
 | Seller floor | `minSellerProceedsPerUnit[listingId]`; a purchase reverts (`BelowMinimumProceeds`) unless the seller nets ≥ floor × quantity at the live royalty. Seller-only updates. Listing/event/query shapes unchanged (no new event). |
 | Reentrancy | `nonReentrant` on `buy`; listing state is updated before any external call. |
 
-## Parameters proposed for owner approval
+## Parameters (scope confirmed 2026-10-20; owner Safe BLOCKED)
 - `feeRecipient`: `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4` (same as V4).
 - `platformFeeBps`: `250`.
 - `owner`: a Safe, address to be supplied (NOT the deployer EOA). **Required decision — none is recorded in the repo for this contract.**
 - Collection: Genesis `0xD1B4367dd9f235f9ee61878019d66E31511E98eE`, tokens `0–3`, `maxRoyaltyBps = 500` (verified current response; Genesis owner can raise it up to 2,500, which would make sales revert until the cap is raised by the Safe or the royalty is lowered). Genesis keeps its own 5% royalty; the 2.5% artist royalty applies to new factory releases only (see ADR).
 - Chain: 43114 only.
 
-## Unresolved decisions that block deployment
-1. Confirm Genesis resale honors Genesis's own 5% royalty (recommended; changes nothing on Genesis) — or the Genesis owner changes it first.
-2. Approve the Genesis scope and cap (tokens 0–3, 500 bps).
-3. Supply the owner Safe address.
-4. Choose the app's default seller tolerance (currently 0: any royalty increase blocks the sale).
-5. Fund the acceptance run (two funded wallets) and authorize deployment.
+## Decisions: confirmed vs. still blocking deployment
+Confirmed as the candidate's implementation scope (2026-10-20; not deployment authority): honor Genesis's own 5% royalty; tokens 0–3 only; 500 bps cap; 250 bps fee; target 92.5 / 5 / 2.5; V4 untouched; deployment gate retained.
+Still blocking:
+1. **Owner Safe address — BLOCKED** (not in the repo; will not be invented; not the deployer). Validate with `OWNER_SAFE_ADDRESS=0x… node scripts/prepare-legacy-marketplace-deployment.mjs` (dry run; exit 3 = BLOCKED).
+2. A completed **human audit** with findings resolved.
+3. Default seller tolerance in the UI (currently 0).
+4. Explicit deployment authorization and two funded wallets for the acceptance run.
 
 ## Human audit package (to hand to a qualified auditor)
+The full package — candidate hashes, build instructions, formulas, invariants, admin powers, assumptions, results and checklist — is `docs/GENESIS-MARKETPLACE-AUDIT-PACKAGE.md`. Summary:
 - Scope: `contracts/LegacyCollectionMarketplace.sol` (≈300 lines, no dependencies other than a 3-function ERC-1155 interface).
 - Spec: `docs/adr/0001-genesis-legacy-collection-marketplace.md` (formulas, trust assumptions, open decisions).
 - Tests: `test/LegacyCollectionMarketplace.t.sol` (19), `test/LegacyCollectionMarketplaceMinProceeds.t.sol` (18), fork tests `test/LegacyCollectionMarketplaceMainnetFork.t.sol` (5; need `MAINNET_FORK_RPC`).
