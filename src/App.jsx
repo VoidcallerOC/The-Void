@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
@@ -12,6 +12,7 @@ import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
+import { NotFoundPage } from "./components/NotFoundPage.jsx";
 
 const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 
@@ -70,44 +71,51 @@ export function ReleaseRoutePage() {
   );
 }
 
+// The route table, exported so tests can mount it in a memory router.
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<HomePage />} />
+        <Route path="discover" element={<DiscoverPage />} />
+        <Route path="marketplace" element={<MarketplacePage />} />
+        <Route path="claim" element={<ClaimPage />} />
+        <Route path="claim/:edition" element={<ClaimPage />} />
+        <Route path="artists" element={<ArtistsPage />} />
+        <Route path="artist/:artist" element={<ArtistRoutePage />} />
+        <Route path="release/:release" element={<ReleaseRoutePage />} />
+        <Route path="edition/:edition" element={<EditionPage />} />
+        <Route path="experience/:experience" element={<ExperiencePage />} />
+        <Route path="studio" element={<ArtistStudioPage />} />
+        <Route path="studio/profile/:artistId" element={<ArtistProfileEditPage />} />
+        <Route path="admin/roles" element={<ContractRolesPage />} />
+        <Route path="verify" element={<VerifyLanding />} />
+        <Route path="verify/apply" element={<VerifyApplyPage />} />
+        <Route path="verify/received" element={<VerifyReceivedPage />} />
+        <Route path="verify/dashboard" element={<VerifyDashboardPage />} />
+        <Route path="verify/review" element={<VerifyReviewQueuePage />} />
+        <Route path="verify/review/:id" element={<VerifyReviewApplicationPage />} />
+        {SUMMIT_DEMO && FujiIntegrationPage && <Route path="fuji-integration" element={<FujiIntegrationPage />} />}
+        <Route path="collection" element={<CollectionPage />} />
+        <Route path="collection/:collection" element={<CollectionDetailPage />} />
+        <Route path="my-collection" element={<MyCollectionPage />} />
+        <Route path="collectors" element={<CollectorsPage />} />
+        <Route path="chronicle" element={<ChroniclePage />} />
+        <Route path="the-call" element={<BleedPage />} />
+        <Route path="the-bleed" element={<BleedPage />} />
+        <Route path="choir" element={<ChoirPage />} />
+        <Route path="reliquary" element={<ReliquaryPage />} />
+        {VOID_LIVE && <Route path="covenant" element={<CovenantPage />} />}
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<HomePage />} />
-          <Route path="discover" element={<DiscoverPage />} />
-          <Route path="marketplace" element={<MarketplacePage />} />
-          <Route path="claim" element={<ClaimPage />} />
-          <Route path="claim/:edition" element={<ClaimPage />} />
-          <Route path="artists" element={<ArtistsPage />} />
-          <Route path="artist/:artist" element={<ArtistRoutePage />} />
-          <Route path="release/:release" element={<ReleaseRoutePage />} />
-          <Route path="edition/:edition" element={<EditionPage />} />
-          <Route path="experience/:experience" element={<ExperiencePage />} />
-          <Route path="studio" element={<ArtistStudioPage />} />
-          <Route path="studio/profile/:artistId" element={<ArtistProfileEditPage />} />
-          <Route path="admin/roles" element={<ContractRolesPage />} />
-          <Route path="verify" element={<VerifyLanding />} />
-          <Route path="verify/apply" element={<VerifyApplyPage />} />
-          <Route path="verify/received" element={<VerifyReceivedPage />} />
-          <Route path="verify/dashboard" element={<VerifyDashboardPage />} />
-          <Route path="verify/review" element={<VerifyReviewQueuePage />} />
-          <Route path="verify/review/:id" element={<VerifyReviewApplicationPage />} />
-          {SUMMIT_DEMO && FujiIntegrationPage && <Route path="fuji-integration" element={<FujiIntegrationPage />} />}
-          <Route path="collection" element={<CollectionPage />} />
-          <Route path="collection/:collection" element={<CollectionDetailPage />} />
-          <Route path="my-collection" element={<MyCollectionPage />} />
-          <Route path="collectors" element={<CollectorsPage />} />
-          <Route path="chronicle" element={<ChroniclePage />} />
-          <Route path="the-call" element={<BleedPage />} />
-          <Route path="the-bleed" element={<BleedPage />} />
-          <Route path="choir" element={<ChoirPage />} />
-          <Route path="reliquary" element={<ReliquaryPage />} />
-          {VOID_LIVE && <Route path="covenant" element={<CovenantPage />} />}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      <AppRoutes />
       <Analytics />
     </BrowserRouter>
   );

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { WalletButton } from "./WalletButton.jsx";
@@ -34,6 +34,21 @@ export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const notifications = useReviewerNotifications();
   const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+  // Any route change closes the mobile menu: the logo, footer and in-page links, and browser
+  // back/forward all navigate without a menu-item click. Left open, the full-width menu hid the
+  // new page so the site looked unchanged (reproduced on production at 375px).
+  const [menuRoute, setMenuRoute] = useState(location.key);
+  if (menuRoute !== location.key) {
+    setMenuRoute(location.key);
+    if (menuOpen) setMenuOpen(false);
+  }
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", onScroll);
@@ -47,6 +62,12 @@ export function Nav() {
     ...(notifications.reviewer ? [[REVIEWER_NAV_LABEL, REVIEWER_NAV_PATH]] : []),
   ];
   const badge = (path) => (path === REVIEWER_NAV_PATH ? <ReviewerBadge count={notifications.count} /> : null);
+  // Collector destinations first, then the artist-facing pair (VERIFY, ARTIST STUDIO) after a rule.
+  // The mobile menu lists the same links in the same order as the desktop header.
+  const isSecondary = ([, path]) => ["/verify", "/studio"].includes(path);
+  const primaryLinks = links.filter((link) => !isSecondary(link));
+  const secondaryLinks = links.filter(isSecondary);
+  const orderedLinks = [...primaryLinks, ...secondaryLinks];
 
   return (
     <nav
@@ -72,14 +93,14 @@ export function Nav() {
           <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
-          {links.filter(([, path]) => !["/verify", "/studio"].includes(path)).map(([label, path]) => (
+          {primaryLinks.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
               {label}
               {badge(path)}
             </NavLink>
           ))}
           <span className="vc-nav-rule" aria-hidden="true" />
-          {links.filter(([, path]) => ["/verify", "/studio"].includes(path)).map(([label, path]) => (
+          {secondaryLinks.map(([label, path]) => (
             <NavLink key={label} to={path} end={path === "/"} className="vc-navlink vc-nav-secondary">
               {label}
               {badge(path)}
@@ -95,6 +116,8 @@ export function Nav() {
         <button
           className="vc-nav-burger"
           aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          aria-controls="vc-mobile-menu"
           onClick={() => setMenuOpen((v) => !v)}
           style={{
             display: "none",
@@ -114,6 +137,7 @@ export function Nav() {
 
       {menuOpen && (
         <div
+          id="vc-mobile-menu"
           className="vc-nav-menu"
           style={{
             position: "absolute",
@@ -129,7 +153,7 @@ export function Nav() {
             gap: 4,
           }}
         >
-          {links.map(([label, path]) => (
+          {orderedLinks.map(([label, path]) => (
             <NavLink
               key={label}
               to={path}
