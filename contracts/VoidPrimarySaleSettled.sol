@@ -8,7 +8,8 @@ import {IVoidRelease1155V2, ReentrancyGuard} from "./VoidPrimarySale.sol";
 /// share is transferred to `platformRecipient` inside the purchase transaction. The artist
 /// share is still credited to `balances[payoutOf(tokenId)]` and is pulled with `withdraw()`.
 /// If the platform transfer fails, the whole purchase reverts: no mint, no credit, no event.
-/// `balances[platformRecipient]` is never credited by this contract.
+/// `balances[platformRecipient]` is never credited by this contract. The fee is the constant
+/// PLATFORM_FEE_BPS and there is no owner: nobody can lower, raise or redirect it after deployment.
 /// NOT DEPLOYED. The production sale 0x6ae84a51f100f10f0535a514555043ae9edf9aa3 runs
 /// VoidPrimarySale (pull payments for both shares) and is immutable.
 contract VoidPrimarySaleSettled is ReentrancyGuard {
@@ -25,18 +26,16 @@ contract VoidPrimarySaleSettled is ReentrancyGuard {
         bool configured;
     }
 
+    /// @dev The established platform fee on a primary sale (2.5%). Fixed at compile time.
+    uint256 public constant PLATFORM_FEE_BPS = 250;
+
     IVoidRelease1155V2 public immutable releases;
     address public immutable platformRecipient;
-    uint256 public immutable platformFeeCapBps;
-    uint256 public platformFeeBps;
-    address public owner;
     mapping(uint256 => Sale) public sales;
     mapping(uint256 => mapping(address => uint256)) public walletPurchased;
     mapping(address => uint256) public balances;
 
     error InvalidAddress();
-    error NotOwner();
-    error FeeAboveCap(uint256 requested, uint256 cap);
     error AccessDenied(address account);
     error NotEditionArtist(uint256 tokenId, address artist, address caller);
     error InvalidPrice();
@@ -66,35 +65,13 @@ contract VoidPrimarySaleSettled is ReentrancyGuard {
         bool paused
     );
     event Purchased(uint256 indexed tokenId, address indexed buyer, uint256 qty, uint256 paid, uint256 artistCut, uint256 platformCut);
-    event PlatformFeeUpdated(uint256 previousBps, uint256 nextBps);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event Withdrawn(address indexed account, uint256 amount);
     event PlatformPaid(address indexed recipient, uint256 amount);
 
-    constructor(address releases_, address platformRecipient_, uint256 platformFeeBps_) {
+    constructor(address releases_, address platformRecipient_) {
         if (releases_ == address(0) || platformRecipient_ == address(0)) revert InvalidAddress();
-        if (platformFeeBps_ > BPS_DENOMINATOR) revert FeeAboveCap(platformFeeBps_, BPS_DENOMINATOR);
         releases = IVoidRelease1155V2(releases_);
         platformRecipient = platformRecipient_;
-        platformFeeCapBps = platformFeeBps_;
-        platformFeeBps = platformFeeBps_;
-        owner = msg.sender;
-        emit OwnershipTransferred(address(0), msg.sender);
-    }
-
-    function transferOwnership(address newOwner) external {
-        if (msg.sender != owner) revert NotOwner();
-        if (newOwner == address(0)) revert InvalidAddress();
-        address previousOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(previousOwner, newOwner);
-    }
-
-    function setPlatformFeeBps(uint256 nextBps) external {
-        if (msg.sender != owner) revert NotOwner();
-        if (nextBps > platformFeeCapBps) revert FeeAboveCap(nextBps, platformFeeCapBps);
-        emit PlatformFeeUpdated(platformFeeBps, nextBps);
-        platformFeeBps = nextBps;
     }
 
     function configureSale(
@@ -162,7 +139,7 @@ contract VoidPrimarySaleSettled is ReentrancyGuard {
 
         sale.sold += qty;
         walletPurchased[tokenId][msg.sender] = already + qty;
-        uint256 platformCut = (paid * platformFeeBps) / BPS_DENOMINATOR;
+        uint256 platformCut = (paid * PLATFORM_FEE_BPS) / BPS_DENOMINATOR;
         uint256 artistCut = paid - platformCut;
         address payout = releases.payoutOf(tokenId);
         balances[payout] += artistCut;

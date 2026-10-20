@@ -54,7 +54,7 @@ contract VoidPrimarySaleSettledTest {
 
     function setUp() public {
         token = new VoidRelease1155V2(admin);
-        sale = new VoidPrimarySaleSettled(address(token), platform, 250);
+        sale = new VoidPrimarySaleSettled(address(token), platform);
         token.grantRole(token.ARTIST_ROLE(), artist);
         token.grantRole(token.ISSUER_ROLE(), address(sale));
         vm.prank(artist);
@@ -110,7 +110,7 @@ contract VoidPrimarySaleSettledTest {
     function testPayoutEqualToPlatformRecipientKeepsBothShares() public {
         // The platform recipient is also the edition payout: it is paid its fee
         // automatically and must still pull the artist share through withdraw().
-        VoidPrimarySaleSettled same = new VoidPrimarySaleSettled(address(token), payout, 250);
+        VoidPrimarySaleSettled same = new VoidPrimarySaleSettled(address(token), payout);
         token.grantRole(token.ISSUER_ROLE(), address(same));
         vm.prank(artist);
         uint256 other = token.createEdition(bytes32("r2"), bytes32("e2"), 5, "ipfs://two", payout, 0);
@@ -144,16 +144,24 @@ contract VoidPrimarySaleSettledTest {
         require(payout.balance + (platform.balance - platformBefore) == total, "nothing lost or created");
     }
 
-    function testFeeLoweredToZeroSkipsTheTransferAndCreditsEverythingToArtist() public {
-        sale.setPlatformFeeBps(0);
+    function testFeeIsFixedAndHasNoSetterOrOwner() public {
+        require(sale.PLATFORM_FEE_BPS() == 250, "fee constant");
+        (bool setter,) = address(sale).call(abi.encodeWithSignature("setPlatformFeeBps(uint256)", 0));
+        (bool transfer,) = address(sale).call(abi.encodeWithSignature("transferOwnership(address)", address(this)));
+        (bool owned,) = address(sale).staticcall(abi.encodeWithSignature("owner()"));
+        require(!setter && !transfer && !owned, "no fee setter, no owner");
         uint256 before = platform.balance;
         _buy(buyer, 1, PRICE);
-        require(platform.balance == before, "no platform payment at 0 bps");
-        require(sale.balances(payout) == PRICE, "artist keeps the full price");
+        require(platform.balance == before + 0.025 ether, "always 2.5%");
+    }
+
+    function testConstructorRejectsZeroAddresses() public {
+        try new VoidPrimarySaleSettled(address(0), platform) { revert("zero release"); } catch {}
+        try new VoidPrimarySaleSettled(address(token), address(0)) { revert("zero recipient"); } catch {}
     }
 
     function testRoundingFavoursTheArtistAndSumsExactly() public {
-        VoidPrimarySaleSettled odd = new VoidPrimarySaleSettled(address(token), platform, 250);
+        VoidPrimarySaleSettled odd = new VoidPrimarySaleSettled(address(token), platform);
         token.grantRole(token.ISSUER_ROLE(), address(odd));
         vm.prank(artist);
         uint256 other = token.createEdition(bytes32("r3"), bytes32("e3"), 5, "ipfs://three", payout, 0);
@@ -173,7 +181,7 @@ contract VoidPrimarySaleSettledTest {
 
     function testRejectingPlatformRevertsTheWholePurchase() public {
         RejectingPlatform bad = new RejectingPlatform();
-        VoidPrimarySaleSettled s = new VoidPrimarySaleSettled(address(token), address(bad), 250);
+        VoidPrimarySaleSettled s = new VoidPrimarySaleSettled(address(token), address(bad));
         token.grantRole(token.ISSUER_ROLE(), address(s));
         vm.prank(artist);
         uint256 other = token.createEdition(bytes32("r4"), bytes32("e4"), 5, "ipfs://four", payout, 0);
@@ -197,7 +205,7 @@ contract VoidPrimarySaleSettledTest {
 
     function testReenteringPlatformIsBlockedAndOuterPurchaseCompletesOnce() public {
         ReenteringPlatform hostile = new ReenteringPlatform();
-        VoidPrimarySaleSettled s = new VoidPrimarySaleSettled(address(token), address(hostile), 250);
+        VoidPrimarySaleSettled s = new VoidPrimarySaleSettled(address(token), address(hostile));
         token.grantRole(token.ISSUER_ROLE(), address(s));
         vm.prank(artist);
         uint256 other = token.createEdition(bytes32("r5"), bytes32("e5"), 5, "ipfs://five", payout, 0);
@@ -221,15 +229,14 @@ contract VoidPrimarySaleSettledTest {
 
     // ---- previously credited balances and the legacy contract ----
 
-    function testExistingBalancesSurviveLaterPurchasesAndFeeChanges() public {
+    function testExistingBalancesSurviveLaterPurchases() public {
         _buy(buyer, 1, PRICE);
         require(sale.balances(payout) == 0.975 ether, "first credit");
-        sale.setPlatformFeeBps(100);
         _buy(second, 1, PRICE);
-        require(sale.balances(payout) == 0.975 ether + 0.99 ether, "first credit preserved, second added");
+        require(sale.balances(payout) == 1.95 ether, "first credit preserved, second added");
         vm.prank(payout);
         sale.withdraw();
-        require(payout.balance == 1.965 ether, "full credited amount withdrawable");
+        require(payout.balance == 1.95 ether, "full credited amount withdrawable");
     }
 
     function testLegacySaleStillCreditsBothSharesAsBalances() public {
