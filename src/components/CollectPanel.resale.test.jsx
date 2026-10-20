@@ -65,7 +65,7 @@ describe("CollectPanel owner resale action", () => {
     expect(screen.getByText("You own this edition. You can list it for resale.")).toBeTruthy();
   });
 
-  it("keeps a visible owner action for an edition that the Fuji marketplace cannot accept", async () => {
+  it("withholds LIST FOR SALE and explains why for an owned edition the marketplace cannot accept", async () => {
     mocks.balance.mockResolvedValue(1n);
     mocks.primarySale.mockResolvedValue(null);
     const unsupportedEdition = { ...edition, chainId: 43114 };
@@ -80,7 +80,7 @@ describe("CollectPanel owner resale action", () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(screen.getByText("Owned")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "List for sale" }).getAttribute("href")).toBe("/edition/factory-release-owned-edition#secondary-listing");
-    expect(screen.getByText("You own this edition. Secondary resale is unavailable for this release.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "List for sale" })).toBeNull();
+    expect(screen.getByText(/Secondary resale is not available: The Void marketplace lists only releases created by The Void release factory/)).toBeTruthy();
   });
 });

@@ -177,6 +177,19 @@ describe("FactoryV2 → ReleaseMarketplaceV3 secondary listing verification", ()
     })).toBe(true);
   });
 
+  it("never treats the mainnet Genesis ERC-1155 (not factory-registered) as a listing candidate", () => {
+    expect(isReleasePerContractCandidate({
+      chainId: 43114,
+      contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
+      tokenIds: ["0"],
+    })).toBe(false);
+  });
+
+  it("reports an existing marketplace approval and a seller with insufficient balance without throwing", async () => {
+    await expect(readReleaseListingContext({ ...baseInput, provider: providerFor({ approved: true }) })).resolves.toMatchObject({ approved: true, balance: "2" });
+    await expect(readReleaseListingContext({ ...baseInput, provider: providerFor({ balance: 0n }) })).resolves.toMatchObject({ balance: "0" });
+  });
+
   it("calculates seller proceeds with the live fee and per-edition royalty, including integer rounding", () => {
     expect(calculateListingEconomics({
       priceWei: "1000000000000000000",
