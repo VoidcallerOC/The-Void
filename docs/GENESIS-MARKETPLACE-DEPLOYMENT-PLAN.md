@@ -14,10 +14,10 @@ Design record: `docs/adr/0001-genesis-legacy-collection-marketplace.md`. Root ca
 | Custody | None. Seller keeps tokens; marketplace is an approved operator used only inside `buy`. No `receive`/`fallback`. |
 | Admin powers | `allowCollection`, `disableCollection`, `setPaused`, two-step `transferOwnership`. No withdraw, no arbitrary call, no upgrade proxy, cannot cancel/alter listings. |
 | Immutable | fee 250 bps, fee recipient, chain id. Constructor reverts on any other fee. |
-| Pause / disable | Blocks `createListing` and `buy`. `cancelListing` always works for the seller. |
+| Pause / disable | Blocks `createListingWithMinProceeds` and `buy`. `cancelListing` works for the seller (on the deployment chain). |
 | Royalty | `royaltyInfo(id, price)` read at listing and sale time by bounds-checked `staticcall` (exactly 64 bytes, clean address word). Must be ≤ the collection's `maxRoyaltyBps` cap (hard ceiling 1000) and, if > 0, to a non-zero receiver that is not the marketplace. Not hardcoded; the cap only protects sellers. |
 | Settlement | `S = price·q`; `fee = ⌊S·250/10000⌋`; royalty = `royaltyInfo(id, S)` (capped); `seller = S − fee − royalty` (seller takes rounding dust). Order: floor check, token transfer, fee, royalty, seller. Any failure reverts the whole sale. |
-| Seller floor | `minSellerProceedsPerUnit[listingId]`; a purchase reverts (`BelowMinimumProceeds`) unless the seller nets ≥ floor × quantity at the live royalty. Seller-only updates. Listing/event/query shapes unchanged (no new event). |
+| Seller floor | `minSellerProceedsPerUnit[listingId]`, mandatory and non-zero on every listing (the only creation path is `createListingWithMinProceeds`); a purchase reverts (`BelowMinimumProceeds`) unless the seller nets ≥ floor × quantity at the live royalty. Seller-only updates, never clearable. Listing/event/query shapes unchanged (no new event). |
 | Reentrancy | `nonReentrant` on `buy`; listing state is updated before any external call. |
 
 ## Parameters (scope confirmed 2026-10-20; owner Safe BLOCKED)
@@ -32,16 +32,16 @@ Confirmed as the candidate's implementation scope (2026-10-20; not deployment au
 Still blocking:
 1. **Owner Safe address — BLOCKED** (not in the repo; will not be invented; not the deployer). Validate with `OWNER_SAFE_ADDRESS=0x… node scripts/prepare-legacy-marketplace-deployment.mjs` (dry run; exit 3 = BLOCKED).
 2. A completed **human audit** with findings resolved.
-3. Default seller tolerance in the UI (currently 0).
+3. Seller tolerance: zero is retained as the explicit fail-safe default; changing it is a product decision (not a blocker).
 4. Explicit deployment authorization and two funded wallets for the acceptance run.
 
 ## Human audit package (to hand to a qualified auditor)
 The full package — candidate hashes, build instructions, formulas, invariants, admin powers, assumptions, results and checklist — is `docs/GENESIS-MARKETPLACE-AUDIT-PACKAGE.md`. Summary:
 - Scope: `contracts/LegacyCollectionMarketplace.sol` (≈300 lines, no dependencies other than a 3-function ERC-1155 interface).
 - Spec: `docs/adr/0001-genesis-legacy-collection-marketplace.md` (formulas, trust assumptions, open decisions).
-- Tests: `test/LegacyCollectionMarketplace.t.sol` (19), `test/LegacyCollectionMarketplaceMinProceeds.t.sol` (18), fork tests `test/LegacyCollectionMarketplaceMainnetFork.t.sol` (5; need `MAINNET_FORK_RPC`).
-- Questions to put to the auditor: reentrancy across `createListing`/`cancelListing` during `buy`; royalty-read assembly (`staticcall`, 100k gas, 64-byte buffer); the floor invariant under partial fills and rounding; forced-AVAX / accounting; interaction with Genesis's operator filter; owner-power liveness (pause/disable/narrow); the unprotected V4-shaped `createListing` overload.
-- The two AI reviews recorded in the ADR are not a substitute for this audit.
+- Tests: `test/LegacyCollectionMarketplace.t.sol` (19), `…MinProceeds.t.sol` (18), `…GenesisPolicy.t.sol` (10, three fuzz), `…ListingPaths.t.sol` (10), fork tests `…MainnetFork.t.sol` (6; need `MAINNET_FORK_RPC`, skipped without it).
+- Questions to put to the auditor: reentrancy across `createListingWithMinProceeds`/`cancelListing`/`setMinSellerProceeds` during `buy`; royalty-read assembly (`staticcall`, 100k gas, 64-byte buffer); the floor invariant under partial fills and rounding; forced-AVAX / accounting; interaction with Genesis's operator filter; owner-power liveness (pause/disable/narrow);  the delivery check and the self-purchase rule.
+- The two AI reviews recorded in the ADR and audit package are not a substitute for this audit.
 
 ## Security gates before any broadcast (all required)
 1. Independent human/third-party audit of `LegacyCollectionMarketplace.sol` including the seller-floor logic. The AI reviews recorded in the ADR are not a substitute.

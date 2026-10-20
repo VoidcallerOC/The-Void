@@ -37,8 +37,8 @@ Date: 2026-10-20
   the NFT while a payout is unpaid. The royalty percentage is **taken from Genesis, not hardcoded**; the cap only protects
   sellers if the Genesis owner raises the royalty later.
 - Proposed Genesis scope: token ids 0–3, `maxRoyaltyBps = 500` (the verified current royalty). Owner decision required.
-- Compatible with V4's `createListing/cancelListing/expireListing/buy/getListing` signatures and event shapes so the indexer and
-  frontend reuse their decoders.
+- Keeps V4's `cancelListing/expireListing/buy/getListing` signatures and all event shapes so the indexer and frontend reuse their decoders.
+  The V4-shaped `createListing` was deliberately **not** kept (see "Resolutions, second round").
 
 ## Residual risks (must be accepted or mitigated before deployment)
 - Operator filter: if the Genesis owner starts filtering this marketplace, `buy` reverts and listings go stale. Readiness check
@@ -90,8 +90,8 @@ For a purchase of `q` units of a listing priced `p` per unit: `S = p·q` (must e
 - `minSellerProceedsPerUnit[listingId]` (wei, public getter). The purchase requires `seller ≥ minSellerProceedsPerUnit · q` using the *actual* `S`, fee and live `royaltyInfo` of that exact purchase; otherwise `BelowMinimumProceeds(seller, required)` and the whole transaction reverts (no token moved, no payment kept, listing unchanged).
 - Per unit × quantity, so splitting or enlarging a purchase cannot dodge it; computed at purchase time, so a royalty change between listing and sale cannot undercut it. A receiver change alone does not change the seller's proceeds (only the royalty amount does).
 - Set at `createListingWithMinProceeds(...)`; changed by the seller only via `setMinSellerProceeds(listingId, min)` (ACTIVE listings, also while paused). A floor above the unit price, or not deliverable at today's royalty for 1 unit and for the full remaining quantity, is refused (`MinProceedsTooHigh`) so a typo cannot silently freeze a listing.
-- Recommended floor (what the app sends): `⌊p · (10000 − 250 − royaltyBps) / 10000⌋`. Because the contract floors fee and royalty, real proceeds are ≥ this value for every `q`, so a sale at today's royalty always clears it and any royalty increase reverts.
-- **Compatibility:** `Listing`, `getListing`, `ListingCreated/Cancelled/Expired/Sold`, `createListing`, `cancelListing`, `expireListing`, `buy` are byte-for-byte the V4 shapes (selectors/topics asserted in `testV4ShapedSelectorsAndEventsAreUnchanged`). The floor lives in a separate mapping; **no new event** was added because the indexer records any unrecognized marketplace event as a malformed-event error. The V4-shaped `createListing` remains and carries **no floor** (documented risk); the app never uses it for the legacy marketplace (`encodeCreateListingWithMinProceeds` throws without a floor). Off-chain observers read the floor with the `minSellerProceedsPerUnit(listingId)` view.
+- Recommended floor (what the app sends): `⌊p · (10000 − 250 − royaltyBps) / 10000⌋`. Because the contract floors fee and royalty, real proceeds are ≥ this value for every `q`, so a sale at today's royalty always clears it, and a royalty increase that would leave the seller below the floor makes the purchase revert (at ordinary prices every increase; at wei-scale prices rounding can absorb a very small one without taking the seller below the floor).
+- **Compatibility:** `Listing`, `getListing`, `ListingCreated/Cancelled/Expired/Sold`, `cancelListing`, `expireListing`, `buy` are byte-for-byte the V4 shapes (selectors/topics asserted in `testV4ShapedSelectorsAndEventsAreUnchanged`). The floor lives in a separate mapping; **no new event** was added because the indexer records any unrecognized marketplace event as a malformed-event error. There is **no** V4-shaped `createListing`: `createListingWithMinProceeds` is the only creation function and the floor is mandatory. `encodeCreateListingWithMinProceeds` throws without a non-zero floor. Off-chain observers read the floor with the `minSellerProceedsPerUnit(listingId)` view.
 
 ## Confirmed scope and open decisions (2026-10-20)
 Confirmed by the owner as the *implementation scope of the candidate* (not permission to deploy or change production):
@@ -104,14 +104,20 @@ Confirmed by the owner as the *implementation scope of the candidate* (not permi
 Still open:
 - **Owner Safe address — BLOCKED.** Not in the repo; not invented; the deployer wallet is not a substitute. Validate with `scripts/prepare-legacy-marketplace-deployment.mjs` once supplied, and confirm identity out of band.
 - **Human security audit** — not started.
-- **Default seller tolerance in the UI** — the app sends a zero-tolerance floor (any royalty increase blocks the sale). Product choice; not a code blocker.
-- **Whether to remove the unprotected V4-shaped `createListing` overload** — retained for client compatibility; flagged for the auditor.
+- **Seller tolerance** — zero tolerance is retained as the fail-safe default and is now explicit in the listing UI and docs; a nonzero tolerance would lower sellers' floors and is a product decision that has not been made. Not a blocker.
 - **Deployment authorization** and funded wallets for the mainnet acceptance run.
 
 ## Known limitations and trust assumptions (final)
-- Seller floor is only as good as the floor chosen: a listing created through the V4-shaped `createListing` has none and sells at the live royalty (≤ the collection cap).
+- Seller floor is only as good as the floor chosen: a seller who deliberately sets a tiny floor accepts any royalty up to the cap. The app never sends one. There is no way to create a listing without a non-zero floor.
 - A seller can raise their own floor (to what is attainable today) while a buyer's transaction is pending; that purchase then reverts atomically and costs the buyer only gas.
-- The collection's admin (Genesis owner `0x284C…180a`) can change the royalty (≤ 2,500 bps on Genesis), change the receiver, or filter the marketplace's operator address. None can take funds or tokens; the first lowers seller proceeds only until the seller's floor reverts the sale, and the cap bounds it for unprotected listings.
+- The collection's admin (Genesis owner `0x284C…180a`) can change the royalty (≤ 2,500 bps on Genesis), change the receiver, or filter the marketplace's operator address. None can take funds or tokens; the first lowers seller proceeds only until the seller's floor reverts the sale, and the cap bounds the royalty a seller who chose a very low floor can be charged.
 - The marketplace owner (intended: a Safe) can pause, disable or re-scope a collection (liveness only); re-allowing a disabled collection revives its still-active listings.
 - Royalty receivers, sellers and the fee recipient that reject AVAX block their own sale (reverts by design).
 - Floors are validated against today's royalty for 1 unit and for the full remaining quantity; intermediate quantities are checked at purchase time.
+
+## Resolutions, second round (2026-10-20)
+1. **The V4-shaped `createListing` overload was removed.** Code-level evidence: it called the same `_createListing` as the protected path with a zero floor, so it enforced the allowlist, token scope, cap, seller authorization, balance, approval and settlement preview, but skipped the seller guard — an alternate path around the guard. It had no caller: the app used `encodeCreateListing` only for the V4 marketplace (guarded by `isLegacyMarketplace`), `scripts/rehearse-royalty-fuji.mjs` targets V4 on Fuji, and the contract is undeployed, so no external client can depend on it. `testTheV4ShapedCreateListingSelectorDoesNotExistAndCreatesNothing` and `testTheSingleCreationPathEnforcesEveryEssentialInvariant` pin the result; a source tripwire fails if a second creation path appears.
+2. **The floor is mandatory (non-zero) for creation and updates**, so it can never be cleared. Consequence found by fuzzing: at about 1 wei the exact-rate floor is 0, so no valid floor exists; the app refuses such a listing and the contract refuses a zero floor.
+3. **Seller tolerance:** zero tolerance retained as the fail-safe; the review screen shows the exact minimum per edition and in total, says the royalty is set by the collection and that the listing stays unsold until cancelled and relisted if the royalty rises; the floor signed is the one reviewed (the app aborts if the royalty changed since).
+4. **Second independent AI review** (fresh agent, 25 PoC tests, not committed): no critical/high/medium. Closed in code: payment-without-delivery (`TokensNotDelivered` check; `SelfPurchase` refused so the check is sound) and `listingStatus` reading `ACTIVE` for unknown ids (`UnknownListing`). Documented, not changed: forced AVAX, policy changes stranding listings, chain-id gating of `cancelListing`, gas-dependent `royaltyInfo` from a hostile allowlisted collection, fee-recipient payability, wash trading from a second wallet. A malicious allowlisted token can still lie about `balanceOf`; the allowlist remains a trust boundary.
+5. Full evidence, hashes and the auditor checklist: `docs/GENESIS-MARKETPLACE-AUDIT-PACKAGE.md`.
