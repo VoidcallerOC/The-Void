@@ -25,7 +25,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isLegacyMarketplace } from "../../config/legacy-collection-marketplace.js";
-import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
+import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, minimumSellerProceedsPerUnit } from "../lib/secondary-listing.js";
 import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
@@ -337,6 +337,8 @@ export function ListingPanel({ edition }) {
         amount,
         price: priceWei,
         expiresAt: expiringSeconds,
+        // Legacy-collection marketplace only: the purchase reverts unless the seller nets at least this per unit.
+        minSellerProceedsPerUnit: legacyMarketplace ? minimumSellerProceedsPerUnit({ priceWei, marketplaceFeeBps: afterApproval.marketplaceFeeBps, royaltyBps: afterApproval.royaltyBps }) : undefined,
       });
       receiptObserved = Boolean(receipt);
       observedTransactionHash = String(receipt?.transactionHash || "");

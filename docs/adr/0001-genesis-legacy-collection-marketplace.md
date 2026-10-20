@@ -1,6 +1,6 @@
 # ADR 0001 — Marketplace for legacy ERC-1155 collections (Genesis)
 
-Status: PROPOSED (not deployed; needs independent review and explicit deployment authorization)
+Status: PROPOSED (not deployed; needs a human security audit, the decisions listed under "Open decisions", and explicit deployment authorization)
 Date: 2026-10-20
 
 ## Context (verified on Avalanche C-Chain 43114 by `eth_call` at the time of writing)
@@ -60,4 +60,49 @@ where funds strand, or where the owner can take funds/tokens/listings.
   AVAX (`0xb65C…1ce4` has no contract code on mainnet, i.e. it is an EOA); `listingStatus`/`getListing` of a never-created id reads
   `ACTIVE` with a zero seller, as in V4 — indexers must key on the `ListingCreated` event, not on `listingStatus` alone; `ListingSold.price`
   is the total while `ListingCreated.price` is per unit; the `RoyaltyTooHigh` branch is unreachable (cap ≤ 10% + 2.5% fee).
-- Not built: a seller `minProceeds`/royalty snapshot guard (would add buy-reverts and change the V4-compatible interface). Decide before deployment.
+- Seller minimum-proceeds guard: built afterwards (see "Seller minimum-proceeds guard" below), which closes the royalty-change exposure noted above.
+
+
+## Royalty policy — verified, kept separate (2026-10-20)
+| Asset | Royalty | Receiver | Source of truth | Evidence |
+|---|---|---|---|---|
+| Genesis `0xD1B4…98eE` tokens 0–3 | **5.0% (500 bps)** | `0x284C09a7…180a` | Genesis's own ERC-2981 `royaltyInfo` | Launchpeg initializer hardcodes `_setDefaultRoyalty(initData.royaltyReceiver, 500)` ("Default royalty is 5%"); `eth_call` returns 5e16 per 1e18 for ids 0–3 (and 7); Etherscan logs show **no** `DefaultRoyaltySet` event on the proxy, i.e. never changed since launch. Owner can change it (`setRoyaltyInfo`, ≤ 2,500 bps). |
+| New Void factory releases (`VoidReleaseFactoryV2Royalty` → `VoidRelease1155V4Royalty`) | **2.5% (250 bps)** | the edition's own artist payout | enforced on-chain at edition creation, again by `ReleaseMarketplaceV4` | `deploy/mainnet/README.md` "Economics (final)", `test/RoyaltyEnforcement.t.sol`, `test/MainnetEconomics.t.sol`, `config/mainnet-release-per-contract.json` (`artistRoyaltyBps: 250`) |
+| Marketplace fee (both marketplaces) | 2.5% (250 bps) | `0xb65C575C…1ce4` (no contract code: an EOA) | immutable in each marketplace constructor | V4 and `LegacyCollectionMarketplace` |
+
+**Finding:** the "2.5% artist royalty" policy is a policy for *new factory releases*. Nothing in the repo (code, tests, docs, config) states a Genesis royalty policy; Genesis simply carries the 5% default its launchpad gave it, paid to the creator wallet that is also its owner. The frontend carries no Genesis royalty copy beyond what this PR added.
+
+Seller proceeds, 1 AVAX resale, by policy:
+- Factory release (V4): fee 0.025, artist royalty 0.025, **seller 0.95**.
+- Genesis (legacy marketplace): fee 0.025, creator royalty 0.05, **seller 0.925**.
+
+**Inconsistencies found (documented, not "fixed"):** (1) the platform headline "2.5% artist royalty" is true of factory releases only; (2) my first root-cause note said Genesis was 250 bps — corrected to 500; (3) `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` (superseded) calls the legacy collection "out of scope"; this ADR is the first place it is brought into the marketplace. No royalty percentage or recipient was changed anywhere to make these agree.
+
+## Final settlement formulas (`LegacyCollectionMarketplace.buy`)
+For a purchase of `q` units of a listing priced `p` per unit: `S = p·q` (must equal `msg.value`).
+- `fee = ⌊S · 250 / 10000⌋` → fee recipient.
+- `(receiver, royalty) = token.royaltyInfo(tokenId, S)` — read at sale time, 100k-gas-capped, exactly 64 bytes returned; `royalty ≤ ⌊S · maxRoyaltyBps / 10000⌋`; if `royalty > 0` the receiver is non-zero and not the marketplace.
+- `seller = S − fee − royalty`.
+- Conservation: `fee + royalty + seller = S` exactly; the seller absorbs rounding dust (floors favor the seller).
+- Order: seller floor check → ERC-1155 `safeTransferFrom(seller → buyer)` → pay fee → pay royalty → pay seller. Any revert undoes everything.
+
+## Seller minimum-proceeds guard
+- `minSellerProceedsPerUnit[listingId]` (wei, public getter). The purchase requires `seller ≥ minSellerProceedsPerUnit · q` using the *actual* `S`, fee and live `royaltyInfo` of that exact purchase; otherwise `BelowMinimumProceeds(seller, required)` and the whole transaction reverts (no token moved, no payment kept, listing unchanged).
+- Per unit × quantity, so splitting or enlarging a purchase cannot dodge it; computed at purchase time, so a royalty change between listing and sale cannot undercut it. A receiver change alone does not change the seller's proceeds (only the royalty amount does).
+- Set at `createListingWithMinProceeds(...)`; changed by the seller only via `setMinSellerProceeds(listingId, min)` (ACTIVE listings, also while paused). A floor above the unit price, or not deliverable at today's royalty for 1 unit and for the full remaining quantity, is refused (`MinProceedsTooHigh`) so a typo cannot silently freeze a listing.
+- Recommended floor (what the app sends): `⌊p · (10000 − 250 − royaltyBps) / 10000⌋`. Because the contract floors fee and royalty, real proceeds are ≥ this value for every `q`, so a sale at today's royalty always clears it and any royalty increase reverts.
+- **Compatibility:** `Listing`, `getListing`, `ListingCreated/Cancelled/Expired/Sold`, `createListing`, `cancelListing`, `expireListing`, `buy` are byte-for-byte the V4 shapes (selectors/topics asserted in `testV4ShapedSelectorsAndEventsAreUnchanged`). The floor lives in a separate mapping; **no new event** was added because the indexer records any unrecognized marketplace event as a malformed-event error. The V4-shaped `createListing` remains and carries **no floor** (documented risk); the app never uses it for the legacy marketplace (`encodeCreateListingWithMinProceeds` throws without a floor). Off-chain observers read the floor with the `minSellerProceedsPerUnit(listingId)` view.
+
+## Open decisions (not decided by this work)
+1. **Genesis royalty:** confirm Genesis resale should honor Genesis's own 5% (the recommended default, since it preserves established contract behavior), versus asking the Genesis owner (`0x284C…180a`) to call `setRoyaltyInfo` for a different value. This work changes neither.
+2. **Cap:** approve `maxRoyaltyBps = 500` for Genesis (a Genesis owner raise above it blocks sales until the Safe raises the cap).
+3. **Owner Safe address** for the marketplace (not the deployer).
+4. **Default seller tolerance:** the app sends a zero-tolerance floor (any royalty increase blocks the sale). Decide whether the UI should offer a tolerance.
+
+## Known limitations and trust assumptions (final)
+- Seller floor is only as good as the floor chosen: a listing created through the V4-shaped `createListing` has none and sells at the live royalty (≤ the collection cap).
+- A seller can raise their own floor (to what is attainable today) while a buyer's transaction is pending; that purchase then reverts atomically and costs the buyer only gas.
+- The collection's admin (Genesis owner `0x284C…180a`) can change the royalty (≤ 2,500 bps on Genesis), change the receiver, or filter the marketplace's operator address. None can take funds or tokens; the first lowers seller proceeds only until the seller's floor reverts the sale, and the cap bounds it for unprotected listings.
+- The marketplace owner (intended: a Safe) can pause, disable or re-scope a collection (liveness only); re-allowing a disabled collection revives its still-active listings.
+- Royalty receivers, sellers and the fee recipient that reject AVAX block their own sale (reverts by design).
+- Floors are validated against today's royalty for 1 unit and for the full remaining quantity; intermediate quantities are checked at purchase time.

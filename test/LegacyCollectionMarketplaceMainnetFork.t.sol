@@ -16,6 +16,8 @@ interface IGenesis {
     function safeTransferFrom(address, address, uint256, uint256, bytes calldata) external;
     function royaltyInfo(uint256, uint256) external view returns (address, uint256);
     function operatorFilterRegistry() external view returns (address);
+    function setRoyaltyInfo(address receiver, uint96 feePercent) external;
+    function owner() external view returns (address);
 }
 
 interface IOperatorFilterRegistry {
@@ -106,5 +108,32 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.prank(HOLDER);
         (bool ok,) = address(market).call(abi.encodeCall(market.createListing, (address(GENESIS), HOLDER, 0, 1, PRICE, uint64(0))));
         require(!ok, "unapproved listing refused");
+    }
+
+    /// The Genesis owner (a real, separate actor) raises the royalty after a protected listing exists: the purchase must revert
+    /// atomically, and the seller keeps the token. Replayed on a fork only; nothing is broadcast.
+    function testRealGenesisRoyaltyIncreaseCannotUndercutAProtectedSeller() public {
+        if (!forked) return;
+        vm.prank(HOLDER);
+        GENESIS.setApprovalForAll(address(market), true);
+        // Floor = exact real-valued share at today's 5% royalty and the 2.5% fee.
+        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        vm.prank(HOLDER);
+        uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 2, PRICE, 0, floorPerUnit);
+
+        vm.prank(GENESIS.owner());
+        GENESIS.setRoyaltyInfo(CREATOR, 700); // Genesis allows up to 2,500 bps
+        uint256 holderTokens = GENESIS.balanceOf(HOLDER, 0);
+        uint256 holderAvax = HOLDER.balance;
+        vm.prank(BUYER);
+        (bool ok,) = address(market).call{value: PRICE}(abi.encodeCall(market.buy, (id, 1)));
+        require(!ok, "purchase below the seller's floor must revert");
+        require(GENESIS.balanceOf(HOLDER, 0) == holderTokens && GENESIS.balanceOf(BUYER, 0) == 0 && HOLDER.balance == holderAvax && address(market).balance == 0, "nothing moved");
+
+        vm.prank(GENESIS.owner());
+        GENESIS.setRoyaltyInfo(CREATOR, 500); // restored: sale settles at the policy
+        vm.prank(BUYER);
+        market.buy{value: PRICE}(id, 1);
+        require(HOLDER.balance - holderAvax == floorPerUnit && GENESIS.balanceOf(BUYER, 0) == 1, "settles at 92.5% once the royalty is back");
     }
 }

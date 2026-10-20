@@ -2,7 +2,7 @@ import { Interface } from "ethers";
 import { isValidAddress, waitForReceipt } from "./web3.js";
 import { ensureWalletOnChain } from "./release-chain.js";
 import { releaseDeploymentForFactory, releaseDeploymentForMarketplace } from "../../config/release-network.js";
-import { LEGACY_COLLECTION_MARKETPLACE, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
+import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
 
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
 export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", OBSERVED: "OBSERVED", CONFIRMED: "CONFIRMED", FINALIZED: "FINALIZED", FAILED: "FAILED", REJECTED: "REJECTED", REVERTED: "REVERTED", REPLACED: "REPLACED", STALE: "STALE", RECONCILIATION_REQUIRED: "RECONCILIATION_REQUIRED", EXPIRED: "EXPIRED" });
@@ -35,7 +35,7 @@ export function marketplaceConfigForEdition(edition, base = MARKETPLACE_CONFIG, 
   return Object.freeze({ ...base, address: deployment.marketplaceAddress });
 }
 
-const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5" };
+const SELECTORS = { createListing: "0x5201ea65", cancelListing: "0x305a67a8", buy: "0xd6febde8", getListing: "0x107a274a", approval: "0xa22cb465", approved: "0xe985e9c5", createListingWithMinProceeds: "0x068773dd", setMinSellerProceeds: "0x69ce933d" };
 const MAX_UINT256 = (1n << 256n) - 1n;
 const LISTING_CREATED_TOPIC = "0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19";
 const LISTING_EVENT_INTERFACE = new Interface([
@@ -62,6 +62,12 @@ export function validateListingDraft({ seller, contract, tokenId, amount, price,
   return null;
 }
 export function encodeCreateListing({ contract, seller, tokenId, amount, price, expiresAt = 0 }) { return SELECTORS.createListing + addressWord(contract) + addressWord(seller) + word(tokenId) + word(amount) + word(price) + word(expiresAt); }
+// LegacyCollectionMarketplace only: the same listing plus a floor on the seller's net proceeds, in wei per unit sold.
+export function encodeCreateListingWithMinProceeds({ contract, seller, tokenId, amount, price, expiresAt = 0, minSellerProceedsPerUnit }) {
+  if (!/^\d+$/.test(String(minSellerProceedsPerUnit ?? ""))) throw new Error("A minimum seller proceeds amount is required for this marketplace.");
+  return SELECTORS.createListingWithMinProceeds + addressWord(contract) + addressWord(seller) + word(tokenId) + word(amount) + word(price) + word(expiresAt) + word(minSellerProceedsPerUnit);
+}
+export function encodeSetMinSellerProceeds(listingId, minSellerProceedsPerUnit) { return SELECTORS.setMinSellerProceeds + word(listingId) + word(minSellerProceedsPerUnit); }
 export function encodeCancelListing(listingId) { return SELECTORS.cancelListing + word(listingId); }
 export function encodeBuy(listingId, quantity = 1) { return SELECTORS.buy + word(listingId) + word(quantity); }
 export function encodeApproval(marketplace, approved = true) { return SELECTORS.approval + addressWord(marketplace) + boolWord(approved); }
@@ -141,12 +147,12 @@ export async function submitApproval({ provider, owner, tokenContract, marketpla
   const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: tokenContract, data: encodeApproval(marketplace, true) }] });
   return waitForReceipt(provider, txHash);
 }
-export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt }) {
+export async function submitListing({ provider, owner, edition, marketplace, chain, chainId, tokenId, amount, price, expiresAt, minSellerProceedsPerUnit, legacy = LEGACY_COLLECTION_MARKETPLACE }) {
   const error = validateListingDraft({ seller: owner, contract: edition.contractAddress, tokenId, amount, price, expiresAt: expiresAt * 1000 });
   if (error) throw new Error(error);
   void chainId;
   await ensureMarketplaceChain(provider, chain);
-  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: encodeCreateListing({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] });
+  const txHash = await provider.request({ method: "eth_sendTransaction", params: [{ from: owner, to: marketplace, data: (isLegacyMarketplace(marketplace, legacy) ? (params) => encodeCreateListingWithMinProceeds({ ...params, minSellerProceedsPerUnit }) : encodeCreateListing)({ contract: edition.contractAddress, seller: owner, tokenId, amount, price, expiresAt }) }] });
   return waitForReceipt(provider, txHash);
 }
 export async function submitPurchase({ provider, buyer, marketplace, listing, quantity = listing.amount, chain, chainId, onState = () => {}, canonical = MARKETPLACE_CONFIG }) {

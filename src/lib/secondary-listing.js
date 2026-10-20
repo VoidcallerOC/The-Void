@@ -237,6 +237,21 @@ export async function readLegacyListingContext({ provider, marketplaceAddress, m
   });
 }
 
+/**
+ * Floor on the seller's net proceeds, in wei per unit, for LegacyCollectionMarketplace.createListingWithMinProceeds.
+ * It is the floor of the exact-rate share, price * (10000 - fee - royalty) / 10000. Because the contract floors the fee and the
+ * royalty, the seller's actual proceeds for any quantity are never below this, so a sale at today's royalty always clears it
+ * and any royalty increase (however small) makes the purchase revert instead of paying the seller less.
+ * `toleranceBps` lets a seller accept a bounded increase; it lowers the floor by that share of the unit price.
+ */
+export function minimumSellerProceedsPerUnit({ priceWei, marketplaceFeeBps, royaltyBps, toleranceBps = 0 }) {
+  if (![priceWei, marketplaceFeeBps, royaltyBps, toleranceBps].every((value) => /^\d+$/.test(String(value)))) return null;
+  const price = BigInt(priceWei);
+  const keepBps = 10_000n - BigInt(marketplaceFeeBps) - BigInt(royaltyBps) - BigInt(toleranceBps);
+  if (price <= 0n || keepBps < 0n) return null;
+  return ((price * keepBps) / 10_000n).toString();
+}
+
 export function calculateListingEconomics({ priceWei, amount, marketplaceFeeBps, royaltyBps }) {
   if (![priceWei, amount, marketplaceFeeBps, royaltyBps].every((value) => /^\d+$/.test(String(value)))) return null;
   const quantity = BigInt(amount);

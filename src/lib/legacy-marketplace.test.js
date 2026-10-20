@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Interface, getAddress } from "ethers";
 import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor, legacyMarketplaceActive } from "../../config/legacy-collection-marketplace.js";
-import { MARKETPLACE_CONFIG, marketplaceConfigForEdition } from "./marketplace.js";
-import { isLegacyCollectionCandidate, isReleasePerContractCandidate, readLegacyListingContext, readReleaseListingContext } from "./secondary-listing.js";
+import { MARKETPLACE_CONFIG, MARKETPLACE_SELECTORS, encodeCreateListing, encodeCreateListingWithMinProceeds, encodeSetMinSellerProceeds, marketplaceConfigForEdition, submitListing } from "./marketplace.js";
+import { isLegacyCollectionCandidate, isReleasePerContractCandidate, minimumSellerProceedsPerUnit, readLegacyListingContext, readReleaseListingContext } from "./secondary-listing.js";
 
 const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 const CREATOR = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
@@ -107,5 +107,87 @@ describe("readLegacyListingContext", () => {
 
   it("is only reachable through readReleaseListingContext while the manifest is active (V4 path unchanged)", async () => {
     await expect(readReleaseListingContext({ ...input(providerFor()), releaseContractAddress: GENESIS })).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
+  });
+});
+
+describe("seller minimum-proceeds floor (client side)", () => {
+  const WEI = 10n ** 18n;
+  it("derives the per-unit floor from the live fee and royalty, as the floor of the exact-rate share", () => {
+    expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("925000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: "333", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("308");
+    expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "250", royaltyBps: "0" })).toBe("975000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "250", royaltyBps: "500", toleranceBps: 200 })).toBe("905000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: "1", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("0");
+  });
+
+  it("refuses malformed inputs instead of producing a floor", () => {
+    expect(minimumSellerProceedsPerUnit({ priceWei: "0", marketplaceFeeBps: "250", royaltyBps: "500" })).toBeNull();
+    expect(minimumSellerProceedsPerUnit({ priceWei: "abc", marketplaceFeeBps: "250", royaltyBps: "500" })).toBeNull();
+    expect(minimumSellerProceedsPerUnit({ priceWei: "100", marketplaceFeeBps: "9000", royaltyBps: "900", toleranceBps: 200 })).toBeNull();
+  });
+
+  it("is never above what the contract's floor-rounded settlement pays the seller, for any price and quantity (property check)", () => {
+    for (const price of [1n, 7n, 39n, 40n, 333n, 999n, 12_345_678_901n, WEI, 3n * WEI + 1n]) {
+      for (const royaltyBps of [0n, 1n, 250n, 500n, 999n, 1000n]) {
+        const floor = BigInt(minimumSellerProceedsPerUnit({ priceWei: price, marketplaceFeeBps: 250, royaltyBps }));
+        for (const quantity of [1n, 2n, 3n, 7n, 100n]) {
+          const sale = price * quantity;
+          const proceeds = sale - (sale * 250n) / 10_000n - (sale * royaltyBps) / 10_000n; // the contract's arithmetic
+          expect(proceeds >= floor * quantity).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("protected listing transaction encoding", () => {
+  const iface = new Interface([
+    "function createListing(address,address,uint256,uint256,uint256,uint64)",
+    "function createListingWithMinProceeds(address,address,uint256,uint256,uint256,uint64,uint256)",
+    "function setMinSellerProceeds(uint256,uint256)",
+  ]);
+  const args = { contract: GENESIS, seller: SELLER, tokenId: "0", amount: "2", price: "1000000000000000000", expiresAt: 0 };
+
+  it("encodes exactly what the ABI encodes and leaves the V4-shaped encoding untouched", () => {
+    expect(encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "925000000000000000" }))
+      .toBe(iface.encodeFunctionData("createListingWithMinProceeds", [GENESIS, SELLER, 0, 2, "1000000000000000000", 0, "925000000000000000"]).toLowerCase());
+    expect(encodeSetMinSellerProceeds(5, "900")).toBe(iface.encodeFunctionData("setMinSellerProceeds", [5, 900]).toLowerCase());
+    expect(encodeCreateListing(args)).toBe(iface.encodeFunctionData("createListing", [GENESIS, SELLER, 0, 2, "1000000000000000000", 0]).toLowerCase());
+    expect(MARKETPLACE_SELECTORS.createListing).toBe("0x5201ea65");
+  });
+
+  it("will not encode a protected listing without a floor", () => {
+    expect(() => encodeCreateListingWithMinProceeds(args)).toThrow(/minimum seller proceeds/i);
+    expect(() => encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "-1" })).toThrow();
+  });
+
+  const chain = { id: 43114, chainId: 43114, hexId: "0xa86a" };
+  function wallet() {
+    const sent = [];
+    return { sent, request: vi.fn(async ({ method, params }) => {
+      if (method === "eth_chainId") return "0xa86a";
+      if (method === "eth_sendTransaction") { sent.push(params[0]); return "0xabc"; }
+      if (method === "eth_getTransactionReceipt") return { status: "0x1" };
+      throw new Error(`unexpected ${method}`);
+    }) };
+  }
+  const edition = { contractAddress: GENESIS };
+  const listing = { owner: SELLER, edition, chain, chainId: 43114, tokenId: "0", amount: "2", price: "1000000000000000000", expiresAt: 0 };
+
+  it("submits the protected function to the legacy marketplace, never the unprotected one, and refuses to submit without a floor", async () => {
+    const provider = wallet();
+    await submitListing({ ...listing, provider, marketplace: MARKET, minSellerProceedsPerUnit: "925000000000000000", legacy: active });
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].to).toBe(MARKET);
+    expect(provider.sent[0].data.startsWith("0x068773dd")).toBe(true);
+    const blocked = wallet();
+    await expect(submitListing({ ...listing, provider: blocked, marketplace: MARKET, legacy: active })).rejects.toThrow(/minimum seller proceeds/i);
+    expect(blocked.sent).toHaveLength(0);
+  });
+
+  it("keeps the V4 marketplace on the original V4-shaped call", async () => {
+    const provider = wallet();
+    await submitListing({ ...listing, provider, marketplace: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5", legacy: active });
+    expect(provider.sent[0].data.startsWith("0x5201ea65")).toBe(true);
   });
 });

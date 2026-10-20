@@ -48,6 +48,9 @@ contract LegacyCollectionMarketplace {
     bool public paused;
     mapping(address => Collection) private collections;
     mapping(uint256 => Listing) private listings;
+    /// @notice Seller-set floor on net proceeds, in wei per unit sold. 0 means no protection. Kept outside `Listing` so
+    /// `getListing`, `ListingCreated` and every V4-shaped consumer are unchanged.
+    mapping(uint256 => uint256) public minSellerProceedsPerUnit;
     bool private entered;
 
     event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt);
@@ -65,6 +68,7 @@ contract LegacyCollectionMarketplace {
     error FeeTooHigh(); error RoyaltyTooHigh(); error TransferFailed(); error Reentrancy(); error WrongDeploymentChain(uint256 expected, uint256 actual);
     error NotOwner(); error PausedMarket(); error UnsupportedCollection(); error UnsupportedToken(); error InvalidCollectionConfig();
     error RoyaltyReadFailed(); error RoyaltyAboveCap(); error InvalidRoyaltyReceiver();
+    error MinProceedsTooHigh(); error BelowMinimumProceeds(uint256 sellerProceeds, uint256 required);
 
     constructor(address feeRecipient_, uint256 platformFeeBps_, address owner_) {
         if (feeRecipient_ == address(0) || owner_ == address(0)) revert InvalidAddress();
@@ -111,7 +115,30 @@ contract LegacyCollectionMarketplace {
 
     // ------------------------------------------------------------------ listings
 
+    /// @notice V4-compatible listing without a proceeds floor. Frontends listing Genesis should use
+    /// `createListingWithMinProceeds`; this overload exists so V4-shaped clients keep working.
     function createListing(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt) external onlyDeploymentChain returns (uint256 listingId) {
+        return _createListing(tokenContract, seller, tokenId, amount, price, expiresAt, 0);
+    }
+
+    /// @notice Lists with a floor on the seller's net proceeds: a purchase of `q` units reverts unless the seller
+    /// receives at least `minSellerProceedsPerUnit_ * q` wei after the platform fee and the collection's royalty.
+    function createListingWithMinProceeds(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt, uint256 minSellerProceedsPerUnit_) external onlyDeploymentChain returns (uint256 listingId) {
+        return _createListing(tokenContract, seller, tokenId, amount, price, expiresAt, minSellerProceedsPerUnit_);
+    }
+
+    /// @notice Seller-only. Replaces the floor on an active listing (also while paused). The new floor must be
+    /// attainable at today's royalty, so a typo cannot silently make the listing unbuyable; use `cancelListing` for that.
+    function setMinSellerProceeds(uint256 listingId, uint256 minSellerProceedsPerUnit_) external onlyDeploymentChain {
+        Listing storage listing = listings[listingId];
+        if (listing.seller == address(0) || listing.status != Status.ACTIVE) revert ListingNotActive();
+        if (listing.seller != msg.sender) revert NotSeller();
+        _requireSupported(listing.tokenContract, listing.tokenId);
+        _requireAttainable(listing.tokenContract, listing.tokenId, listing.price, listing.amount, minSellerProceedsPerUnit_);
+        minSellerProceedsPerUnit[listingId] = minSellerProceedsPerUnit_;
+    }
+
+    function _createListing(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt, uint256 minPerUnit) private returns (uint256 listingId) {
         if (paused) revert PausedMarket();
         if (seller != msg.sender || seller == address(0) || tokenContract == address(0)) revert InvalidAddress();
         _requireSupported(tokenContract, tokenId);
@@ -125,8 +152,10 @@ contract LegacyCollectionMarketplace {
         // one unit and at the full quantity, since a collection's royaltyInfo need not be linear in the price.
         _settlement(tokenContract, tokenId, price);
         _settlement(tokenContract, tokenId, price * amount);
+        _requireAttainable(tokenContract, tokenId, price, amount, minPerUnit);
         listingId = nextListingId++;
         listings[listingId] = Listing(listingId, seller, tokenContract, tokenId, amount, price, uint64(block.timestamp), expiresAt, Status.ACTIVE);
+        if (minPerUnit != 0) minSellerProceedsPerUnit[listingId] = minPerUnit;
         emit ListingCreated(listingId, seller, tokenContract, tokenId, amount, price, expiresAt);
     }
 
@@ -169,6 +198,7 @@ contract LegacyCollectionMarketplace {
     /// Any failed transfer reverts the entire sale, including the token transfer and the listing update.
     function _settle(uint256 listingId, address seller, address tokenContract, uint256 tokenId, uint256 quantity, uint256 salePrice) private {
         (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds) = _settlement(tokenContract, tokenId, salePrice);
+        _requireMinimumProceeds(listingId, quantity, sellerProceeds);
         IERC1155ReleaseMarketplace(tokenContract).safeTransferFrom(seller, msg.sender, tokenId, quantity, "");
         _pay(feeRecipient, platformFee);
         _pay(royaltyReceiver, royaltyAmount);
@@ -225,6 +255,24 @@ contract LegacyCollectionMarketplace {
         platformFee = (salePrice * platformFeeBps) / BPS_DENOMINATOR;
         if (platformFee + royaltyAmount > salePrice) revert RoyaltyTooHigh();
         sellerProceeds = salePrice - platformFee - royaltyAmount;
+    }
+
+    /// @dev The seller's floor, in net wei for this purchase. Evaluated on the actual proceeds of this exact sale
+    /// (price x quantity, live royaltyInfo), so changing quantity, price or royalty cannot get around it.
+    function _requireMinimumProceeds(uint256 listingId, uint256 quantity, uint256 sellerProceeds) private view {
+        uint256 required = minSellerProceedsPerUnit[listingId] * quantity;
+        if (sellerProceeds < required) revert BelowMinimumProceeds(sellerProceeds, required);
+    }
+
+    /// @dev A floor must not exceed the unit price and must be deliverable at today's royalty for one unit and for the
+    /// whole remaining quantity. Intermediate quantities are still checked at purchase time.
+    function _requireAttainable(address tokenContract, uint256 tokenId, uint256 price, uint256 amount, uint256 minPerUnit) private view {
+        if (minPerUnit == 0) return;
+        if (minPerUnit > price) revert MinProceedsTooHigh();
+        (,,, uint256 proceedsOne) = _settlement(tokenContract, tokenId, price);
+        if (proceedsOne < minPerUnit) revert MinProceedsTooHigh();
+        (,,, uint256 proceedsAll) = _settlement(tokenContract, tokenId, price * amount);
+        if (proceedsAll < minPerUnit * amount) revert MinProceedsTooHigh();
     }
 
     function _supportsInterface(address tokenContract, bytes4 interfaceId) private view returns (bool) {

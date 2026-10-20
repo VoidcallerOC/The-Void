@@ -33,3 +33,6 @@ royalty settlement on mainnet) are UNVERIFIED: they need funded wallets and sign
 
 
 See `docs/adr/0001-genesis-legacy-collection-marketplace.md` for the compatibility design.
+
+## Royalty provenance (added 2026-10-20)
+Genesis's 5% is the Launchpeg initializer default (`_setDefaultRoyalty(initData.royaltyReceiver, 500)`), paid to `0x284C…180a`, never changed (no `DefaultRoyaltySet` event on the proxy). The 2.5% artist royalty is a policy for new Void factory releases, enforced by `VoidRelease1155V4Royalty` and `ReleaseMarketplaceV4`; it does not apply to Genesis, and nothing here changes either arrangement. Details and the seller-proceeds table: ADR 0001.
