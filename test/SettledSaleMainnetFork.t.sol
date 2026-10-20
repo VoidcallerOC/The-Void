@@ -19,6 +19,10 @@ interface VmSettledFork {
     function etch(address, bytes calldata) external;
 }
 
+interface IGenesisBalanceFork {
+    function balanceOf(address account, uint256 id) external view returns (uint256);
+}
+
 /// @dev A minter that an artist (release admin) could authorize in place of the sale. It mints with no fee.
 contract ForkRogueMinter {
     VoidRelease1155V4 internal immutable release;
@@ -323,6 +327,28 @@ contract SettledSaleMainnetForkTest {
         require(release.edition(TOKEN).mintedSupply == b.minted && address(newSale).balance == 0 && newSale.balances(ARTIST) == 0, "no mint, no escrow, no artist credit");
         (,, uint256 soldNew,,,,,) = newSale.sales(TOKEN);
         require(soldNew == 0 && newSale.walletPurchased(TOKEN, FAN) == 0, "no sale recorded");
+    }
+
+    function testGenesisBalancesAndCodeAreUnchangedByActivationAndSettledPurchases() public onlyFork {
+        _forkLatest();
+        IGenesisBalanceFork genesis = IGenesisBalanceFork(0xD1B4367dd9f235f9ee61878019d66E31511E98eE);
+        bytes32 codeBefore = keccak256(address(genesis).code);
+        address[5] memory holders = [FAN, ARTIST, PLATFORM, OLD_SALE, HIST_BUYER];
+        uint256[20] memory before_;
+        for (uint256 h = 0; h < 5; h++) {
+            for (uint256 id = 0; id < 4; id++) before_[h * 4 + id] = genesis.balanceOf(holders[h], id);
+        }
+
+        _activate();
+        _configureNewSale();
+        _buyNew(FAN);
+
+        require(keccak256(address(genesis).code) == codeBefore, "Genesis code unchanged");
+        for (uint256 h = 0; h < 5; h++) {
+            for (uint256 id = 0; id < 4; id++) {
+                require(genesis.balanceOf(holders[h], id) == before_[h * 4 + id], "Genesis balance changed");
+            }
+        }
     }
 
     // ------------------------------------------------------------------ (f) the real marketplace
