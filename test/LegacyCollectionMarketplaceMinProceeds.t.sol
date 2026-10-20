@@ -59,14 +59,13 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
 
     function testV4ShapedSelectorsAndEventsAreUnchanged() public pure {
         // These are the values the frontend (src/lib/marketplace.js) and the indexer (server/marketplace-events.js) hardcode or derive.
-        require(LegacyCollectionMarketplace.createListing.selector == 0x5201ea65, "createListing");
         require(LegacyCollectionMarketplace.cancelListing.selector == 0x305a67a8, "cancelListing");
         require(LegacyCollectionMarketplace.buy.selector == 0xd6febde8, "buy");
         require(LegacyCollectionMarketplace.getListing.selector == 0x107a274a, "getListing");
         require(keccak256("ListingCreated(uint256,address,address,uint256,uint256,uint256,uint64)") == 0xd805c12164ca2f60bbd92cc6343c957e7813dff1eb56a4c62519c3222cd6bd19, "ListingCreated topic");
         require(keccak256("ListingSold(uint256,address,address,address,uint256,uint256,uint256,uint256,uint256)") == 0x2b7afc2686848b44bb9d680f07613f88a940454a6a60984a092cd305a781e811, "ListingSold topic");
         require(keccak256("ListingCancelled(uint256)") == 0x411aee90354c51b1b04cd563fcab2617142a9d50da19232d888547c8a1b7fd8a, "ListingCancelled topic");
-        // New entry points are additive and distinct from the V4-shaped ones.
+        // The only creation entry point; the V4-shaped createListing (0x5201ea65) is deliberately absent (see the listing-path tests).
         require(LegacyCollectionMarketplace.createListingWithMinProceeds.selector == 0x068773dd, "createListingWithMinProceeds");
         require(LegacyCollectionMarketplace.setMinSellerProceeds.selector == 0x69ce933d, "setMinSellerProceeds");
     }
@@ -250,13 +249,16 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
         market.cancelListing(id);
     }
 
-    function testListingWithoutAFloorStillWorksAndHasNone() public {
+    /// A trivially small floor is still an explicit, stored, non-zero seller choice: the listing then accepts any royalty the cap allows.
+    /// (The app never sends one; the semantics are pinned here so the audit and the UI copy describe the contract truthfully.)
+    function testATinyFloorIsAnExplicitChoiceThatAcceptsAnyRoyaltyUpToTheCap() public {
         vm.prank(SELLER);
-        uint256 id = market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0);
-        require(market.minSellerProceedsPerUnit(id) == 0, "V4-shaped listing carries no floor");
-        genesis.setRoyalty(CREATOR, 900);
+        uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 0, 1);
+        require(market.minSellerProceedsPerUnit(id) == 1, "the floor is stored exactly as given");
+        genesis.setRoyalty(CREATOR, 900); // within this fixture's 1000 bps cap
+        uint256 sellerBefore = SELLER.balance;
         (bool ok,) = buyCall(id, 1, PRICE);
-        require(ok, "unprotected listing sells at the live royalty (the documented risk of the V4-shaped overload)");
+        require(ok && SELLER.balance - sellerBefore == 0.885 ether, "sells at the live 9% royalty because the seller chose a 1 wei floor");
     }
 
     // ---------------------------------------------------------------- failed payments and reentrancy with a floor

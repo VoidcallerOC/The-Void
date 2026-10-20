@@ -74,7 +74,16 @@ describe("source tripwire: the contract's owner powers and dangerous constructs 
   const externals = declarations.filter((item) => /\b(external|public)\b/.test(item.header)).map((item) => item.name).sort();
 
   it("exposes exactly the reviewed external surface (a new public function must be reviewed and added here)", () => {
-    expect(externals).toEqual(["acceptOwnership", "allowCollection", "buy", "cancelListing", "createListing", "createListingWithMinProceeds", "disableCollection", "expireListing", "getCollection", "getListing", "isSupported", "listingStatus", "previewSettlement", "setMinSellerProceeds", "setPaused", "transferOwnership"]);
+    expect(externals).toEqual(["acceptOwnership", "allowCollection", "buy", "cancelListing", "createListingWithMinProceeds", "disableCollection", "expireListing", "getCollection", "getListing", "isSupported", "listingStatus", "previewSettlement", "setMinSellerProceeds", "setPaused", "transferOwnership"]);
+  });
+
+  it("has exactly one way to create a listing, with the floor mandatory and the V4-shaped createListing absent", () => {
+    expect(code).not.toMatch(/function\s+createListing\s*\(/);
+    expect((code.match(/\blistings\[\w+\]\s*=\s*Listing\(/g) || []).length).toBe(1); // the only place a listing is written
+    expect((code.match(/\b_createListing\(/g) || []).length).toBe(2); // the definition and the single external caller
+    expect(code).toMatch(/if \(minPerUnit == 0\) revert MinProceedsRequired\(\);/);
+    expect((code.match(/_requireAttainable\(/g) || []).length).toBe(3); // definition + create + setMinSellerProceeds
+    expect(code).not.toMatch(/minSellerProceedsPerUnit\[\w+\]\s*=\s*0\b/);
   });
 
   it("gives the owner only collection management, pause and ownership transfer", () => {

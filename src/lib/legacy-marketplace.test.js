@@ -117,7 +117,9 @@ describe("seller minimum-proceeds floor (client side)", () => {
     expect(minimumSellerProceedsPerUnit({ priceWei: "333", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("308");
     expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "250", royaltyBps: "0" })).toBe("975000000000000000");
     expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "250", royaltyBps: "500", toleranceBps: 200 })).toBe("905000000000000000");
-    expect(minimumSellerProceedsPerUnit({ priceWei: "1", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("0");
+    // At 1 wei the exact-rate share rounds to 0: no valid (non-zero) floor exists, so there is nothing to send.
+    expect(minimumSellerProceedsPerUnit({ priceWei: "1", marketplaceFeeBps: "250", royaltyBps: "500" })).toBeNull();
+    expect(minimumSellerProceedsPerUnit({ priceWei: "2", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("1");
   });
 
   it("refuses malformed inputs instead of producing a floor", () => {
@@ -129,7 +131,9 @@ describe("seller minimum-proceeds floor (client side)", () => {
   it("is never above what the contract's floor-rounded settlement pays the seller, for any price and quantity (property check)", () => {
     for (const price of [1n, 7n, 39n, 40n, 333n, 999n, 12_345_678_901n, WEI, 3n * WEI + 1n]) {
       for (const royaltyBps of [0n, 1n, 250n, 500n, 999n, 1000n]) {
-        const floor = BigInt(minimumSellerProceedsPerUnit({ priceWei: price, marketplaceFeeBps: 250, royaltyBps }));
+        const floorText = minimumSellerProceedsPerUnit({ priceWei: price, marketplaceFeeBps: 250, royaltyBps });
+        if (floorText === null) continue; // no non-zero floor exists at this price; the app does not offer the listing
+        const floor = BigInt(floorText);
         for (const quantity of [1n, 2n, 3n, 7n, 100n]) {
           const sale = price * quantity;
           const proceeds = sale - (sale * 250n) / 10_000n - (sale * royaltyBps) / 10_000n; // the contract's arithmetic
@@ -159,6 +163,8 @@ describe("protected listing transaction encoding", () => {
   it("will not encode a protected listing without a floor", () => {
     expect(() => encodeCreateListingWithMinProceeds(args)).toThrow(/minimum seller proceeds/i);
     expect(() => encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "-1" })).toThrow();
+    expect(() => encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "0" })).toThrow(/non-zero/i);
+    expect(() => encodeSetMinSellerProceeds(5, "0")).toThrow(/non-zero/i);
   });
 
   const chain = { id: 43114, chainId: 43114, hexId: "0xa86a" };

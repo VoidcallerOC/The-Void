@@ -243,13 +243,27 @@ export async function readLegacyListingContext({ provider, marketplaceAddress, m
  * royalty, the seller's actual proceeds for any quantity are never below this, so a sale at today's royalty always clears it
  * and any royalty increase (however small) makes the purchase revert instead of paying the seller less.
  * `toleranceBps` lets a seller accept a bounded increase; it lowers the floor by that share of the unit price.
+ * Returns null when no valid (non-zero) floor exists.
  */
 export function minimumSellerProceedsPerUnit({ priceWei, marketplaceFeeBps, royaltyBps, toleranceBps = 0 }) {
   if (![priceWei, marketplaceFeeBps, royaltyBps, toleranceBps].every((value) => /^\d+$/.test(String(value)))) return null;
   const price = BigInt(priceWei);
   const keepBps = 10_000n - BigInt(marketplaceFeeBps) - BigInt(royaltyBps) - BigInt(toleranceBps);
   if (price <= 0n || keepBps < 0n) return null;
-  return ((price * keepBps) / 10_000n).toString();
+  const floor = (price * keepBps) / 10_000n;
+  // The marketplace requires a non-zero floor. At prices so small that the exact-rate share rounds to 0 wei (about 1 wei) no
+  // protective floor exists, so the listing must not be offered rather than sent to fail on chain.
+  return floor > 0n ? floor.toString() : null;
+}
+
+/**
+ * The seller-facing terms of the proceeds floor, for display and for what is sent: per edition and for the whole listing.
+ * Null when no valid floor exists (see `minimumSellerProceedsPerUnit`).
+ */
+export function sellerFloorTerms({ priceWei, amount, marketplaceFeeBps, royaltyBps, toleranceBps = 0 }) {
+  const perUnitWei = minimumSellerProceedsPerUnit({ priceWei, marketplaceFeeBps, royaltyBps, toleranceBps });
+  if (perUnitWei === null || !/^\d+$/.test(String(amount)) || BigInt(amount) <= 0n) return null;
+  return Object.freeze({ perUnitWei, totalWei: (BigInt(perUnitWei) * BigInt(amount)).toString(), royaltyBps: String(royaltyBps), toleranceBps: Number(toleranceBps) });
 }
 
 export function calculateListingEconomics({ priceWei, amount, marketplaceFeeBps, royaltyBps }) {

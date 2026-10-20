@@ -147,7 +147,7 @@ contract LegacyCollectionMarketplaceTest {
 
     function list(uint256 id, uint256 amount, uint256 price) internal returns (uint256) {
         vm.prank(SELLER);
-        return market.createListing(address(genesis), SELLER, id, amount, price, 0);
+        return market.createListingWithMinProceeds(address(genesis), SELLER, id, amount, price, 0, 1);
     }
 
     function expectFail(bytes memory call, address from, uint256 value) internal returns (bytes memory err) {
@@ -176,12 +176,12 @@ contract LegacyCollectionMarketplaceTest {
         vm.prank(SELLER);
         other.setApprovalForAll(address(market), true);
         vm.prank(SELLER);
-        try market.createListing(address(other), SELLER, 0, 1, PRICE, 0) { revert("other collection listed"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(other), SELLER, 0, 1, PRICE, 0, 1) { revert("other collection listed"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.UnsupportedCollection.selector, "UnsupportedCollection");
         }
         genesis.mint(SELLER, 4, 1);
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 4, 1, PRICE, 0) { revert("token 4 listed"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 4, 1, PRICE, 0, 1) { revert("token 4 listed"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.UnsupportedToken.selector, "UnsupportedToken");
         }
     }
@@ -212,13 +212,13 @@ contract LegacyCollectionMarketplaceTest {
     // 3. Seller cannot list tokens they do not own (or more than they own).
     function testCannotListUnownedOrExcessQuantity() public {
         vm.prank(STRANGER);
-        try market.createListing(address(genesis), STRANGER, 0, 1, PRICE, 0) { revert("unowned"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), STRANGER, 0, 1, PRICE, 0, 1) { revert("unowned"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.InsufficientBalance.selector, "InsufficientBalance");
         }
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 6, PRICE, 0) { revert("more than owned"); } catch {}
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 6, PRICE, 0, 1) { revert("more than owned"); } catch {}
         vm.prank(STRANGER);
-        try market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0) { revert("listing on behalf of another"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 0, 1) { revert("listing on behalf of another"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.InvalidAddress.selector, "InvalidAddress");
         }
     }
@@ -228,7 +228,7 @@ contract LegacyCollectionMarketplaceTest {
         vm.prank(SELLER);
         genesis.setApprovalForAll(address(market), false);
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0) { revert("listed without approval"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 0, 1) { revert("listed without approval"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.InsufficientApproval.selector, "InsufficientApproval");
         }
         vm.prank(SELLER);
@@ -315,7 +315,7 @@ contract LegacyCollectionMarketplaceTest {
             expectFail(abi.encodeCall(market.buy, (id, 1)), BUYER, PRICE);
             require(genesis.balanceOf(BUYER, 0) == 0 && genesis.balanceOf(SELLER, 0) == 5, "no transfer on bad royalty");
             vm.prank(SELLER);
-            try market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0) { revert("listing with unreadable royalty"); } catch {}
+            try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 0, 1) { revert("listing with unreadable royalty"); } catch {}
         }
         genesis.setRoyaltyMode(0);
         // Royalty raised above the cap by the collection owner after listing.
@@ -343,7 +343,7 @@ contract LegacyCollectionMarketplaceTest {
         vm.prank(address(contractSeller));
         genesis.setApprovalForAll(address(market), true);
         vm.prank(address(contractSeller));
-        uint256 id2 = market.createListing(address(genesis), address(contractSeller), 1, 1, PRICE, 0);
+        uint256 id2 = market.createListingWithMinProceeds(address(genesis), address(contractSeller), 1, 1, PRICE, 0, 1);
         err = expectFail(abi.encodeCall(market.buy, (id2, 1)), BUYER, PRICE);
         require(selector(err) == LegacyCollectionMarketplace.TransferFailed.selector, "seller payout failure reverts");
         require(genesis.balanceOf(address(contractSeller), 1) == 1, "token stays with seller");
@@ -353,14 +353,14 @@ contract LegacyCollectionMarketplaceTest {
     function testListingValidatedAtFullQuantityAndGasGriefingRoyaltyIsBounded() public {
         genesis.setRoyaltyMode(5);
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 2, PRICE, 0) { revert("bulk royalty above cap listed"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 2, PRICE, 0, 1) { revert("bulk royalty above cap listed"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.RoyaltyAboveCap.selector, "RoyaltyAboveCap at full quantity");
         }
         vm.prank(SELLER);
-        market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0); // one unit is fine
+        market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 0, 1); // one unit is fine
         genesis.setRoyaltyMode(6);
         vm.prank(SELLER);
-        (bool ok,) = address(market).call{gas: 3_000_000}(abi.encodeCall(market.createListing, (address(genesis), SELLER, 0, 1, PRICE, uint64(0))));
+        (bool ok,) = address(market).call{gas: 3_000_000}(abi.encodeCall(market.createListingWithMinProceeds, (address(genesis), SELLER, 0, 1, PRICE, uint64(0), 1)));
         require(!ok, "gas-burning royaltyInfo refused, not run to exhaustion");
     }
 
@@ -398,12 +398,12 @@ contract LegacyCollectionMarketplaceTest {
     // 13. Invalid quantities, prices, stale and duplicate purchases.
     function testInvalidInputsStaleAndDuplicatePurchases() public {
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 0, PRICE, 0) { revert("zero amount"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidAmount.selector, "InvalidAmount"); }
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 0, PRICE, 0, 1) { revert("zero amount"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidAmount.selector, "InvalidAmount"); }
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 1, 0, 0) { revert("zero price"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidPrice.selector, "InvalidPrice"); }
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 0, 0, 1) { revert("zero price"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidPrice.selector, "InvalidPrice"); }
         vm.warp(1000);
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 1, PRICE, 999) { revert("expiry in the past"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidExpiry.selector, "InvalidExpiry"); }
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 999, 1) { revert("expiry in the past"); } catch (bytes memory e) { require(selector(e) == LegacyCollectionMarketplace.InvalidExpiry.selector, "InvalidExpiry"); }
 
         uint256 id = list(0, 1, PRICE);
         bytes memory err = expectFail(abi.encodeCall(market.buy, (id, 0)), BUYER, 0);
@@ -433,7 +433,7 @@ contract LegacyCollectionMarketplaceTest {
         // Expiry.
         genesis.mint(SELLER, 0, 1);
         vm.prank(SELLER);
-        uint256 id3 = market.createListing(address(genesis), SELLER, 0, 1, PRICE, 2000);
+        uint256 id3 = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, PRICE, 2000, 1);
         vm.warp(2001);
         err = expectFail(abi.encodeCall(market.buy, (id3, 1)), BUYER, PRICE);
         require(selector(err) == LegacyCollectionMarketplace.Expired.selector, "expired");
@@ -444,10 +444,10 @@ contract LegacyCollectionMarketplaceTest {
         // A price whose arithmetic overflows can never be listed, so price * quantity can never underpay.
         genesis.mint(SELLER, 0, 2);
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 2, type(uint256).max / 2 + 1, 0) { revert("overflowing price listed"); } catch {}
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 2, type(uint256).max / 2 + 1, 0, 1) { revert("overflowing price listed"); } catch {}
         // A large but safe price still cannot be bought with a wrapped-around payment.
         vm.prank(SELLER);
-        uint256 id4 = market.createListing(address(genesis), SELLER, 0, 2, type(uint256).max / 20_000, 0);
+        uint256 id4 = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 2, type(uint256).max / 20_000, 0, 1);
         err = expectFail(abi.encodeCall(market.buy, (id4, 2)), BUYER, 1);
         require(selector(err) == LegacyCollectionMarketplace.IncorrectPayment.selector, "wrong payment refused");
     }

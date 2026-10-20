@@ -78,7 +78,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.prank(HOLDER);
         GENESIS.setApprovalForAll(address(market), true); // passes the real operator filter
         vm.prank(HOLDER);
-        uint256 id = market.createListing(address(GENESIS), HOLDER, 0, 2, PRICE, 0);
+        uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 2, PRICE, 0, 1);
 
         uint256 holderBefore = GENESIS.balanceOf(HOLDER, 0);
         uint256 holderAvax = HOLDER.balance;
@@ -107,7 +107,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         if (!forked) return;
         // No approval from the holder yet: listing must be refused.
         vm.prank(HOLDER);
-        (bool ok,) = address(market).call(abi.encodeCall(market.createListing, (address(GENESIS), HOLDER, 0, 1, PRICE, uint64(0))));
+        (bool ok,) = address(market).call(abi.encodeCall(market.createListingWithMinProceeds, (address(GENESIS), HOLDER, 0, 1, PRICE, uint64(0), 1)));
         require(!ok, "unapproved listing refused");
     }
 
@@ -156,7 +156,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
             require(CREATOR.balance - creatorBefore == 0.05 ether && HOLDER.balance - holderBefore == 0.925 ether, "5% / 92.5%");
         }
         vm.prank(HOLDER);
-        (bool ok,) = address(market).call(abi.encodeCall(market.createListing, (address(GENESIS), HOLDER, 4, 1, PRICE, uint64(0))));
+        (bool ok,) = address(market).call(abi.encodeCall(market.createListingWithMinProceeds, (address(GENESIS), HOLDER, 4, 1, PRICE, uint64(0), 1)));
         require(!ok, "id 4 is outside the allowlisted scope");
     }
 }

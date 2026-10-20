@@ -25,7 +25,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isLegacyMarketplace } from "../../config/legacy-collection-marketplace.js";
-import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, minimumSellerProceedsPerUnit } from "../lib/secondary-listing.js";
+import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, sellerFloorTerms } from "../lib/secondary-listing.js";
 import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
@@ -122,6 +122,9 @@ export function ListingPanel({ edition }) {
   const economics = context && priceWei
     ? calculateListingEconomics({ priceWei, amount, marketplaceFeeBps: context.marketplaceFeeBps, royaltyBps: context.royaltyBps })
     : null;
+  // LegacyCollectionMarketplace only: the minimum the seller will accept, derived from the fee and royalty they reviewed. Zero tolerance:
+  // any royalty increase after listing makes a purchase revert instead of paying the seller less.
+  const sellerFloor = legacyMarketplace && context && priceWei ? sellerFloorTerms({ priceWei, amount, marketplaceFeeBps: context.marketplaceFeeBps, royaltyBps: context.royaltyBps }) : null;
   const busy = ["approval", "listing", "cancelling", "pending"].includes(stage);
   const canReview = stage === "ready" && Boolean(wallet.authenticated) && Boolean(context) && !busy;
   const inputDisabled = stage !== "ready" || busy || !wallet.authenticated;
@@ -247,6 +250,7 @@ export function ListingPanel({ edition }) {
     if (BigInt(amount || "0") > BigInt(context.balance)) return `Quantity exceeds the on-chain balance of ${context.balance}.`;
     if (!priceWei) return "Enter a valid native AVAX price with no more than 18 decimals.";
     if (!economics) return "The current marketplace fee and edition royalty do not leave valid seller proceeds.";
+    if (legacyMarketplace && !sellerFloor) return "This price is too low to set a protective minimum payout. Choose a higher price.";
     if (expiresAt && (!Number.isFinite(new Date(expiresAt).getTime()) || expiringSeconds <= Math.floor(Date.now() / 1000))) return "Expiration must be a valid future date and time.";
     return validateListingDraft({ seller: wallet.account, contract, tokenId, amount, price: priceWei, expiresAt: expiresAt ? new Date(expiresAt).getTime() : 0 });
   };
@@ -287,6 +291,9 @@ export function ListingPanel({ edition }) {
       return;
     }
     const provider = wallet.getProvider();
+    // What the seller reviewed is what is signed: the floor and royalty shown at review, never a recomputed one.
+    const reviewedFloor = sellerFloor;
+    const reviewedRoyaltyBps = context.royaltyBps;
     let receiptObserved = false;
     let observedTransactionHash = "";
     try {
@@ -322,6 +329,9 @@ export function ListingPanel({ edition }) {
       });
       if (BigInt(afterApproval.balance) < BigInt(amount)) throw Object.assign(new Error("The wallet no longer holds the selected listing quantity."), { code: "NOT_OWNER" });
       if (!afterApproval.approved) throw Object.assign(new Error("The marketplace approval did not verify on chain. Listing was not sent."), { code: "APPROVAL_NOT_VERIFIED" });
+      if (legacyMarketplace && (!reviewedFloor || String(afterApproval.royaltyBps) !== String(reviewedRoyaltyBps))) {
+        throw Object.assign(new Error(`The edition royalty changed from ${bpsLabel(reviewedRoyaltyBps)} to ${bpsLabel(afterApproval.royaltyBps)} since you reviewed this listing. Nothing was sent. Review the listing again.`), { code: "ROYALTY_CHANGED" });
+      }
       const duplicateAfterApproval = await refreshActiveListings();
       if (duplicateAfterApproval) throw Object.assign(new Error("An active indexed listing appeared while approval was being confirmed. No duplicate listing was sent."), { code: "ACTIVE_LISTING_EXISTS", listing: duplicateAfterApproval });
 
@@ -338,7 +348,7 @@ export function ListingPanel({ edition }) {
         price: priceWei,
         expiresAt: expiringSeconds,
         // Legacy-collection marketplace only: the purchase reverts unless the seller nets at least this per unit.
-        minSellerProceedsPerUnit: legacyMarketplace ? minimumSellerProceedsPerUnit({ priceWei, marketplaceFeeBps: afterApproval.marketplaceFeeBps, royaltyBps: afterApproval.royaltyBps }) : undefined,
+        minSellerProceedsPerUnit: legacyMarketplace ? reviewedFloor.perUnitWei : undefined,
       });
       receiptObserved = Boolean(receipt);
       observedTransactionHash = String(receipt?.transactionHash || "");
@@ -533,6 +543,7 @@ export function ListingPanel({ edition }) {
             {priceWei && economics
               ? `LISTING TOTAL ${formatWeiAsAvax(economics.grossWei)} · ESTIMATED SELLER PROCEEDS ${formatWeiAsAvax(economics.sellerProceedsWei)}`
               : "Enter a price to calculate marketplace fee, edition royalty and estimated seller proceeds from on-chain settings."}
+            {legacyMarketplace && sellerFloor ? ` · MINIMUM YOU WILL ACCEPT ${formatWeiAsAvax(sellerFloor.perUnitWei)} PER EDITION` : ""}
           </div>
           <div style={{ gridColumn: "1 / -1", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <Btn onClick={review} disabled={!wallet.authenticated || !context}>REVIEW LISTING</Btn>
@@ -552,9 +563,15 @@ export function ListingPanel({ edition }) {
             <div><dt style={{ color: "var(--vc-bone-dim)" }}>MARKETPLACE FEE · {bpsLabel(context.marketplaceFeeBps)}</dt><dd style={{ margin: "4px 0" }}>{formatWeiAsAvax(economics?.marketplaceFeeWei)}</dd></div>
             <div><dt style={{ color: "var(--vc-bone-dim)" }}>ARTIST ROYALTY · {bpsLabel(context.royaltyBps)}</dt><dd style={{ margin: "4px 0" }}>{formatWeiAsAvax(economics?.royaltyWei)}</dd></div>
             <div><dt style={{ color: "var(--vc-bone-dim)" }}>ESTIMATED SELLER PROCEEDS · {bpsLabel(economics?.sellerProceedsBps)}</dt><dd style={{ margin: "4px 0" }}>{formatWeiAsAvax(economics?.sellerProceedsWei)}</dd></div>
+            {legacyMarketplace && sellerFloor && (
+              <div><dt style={{ color: "var(--vc-bone-dim)" }}>MINIMUM YOU WILL ACCEPT</dt><dd style={{ margin: "4px 0" }}>{formatWeiAsAvax(sellerFloor.perUnitWei)} per edition · {formatWeiAsAvax(sellerFloor.totalWei)} for {amount}</dd></div>
+            )}
             <div><dt style={{ color: "var(--vc-bone-dim)" }}>EXPIRATION</dt><dd style={{ margin: "4px 0" }}>{expiresAt ? new Date(expiresAt).toLocaleString() : "No expiry"}</dd></div>
           </dl>
           <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.6 }}>Rates come from the configured marketplace contract and this edition’s on-chain royalty. Amounts are estimates using the marketplace’s integer rounding. Confirming may request a separate ERC-1155 approval transaction.</p>
+          {legacyMarketplace && sellerFloor && (
+            <p role="note" style={{ color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.6 }}>PROTECTED LISTING · You will never receive less than {formatWeiAsAvax(sellerFloor.perUnitWei)} per edition. That is today’s {bpsLabel(context.royaltyBps)} edition royalty and {bpsLabel(context.marketplaceFeeBps)} marketplace fee, with no tolerance added. If the collection raises its royalty before a sale so you would receive less, the purchase fails and nothing moves; the listing then stays unsold until you cancel it and list again. The creator royalty is set by the collection, not by this marketplace.</p>
+          )}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Btn onClick={confirmListing} disabled={!canReview || !economics}>CONFIRM LISTING</Btn>
             <button type="button" onClick={() => setReviewKey("")} style={{ ...field, width: "auto", cursor: "pointer" }}>EDIT DETAILS</button>

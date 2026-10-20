@@ -64,10 +64,10 @@ export function validateListingDraft({ seller, contract, tokenId, amount, price,
 export function encodeCreateListing({ contract, seller, tokenId, amount, price, expiresAt = 0 }) { return SELECTORS.createListing + addressWord(contract) + addressWord(seller) + word(tokenId) + word(amount) + word(price) + word(expiresAt); }
 // LegacyCollectionMarketplace only: the same listing plus a floor on the seller's net proceeds, in wei per unit sold.
 export function encodeCreateListingWithMinProceeds({ contract, seller, tokenId, amount, price, expiresAt = 0, minSellerProceedsPerUnit }) {
-  if (!/^\d+$/.test(String(minSellerProceedsPerUnit ?? ""))) throw new Error("A minimum seller proceeds amount is required for this marketplace.");
+  if (!/^\d+$/.test(String(minSellerProceedsPerUnit ?? "")) || BigInt(minSellerProceedsPerUnit) <= 0n) throw new Error("A non-zero minimum seller proceeds amount is required for this marketplace.");
   return SELECTORS.createListingWithMinProceeds + addressWord(contract) + addressWord(seller) + word(tokenId) + word(amount) + word(price) + word(expiresAt) + word(minSellerProceedsPerUnit);
 }
-export function encodeSetMinSellerProceeds(listingId, minSellerProceedsPerUnit) { return SELECTORS.setMinSellerProceeds + word(listingId) + word(minSellerProceedsPerUnit); }
+export function encodeSetMinSellerProceeds(listingId, minSellerProceedsPerUnit) { if (!/^\d+$/.test(String(minSellerProceedsPerUnit ?? "")) || BigInt(minSellerProceedsPerUnit) <= 0n) throw new Error("A non-zero minimum seller proceeds amount is required for this marketplace."); return SELECTORS.setMinSellerProceeds + word(listingId) + word(minSellerProceedsPerUnit); }
 export function encodeCancelListing(listingId) { return SELECTORS.cancelListing + word(listingId); }
 export function encodeBuy(listingId, quantity = 1) { return SELECTORS.buy + word(listingId) + word(quantity); }
 export function encodeApproval(marketplace, approved = true) { return SELECTORS.approval + addressWord(marketplace) + boolWord(approved); }

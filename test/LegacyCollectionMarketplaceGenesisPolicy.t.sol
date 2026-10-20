@@ -55,15 +55,15 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     function testTokenIdsOutsideTheScopeAreRefusedForListingAndForExistingListings() public {
         for (uint256 id = 4; id <= 5; id++) {
             vm.prank(SELLER);
-            try market.createListing(address(genesis), SELLER, id, 1, 1 ether, 0) { revert("out-of-scope id listed"); } catch (bytes memory e) {
+            try market.createListingWithMinProceeds(address(genesis), SELLER, id, 1, 1 ether, 0, 1) { revert("out-of-scope id listed"); } catch (bytes memory e) {
                 require(selector(e) == LegacyCollectionMarketplace.UnsupportedToken.selector, "UnsupportedToken");
             }
         }
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, type(uint256).max, 1, 1 ether, 0) { revert("max id listed"); } catch {}
+        try market.createListingWithMinProceeds(address(genesis), SELLER, type(uint256).max, 1, 1 ether, 0, 1) { revert("max id listed"); } catch {}
         // Narrowing the range after listing makes the existing listing unbuyable but still cancelable.
         vm.prank(SELLER);
-        uint256 listingId = market.createListing(address(genesis), SELLER, 3, 1, 1 ether, 0);
+        uint256 listingId = market.createListingWithMinProceeds(address(genesis), SELLER, 3, 1, 1 ether, 0, 1);
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 500, 0, 2);
         vm.prank(BUYER);
@@ -76,14 +76,14 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     function testRoyaltyAtTheCapIsAcceptedAndOneBpsAboveIsRefused() public {
         genesis.setRoyalty(CREATOR, 500);
         vm.prank(SELLER);
-        uint256 listingId = market.createListing(address(genesis), SELLER, 0, 1, 1 ether, 0);
+        uint256 listingId = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 1 ether, 0, 1);
         genesis.setRoyalty(CREATOR, 501);
         vm.prank(BUYER);
         (bool ok, bytes memory ret) = address(market).call{value: 1 ether}(abi.encodeCall(market.buy, (listingId, 1)));
         require(!ok && selector(ret) == LegacyCollectionMarketplace.RoyaltyAboveCap.selector, "501 bps refused");
         require(genesis.balanceOf(BUYER, 0) == 0 && BUYER.balance == 1_000_000 ether, "nothing moved");
         vm.prank(SELLER);
-        try market.createListing(address(genesis), SELLER, 0, 1, 1 ether, 0) { revert("listing above the cap"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 1 ether, 0, 1) { revert("listing above the cap"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.RoyaltyAboveCap.selector, "refused at listing too");
         }
         genesis.setRoyalty(CREATOR, 500);
@@ -123,7 +123,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         vm.prank(SELLER);
         uint256 protectedId = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 1 ether, 0, 0.925 ether);
         vm.prank(SELLER);
-        uint256 unprotectedId = market.createListing(address(genesis), SELLER, 1, 1, 1 ether, 0);
+        uint256 unprotectedId = market.createListingWithMinProceeds(address(genesis), SELLER, 1, 1, 1 ether, 0, 1);
 
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 1000, 0, 3); // the widest cap the contract permits
@@ -156,7 +156,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
 
     /// settlement conservation, exact rounding and the seller-floor invariant for arbitrary price, quantity and royalty <= cap
     function testFuzzSettlementMatchesTheDocumentedFormulaAndNeverShortsTheFloor(uint96 priceRaw, uint8 qRaw, uint16 bpsRaw) public {
-        uint256 price = uint256(priceRaw) % 1e22 + 1;
+        uint256 price = uint256(priceRaw) % 1e22 + 100; // below 100 wei no protective floor exists (see the tiny-price test)
         uint256 q = uint256(qRaw) % 40 + 1;
         uint256 bps = uint256(bpsRaw) % 501;
         genesis.setRoyalty(CREATOR, bps);
@@ -185,7 +185,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         uint256 bps = 501 + (uint256(bpsRaw) % 2000);
         uint256 price = uint256(priceRaw) % 1e22 + 10_000; // large enough that 1 bp is >= 1 wei
         vm.prank(SELLER);
-        uint256 id = market.createListing(address(genesis), SELLER, 2, 1, price, 0);
+        uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 2, 1, price, 0, 1);
         genesis.setRoyalty(CREATOR, bps);
         vm.prank(BUYER);
         (bool ok,) = address(market).call{value: price}(abi.encodeCall(market.buy, (id, 1)));
@@ -196,7 +196,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     function testFuzzFloorHoldsWheneverTheRoyaltyChangesAfterListing(uint16 listedRaw, uint16 laterRaw, uint96 priceRaw, uint8 qRaw) public {
         uint256 listedBps = uint256(listedRaw) % 501;
         uint256 laterBps = uint256(laterRaw) % 501;
-        uint256 price = uint256(priceRaw) % 1e22 + 1;
+        uint256 price = uint256(priceRaw) % 1e22 + 100; // below 100 wei no protective floor exists (see the tiny-price test)
         uint256 q = uint256(qRaw) % 20 + 1;
         genesis.setRoyalty(CREATOR, listedBps);
         uint256 floorPerUnit = (price * (10_000 - 250 - listedBps)) / 10_000;
