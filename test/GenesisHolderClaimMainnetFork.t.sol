@@ -44,8 +44,12 @@ contract GenesisHolderClaimMainnetForkTest {
         string memory rpc = vm.envOr("MAINNET_FORK_RPC", string(""));
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
-        forked = true;
         require(block.chainid == 43114, "not C-Chain");
+        // This replays the artist's launch steps. Once the edition exists on the live release the replay
+        // cannot recreate it (and live sales already change the accounting), so it is reported as skipped.
+        (bool exists,) = address(release).staticcall(abi.encodeWithSignature("maxSupplyOf(uint256)", EXPECTED_TOKEN_ID));
+        if (exists) return;
+        forked = true;
         T = block.timestamp + 1 hours;
         // Artist-signed steps of the launch plan, replayed on the fork.
         vm.prank(ARTIST);
