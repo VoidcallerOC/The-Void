@@ -24,6 +24,7 @@ import {
 } from "../lib/marketplace-api.js";
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
+import { isLegacyMarketplace } from "../../config/legacy-collection-marketplace.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics } from "../lib/secondary-listing.js";
 import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
@@ -83,7 +84,8 @@ export function ListingPanel({ edition }) {
   // an edition without a recorded factory keeps the configured release marketplace.
   const marketplace = useMemo(() => marketplaceConfigForEdition(edition, MARKETPLACE_CONFIG), [edition]);
   const deployment = releaseDeploymentForMarketplace(marketplace.address);
-  const canonicalMarketplace = deployment?.marketplaceAddress || RELEASE_PER_CONTRACT.marketplaceAddress;
+  const legacyMarketplace = isLegacyMarketplace(marketplace.address);
+  const canonicalMarketplace = legacyMarketplace ? marketplace.address : deployment?.marketplaceAddress || RELEASE_PER_CONTRACT.marketplaceAddress;
   const canonicalChainId = Number(RELEASE_PER_CONTRACT.chainId);
   const candidate = isReleasePerContractCandidate(edition);
   const marketplaceConfigured = infrastructure === MARKETPLACE_STATE.LIVE
@@ -483,7 +485,7 @@ export function ListingPanel({ edition }) {
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
         <div style={{ marginTop: 10, color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.8, overflowWrap: "anywhere" }}>
           <div>NETWORK · {String(RELEASE_DEPLOYMENT.networkName || "Avalanche").toUpperCase()} · CHAIN {canonicalChainId}</div>
-          <div>RELEASE FACTORY · {deployment?.factoryAddress || RELEASE_PER_CONTRACT.factoryAddress}</div>
+          <div>{legacyMarketplace ? "LEGACY COLLECTION MARKETPLACE" : `RELEASE FACTORY · ${deployment?.factoryAddress || RELEASE_PER_CONTRACT.factoryAddress}`}</div>
           <div>MARKETPLACE · {canonicalMarketplace}</div>
           <div>RELEASE CONTRACT · {contract || "UNAVAILABLE"}</div>
           <div>CONTRACT · checks clone registration, balance, approval, price, expiry and settlement rules.</div>

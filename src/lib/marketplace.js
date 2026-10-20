@@ -2,6 +2,7 @@ import { Interface } from "ethers";
 import { isValidAddress, waitForReceipt } from "./web3.js";
 import { ensureWalletOnChain } from "./release-chain.js";
 import { releaseDeploymentForFactory, releaseDeploymentForMarketplace } from "../../config/release-network.js";
+import { LEGACY_COLLECTION_MARKETPLACE, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
 
 export const LISTING_STATUS = Object.freeze({ ACTIVE: "ACTIVE", SOLD: "SOLD", CANCELLED: "CANCELLED", EXPIRED: "EXPIRED", REORGED: "REORGED" });
 export const PURCHASE_STATE = Object.freeze({ READY: "READY", WALLET_CONFIRMATION: "WALLET_CONFIRMATION", SUBMITTED: "SUBMITTED", PENDING: "PENDING", OBSERVED: "OBSERVED", CONFIRMED: "CONFIRMED", FINALIZED: "FINALIZED", FAILED: "FAILED", REJECTED: "REJECTED", REVERTED: "REVERTED", REPLACED: "REPLACED", STALE: "STALE", RECONCILIATION_REQUIRED: "RECONCILIATION_REQUIRED", EXPIRED: "EXPIRED" });
@@ -23,7 +24,12 @@ export const MARKETPLACE_CONFIG = Object.freeze({
 // it (each marketplace's registry is immutable). The configured marketplace only switches the
 // surface on: when it is one of the recorded release marketplaces on the same chain, the edition
 // gets its own factory's marketplace. Anything else keeps the configured marketplace.
-export function marketplaceConfigForEdition(edition, base = MARKETPLACE_CONFIG) {
+export function marketplaceConfigForEdition(edition, base = MARKETPLACE_CONFIG, legacy = LEGACY_COLLECTION_MARKETPLACE) {
+  // An allowlisted legacy collection (Genesis) trades only on the LegacyCollectionMarketplace, once it is deployed
+  // and recorded; the factory-release marketplaces never accept it.
+  if (base?.enabled && legacyCollectionFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId: edition?.tokenIds?.[0] }, legacy) && Number(base.chainId) === Number(legacy.chainId)) {
+    return Object.freeze({ ...base, address: legacy.marketplaceAddress });
+  }
   const deployment = releaseDeploymentForFactory(edition?.factoryAddress);
   if (!deployment || !base?.enabled || Number(base.chainId) !== Number(deployment.chainId) || !releaseDeploymentForMarketplace(base.address)) return base;
   return Object.freeze({ ...base, address: deployment.marketplaceAddress });

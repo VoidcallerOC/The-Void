@@ -2,6 +2,7 @@ import process from "node:process";
 import { resolve } from "node:path";
 import { id } from "ethers";
 import { RELEASE_PER_CONTRACT_DEPLOYMENTS } from "../config/release-network.js";
+import { LEGACY_COLLECTION_MARKETPLACE, legacyMarketplaceActive } from "../config/legacy-collection-marketplace.js";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 
@@ -175,6 +176,15 @@ export function withManifestReleaseDeployments(contracts, { chainId, deployments
   return added.length ? Object.freeze([...contracts, ...added]) : contracts;
 }
 
+// The legacy-collection marketplace (Genesis resale) is indexed once its manifest is `deployed` with a recorded block.
+// Until then this is a no-op. An address the env already lists keeps its env entry.
+export function withLegacyCollectionMarketplace(contracts, { chainId, manifest = LEGACY_COLLECTION_MARKETPLACE } = {}) {
+  if (!legacyMarketplaceActive(manifest) || Number(manifest.chainId) !== chainId) return contracts;
+  const address = evmAddress(manifest.marketplaceAddress, "legacy collection marketplace manifest address");
+  if (contracts.some((contract) => contract.address === address)) return contracts;
+  return Object.freeze([...contracts, Object.freeze({ chainId, address, contractType: "MARKETPLACE", startBlock: manifest.deploymentBlock, platformFeeBps: manifest.platformFeeBps, tokenAddress: null, reconcileListings: true, eventTopics: undefined })]);
+}
+
 // requireWalletAuth (default true): API processes that issue SIWE challenges must supply
 // HTTPS PUBLIC_APP_URL / AUTH_* aligned to RELEASE_NETWORK. Indexer workers and migrate only
 // need the database pool fields; they pass requireWalletAuth: false so a missing PUBLIC_APP_URL
@@ -269,7 +279,7 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     rpcUrl: normalizedUrl(rpcUrlValue, "INDEXER_RPC_URL").toString(),
     contracts: String(env.INDEXER_INCLUDE_RELEASE_MANIFEST ?? "true").trim().toLowerCase() === "false"
       ? parseIndexerContracts(contractsValue, { chainId })
-      : withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }),
+      : withLegacyCollectionMarketplace(withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }), { chainId }),
     confirmations: boundedPositiveInteger(env.INDEXER_CONFIRMATIONS, 12, "INDEXER_CONFIRMATIONS", { min: 1, max: 500 }),
     // Default 100 matches Avalanche public C-Chain eth_getLogs max span; override only for RPCs that allow larger ranges.
     chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 100, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),

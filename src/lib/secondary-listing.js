@@ -1,6 +1,7 @@
 import { Interface, getAddress, isAddress } from "ethers";
 import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
+import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MARKETPLACE_VIEW = new Interface([
@@ -32,7 +33,27 @@ async function read(provider, address, contractInterface, method, args = []) {
   return contractInterface.decodeFunctionResult(method, result);
 }
 
+const LEGACY_MARKETPLACE_VIEW = new Interface([
+  "function platformFeeBps() view returns (uint256)",
+  "function deploymentChainId() view returns (uint256)",
+  "function paused() view returns (bool)",
+  "function isSupported(address tokenContract, uint256 tokenId) view returns (bool)",
+  "function previewSettlement(address tokenContract, uint256 tokenId, uint256 salePrice) view returns (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds)",
+]);
+const LEGACY_TOKEN_VIEW = new Interface([
+  "function balanceOf(address account, uint256 id) view returns (uint256)",
+  "function isApprovedForAll(address account, address operator) view returns (bool)",
+  "function operatorFilterRegistry() view returns (address)",
+]);
+const OPERATOR_FILTER_VIEW = new Interface(["function isOperatorAllowed(address registrant, address operator) view returns (bool)"]);
+
+/** True for an allowlisted legacy collection (Genesis) once its marketplace is deployed and recorded. */
+export function isLegacyCollectionCandidate(edition, config = LEGACY_COLLECTION_MARKETPLACE) {
+  return Boolean(legacyCollectionFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId: edition?.tokenIds?.[0] }, config));
+}
+
 export function isReleasePerContractCandidate(edition) {
+  if (isLegacyCollectionCandidate(edition)) return true;
   const tokenId = edition?.tokenIds?.[0];
   return Number(edition?.chainId) === Number(RELEASE_PER_CONTRACT.chainId)
     && !isCertifiedFujiEdition(edition)
@@ -51,6 +72,9 @@ export async function readReleaseListingContext({
   tokenId,
   seller,
 }) {
+  if (isLegacyMarketplace(marketplaceAddress)) {
+    return readLegacyListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress: releaseContractAddress, tokenId, seller });
+  }
   const expectedChainId = Number(RELEASE_PER_CONTRACT.chainId);
   // Each recorded deployment pairs one factory with the one marketplace whose registry it is.
   const deployment = validContractAddress(marketplaceAddress) ? releaseDeploymentForMarketplace(marketplaceAddress) : null;
@@ -128,6 +152,85 @@ export async function readReleaseListingContext({
     factoryAddress,
     marketplaceAddress: canonicalMarketplace,
     releaseContractAddress: getAddress(releaseContractAddress),
+    tokenId: String(tokenId),
+    seller: getAddress(seller),
+    chainId: expectedChainId,
+  });
+}
+
+/**
+ * Pre-listing checks for an allowlisted legacy collection. The marketplace itself decides whether the asset is
+ * supported and how a sale settles; this reads those answers (plus balance, approval and the collection's
+ * operator filter) and refuses with an actionable code instead of letting a doomed transaction be signed.
+ */
+export async function readLegacyListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress, tokenId, seller }, config = LEGACY_COLLECTION_MARKETPLACE) {
+  const expectedChainId = Number(config.chainId);
+  if (!provider?.request) fail("Connect a browser wallet to verify this collection on chain.", "WALLET_REQUIRED");
+  if (!isLegacyMarketplace(marketplaceAddress, config) || Number(marketplaceChainId) !== expectedChainId) {
+    fail("The configured marketplace is not the recorded legacy-collection marketplace.", "MARKETPLACE_UNAVAILABLE");
+  }
+  const collection = legacyCollectionFor({ chainId: expectedChainId, contractAddress: tokenContractAddress, tokenId }, config);
+  if (!collection) fail("This collection or token is not on the legacy-collection marketplace allowlist.", "UNSUPPORTED_RELEASE");
+  if (!validContractAddress(seller)) fail("The connected wallet address is invalid.", "UNSUPPORTED_RELEASE");
+  let connectedChainId;
+  try { connectedChainId = Number(BigInt(await provider.request({ method: "eth_chainId" }))); } catch { fail("The wallet network could not be verified. No listing action was taken.", "OWNERSHIP_READ_FAILED"); }
+  if (connectedChainId !== expectedChainId) fail(`Switch to Avalanche C-Chain (${expectedChainId}) to list this collection.`, "WRONG_NETWORK");
+
+  const token = getAddress(tokenContractAddress);
+  const market = getAddress(marketplaceAddress);
+  let feeBps; let deployedChainId; let paused; let supported; let preview;
+  try {
+    [feeBps, deployedChainId, paused, supported, preview] = await Promise.all([
+      read(provider, market, LEGACY_MARKETPLACE_VIEW, "platformFeeBps").then(([v]) => BigInt(v)),
+      read(provider, market, LEGACY_MARKETPLACE_VIEW, "deploymentChainId").then(([v]) => BigInt(v)),
+      read(provider, market, LEGACY_MARKETPLACE_VIEW, "paused").then(([v]) => Boolean(v)),
+      read(provider, market, LEGACY_MARKETPLACE_VIEW, "isSupported", [token, String(tokenId)]).then(([v]) => Boolean(v)),
+      read(provider, market, LEGACY_MARKETPLACE_VIEW, "previewSettlement", [token, String(tokenId), "1000000000000000000"]),
+    ]);
+  } catch {
+    fail("This collection's royalty could not be settled by the marketplace right now (royalty above its cap, unreadable, or unpayable). Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
+  }
+  if (deployedChainId !== BigInt(expectedChainId) || feeBps !== BigInt(config.platformFeeBps)) {
+    fail("The marketplace deployment does not match the recorded chain or 250 bps fee.", "MARKETPLACE_UNAVAILABLE");
+  }
+  if (paused) fail("The marketplace is paused. Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
+  if (!supported) fail("The marketplace does not currently accept this collection or token.", "UNSUPPORTED_RELEASE");
+  const royaltyReceiver = preview[1];
+  if (collection.expectedRoyaltyReceiver && getAddress(royaltyReceiver) !== getAddress(collection.expectedRoyaltyReceiver)) {
+    fail("The collection's royalty recipient changed from the recorded creator wallet. Listing is paused until it is reviewed.", "UNSUPPORTED_RELEASE");
+  }
+  const royaltyBps = (BigInt(preview[2]) * 10_000n) / 1_000_000_000_000_000_000n;
+
+  try {
+    // The collection's own operator filter can block this marketplace; surface it before approval is requested.
+    const [filter] = await read(provider, token, LEGACY_TOKEN_VIEW, "operatorFilterRegistry");
+    if (validContractAddress(filter)) {
+      const [allowed] = await read(provider, filter, OPERATOR_FILTER_VIEW, "isOperatorAllowed", [token, market]);
+      if (!allowed) fail("This collection's operator filter blocks the marketplace, so listings cannot settle.", "MARKETPLACE_UNAVAILABLE");
+    }
+  } catch (error) {
+    if (error?.code) throw error;
+    // No filter registry on the collection: nothing to check.
+  }
+
+  let balance;
+  let approved;
+  try {
+    [balance, approved] = await Promise.all([
+      read(provider, token, LEGACY_TOKEN_VIEW, "balanceOf", [getAddress(seller), String(tokenId)]).then(([v]) => BigInt(v)),
+      read(provider, token, LEGACY_TOKEN_VIEW, "isApprovedForAll", [getAddress(seller), market]).then(([v]) => Boolean(v)),
+    ]);
+  } catch {
+    fail("On-chain ownership could not be read. Eligibility was not assumed.", "OWNERSHIP_READ_FAILED");
+  }
+  return Object.freeze({
+    balance: balance.toString(),
+    approved,
+    marketplaceFeeBps: feeBps.toString(),
+    royaltyBps: royaltyBps.toString(),
+    factoryAddress: null,
+    marketplaceAddress: market,
+    releaseContractAddress: token,
     tokenId: String(tokenId),
     seller: getAddress(seller),
     chainId: expectedChainId,
