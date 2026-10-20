@@ -47,3 +47,17 @@ Date: 2026-10-20
 - Royalty receiver that rejects AVAX blocks sales of Genesis (reverts by design; no silent skip).
 - Platform fee recipient `0xb65C…1ce4` rejecting AVAX would block every sale; it is an EOA/Safe controlled by the platform.
 - Not independently audited.
+
+## Independent review (AI subagent, adversarial, contract only) — 2026-10-20
+Not a substitute for a human audit. No critical/high findings; no path found where a buyer keeps tokens with an unpaid payout,
+where funds strand, or where the owner can take funds/tokens/listings.
+- Applied: listing is validated at the full `price × amount` as well as per unit; the `royaltyInfo` read is capped at 100k gas with a
+  fixed 64-byte return buffer (test: `testListingValidatedAtFullQuantityAndGasGriefingRoyaltyIsBounded`).
+- Accepted/documented (design): the collection's own admin can raise the royalty up to the cap or change its receiver between listing
+  and sale (seller proceeds fall; the buyer always pays exactly `price × quantity`), or break `royaltyInfo` to freeze that collection's
+  sales; the marketplace owner can freeze (pause/disable/narrow) but not alter or take; re-allowing a disabled collection revives its
+  still-active listings (sellers should cancel when a collection is disabled); `feeRecipient` is immutable and must be able to receive
+  AVAX (`0xb65C…1ce4` has no contract code on mainnet, i.e. it is an EOA); `listingStatus`/`getListing` of a never-created id reads
+  `ACTIVE` with a zero seller, as in V4 — indexers must key on the `ListingCreated` event, not on `listingStatus` alone; `ListingSold.price`
+  is the total while `ListingCreated.price` is per unit; the `RoyaltyTooHigh` branch is unreachable (cap ≤ 10% + 2.5% fee).
+- Not built: a seller `minProceeds`/royalty snapshot guard (would add buy-reverts and change the V4-compatible interface). Decide before deployment.

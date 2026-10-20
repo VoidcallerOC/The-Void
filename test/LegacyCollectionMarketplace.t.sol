@@ -44,6 +44,8 @@ contract MockGenesis {
         if (royaltyMode == 2) assembly { mstore(0, 1) return(0, 32) }
         if (royaltyMode == 3) assembly { mstore(0, not(0)) mstore(32, 1) return(0, 64) }
         if (royaltyMode == 4) return (royaltyReceiver, price * 2);
+        if (royaltyMode == 5) return (royaltyReceiver, price > 1 ether ? price : 0); // non-linear: fine per unit, absurd in bulk
+        if (royaltyMode == 6) { while (true) {} } // burns all gas
         return (royaltyReceiver, (price * royaltyBps) / 10_000);
     }
     function safeTransferFrom(address from, address to, uint256 id, uint256 value, bytes calldata data) external {
@@ -345,6 +347,21 @@ contract LegacyCollectionMarketplaceTest {
         err = expectFail(abi.encodeCall(market.buy, (id2, 1)), BUYER, PRICE);
         require(selector(err) == LegacyCollectionMarketplace.TransferFailed.selector, "seller payout failure reverts");
         require(genesis.balanceOf(address(contractSeller), 1) == 1, "token stays with seller");
+    }
+
+    // Review finding: validate at the full quantity, and bound the royaltyInfo read.
+    function testListingValidatedAtFullQuantityAndGasGriefingRoyaltyIsBounded() public {
+        genesis.setRoyaltyMode(5);
+        vm.prank(SELLER);
+        try market.createListing(address(genesis), SELLER, 0, 2, PRICE, 0) { revert("bulk royalty above cap listed"); } catch (bytes memory e) {
+            require(selector(e) == LegacyCollectionMarketplace.RoyaltyAboveCap.selector, "RoyaltyAboveCap at full quantity");
+        }
+        vm.prank(SELLER);
+        market.createListing(address(genesis), SELLER, 0, 1, PRICE, 0); // one unit is fine
+        genesis.setRoyaltyMode(6);
+        vm.prank(SELLER);
+        (bool ok,) = address(market).call{gas: 3_000_000}(abi.encodeCall(market.createListing, (address(genesis), SELLER, 0, 1, PRICE, uint64(0))));
+        require(!ok, "gas-burning royaltyInfo refused, not run to exhaustion");
     }
 
     // 12. Reentrancy and malicious receivers.

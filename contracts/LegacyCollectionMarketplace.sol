@@ -35,6 +35,7 @@ contract LegacyCollectionMarketplace {
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant REQUIRED_PLATFORM_FEE_BPS = 250;
     uint16 public constant ROYALTY_CEILING_BPS = 1_000;
+    uint256 private constant ROYALTY_READ_GAS = 100_000;
     bytes4 private constant ERC1155_INTERFACE_ID = 0xd9b67a26;
     bytes4 private constant ERC2981_INTERFACE_ID = 0x2a55205a;
 
@@ -120,8 +121,10 @@ contract LegacyCollectionMarketplace {
         IERC1155ReleaseMarketplace token = IERC1155ReleaseMarketplace(tokenContract);
         if (token.balanceOf(seller, tokenId) < amount) revert InsufficientBalance();
         if (!token.isApprovedForAll(seller, address(this))) revert InsufficientApproval();
-        // A listing whose royalty cannot be settled today is refused up front rather than left unbuyable.
+        // A listing whose royalty cannot be settled today is refused up front rather than left unbuyable. Checked at
+        // one unit and at the full quantity, since a collection's royaltyInfo need not be linear in the price.
         _settlement(tokenContract, tokenId, price);
+        _settlement(tokenContract, tokenId, price * amount);
         listingId = nextListingId++;
         listings[listingId] = Listing(listingId, seller, tokenContract, tokenId, amount, price, uint64(block.timestamp), expiresAt, Status.ACTIVE);
         emit ListingCreated(listingId, seller, tokenContract, tokenId, amount, price, expiresAt);
@@ -199,10 +202,22 @@ contract LegacyCollectionMarketplace {
     /// @dev Fee, royalty and seller proceeds for one sale. The royalty is whatever the collection reports for this
     /// token and price, provided it is within the collection's cap and payable; otherwise the sale is refused.
     function _settlement(address tokenContract, uint256 tokenId, uint256 salePrice) private view returns (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds) {
-        (bool ok, bytes memory data) = tokenContract.staticcall(abi.encodeWithSignature("royaltyInfo(uint256,uint256)", tokenId, salePrice));
-        if (!ok || data.length != 64) revert RoyaltyReadFailed();
+        // Bounded read: capped gas and a fixed 64-byte return buffer, so a hostile collection can neither burn the
+        // sale's gas nor return an unbounded payload.
         uint256 rawReceiver;
-        (rawReceiver, royaltyAmount) = abi.decode(data, (uint256, uint256));
+        bool ok;
+        uint256 returned;
+        bytes memory callData = abi.encodeWithSignature("royaltyInfo(uint256,uint256)", tokenId, salePrice);
+        assembly {
+            ok := staticcall(ROYALTY_READ_GAS, tokenContract, add(callData, 32), mload(callData), 0, 0)
+            returned := returndatasize()
+            if and(ok, eq(returned, 64)) {
+                returndatacopy(0, 0, 64)
+                rawReceiver := mload(0)
+                royaltyAmount := mload(32)
+            }
+        }
+        if (!ok || returned != 64) revert RoyaltyReadFailed();
         if (rawReceiver > type(uint160).max) revert RoyaltyReadFailed();
         royaltyReceiver = address(uint160(rawReceiver));
         if (royaltyAmount > (salePrice * collections[tokenContract].maxRoyaltyBps) / BPS_DENOMINATOR) revert RoyaltyAboveCap();
