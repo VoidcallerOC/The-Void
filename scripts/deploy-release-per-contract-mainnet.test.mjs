@@ -72,10 +72,10 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     const factory = getCreateAddress({ from: DEPLOYER, nonce: 0 });
     const coder = AbiCoder.defaultAbiCoder();
     const factoryData = `${FACTORY_INIT}${coder.encode(["address"], [RECIPIENT]).slice(2)}`;
-    const marketplaceData = `0x6002600255${coder.encode(["address", "uint256", "address"], [RECIPIENT, 250, factory]).slice(2)}`;
+    const marketplaceData = `0x6002600255${coder.encode(["address", "address", "address", "address", "uint256", "address"], [RECIPIENT, factory, "0x262B774cf9a1949170B58E2d57F6189980FE757b", "0xD1B4367dd9f235f9ee61878019d66E31511E98eE", 3, "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a"]).slice(2)}`;
     expect(plan.signingRequests).toEqual([
       { step: 1, contract: "VoidReleaseFactoryV2RoyaltySettled", chainId: 43114, from: DEPLOYER, to: null, nonce: 0, value: "0", data: factoryData.toLowerCase(), dataHash: keccak256(factoryData), gasLimit: "1200000", predictedAddress: factory },
-      { step: 2, contract: "ReleaseMarketplaceV4", chainId: 43114, from: DEPLOYER, to: null, nonce: 1, value: "0", data: marketplaceData.toLowerCase(), dataHash: keccak256(marketplaceData), gasLimit: "1200000", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 1 }) },
+      { step: 2, contract: "VoidUnifiedMarketplace", chainId: 43114, from: DEPLOYER, to: null, nonce: 1, value: "0", data: marketplaceData.toLowerCase(), dataHash: keccak256(marketplaceData), gasLimit: "1200000", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 1 }) },
     ]);
     expect(plan.transactions[0].predictedImplementation).toBe(getCreateAddress({ from: factory, nonce: 1 }));
     expect(plan.planInputs).toEqual({ DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0", RELEASE_PLATFORM_RECIPIENT: RECIPIENT, RELEASE_MARKETPLACE_FEE_RECIPIENT: RECIPIENT, RELEASE_PLATFORM_FEE_BPS: "250", RELEASE_MARKETPLACE_FEE_BPS: "250" });
@@ -171,7 +171,7 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
     const second = await verifyReleaseStep(chain, plan, 2, hash, { load: artifacts });
     expect(second).toMatchObject({ address: marketplace.predictedAddress, factoryAddress: factory.predictedAddress, feeRecipient: RECIPIENT, feeBps: 250 });
     const record = buildDeploymentRecord(plan, [first, second], { sourceCommit: "a".repeat(40), planDigest: "b".repeat(64) });
-    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, signedBy: { deployer: DEPLOYER }, factory: { address: factory.predictedAddress, contract: "VoidReleaseFactoryV2RoyaltySettled", artifact: "out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json", primarySale: "VoidPrimarySaleSettled", deploymentTransaction: first.transaction }, marketplace: { address: marketplace.predictedAddress, contract: "ReleaseMarketplaceV4", artifact: MARKETPLACE_ARTIFACT_PATH, factoryAddress: factory.predictedAddress } });
+    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, signedBy: { deployer: DEPLOYER }, factory: { address: factory.predictedAddress, contract: "VoidReleaseFactoryV2RoyaltySettled", artifact: "out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json", primarySale: "VoidPrimarySaleSettled", deploymentTransaction: first.transaction }, marketplace: { address: marketplace.predictedAddress, contract: "VoidUnifiedMarketplace", genesisCollection: "0xD1B4367dd9f235f9ee61878019d66E31511E98eE", legacyReleaseFactory: "0x262B774cf9a1949170B58E2d57F6189980FE757b", artifact: MARKETPLACE_ARTIFACT_PATH, factoryAddress: factory.predictedAddress } });
     expect(deploymentRecordPath(factory.predictedAddress)).toMatch(/^deployments\/release-per-contract-mainnet-0x/);
     // Every field the manifest update needs for the new active pair is in the record.
     expect(record.factory).toMatchObject({ address: expect.any(String), deploymentBlock: expect.any(Number), implementationAddress: factory.predictedImplementation, platformRecipient: RECIPIENT });
@@ -210,11 +210,17 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
     await expect(verifyReleaseStep(chain, plan, 1, await minedFactory(chain, plan, {}, { runtime: "0x6002" }), { load: artifacts })).rejects.toThrow(/factory runtime code differs/);
   });
 
-  it("refuses a marketplace bound to another factory, recipient, fee or chain", async () => {
+  it("refuses a marketplace bound to another factory, recipient, fee, Genesis policy or chain", async () => {
     for (const [options, message] of [
-      [{ registry: "0x00000000000000000000000000000000000000F3" }, /registry/],
+      [{ registry: "0x00000000000000000000000000000000000000F3" }, /releaseFactory/],
+      [{ legacy: "0x00000000000000000000000000000000000000F3" }, /legacyReleaseFactory/],
       [{ feeRecipient: ARTIST }, /feeRecipient/],
-      [{ fee: 0n }, /platformFeeBps/],
+      [{ fee: 0n }, /factory economics/],
+      [{ genesis: "0x00000000000000000000000000000000000000F4" }, /genesisCollection/],
+      [{ genesisMax: 4n }, /genesisMaxTokenId/],
+      [{ genesisReceiver: "0x00000000000000000000000000000000000000F5" }, /genesisRoyaltyReceiver/],
+      [{ genesisFee: 250n }, /Genesis economics/],
+      [{ genesisRoyalty: 250n }, /Genesis economics/],
       [{ chain: 43113n }, /deploymentChainId/],
       [{ runtime: "0x6001" }, /marketplace runtime code differs/],
     ]) {

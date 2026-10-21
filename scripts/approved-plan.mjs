@@ -1,5 +1,6 @@
 import { getAddress, getCreateAddress, keccak256 } from "ethers";
 import { bindPlan } from "./plan-binding-core.mjs";
+import unifiedManifest from "../config/unified-marketplace.json" with { type: "json" };
 import { MAINNET_FEE_RECIPIENT } from "./mainnet-signing-requests.mjs";
 import { profileFor } from "./network-profiles.mjs";
 import { PROBE_CONTRACT, PROBE_LABEL } from "./fuji-rabby-probe.mjs";
@@ -22,6 +23,7 @@ const fail = (message) => { throw new ApprovedPlanError(message); };
 // deploy the factory whose releases pay the platform fee during the purchase.
 export const EXECUTED_RELEASE_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
 export const RELEASE_FACTORY_CONTRACT = "VoidReleaseFactoryV2RoyaltySettled";
+export const UNIFIED_MARKETPLACE_CONTRACT = "VoidUnifiedMarketplace";
 
 const deployerOf = (kind, plan) => (kind.startsWith("genesis-claim") ? plan.deployer : plan.deployer?.address);
 
@@ -49,6 +51,11 @@ export function validateApprovedPlan(entry, network = "mainnet") {
     if (getAddress(plan.transactions[0].constructor.platformRecipient) !== MAINNET_FEE_RECIPIENT || getAddress(plan.transactions[1].constructor.feeRecipient) !== MAINNET_FEE_RECIPIENT) fail("The fee recipient is not the recorded Nano S Plus.");
     if (getAddress(plan.transactions[1].constructor.releaseFactory) !== getAddress(requests[0].predictedAddress)) fail("The marketplace is not bound to the factory of step 1.");
     const executed = getAddress(requests[0].predictedAddress) === EXECUTED_RELEASE_FACTORY;
+    // Every new release-infrastructure plan deploys the single unified marketplace, bound to that factory, the production
+    // factory and the Genesis collection at its existing royalty receiver (config/unified-marketplace.json).
+    const market = plan.transactions[1];
+    if (!executed && (market.contract !== UNIFIED_MARKETPLACE_CONTRACT || requests[1].contract !== UNIFIED_MARKETPLACE_CONTRACT || plan.artifacts?.marketplace?.path !== `out/${UNIFIED_MARKETPLACE_CONTRACT}.sol/${UNIFIED_MARKETPLACE_CONTRACT}.json`)) fail(`A new release-infrastructure plan must deploy ${UNIFIED_MARKETPLACE_CONTRACT}.`);
+    if (!executed && (getAddress(market.constructor.legacyReleaseFactory) !== EXECUTED_RELEASE_FACTORY || getAddress(market.constructor.genesisCollection) !== getAddress(unifiedManifest.genesis.address) || Number(market.constructor.genesisMaxTokenId) !== Number(unifiedManifest.genesis.maxTokenId) || getAddress(market.constructor.genesisRoyaltyReceiver) !== getAddress(unifiedManifest.genesis.royaltyReceiver))) fail("The unified marketplace is not bound to the production factory and the recorded Genesis collection, token range and royalty receiver.");
     if (!executed && (plan.transactions[0].contract !== RELEASE_FACTORY_CONTRACT || requests[0].contract !== RELEASE_FACTORY_CONTRACT || plan.artifacts?.factory?.path !== `out/${RELEASE_FACTORY_CONTRACT}.sol/${RELEASE_FACTORY_CONTRACT}.json`)) fail(`A new release-infrastructure plan must deploy ${RELEASE_FACTORY_CONTRACT}.`);
   }
   if (kind === "genesis-claim-fuji") {

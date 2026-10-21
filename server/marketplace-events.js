@@ -5,11 +5,15 @@ const MARKETPLACE_ABI = [
   "event ListingCancelled(uint256 indexed listingId)",
   "event ListingExpired(uint256 indexed listingId)",
   "event ListingSold(uint256 indexed listingId, address indexed buyer, address indexed seller, address tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint256 platformFee, uint256 royalty)",
+  // VoidUnifiedMarketplace only: emitted right after ListingSold with the asset class and the actual royalty recipient.
+  "event SaleSettled(uint256 indexed listingId, uint8 indexed assetClass, address royaltyReceiver, uint256 sellerProceeds)",
   "function getListing(uint256 listingId) view returns (uint256 listingId, address seller, address tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint64 createdAt, uint64 expiresAt, uint8 status)",
 ];
 
 export const marketplaceInterface = new Interface(MARKETPLACE_ABI);
 export const MARKETPLACE_EVENT_TOPICS = Object.freeze(Object.fromEntries(["ListingCreated", "ListingCancelled", "ListingExpired", "ListingSold"].map((name) => [name, marketplaceInterface.getEvent(name).topicHash.toLowerCase()])));
+export const SALE_SETTLED_TOPIC = marketplaceInterface.getEvent("SaleSettled").topicHash.toLowerCase();
+export const UNIFIED_ASSET_CLASSES = Object.freeze({ 1: "FACTORY_RELEASE", 2: "GENESIS" });
 export const MARKETPLACE_LISTING_STATUSES = Object.freeze(["ACTIVE", "SOLD", "CANCELLED", "EXPIRED"]);
 export const MARKETPLACE_CHAIN_IDS = Object.freeze([43113, 43114]);
 
@@ -57,6 +61,12 @@ function timestamp(value) {
 export function decodeMarketplaceLog(log, { chainId, expectedAddress = null, blockTimestamp = null, platformFeeBps = null } = {}) {
   let decoded;
   try { decoded = marketplaceInterface.parseLog({ topics: log?.topics, data: log?.data }); } catch { throw new MarketplaceEventError("Marketplace log does not match the supported contract ABI."); }
+  if (decoded?.name === "SaleSettled") {
+    const reference = blockReference({ ...log, chainId: chainId ?? log?.chainId }, expectedAddress);
+    const assetClass = UNIFIED_ASSET_CLASSES[Number(decoded.args.assetClass)];
+    if (!assetClass) throw new MarketplaceEventError("SaleSettled asset class is not supported.");
+    return { ...reference, eventType: "SaleSettled", blockTimestamp: timestamp(blockTimestamp ?? log?.blockTimestamp), listingId: uint(decoded.args.listingId, "listingId", { positive: true }), assetClass, royaltyReceiver: normalizedAddress(decoded.args.royaltyReceiver, "royalty receiver"), sellerProceedsWei: uint(decoded.args.sellerProceeds, "seller proceeds") };
+  }
   if (!decoded || !MARKETPLACE_EVENT_TOPICS[decoded.name]) throw new MarketplaceEventError("Marketplace log event is not supported.");
   const reference = blockReference({ ...log, chainId: chainId ?? log?.chainId }, expectedAddress);
   const common = { ...reference, eventType: decoded.name, blockTimestamp: timestamp(blockTimestamp ?? log?.blockTimestamp) };
@@ -78,7 +88,8 @@ export function decodeMarketplaceLog(log, { chainId, expectedAddress = null, blo
   const royaltyWei = uint(args.royalty, "royalty");
   if (BigInt(platformFeeWei) > BigInt(salePriceWei) || BigInt(royaltyWei) > BigInt(salePriceWei) - BigInt(platformFeeWei)) throw new MarketplaceEventError("Marketplace settlement fee or royalty exceeds the sale price.");
   if (platformFeeBps !== null) {
-    const feeBps = Number(platformFeeBps);
+    // A function resolves the fee per asset (VoidUnifiedMarketplace: 0 bps Genesis, 250 bps factory releases).
+    const feeBps = Number(typeof platformFeeBps === "function" ? platformFeeBps(normalizedAddress(args.tokenContract, "token contract")) : platformFeeBps);
     if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 10_000) throw new MarketplaceEventError("Configured marketplace platform fee basis points are invalid.");
     if (BigInt(platformFeeWei) !== (BigInt(salePriceWei) * BigInt(feeBps)) / 10_000n) throw new MarketplaceEventError("Marketplace settlement platform fee does not match configured basis points.");
   }

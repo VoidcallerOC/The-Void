@@ -40,7 +40,8 @@ describe("approved mainnet plans", () => {
     const coder = AbiCoder.defaultAbiCoder();
     const [factoryTx, marketplaceTx] = plan.transactions;
     const factoryData = `${factory.bytecode.object}${coder.encode(["address"], [factoryTx.constructor.platformRecipient]).slice(2)}`.toLowerCase();
-    const marketplaceData = `${marketplace.bytecode.object}${coder.encode(["address", "uint256", "address"], [marketplaceTx.constructor.feeRecipient, marketplaceTx.constructor.platformFeeBps, marketplaceTx.constructor.releaseFactory]).slice(2)}`.toLowerCase();
+    const c = marketplaceTx.constructor;
+    const marketplaceData = `${marketplace.bytecode.object}${coder.encode(["address", "address", "address", "address", "uint256", "address"], [c.feeRecipient, c.releaseFactory, c.legacyReleaseFactory, c.genesisCollection, c.genesisMaxTokenId, c.genesisRoyaltyReceiver]).slice(2)}`.toLowerCase();
     expect(plan.signingRequests[0].data).toBe(factoryData);
     expect(plan.signingRequests[1].data).toBe(marketplaceData);
     expect(plan.artifacts.factory.initCodeHash).toBe(keccak256(factory.bytecode.object));

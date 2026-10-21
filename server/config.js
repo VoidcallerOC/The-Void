@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { id } from "ethers";
 import { RELEASE_PER_CONTRACT_DEPLOYMENTS } from "../config/release-network.js";
 import { LEGACY_COLLECTION_MARKETPLACE, legacyMarketplaceActive } from "../config/legacy-collection-marketplace.js";
+import { UNIFIED_MARKETPLACE, unifiedMarketplaceActive } from "../config/unified-marketplace.js";
 
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 
@@ -191,6 +192,17 @@ export function withLegacyCollectionMarketplace(contracts, { chainId, manifest =
   return Object.freeze([...contracts, Object.freeze({ chainId, address, contractType: "MARKETPLACE", startBlock: manifest.deploymentBlock, platformFeeBps: manifest.platformFeeBps, tokenAddress: null, reconcileListings: true, eventTopics: undefined })]);
 }
 
+// VoidUnifiedMarketplace is indexed once its manifest is `deployed` with a recorded block; until then this is a no-op.
+// Its fee is per asset (0 bps Genesis, 250 bps factory releases), so it carries feePolicy "unified" instead of one bps.
+export function withUnifiedMarketplace(contracts, { chainId, manifest = UNIFIED_MARKETPLACE } = {}) {
+  if (!unifiedMarketplaceActive(manifest) || Number(manifest.chainId) !== chainId) return contracts;
+  const address = evmAddress(manifest.marketplaceAddress, "unified marketplace manifest address");
+  // The per-asset fee is a property of the contract, so it replaces a single-bps entry for the same address (the release
+  // manifest also records this address as its factory's marketplace).
+  const others = contracts.filter((contract) => contract.address !== address);
+  return Object.freeze([...others, Object.freeze({ chainId, address, contractType: "MARKETPLACE", startBlock: manifest.deploymentBlock, platformFeeBps: null, feePolicy: "unified", tokenAddress: null, reconcileListings: true, eventTopics: undefined })]);
+}
+
 // requireWalletAuth (default true): API processes that issue SIWE challenges must supply
 // HTTPS PUBLIC_APP_URL / AUTH_* aligned to RELEASE_NETWORK. Indexer workers and migrate only
 // need the database pool fields; they pass requireWalletAuth: false so a missing PUBLIC_APP_URL
@@ -285,7 +297,7 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     rpcUrl: normalizedUrl(rpcUrlValue, "INDEXER_RPC_URL").toString(),
     contracts: String(env.INDEXER_INCLUDE_RELEASE_MANIFEST ?? "true").trim().toLowerCase() === "false"
       ? parseIndexerContracts(contractsValue, { chainId })
-      : withLegacyCollectionMarketplace(withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }), { chainId }),
+      : withUnifiedMarketplace(withLegacyCollectionMarketplace(withManifestReleaseDeployments(parseIndexerContracts(contractsValue, { chainId }), { chainId }), { chainId }), { chainId }),
     confirmations: boundedPositiveInteger(env.INDEXER_CONFIRMATIONS, 12, "INDEXER_CONFIRMATIONS", { min: 1, max: 500 }),
     // Default 100 matches Avalanche public C-Chain eth_getLogs max span; override only for RPCs that allow larger ranges.
     chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 100, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),
