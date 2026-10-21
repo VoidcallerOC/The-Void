@@ -197,4 +197,59 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         require(completed > 0, "real purchases complete with enough gas");
         require(minOk > 40_000, "and too little gas fails (the sweep covers the failing region too)");
     }
+
+    /// Economic-policy facts (2026-10-21): Genesis reports one deterministic 500 bps royalty for ids 0-3 at every price, floored per
+    /// ERC-2981; the marketplace pays exactly that and never substitutes another rate.
+    function testRealGenesisRoyaltyIsDeterministicAcrossIdsAndPrices() public view {
+        if (!forked) return;
+        uint256[4] memory prices = [uint256(1), 3_333, 1 ether, 123_456_789 ether];
+        for (uint256 id = 0; id <= 3; id++) {
+            for (uint256 i = 0; i < prices.length; i++) {
+                (address receiver, uint256 amount) = GENESIS.royaltyInfo(id, prices[i]);
+                require(receiver == CREATOR && amount == (prices[i] * 500) / 10_000, "500 bps to the creator, floored");
+                (uint256 fee, address r, uint256 royalty, uint256 seller) = market.previewSettlement(address(GENESIS), id, prices[i]);
+                require(r == CREATOR && royalty == amount && fee == (prices[i] * 250) / 10_000 && fee + royalty + seller == prices[i], "pays the reported royalty, conserves value");
+            }
+        }
+    }
+
+    /// The royalty is mutable, but only by the collection owner (an account outside this marketplace), and only up to 2,500 bps.
+    /// Controlling the receiver wallet is not the authority; ownership of the collection is.
+    function testRealGenesisRoyaltySetterIsOwnerOnlyAndCapped() public {
+        if (!forked) return;
+        require(GENESIS.owner() == CREATOR, "collection owner is the creator wallet today");
+        vm.prank(HOLDER);
+        (bool ok,) = address(GENESIS).call(abi.encodeCall(IGenesis.setRoyaltyInfo, (HOLDER, 250)));
+        require(!ok, "a non-owner cannot change the royalty");
+        vm.prank(address(market));
+        (ok,) = address(GENESIS).call(abi.encodeCall(IGenesis.setRoyaltyInfo, (CREATOR, 250)));
+        require(!ok, "the marketplace cannot change the royalty");
+        vm.prank(CREATOR);
+        (ok,) = address(GENESIS).call(abi.encodeCall(IGenesis.setRoyaltyInfo, (CREATOR, 2_501)));
+        require(!ok, "Genesis caps its own royalty at 2,500 bps");
+        (, uint256 amount) = GENESIS.royaltyInfo(0, 10_000);
+        require(amount == 500, "unchanged");
+    }
+
+    /// What the 2.5/2.5/95 policy would require, replayed on a fork only (nothing is broadcast, no decision is implied): it is reached
+    /// by the Genesis owner lowering the collection's own royalty to 250 bps, with no marketplace change. The factory-only V4
+    /// marketplace still refuses Genesis at 250 bps, so the trust boundary does not move.
+    function testIfTheGenesisOwnerSetTwoPointFivePercentTheUnchangedMarketplaceWouldSettle95() public {
+        if (!forked) return;
+        vm.prank(CREATOR);
+        GENESIS.setRoyaltyInfo(CREATOR, 250);
+        vm.prank(HOLDER);
+        GENESIS.setApprovalForAll(address(market), true);
+        vm.prank(HOLDER);
+        uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 1, PRICE, 0, 0.95 ether);
+        uint256 holderAvax = HOLDER.balance;
+        uint256 feeAvax = PLATFORM.balance;
+        uint256 creatorAvax = CREATOR.balance;
+        vm.prank(BUYER);
+        market.buy{value: PRICE}(id, 1);
+        require(PLATFORM.balance - feeAvax == 0.025 ether && CREATOR.balance - creatorAvax == 0.025 ether && HOLDER.balance - holderAvax == 0.95 ether, "2.5 / 2.5 / 95");
+        vm.prank(HOLDER);
+        (bool ok,) = V4_MARKET.call(abi.encodeCall(IV4.createListing, (address(GENESIS), HOLDER, 0, 1, PRICE, 0)));
+        require(!ok, "V4 refuses Genesis even at 250 bps: it is not a factory release");
+    }
 }
