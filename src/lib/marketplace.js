@@ -28,7 +28,7 @@ export function marketplaceConfigForEdition(edition, base = MARKETPLACE_CONFIG, 
   // An allowlisted legacy collection (Genesis) trades only on the LegacyCollectionMarketplace, once it is deployed
   // and recorded; the factory-release marketplaces never accept it.
   if (base?.enabled && legacyCollectionFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId: edition?.tokenIds?.[0] }, legacy) && Number(base.chainId) === Number(legacy.chainId)) {
-    return Object.freeze({ ...base, address: legacy.marketplaceAddress });
+    return Object.freeze({ ...base, address: legacy.marketplaceAddress, feeBps: String(legacy.platformFeeBps) }); // Genesis: 0% platform fee
   }
   const deployment = releaseDeploymentForFactory(edition?.factoryAddress);
   if (!deployment || !base?.enabled || Number(base.chainId) !== Number(deployment.chainId) || !releaseDeploymentForMarketplace(base.address)) return base;

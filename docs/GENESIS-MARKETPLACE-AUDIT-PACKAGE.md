@@ -9,7 +9,37 @@ Evidence classes used throughout: **[FACT]** read from the repo or chain · **[U
 property tests · **[FORK]** local fork of real mainnet state, nothing broadcast · **[AI]** AI adversarial review ·
 **[FUTURE]** required before/after deployment, does not exist yet.
 
-## 1. Candidate identification [FACT]
+## 0. Zero-fee revision (2026-10-21) — supersedes every fee statement below [FACT]
+Owner-locked policy: **Genesis resale = 0% platform fee / full existing 5% royalty / 95% seller at the current royalty rate.**
+The audit target is now the zero-fee contract; §1–§2 hashes and every "250 bps fee" / "92.5%" / `feeRecipient` line below
+describe the superseded candidate and are kept as history only.
+
+| Item | Value |
+|---|---|
+| Git blob of the contract | `708a58db5a47baafa7ce782b1c32b0677e7a41ac` (`git hash-object contracts/LegacyCollectionMarketplace.sol`) |
+| SHA-256 of the contract file | `8f50809438d3a416014ad65532e631dd5dd616706ff1f6e2f40b802774b00774` |
+| creation bytecode keccak256 (Forge 1.5.1, `forge build`) | `0x8564350f7d1ca17fce4b7dd75efe6ca3cc0d3a8a6aa53cbc2ffaa6ddff90d3ea` |
+| runtime bytecode keccak256 | `0x66b52cf1742bd6e50bd539cf7df2f0c16ed066d327973123dc18a3f950cdb202` (8,666 bytes; embeds only the `deploymentChainId` immutable) |
+
+Exact contract delta (diff against the previous candidate, nothing else changed):
+1. `REQUIRED_PLATFORM_FEE_BPS = 250` and the immutables `feeRecipient`, `platformFeeBps` removed; `uint256 public constant platformFeeBps = 0` added (getter kept).
+2. Constructor `(feeRecipient_, platformFeeBps_, owner_)` → `(owner_)`; error `FeeTooHigh` removed.
+3. `_settlement`: `platformFee = 0`; `sellerProceeds = salePrice − royaltyAmount`; the `RoyaltyTooHigh` guard is now `royaltyAmount > salePrice` (unreachable under the ≤ 10% cap, kept as a backstop).
+4. `_settle`: the `_pay(feeRecipient, platformFee)` call removed. Payouts are royalty, then seller. `ListingSold` and `previewSettlement` keep their V4 shapes with `platformFee` always 0.
+5. NatSpec updated. Listing creation, the seller floor, the bounded `royaltyInfo` read, allowlist, pause, ownership, delivery check and reentrancy guard are byte-for-byte unchanged in logic.
+
+Scope note: the zero fee applies to **every** collection this marketplace allowlists. It is a dedicated Genesis marketplace; the
+deployment plan and `buildDeploymentPlan` allowlist Genesis only and refuse a second collection or any non-zero manifest fee.
+
+**New finding for the auditor — M-1 widened (no contract change).** Removing the post-read fee transfer lowers the gas a purchase
+needs after `royaltyInfo`, so the cheapest completing purchase no longer has to forward the full 100k. A collection whose
+`royaltyInfo` reads `gasleft()` *and* delivers near-free can now return a gas-dependent royalty even in the proportional (non-threshold)
+design: measured 4.12%–4.66% across completing limits (lowest completing limit 120,900; `testCheapestDeliveryOnAGasReadingCollectionVariesButEveryInvariantHolds`).
+Invariants still hold (cap, seller floor, conservation, failed purchase moves nothing, no platform fee). Only that collection's own royalty
+receiver can be underpaid. **Genesis is unaffected:** its `royaltyInfo` is storage arithmetic, and the fork sweep pays exactly 5% / 95% at
+every completing gas limit [FORK]. A gas gate remains rejected (§8a); the allowlist vetting rule is the control.
+
+## 1. Candidate identification [FACT] (superseded candidate; see §0)
 | Item | Value |
 |---|---|
 | Contract | `contracts/LegacyCollectionMarketplace.sol` — 309 lines, Solidity `^0.8.24`, no imports beyond a 3-function ERC-1155 interface (`IERC1155ReleaseMarketplace` in `ReleaseMarketplaceV3.sol`) |
@@ -153,24 +183,24 @@ Test files: `test/LegacyCollectionMarketplace.t.sol` (19), `…MinProceeds.t.sol
 ## 11. Deployment, rollback and post-deployment verification [FUTURE — all steps need explicit authorization]
 1. Supply the owner Safe → `OWNER_SAFE_ADDRESS=0x… node scripts/prepare-legacy-marketplace-deployment.mjs`; operator confirms Safe identity out of band.
 2. Complete the human audit; resolve findings; re-run §9 on the final commit; re-record §1–§2 hashes.
-3. Deploy `LegacyCollectionMarketplace(feeRecipient, 250, ownerSafe)` through the repo's approved-plan process (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`); never the deployer as owner.
+3. Deploy `LegacyCollectionMarketplace(ownerSafe)` (zero-fee contract, §0) through the repo's approved-plan process (`deploy/mainnet/DEPLOYMENT-AUTHORITY.md`); never the deployer as owner.
 4. Safe executes `allowCollection(Genesis, 500, 0, 3)`.
-5. Verify source and compare bytecode (§2); read back `owner()`, `feeRecipient()`, `platformFeeBps()`, `deploymentChainId()`, `getCollection(Genesis)`, `paused()`.
+5. Verify source and compare bytecode (§2); read back `owner()`, `platformFeeBps() == 0`, `deploymentChainId()`, `getCollection(Genesis)`, `paused()`; confirm `feeRecipient()` does not exist.
 6. One reviewed PR sets `deployed: true`, `marketplaceAddress`, `deploymentBlock`, `ownerAddress`, `record`; `node scripts/verify-legacy-marketplace.mjs` must exit 0.
-7. Deploy app/API/indexer from that commit. Run the mainnet acceptance procedure in `docs/GENESIS-MARKETPLACE-DEPLOYMENT-PLAN.md` (real holder lists with a floor, second account buys, balances and fee/royalty settle exactly, failed purchase moves nothing, plain transfer works, V4 trading re-verified) and record every transaction hash.
+7. Deploy app/API/indexer from that commit. Run the mainnet acceptance procedure in `docs/GENESIS-MARKETPLACE-DEPLOYMENT-PLAN.md` (real holder lists with a floor, second account buys, balances settle exactly at 0% platform / 5% royalty / 95% seller, failed purchase moves nothing, plain transfer works, V4 trading re-verified) and record every transaction hash.
 8. Rollback: `setPaused(true)` / `disableCollection(Genesis)` from the Safe; revert the manifest PR (`deployed:false`) to hide the UI. Sellers keep `cancelListing`. Redeploy a fixed contract if a bug is found; repoint the manifest.
 
 ## 12. Prioritized auditor checklist
 **P0 — funds and invariants**
-- [ ] `buy` end to end: ordering of effects/interactions, atomic revert on any failure, zero residue, `fee + royalty + seller = S`.
+- [ ] `buy` end to end: ordering of effects/interactions, atomic revert on any failure, zero residue, `royalty + seller = S`, no platform payout on any path (§0).
 - [ ] Seller-floor invariant under partial fills, rounding, price × quantity overflow, royalty changes.
-- [ ] Reentrancy from the buyer hook, royalty receiver, fee recipient and seller into every external function (§8.1).
+- [ ] Reentrancy from the buyer hook, royalty receiver and seller into every external function (§8.1).
 - [ ] Delivery check and self-purchase rule: do they hold for odd ERC-1155 behavior (reentrant `balanceOf`, hooks that move tokens)?
 - [ ] `_settlement` assembly: scratch-space use, gas cap, return-size and dirty-bit handling.
 **P1 — authority and liveness**
-- [ ] M-1 (§8a): confirm the verdict, and decide whether to add an optional per-collection `minRoyaltyBps` (evaluated in scratch; changes Genesis scope if set).
+- [ ] M-1 (§8a, widened by the zero-fee build, §0): confirm the verdict, and decide whether to add an optional per-collection `minRoyaltyBps` (evaluated in scratch; changes Genesis scope if set).
 - [ ] Owner power surface vs §7; two-step ownership; effect of narrowing/disabling/re-allowing a collection.
-- [ ] Non-payable fee recipient / royalty receiver, operator-filter and collection-admin liveness risks (§8.4–8.6).
+- [ ] Non-payable royalty receiver / seller, operator-filter and collection-admin liveness risks (§8.4–8.6).
 - [ ] `onlyDeploymentChain` on `cancelListing` (§8.7).
 **P2 — integration and hygiene**
 - [ ] Event semantics for indexers; `listingStatus`/`getListing` unknown-id behavior.

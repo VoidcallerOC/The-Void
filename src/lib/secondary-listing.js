@@ -190,8 +190,9 @@ export async function readLegacyListingContext({ provider, marketplaceAddress, m
   } catch {
     fail("This collection's royalty could not be settled by the marketplace right now (royalty above its cap, unreadable, or unpayable). Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
   }
-  if (deployedChainId !== BigInt(expectedChainId) || feeBps !== BigInt(config.platformFeeBps)) {
-    fail("The marketplace deployment does not match the recorded chain or 250 bps fee.", "MARKETPLACE_UNAVAILABLE");
+  // Genesis pays no platform fee: the contract must report 0 and a real settlement preview must carry a zero platform share.
+  if (deployedChainId !== BigInt(expectedChainId) || feeBps !== 0n || feeBps !== BigInt(config.platformFeeBps) || BigInt(preview[0]) !== 0n) {
+    fail("The marketplace deployment does not match the recorded chain or the 0% platform fee.", "MARKETPLACE_UNAVAILABLE");
   }
   if (paused) fail("The marketplace is paused. Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
   if (!supported) fail("The marketplace does not currently accept this collection or token.", "UNSUPPORTED_RELEASE");

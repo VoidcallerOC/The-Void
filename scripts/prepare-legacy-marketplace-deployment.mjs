@@ -16,7 +16,7 @@ export const ARTIFACT_PATH = resolve(fileURLToPath(new URL("..", import.meta.url
 const ZERO = "0x0000000000000000000000000000000000000000";
 const SAFE = new Interface(["function getThreshold() view returns (uint256)", "function getOwners() view returns (address[])", "function VERSION() view returns (string)"]);
 const MARKET = new Interface([
-  "constructor(address feeRecipient_, uint256 platformFeeBps_, address owner_)",
+  "constructor(address owner_)",
   "function allowCollection(address tokenContract, uint16 maxRoyaltyBps, uint256 minTokenId, uint256 maxTokenId)",
 ]);
 const same = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
@@ -38,7 +38,7 @@ export async function validateOwnerSafe({ address, rpc, manifest = LEGACY_COLLEC
   if (owner === ZERO) problems.push("The owner may not be the zero address.");
   const mainnet = RELEASE_PER_CONTRACT_MANIFESTS.mainnet;
   const forbidden = [
-    [manifest.feeRecipient, "the platform fee recipient"],
+    [mainnet.marketplaceFeeRecipient, "the platform fee recipient"],
     [mainnet.deployerAddress, "the recorded deployer wallet"],
     [mainnet.factoryAddress, "the release factory"],
     [mainnet.marketplaceAddress, "the V4 marketplace"],
@@ -74,14 +74,17 @@ export async function validateOwnerSafe({ address, rpc, manifest = LEGACY_COLLEC
 export function buildDeploymentPlan({ manifest = LEGACY_COLLECTION_MARKETPLACE, owner, artifact = null }) {
   const collection = manifest.collections[0];
   if (manifest.collections.length !== 1) throw new Error("The audit candidate allowlists exactly one collection.");
-  const constructorArgs = [getAddress(manifest.feeRecipient), BigInt(manifest.platformFeeBps), owner ? getAddress(owner) : null];
+  // Genesis policy: no platform fee. The contract has no fee parameter; the manifest must agree.
+  if (manifest.platformFeeBps !== 0) throw new Error("The legacy marketplace charges no platform fee; the manifest must record platformFeeBps 0.");
+  const ownerArg = owner ? getAddress(owner) : null;
   const plan = {
     broadcast: false,
     chainId: manifest.chainId,
     network: manifest.networkName,
     contract: "contracts/LegacyCollectionMarketplace.sol",
-    constructor: { feeRecipient: constructorArgs[0], platformFeeBps: Number(constructorArgs[1]), owner: constructorArgs[2] },
-    constructorArgsEncoded: owner ? AbiCoder.defaultAbiCoder().encode(["address", "uint256", "address"], constructorArgs) : null,
+    constructor: { owner: ownerArg },
+    constructorArgsEncoded: ownerArg ? AbiCoder.defaultAbiCoder().encode(["address"], [ownerArg]) : null,
+    economics: { platformFeeBps: 0, royalty: "the collection's own ERC-2981 royaltyInfo, paid in full", seller: "sale price minus the royalty" },
     postDeploy: [{
       from: "owner Safe",
       to: "the deployed marketplace",

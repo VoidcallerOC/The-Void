@@ -23,10 +23,10 @@ describe("deployment gate and candidate scope (manifest)", () => {
     expect(legacyMarketplaceActive()).toBe(false);
   });
 
-  it("carries exactly the confirmed scope: Genesis ids 0-3, 500 bps cap, 250 bps fee to the same recipient as V4", () => {
+  it("carries exactly the locked scope: Genesis ids 0-3, 500 bps cap, 0% platform fee and no fee recipient", () => {
     expect(manifest.chainId).toBe(43114);
-    expect(manifest.platformFeeBps).toBe(250);
-    expect(manifest.feeRecipient.toLowerCase()).toBe(mainnet.marketplaceFeeRecipient.toLowerCase());
+    expect(manifest.platformFeeBps).toBe(0);
+    expect(manifest).not.toHaveProperty("feeRecipient");
     expect(manifest.collections).toHaveLength(1);
     expect(manifest.collections[0]).toMatchObject({ address: "0xD1B4367dd9f235f9ee61878019d66E31511E98eE", minTokenId: 0, maxTokenId: 3, maxRoyaltyBps: 500, expectedRoyaltyReceiver: "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a" });
     expect(manifest.collections[0].address.toLowerCase()).not.toBe(mainnet.factoryAddress.toLowerCase());
@@ -99,15 +99,20 @@ describe("source tripwire: the contract's owner powers and dangerous constructs 
     expect((code.match(/\bassembly\b/g) || []).length).toBe(1); // the bounded royaltyInfo read
     expect(code).toMatch(/uint256 private constant ROYALTY_READ_GAS = 100_000;/);
     expect(code).toMatch(/uint16 public constant ROYALTY_CEILING_BPS = 1_000;/);
-    expect(code).toMatch(/uint256 public constant REQUIRED_PLATFORM_FEE_BPS = 250;/);
+    // Genesis policy: the platform fee is a compile-time zero and nothing in the contract can receive one.
+    expect(code).toMatch(/uint256 public constant platformFeeBps = 0;/);
+    expect(code).not.toMatch(/feeRecipient/);
+    expect(code).not.toMatch(/platformFeeBps_/);
+    expect(code).toMatch(/platformFee = 0;/);
+    expect(code).toMatch(/constructor\(address owner_\)/);
   });
 
   it("only the buy path pays out, in a fixed order after the seller-floor check and the token transfer", () => {
     const settle = code.slice(code.indexOf("function _settle("), code.indexOf("// ---", code.indexOf("function _settle(")));
-    const order = ["_requireMinimumProceeds(", "_deliver(", "_pay(feeRecipient", "_pay(royaltyReceiver", "_pay(seller"].map((needle) => settle.indexOf(needle));
+    const order = ["_requireMinimumProceeds(", "_deliver(", "_pay(royaltyReceiver", "_pay(seller"].map((needle) => settle.indexOf(needle));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect((code.match(/_pay\(/g) || []).length).toBe(4); // 3 calls in _settle + the definition
+    expect((code.match(/_pay\(/g) || []).length).toBe(3); // royalty + seller in _settle, plus the definition: no platform payout exists
     expect((code.match(/\.safeTransferFrom\(/g) || []).length).toBe(1); // the only token movement, inside _deliver
     const deliver = code.slice(code.indexOf("function _deliver("), code.indexOf("// ---", code.indexOf("function _deliver(")));
     expect(deliver).toMatch(/revert TokensNotDelivered\(\)/); // ... and it verifies the buyer's balance rose

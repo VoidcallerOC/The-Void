@@ -133,7 +133,7 @@ contract LegacyCollectionMarketplaceTest {
     MockGenesis internal genesis;
 
     function setUp() public {
-        market = new LegacyCollectionMarketplace(FEE, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         genesis = new MockGenesis(CREATOR);
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 500, 0, 3);
@@ -261,34 +261,34 @@ contract LegacyCollectionMarketplaceTest {
         require(selector(err) == LegacyCollectionMarketplace.PausedMarket.selector, "paused blocks buy");
     }
 
-    // 6-9. Purchase: ownership moves, seller proceeds, marketplace fee, and ERC-2981 royalty settle exactly.
-    function testPurchaseSettlesFeeRoyaltyAndSellerExactly() public {
+    // 6-9. Purchase: ownership moves, seller proceeds and ERC-2981 royalty settle exactly; no platform fee is paid.
+    function testPurchaseSettlesRoyaltyAndSellerExactlyWithNoPlatformFee() public {
         uint256 id = list(0, 2, PRICE);
         uint256 sellerBefore = SELLER.balance;
         vm.prank(BUYER);
         market.buy{value: PRICE}(id, 1);
         require(genesis.balanceOf(BUYER, 0) == 1 && genesis.balanceOf(SELLER, 0) == 4, "ownership moved");
-        require(FEE.balance == 0.025 ether, "2.5% platform fee");
+        require(FEE.balance == 0, "0% platform fee: the platform wallet receives nothing");
         require(CREATOR.balance == 0.05 ether, "5% Genesis royalty (royaltyInfo)");
-        require(SELLER.balance - sellerBefore == 0.925 ether, "92.5% to the seller");
+        require(SELLER.balance - sellerBefore == 0.95 ether, "95% to the seller");
         require(address(market).balance == 0, "marketplace holds no funds");
         LegacyCollectionMarketplace.Listing memory l = market.getListing(id);
         require(l.amount == 1 && l.status == LegacyCollectionMarketplace.Status.ACTIVE, "partial fill leaves 1");
         vm.prank(BUYER);
         market.buy{value: PRICE}(id, 1);
         require(market.listingStatus(id) == LegacyCollectionMarketplace.Status.SOLD, "sold out");
-        require(FEE.balance == 0.05 ether && CREATOR.balance == 0.1 ether, "second sale settled");
+        require(FEE.balance == 0 && CREATOR.balance == 0.1 ether, "second sale settled, still no platform fee");
     }
 
     // 10. Rounding and zero royalty.
     function testRoundingAndZeroRoyalty() public {
-        uint256 odd = 333; // fee floor(333*250/10000)=8, royalty floor(333*500/10000)=16, seller 309
+        uint256 odd = 333; // no fee, royalty floor(333*500/10000)=16, seller 317
         uint256 id = list(0, 1, odd);
         uint256 sellerBefore = SELLER.balance;
         vm.prank(BUYER);
         market.buy{value: odd}(id, 1);
-        require(FEE.balance == 8 && CREATOR.balance == 16 && SELLER.balance - sellerBefore == 309, "floor rounding, seller takes dust");
-        require(FEE.balance + CREATOR.balance + (SELLER.balance - sellerBefore) == odd, "nothing lost or created");
+        require(FEE.balance == 0 && CREATOR.balance == 16 && SELLER.balance - sellerBefore == 317, "floor rounding, seller takes dust");
+        require(CREATOR.balance + (SELLER.balance - sellerBefore) == odd, "nothing lost or created");
 
         genesis.setRoyalty(CREATOR, 0);
         uint256 id2 = list(0, 1, PRICE);
@@ -297,7 +297,7 @@ contract LegacyCollectionMarketplaceTest {
         uint256 sellerBefore2 = SELLER.balance;
         vm.prank(BUYER);
         market.buy{value: PRICE}(id2, 1);
-        require(FEE.balance - feeBefore == 0.025 ether && CREATOR.balance == creatorBefore && SELLER.balance - sellerBefore2 == 0.975 ether, "zero royalty pays nobody extra");
+        require(FEE.balance == feeBefore && CREATOR.balance == creatorBefore && SELLER.balance - sellerBefore2 == PRICE, "zero royalty: the seller receives the whole price");
 
         // 1 wei: every share floors to zero except the seller's.
         uint256 id3 = list(0, 1, 1);
@@ -475,10 +475,8 @@ contract LegacyCollectionMarketplaceTest {
     }
 
     function testGenesisAndMarketplaceAdministration() public {
-        require(market.feeRecipient() == FEE && market.platformFeeBps() == 250 && market.owner() == OWNER, "wiring");
-        try new LegacyCollectionMarketplace(FEE, 500, OWNER) { revert("fee other than 250"); } catch {}
-        try new LegacyCollectionMarketplace(address(0), 250, OWNER) { revert("zero fee recipient"); } catch {}
-        try new LegacyCollectionMarketplace(FEE, 250, address(0)) { revert("zero owner"); } catch {}
+        require(market.platformFeeBps() == 0 && market.owner() == OWNER, "wiring: no platform fee");
+        try new LegacyCollectionMarketplace(address(0)) { revert("zero owner"); } catch {}
         vm.prank(OWNER);
         market.transferOwnership(STRANGER);
         require(market.owner() == OWNER, "two-step");
@@ -503,6 +501,6 @@ contract LegacyCollectionMarketplaceTest {
 
     function testPreviewSettlementMatchesGenesisPolicy() public view {
         (uint256 fee, address receiver, uint256 royalty, uint256 proceeds) = market.previewSettlement(address(genesis), 0, 10 ether);
-        require(fee == 0.25 ether && receiver == CREATOR && royalty == 0.5 ether && proceeds == 9.25 ether, "preview");
+        require(fee == 0 && receiver == CREATOR && royalty == 0.5 ether && proceeds == 9.5 ether, "preview: 0 / 5% / 95%");
     }
 }

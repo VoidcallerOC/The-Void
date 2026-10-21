@@ -36,13 +36,13 @@ contract LegacyCollectionMarketplaceListingPathsTest {
     address internal constant BUYER = address(0xB0B);
     address internal constant STRANGER = address(0x5757);
     uint256 internal constant PRICE = 1 ether;
-    uint256 internal constant EXACT_FLOOR = 0.925 ether;
+    uint256 internal constant EXACT_FLOOR = 0.95 ether; // 1 - 5% royalty; no platform fee
 
     LegacyCollectionMarketplace internal market;
     MockGenesis internal genesis;
 
     function setUp() public {
-        market = new LegacyCollectionMarketplace(FEE, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         genesis = new MockGenesis(CREATOR);
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 500, 0, 3);
@@ -143,8 +143,8 @@ contract LegacyCollectionMarketplaceListingPathsTest {
     // ---------------------------------------------------------------- tiny prices: where no protective floor can exist
 
     function testAOneWeiPriceHasNoProtectiveFloorAndIsRefusedSafely() public {
-        // exact-rate share of 1 wei at 92.5% is 0 wei: the app cannot express a floor, and the contract refuses a zero one.
-        require((uint256(1) * (10_000 - 250 - 500)) / 10_000 == 0, "the exact-rate share rounds to zero");
+        // exact-rate share of 1 wei at 95% is 0 wei: the app cannot express a floor, and the contract refuses a zero one.
+        require((uint256(1) * (10_000 - 500)) / 10_000 == 0, "the exact-rate share rounds to zero");
         require(tryCreate(SELLER, address(genesis), SELLER, 0, 1, 1, 0, 0) == LegacyCollectionMarketplace.MinProceedsRequired.selector, "zero floor at 1 wei");
         genesis.mint(SELLER, 0, 100);
         // A 1 wei floor at 1 wei per unit is deliverable only while rounding leaves every unit's wei with the seller: the 5% royalty

@@ -40,14 +40,15 @@ if (!legacyMarketplaceActive()) {
 }
 
 const market = new Contract(manifest.marketplaceAddress, [
-  "function platformFeeBps() view returns (uint256)", "function feeRecipient() view returns (address)", "function deploymentChainId() view returns (uint256)",
+  "function platformFeeBps() view returns (uint256)", "function feeRecipient() view returns (address)", "function deploymentChainId() view returns (uint256)", // feeRecipient must NOT exist
   "function owner() view returns (address)", "function paused() view returns (bool)",
   "function getCollection(address) view returns (tuple(bool enabled, uint16 maxRoyaltyBps, uint256 minTokenId, uint256 maxTokenId))",
   "function previewSettlement(address,uint256,uint256) view returns (uint256,address,uint256,uint256)",
 ], provider);
 check("marketplace has code at the manifest address", (await provider.getCode(manifest.marketplaceAddress)) !== "0x");
 check("marketplace chain id is 43114", (await market.deploymentChainId()) === 43114n);
-check("marketplace fee is 250 bps to the recorded fee recipient", (await market.platformFeeBps()) === 250n && same(await market.feeRecipient(), manifest.feeRecipient));
+check("marketplace platform fee is 0 bps (Genesis policy)", (await market.platformFeeBps()) === 0n && manifest.platformFeeBps === 0);
+check("marketplace has no fee recipient", (await market.feeRecipient().then(() => "present", () => "absent")) === "absent");
 check("marketplace owner is the recorded owner", manifest.ownerAddress ? same(await market.owner(), manifest.ownerAddress) : false, manifest.ownerAddress ? "" : "ownerAddress not recorded");
 check("marketplace is not paused", (await market.paused()) === false);
 for (const collection of manifest.collections) {
@@ -59,7 +60,7 @@ for (const collection of manifest.collections) {
   }
   for (let id = collection.minTokenId; id <= collection.maxTokenId; id += 1) {
     const [fee, receiver, royalty, seller] = await market.previewSettlement(collection.address, id, 10n ** 18n).catch(() => [null]);
-    check(`${collection.name} #${id}: settlement previews (fee/royalty/seller)`, fee !== null && fee + royalty + seller === 10n ** 18n && same(receiver, collection.expectedRoyaltyReceiver), fee === null ? "preview reverts" : `${fee} / ${royalty} / ${seller} wei per 1 AVAX`);
+    check(`${collection.name} #${id}: settles 0 platform / full royalty / rest to the seller`, fee === 0n && royalty + seller === 10n ** 18n && royalty <= (10n ** 18n * BigInt(collection.maxRoyaltyBps)) / 10_000n && same(receiver, collection.expectedRoyaltyReceiver), fee === null ? "preview reverts" : `${fee} / ${royalty} / ${seller} wei per 1 AVAX`);
   }
 }
 const configured = process.env.VITE_LEGACY_MARKETPLACE_ADDRESS || process.env.INDEXER_LEGACY_MARKETPLACE_ADDRESS;

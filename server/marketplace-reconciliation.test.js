@@ -65,6 +65,9 @@ describe("marketplace event decoding", () => {
     expect(() => decodeMarketplaceLog({ ...created(), data: "0x" }, { chainId: 43114, expectedAddress: marketplace, blockTimestamp: new Date() })).toThrow(MarketplaceEventError);
     expect(() => decodeMarketplaceLog(eventLog("ListingSold", [7, buyer, seller, token, 12, 2, 50, 51, 0]), { chainId: 43114, expectedAddress: marketplace, blockTimestamp: new Date() })).toThrow(/fee/i);
     expect(() => decodeMarketplaceLog(sold(), { chainId: 43114, expectedAddress: marketplace, blockTimestamp: new Date(), platformFeeBps: 999 })).toThrow(/basis points/i);
+    // Legacy (Genesis) marketplace is registered with platformFeeBps 0: a fee-free sale decodes, any non-zero fee is refused.
+    expect(decodeMarketplaceLog(eventLog("ListingSold", [7, buyer, seller, token, 0, 1, 100, 0, 5]), { chainId: 43114, expectedAddress: marketplace, blockTimestamp: new Date(), platformFeeBps: 0 })).toMatchObject({ platformFeeWei: "0", royaltyWei: "5", salePriceWei: "100" });
+    expect(() => decodeMarketplaceLog(eventLog("ListingSold", [7, buyer, seller, token, 0, 1, 100, 2, 5]), { chainId: 43114, expectedAddress: marketplace, blockTimestamp: new Date(), platformFeeBps: 0 })).toThrow(/basis points/i);
   });
 
   it("decodes canonical getListing state and rejects malformed results", () => {

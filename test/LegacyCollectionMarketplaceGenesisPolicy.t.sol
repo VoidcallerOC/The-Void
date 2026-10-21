@@ -5,7 +5,7 @@ import {LegacyCollectionMarketplace} from "../contracts/LegacyCollectionMarketpl
 import {MockGenesis, VmLegacy} from "./LegacyCollectionMarketplace.t.sol";
 
 /// @notice The audit candidate's exact Genesis policy, enforced by the contract (not by the frontend):
-/// token ids 0-3, a 500 bps royalty cap, a 250 bps fee. Plus fuzzed reconciliation of the contract's arithmetic with the
+/// token ids 0-3, a 500 bps royalty cap, no platform fee (0% platform / full royalty / rest to the seller). Plus fuzzed reconciliation of the contract's arithmetic with the
 /// documented formulas.
 contract LegacyCollectionMarketplaceGenesisPolicyTest {
     VmLegacy internal constant vm = VmLegacy(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -20,7 +20,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     MockGenesis internal genesis;
 
     function setUp() public {
-        market = new LegacyCollectionMarketplace(FEE, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         genesis = new MockGenesis(CREATOR);
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 500, 0, 3); // the candidate's initial policy
@@ -37,19 +37,19 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     function testPolicyIsExactlyTokens0To3WithA500BpsCap() public view {
         LegacyCollectionMarketplace.Collection memory c = market.getCollection(address(genesis));
         require(c.enabled && c.maxRoyaltyBps == 500 && c.minTokenId == 0 && c.maxTokenId == 3, "candidate policy");
-        require(market.platformFeeBps() == 250 && market.feeRecipient() == FEE, "250 bps fee");
+        require(market.platformFeeBps() == 0, "no platform fee");
         require(market.ROYALTY_CEILING_BPS() == 1000, "owner can never configure a cap above 10%");
     }
 
     function testTokenIds0Through3AreListedAndBought() public {
         for (uint256 id = 0; id <= 3; id++) {
             vm.prank(SELLER);
-            uint256 listingId = market.createListingWithMinProceeds(address(genesis), SELLER, id, 1, 1 ether, 0, 0.925 ether);
+            uint256 listingId = market.createListingWithMinProceeds(address(genesis), SELLER, id, 1, 1 ether, 0, 0.95 ether);
             vm.prank(BUYER);
             market.buy{value: 1 ether}(listingId, 1);
             require(genesis.balanceOf(BUYER, id) == 1, "bought");
         }
-        require(CREATOR.balance == 4 * 0.05 ether && FEE.balance == 4 * 0.025 ether, "5% and 2.5% on each");
+        require(CREATOR.balance == 4 * 0.05 ether && FEE.balance == 0, "5% royalty on each, nothing to the platform");
     }
 
     function testTokenIdsOutsideTheScopeAreRefusedForListingAndForExistingListings() public {
@@ -105,13 +105,13 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
 
     function testDocumentedSettlementAtTheReportedRates() public {
         vm.prank(SELLER);
-        uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 1, 4, 1 ether, 0, 0.925 ether);
+        uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 1, 4, 1 ether, 0, 0.95 ether);
         uint256 sellerBefore = SELLER.balance;
         vm.prank(BUYER);
         market.buy{value: 4 ether}(id, 4);
-        require(SELLER.balance - sellerBefore == 3.7 ether, "92.5% to the seller");
+        require(SELLER.balance - sellerBefore == 3.8 ether, "95% to the seller");
         require(CREATOR.balance == 0.2 ether, "5% to the creator");
-        require(FEE.balance == 0.1 ether, "2.5% to the fee recipient");
+        require(FEE.balance == 0, "0% to the platform");
         require(address(market).balance == 0, "nothing retained");
     }
 
@@ -121,7 +121,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
     /// What it CAN influence is how much royalty an UNPROTECTED listing tolerates; a floor makes a listing immune to that.
     function testOwnerCannotAlterSellerProceedsOfAProtectedListingAndOnlyWidensTheCapForUnprotectedOnes() public {
         vm.prank(SELLER);
-        uint256 protectedId = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 1 ether, 0, 0.925 ether);
+        uint256 protectedId = market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 1 ether, 0, 0.95 ether);
         vm.prank(SELLER);
         uint256 unprotectedId = market.createListingWithMinProceeds(address(genesis), SELLER, 1, 1, 1 ether, 0, 1);
 
@@ -135,10 +135,10 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         uint256 sellerBefore = SELLER.balance;
         vm.prank(BUYER);
         market.buy{value: 1 ether}(unprotectedId, 1);
-        require(SELLER.balance - sellerBefore == 0.885 ether, "an unprotected listing pays what the collection's royalty dictates (documented risk)");
+        require(SELLER.balance - sellerBefore == 0.91 ether, "an unprotected listing pays what the collection's royalty dictates (documented risk)");
 
         // None of the owner's calls can change a listing, a floor or a balance.
-        require(market.minSellerProceedsPerUnit(protectedId) == 0.925 ether && market.getListing(protectedId).price == 1 ether && market.getListing(protectedId).seller == SELLER, "listing untouched");
+        require(market.minSellerProceedsPerUnit(protectedId) == 0.95 ether && market.getListing(protectedId).price == 1 ether && market.getListing(protectedId).seller == SELLER, "listing untouched");
         require(address(market).balance == 0, "the marketplace never holds funds between transactions");
         vm.prank(OWNER);
         (bool cancelled,) = address(market).call(abi.encodeCall(market.cancelListing, (protectedId)));
@@ -160,7 +160,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         uint256 q = uint256(qRaw) % 40 + 1;
         uint256 bps = uint256(bpsRaw) % 501;
         genesis.setRoyalty(CREATOR, bps);
-        uint256 floorPerUnit = (price * (10_000 - 250 - bps)) / 10_000;
+        uint256 floorPerUnit = (price * (10_000 - bps)) / 10_000;
         vm.prank(SELLER);
         uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 0, q, price, 0, floorPerUnit);
 
@@ -172,10 +172,9 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         uint256 fee = FEE.balance;
         uint256 royalty = CREATOR.balance;
         uint256 seller = SELLER.balance - sellerBefore;
-        require(fee == (sale * 250) / 10_000, "fee = floor(S*250/10000)");
-        require(royalty == (sale * bps) / 10_000, "royalty = royaltyInfo(S)");
-        require(seller == sale - fee - royalty, "seller = S - fee - royalty");
-        require(fee + royalty + seller == sale, "conservation");
+        require(fee == 0, "no platform fee at any price, quantity or royalty");
+        require(royalty == (sale * bps) / 10_000, "royalty = royaltyInfo(S), paid in full");
+        require(seller == sale - royalty, "seller = S - royalty");
         require(seller >= floorPerUnit * q, "the exact-rate floor is always cleared at the live royalty");
         require(address(market).balance == 0 && genesis.balanceOf(BUYER, 0) == q, "no residue, tokens delivered");
     }
@@ -199,7 +198,7 @@ contract LegacyCollectionMarketplaceGenesisPolicyTest {
         uint256 price = uint256(priceRaw) % 1e22 + 100; // below 100 wei no protective floor exists (see the tiny-price test)
         uint256 q = uint256(qRaw) % 20 + 1;
         genesis.setRoyalty(CREATOR, listedBps);
-        uint256 floorPerUnit = (price * (10_000 - 250 - listedBps)) / 10_000;
+        uint256 floorPerUnit = (price * (10_000 - listedBps)) / 10_000;
         vm.prank(SELLER);
         uint256 id = market.createListingWithMinProceeds(address(genesis), SELLER, 1, q, price, 0, floorPerUnit);
 

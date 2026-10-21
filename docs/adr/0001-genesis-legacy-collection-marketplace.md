@@ -1,7 +1,14 @@
 # ADR 0001 — Marketplace for legacy ERC-1155 collections (Genesis)
 
 Status: AUDIT CANDIDATE (scope confirmed 2026-10-20; not deployed; needs the owner Safe address, a human security audit and explicit deployment authorization). Audit package: `docs/GENESIS-MARKETPLACE-AUDIT-PACKAGE.md`.
-Date: 2026-10-20
+Date: 2026-10-20 (fee policy amended 2026-10-21)
+
+## Amendment 2026-10-21 — Genesis pays no platform fee (owner decision, supersedes the 250 bps fee below)
+**Genesis resale: 0% platform fee / full existing 5% royalty / 95% seller at the current royalty rate.** The contract now has no
+fee recipient and a constant `platformFeeBps = 0`; the constructor takes only the owner. Genesis's ERC-2981 royalty is honored in
+full and is not changed (no `setRoyaltyInfo` call). New factory releases keep 2.5% platform / 2.5% artist royalty / 95% seller on
+`ReleaseMarketplaceV4`, unchanged. Exact contract delta and the widened M-1 note: audit package §0. Statements below that cite a
+250 bps legacy fee, a legacy fee recipient or a 92.5% seller share are historical.
 
 ## Context (verified on Avalanche C-Chain 43114 by `eth_call` at the time of writing)
 - Genesis `0xD1B4367dd9f235f9ee61878019d66E31511E98eE` is an EIP-1167 clone (45-byte runtime) of
@@ -68,23 +75,24 @@ where funds strand, or where the owner can take funds/tokens/listings.
 |---|---|---|---|---|
 | Genesis `0xD1B4…98eE` tokens 0–3 | **5.0% (500 bps)** | `0x284C09a7…180a` | Genesis's own ERC-2981 `royaltyInfo` | Launchpeg initializer hardcodes `_setDefaultRoyalty(initData.royaltyReceiver, 500)` ("Default royalty is 5%"); `eth_call` returns 5e16 per 1e18 for ids 0–3 (and 7); Etherscan logs show **no** `DefaultRoyaltySet` event on the proxy, i.e. never changed since launch. Owner can change it (`setRoyaltyInfo`, ≤ 2,500 bps). |
 | New Void factory releases (`VoidReleaseFactoryV2Royalty` → `VoidRelease1155V4Royalty`) | **2.5% (250 bps)** | the edition's own artist payout | enforced on-chain at edition creation, again by `ReleaseMarketplaceV4` | `deploy/mainnet/README.md` "Economics (final)", `test/RoyaltyEnforcement.t.sol`, `test/MainnetEconomics.t.sol`, `config/mainnet-release-per-contract.json` (`artistRoyaltyBps: 250`) |
-| Marketplace fee (both marketplaces) | 2.5% (250 bps) | `0xb65C575C…1ce4` (no contract code: an EOA) | immutable in each marketplace constructor | V4 and `LegacyCollectionMarketplace` |
+| Marketplace fee — V4 (factory releases) | 2.5% (250 bps) | `0xb65C575C…1ce4` (no contract code: an EOA) | immutable in the V4 constructor | `ReleaseMarketplaceV4` |
+| Marketplace fee — `LegacyCollectionMarketplace` (Genesis) | **0%** (amended 2026-10-21) | none | compile-time constant `platformFeeBps = 0`; no fee recipient | `LegacyCollectionMarketplace` |
 
 **Finding:** the "2.5% artist royalty" policy is a policy for *new factory releases*. Nothing in the repo (code, tests, docs, config) states a Genesis royalty policy; Genesis simply carries the 5% default its launchpad gave it, paid to the creator wallet that is also its owner. The frontend carries no Genesis royalty copy beyond what this PR added.
 
 Seller proceeds, 1 AVAX resale, by policy:
 - Factory release (V4): fee 0.025, artist royalty 0.025, **seller 0.95**.
-- Genesis (legacy marketplace): fee 0.025, creator royalty 0.05, **seller 0.925**.
+- Genesis (legacy marketplace): fee 0, creator royalty 0.05, **seller 0.95** (amended 2026-10-21; was fee 0.025 / seller 0.925).
 
 **Inconsistencies found (documented, not "fixed"):** (1) the platform headline "2.5% artist royalty" is true of factory releases only; (2) my first root-cause note said Genesis was 250 bps — corrected to 500; (3) `docs/C-CHAIN-PRODUCTION-RUNBOOK.md` (superseded) calls the legacy collection "out of scope"; this ADR is the first place it is brought into the marketplace. No royalty percentage or recipient was changed anywhere to make these agree.
 
 ## Final settlement formulas (`LegacyCollectionMarketplace.buy`)
 For a purchase of `q` units of a listing priced `p` per unit: `S = p·q` (must equal `msg.value`).
-- `fee = ⌊S · 250 / 10000⌋` → fee recipient.
+- Platform fee: **0** (amended 2026-10-21). Nothing is paid to the platform.
 - `(receiver, royalty) = token.royaltyInfo(tokenId, S)` — read at sale time, 100k-gas-capped, exactly 64 bytes returned; `royalty ≤ ⌊S · maxRoyaltyBps / 10000⌋`; if `royalty > 0` the receiver is non-zero and not the marketplace.
-- `seller = S − fee − royalty`.
-- Conservation: `fee + royalty + seller = S` exactly; the seller absorbs rounding dust (floors favor the seller).
-- Order: seller floor check → ERC-1155 `safeTransferFrom(seller → buyer)` → pay fee → pay royalty → pay seller. Any revert undoes everything.
+- `seller = S − royalty`.
+- Conservation: `royalty + seller = S` exactly; the seller absorbs rounding dust (floors favor the seller).
+- Order: seller floor check → ERC-1155 `safeTransferFrom(seller → buyer)` → pay royalty → pay seller. Any revert undoes everything.
 
 ## Seller minimum-proceeds guard
 - `minSellerProceedsPerUnit[listingId]` (wei, public getter). The purchase requires `seller ≥ minSellerProceedsPerUnit · q` using the *actual* `S`, fee and live `royaltyInfo` of that exact purchase; otherwise `BelowMinimumProceeds(seller, required)` and the whole transaction reverts (no token moved, no payment kept, listing unchanged).
@@ -98,7 +106,7 @@ Confirmed by the owner as the *implementation scope of the candidate* (not permi
 1. Honor Genesis's existing ERC-2981 royalty of **500 bps (5%)**; no royalty percentage or recipient is changed.
 2. Initial scope: Genesis token ids **0–3 only**.
 3. Royalty cap: **500 bps**.
-4. Marketplace fee stays **250 bps**; target settlement at the reported rates 92.5% seller / 5% creator / 2.5% fee.
+4. ~~Marketplace fee stays 250 bps; 92.5 / 5 / 2.5.~~ **Amended 2026-10-21:** platform fee 0; settlement 95% seller / 5% creator / 0% platform.
 5. V4 untouched; ordinary ERC-1155 transfers untouched; explicit deployment gate retained (`deployed:false`).
 
 Still open:

@@ -40,7 +40,7 @@ describe("owner Safe validation (address validity only)", () => {
   it("rejects malformed, zero and role-colliding owners (deployer, fee recipient, factory, V4 marketplace, Genesis)", async () => {
     expect((await check("0x1234")).ok).toBe(false);
     expect((await check("0x0000000000000000000000000000000000000000")).problems.join(" ")).toMatch(/zero address/);
-    for (const colliding of [mainnet.deployerAddress, LEGACY_COLLECTION_MARKETPLACE.feeRecipient, mainnet.factoryAddress, mainnet.marketplaceAddress, LEGACY_COLLECTION_MARKETPLACE.collections[0].address]) {
+    for (const colliding of [mainnet.deployerAddress, mainnet.marketplaceFeeRecipient, mainnet.factoryAddress, mainnet.marketplaceAddress, LEGACY_COLLECTION_MARKETPLACE.collections[0].address]) {
       const result = await check(colliding.toLowerCase());
       expect(result.ok).toBe(false);
       expect(result.problems.join(" ")).toMatch(/may not be/);
@@ -70,7 +70,10 @@ describe("deployment plan (dry run)", () => {
     const plan = buildDeploymentPlan({ owner: SAFE_ADDRESS });
     expect(plan.broadcast).toBe(false);
     expect(plan.chainId).toBe(43114);
-    expect(plan.constructor).toEqual({ feeRecipient: getAddress(mainnet.marketplaceFeeRecipient), platformFeeBps: 250, owner: SAFE_ADDRESS });
+    // Genesis policy: the constructor takes only the owner; there is no fee or fee recipient to configure.
+    expect(plan.constructor).toEqual({ owner: SAFE_ADDRESS });
+    expect(plan.constructorArgsEncoded).toBe(`0x${SAFE_ADDRESS.slice(2).toLowerCase().padStart(64, "0")}`);
+    expect(plan.economics.platformFeeBps).toBe(0);
     const call = new Interface(["function allowCollection(address,uint16,uint256,uint256)"]).decodeFunctionData("allowCollection", plan.postDeploy[0].calldata);
     expect([call[0], Number(call[1]), Number(call[2]), Number(call[3])]).toEqual([getAddress("0xD1B4367dd9f235f9ee61878019d66E31511E98eE"), 500, 0, 3]);
     expect(plan.manifestAfterVerification.deployed).toBe(true); // a description of the later, separately approved edit
@@ -81,6 +84,10 @@ describe("deployment plan (dry run)", () => {
     expect(plan.constructor.owner).toBeNull();
     expect(plan.constructorArgsEncoded).toBeNull();
     expect(JSON.stringify(plan).toLowerCase()).not.toContain(mainnet.deployerAddress.toLowerCase());
+  });
+
+  it("refuses a manifest that records any platform fee", () => {
+    expect(() => buildDeploymentPlan({ manifest: { ...LEGACY_COLLECTION_MARKETPLACE, platformFeeBps: 250 }, owner: SAFE_ADDRESS })).toThrow(/no platform fee/);
   });
 
   it("refuses a multi-collection allowlist: the candidate is Genesis only", () => {

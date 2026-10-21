@@ -34,7 +34,7 @@ and the app already supports it.
 | Collection identity | **VERIFIED** | live: 45-byte EIP-1167 proxy, code hash `0xe722…0ed9`; `factory.isRelease(Genesis)=false` |
 | Claims | **UNVERIFIED** as a live feature | live: the F&F release's only `RoleGranted` logs are from its creation (artist roles + old sale as issuer); no `GenesisHolderClaim` is authorized on mainnet. Code composes with the corrected factory (new local test, below). |
 | Resale | **NOT DEPLOYED** | `config/legacy-collection-marketplace.json` `deployed: false`, `marketplaceAddress: null`; fork `testExistingV4MarketplaceStillRefusesGenesis` PASS on live state |
-| Launch-blocking | **YES (2026-10-21, owner instruction)** | Genesis resale compatibility is a mandatory launch blocker. It is BLOCKED on the economic-policy decision in `GENESIS-ECONOMIC-POLICY-DECISION.md` (2.5/5/92.5 as confirmed 2026-10-20 vs 2.5/2.5/95 as stated 2026-10-21), then on deploying and verifying `LegacyCollectionMarketplace`. Kept separate from the factory trust boundary: V4 refuses Genesis at any royalty (fork test). |
+| Launch-blocking | **YES: mandatory launch gate** | Genesis resale: **0% platform fee / full existing 5% royalty / 95% seller** at the current royalty rate (owner-locked 2026-10-21; `GENESIS-ECONOMIC-POLICY-DECISION.md`). Implemented in `LegacyCollectionMarketplace` (constant `platformFeeBps = 0`, no fee recipient). NOT DEPLOYED. Waits on the owner Safe, a human audit of the zero-fee contract, and deployment authorization. Kept separate from the factory trust boundary: V4 refuses Genesis (fork test). |
 
 ## C. Deployment and configuration requirements
 
@@ -50,7 +50,7 @@ and the app already supports it.
 | 8 | PR #236 archive migration 042 (DB status only; contract, token, purchases untouched) | **Optional**, owner decision, separate |
 | 9 | Artist: create the replacement release in Studio (create, edition, `configureSale`) | **Required** for a replacement; no extra steps vs today |
 | 10 | `GenesisHolderClaim` for the replacement release + artist `grantRole(ISSUER_ROLE, claim)` | **Optional** (only if the Genesis claim is part of this launch) |
-| 11 | `LegacyCollectionMarketplace` deployment (Genesis resale) | **Optional / out of scope** |
+| 11 | `LegacyCollectionMarketplace(ownerSafe)` deployment + `allowCollection(Genesis, 500, 0, 3)` (Genesis resale, 0% platform / 5% royalty / 95% seller) | **Required: mandatory launch gate** (gate F). Needs owner Safe, audit, authorization |
 | 12 | Option A satellite sale on F&F | **Unnecessary** (F&F sale sold out and expired) |
 
 ## D. Existing release impact
@@ -98,7 +98,7 @@ Unresolved live checks: pinned historical fork (archive RPC); production DB stat
 8. **First controlled purchase**, after 7. Gate: in the same tx, platform wallet +2.5% and `PlatformPaid`; `balances(artist)` = 97.5%; indexer rows. Rollback: pause the sale.
 9. **(Optional) Genesis claim** (C10), before the sale's start time. Gate: same checks as `GenesisHolderClaimSettledRelease.t.sol` on chain. Rollback: claim admin `pause()`; artist revokes ISSUER.
 10. **Controlled resale** on the new marketplace. Gate: 95/2.5/2.5, buyer owns the token, listing indexed under the new marketplace. Rollback: cancel listing.
-11. **Genesis resale (mandatory).** Gate: owner decision recorded in `GENESIS-ECONOMIC-POLICY-DECISION.md`; deployment per `docs/GENESIS-MARKETPLACE-DEPLOYMENT-PLAN.md`; first controlled Genesis resale pays the decided split to the wei. Launch is not complete until this passes. Rollback: `setPaused(true)` / `disableCollection`; sellers can always cancel.
+11. **Genesis resale (mandatory).** Gate: owner Safe, human audit of the zero-fee contract, and deployment authorization; deployment per `docs/GENESIS-MARKETPLACE-DEPLOYMENT-PLAN.md`; first controlled Genesis resale pays **0% platform / 5% royalty to `0x284C…180a` / 95% seller** to the wei, with the platform wallet unchanged. Launch is not complete until this passes. Rollback: `setPaused(true)` / `disableCollection`; sellers can always cancel.
 
 ## G. Launch status and deployment readiness (updated 2026-10-21 01:50 UTC)
 
@@ -112,7 +112,7 @@ deployed → activated → launch verified. Nothing below is past "tests complet
 | C. Funding | Deployer funded with headroom | **Met by an owner action** (not this agent) | Deployer `0xaBd3…c174` received 0.39679 AVAX from the artist wallet `0x284C…180a`, block 98105278, tx `0x7157a415baf0…`; live balance 0.396793622 AVAX ≥ 0.0521 required |
 | D. On-chain deployment | Owner signs steps 1–2 in Rabby | NOT STARTED | — |
 | E. Activation | Manifest PR + API/indexer/web redeploy | NOT STARTED | — |
-| F. Genesis resale (launch blocker) | Owner picks the Genesis split; `LegacyCollectionMarketplace` deployed by the owner/Safe, Genesis ids 0–3 allowlisted, `verify-legacy-marketplace.mjs` passes, operator filter allows the real address, manifest activated | **BLOCKED** (owner decision) | `GENESIS-ECONOMIC-POLICY-DECISION.md`; 10/10 fork tests on live state at block ~98.14M |
+| F. Genesis resale (mandatory) | Policy 0 / 5 / 95 implemented and tested; owner Safe supplied; human audit of the zero-fee contract; `LegacyCollectionMarketplace(ownerSafe)` deployed; `allowCollection(Genesis, 500, 0, 3)`; `verify-legacy-marketplace.mjs` exits 0 (fee 0, no fee recipient, operator filter allows the real address); manifest activated; acceptance sale settles 0 / 5 / 95 to the wei | **Code and tests complete; NOT DEPLOYED.** BLOCKED on owner Safe, audit and deployment authorization | `GENESIS-ECONOMIC-POLICY-DECISION.md`; 10/10 fork tests on live Genesis |
 
 **Provisional plan** (read-only dry run from `a64b84e` against live C-Chain at block ~98105872;
 addresses are CREATE predictions, valid only while the deployer's nonce stays 3; not an approved plan):

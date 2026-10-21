@@ -17,13 +17,13 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
     address internal constant BUYER = address(0xB0B);
     address internal constant STRANGER = address(0x5757);
     uint256 internal constant PRICE = 1 ether;
-    uint256 internal constant EXPECTED = 0.925 ether; // 1 - 2.5% fee - 5% royalty
+    uint256 internal constant EXPECTED = 0.95 ether; // 1 - 5% royalty; no platform fee
 
     LegacyCollectionMarketplace internal market;
     MockGenesis internal genesis;
 
     function setUp() public {
-        market = new LegacyCollectionMarketplace(FEE, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         genesis = new MockGenesis(CREATOR);
         vm.prank(OWNER);
         market.allowCollection(address(genesis), 1000, 0, 3);
@@ -85,14 +85,14 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
         uint256 sellerBefore = SELLER.balance;
         (bool ok,) = buyCall(id, 1, PRICE);
         require(ok, "sale at the expected royalty succeeds");
-        require(SELLER.balance - sellerBefore == EXPECTED && FEE.balance == 0.025 ether && CREATOR.balance == 0.05 ether, "92.5 / 2.5 / 5");
+        require(SELLER.balance - sellerBefore == EXPECTED && FEE.balance == 0 && CREATOR.balance == 0.05 ether, "95 / 0 / 5");
         (ok,) = buyCall(id, 1, PRICE);
         require(ok && market.listingStatus(id) == LegacyCollectionMarketplace.Status.SOLD, "full fill");
     }
 
     function testRoyaltyIncreaseBelowMinimumRevertsAtomically() public {
         uint256 id = listProtected(3, PRICE, EXPECTED);
-        genesis.setRoyalty(CREATOR, 700); // seller would now net 0.905
+        genesis.setRoyalty(CREATOR, 700); // seller would now net 0.93
         Snapshot memory before = snap(id);
         (bool ok, bytes memory ret) = buyCall(id, 1, PRICE);
         require(!ok && selector(ret) == LegacyCollectionMarketplace.BelowMinimumProceeds.selector, "BelowMinimumProceeds");
@@ -109,17 +109,17 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
         uint256 creatorBefore = CREATOR.balance;
         (bool ok,) = buyCall(id, 2, 2 * PRICE);
         require(ok, "cheaper royalty still sells");
-        require(SELLER.balance - sellerBefore == 2 * 0.965 ether, "seller gets exactly price - 2.5% - 1%");
-        require(CREATOR.balance - creatorBefore == 0.02 ether && FEE.balance == 0.05 ether, "creator 1%, fee 2.5%");
+        require(SELLER.balance - sellerBefore == 2 * 0.99 ether, "seller gets exactly price - 1%");
+        require(CREATOR.balance - creatorBefore == 0.02 ether && FEE.balance == 0, "creator 1%, no platform fee");
         require(address(market).balance == 0, "nothing left in the marketplace");
     }
 
-    function testZeroRoyaltyPaysSellerEverythingAfterTheFee() public {
+    function testZeroRoyaltyPaysSellerEverything() public {
         genesis.setRoyalty(CREATOR, 0);
-        uint256 id = listProtected(1, PRICE, 0.975 ether);
+        uint256 id = listProtected(1, PRICE, PRICE);
         uint256 sellerBefore = SELLER.balance;
         (bool ok,) = buyCall(id, 1, PRICE);
-        require(ok && SELLER.balance - sellerBefore == 0.975 ether && CREATOR.balance == 0 && FEE.balance == 0.025 ether, "zero royalty");
+        require(ok && SELLER.balance - sellerBefore == PRICE && CREATOR.balance == 0 && FEE.balance == 0, "zero royalty: the seller receives the whole price");
     }
 
     // ---------------------------------------------------------------- redirection and malicious royalty responses
@@ -155,29 +155,29 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
     // ---------------------------------------------------------------- rounding
 
     function testRoundingIsFloorBasedAndTheFloorMatchesTheRealValuedShare() public {
-        uint256 price = 333; // real seller share 333 * 92.5% = 308.025; floors: fee 8, royalty 16
-        uint256 minUnit = (price * (10_000 - 250 - 500)) / 10_000; // 308 = floor of the real-valued share
-        require(minUnit == 308, "floor of the exact share");
+        uint256 price = 333; // real seller share 333 * 95% = 316.35; royalty floors to 16, no fee
+        uint256 minUnit = (price * (10_000 - 500)) / 10_000; // 316 = floor of the real-valued share
+        require(minUnit == 316, "floor of the exact share");
         uint256 id = listProtected(3, price, minUnit);
         uint256 sellerBefore = SELLER.balance;
-        (bool ok,) = buyCall(id, 3, 3 * price); // sale 999: fee 24, royalty 49, seller 926 >= 3 * 308
-        require(ok && SELLER.balance - sellerBefore == 926 && FEE.balance == 24 && CREATOR.balance == 49, "full quantity rounds in the seller's favour");
-        require(926 + 24 + 49 == 999, "exact conservation");
-        // One unit at the same price: fee 8, royalty 16, seller 309 (one wei above the floor).
+        (bool ok,) = buyCall(id, 3, 3 * price); // sale 999: royalty 49, seller 950 >= 3 * 316
+        require(ok && SELLER.balance - sellerBefore == 950 && FEE.balance == 0 && CREATOR.balance == 49, "full quantity rounds in the seller's favour");
+        require(950 + 49 == 999, "exact conservation");
+        // One unit at the same price: royalty 16, seller 317 (one wei above the floor).
         uint256 id2 = listProtected(1, price, minUnit);
         sellerBefore = SELLER.balance;
         (ok,) = buyCall(id2, 1, price);
-        require(ok && SELLER.balance - sellerBefore == 309, "1 unit nets 309");
+        require(ok && SELLER.balance - sellerBefore == 317, "1 unit nets 317");
     }
 
     function testAFloorAboveWhatTheFloorsCanDeliverIsRefusedAtListingTime() public {
-        // 333 wei x 1: seller nets 309; a 310 floor is unattainable. 333 x 3 nets 926 < 3 * 309 = 927.
+        // 333 wei x 1: seller nets 317; a 318 floor is unattainable. 333 x 3 nets 950 < 3 * 317 = 951.
         vm.prank(SELLER);
-        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 333, 0, 310) { revert("310 unattainable"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 1, 333, 0, 318) { revert("318 unattainable"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.MinProceedsTooHigh.selector, "MinProceedsTooHigh");
         }
         vm.prank(SELLER);
-        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 3, 333, 0, 309) { revert("309 x 3 unattainable"); } catch (bytes memory e) {
+        try market.createListingWithMinProceeds(address(genesis), SELLER, 0, 3, 333, 0, 317) { revert("317 x 3 unattainable"); } catch (bytes memory e) {
             require(selector(e) == LegacyCollectionMarketplace.MinProceedsTooHigh.selector, "MinProceedsTooHigh");
         }
         vm.prank(SELLER);
@@ -234,7 +234,7 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
         market.setMinSellerProceeds(id, 0.9 ether);
         uint256 sellerBefore = SELLER.balance;
         (ok,) = buyCall(id, 1, PRICE);
-        require(ok && SELLER.balance - sellerBefore == 0.905 ether, "seller consciously accepted 90.5%");
+        require(ok && SELLER.balance - sellerBefore == 0.93 ether, "seller consciously accepted 93%");
     }
 
     function testUpdatesWorkWhilePausedAndCancellationStaysSellerOnly() public {
@@ -258,7 +258,7 @@ contract LegacyCollectionMarketplaceMinProceedsTest {
         genesis.setRoyalty(CREATOR, 900); // within this fixture's 1000 bps cap
         uint256 sellerBefore = SELLER.balance;
         (bool ok,) = buyCall(id, 1, PRICE);
-        require(ok && SELLER.balance - sellerBefore == 0.885 ether, "sells at the live 9% royalty because the seller chose a 1 wei floor");
+        require(ok && SELLER.balance - sellerBefore == 0.91 ether, "sells at the live 9% royalty because the seller chose a 1 wei floor");
     }
 
     // ---------------------------------------------------------------- failed payments and reentrancy with a floor

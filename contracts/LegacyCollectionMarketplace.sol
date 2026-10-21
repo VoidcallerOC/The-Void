@@ -7,9 +7,11 @@ import {IERC1155ReleaseMarketplace} from "./ReleaseMarketplaceV3.sol";
 /// (the Genesis collection), which are not created by The Void's release factory.
 /// @dev Separate from ReleaseMarketplaceV4, whose factory-release trust boundary is untouched.
 /// Non-custodial: sellers keep their tokens; this contract moves them only inside `buy`.
-/// The 250 bps fee, fee recipient and chain are immutable. The owner can allow or disable a collection, pause,
-/// and hand over ownership; it cannot move listings, tokens or AVAX. ERC-2981 only reports a royalty, so
-/// settlement here pays it, reading `royaltyInfo` at sale time and refusing the sale if it cannot be paid.
+/// It charges NO platform fee: there is no fee recipient and `platformFeeBps` is the constant 0, so a sale pays only the
+/// collection's ERC-2981 royalty and the seller (Genesis policy: 0% platform / full 5% royalty / 95% seller). The chain is
+/// immutable. The owner can allow or disable a collection, pause, and hand over ownership; it cannot move listings, tokens
+/// or AVAX. ERC-2981 only reports a royalty, so settlement here pays it, reading `royaltyInfo` at sale time and refusing the
+/// sale if it cannot be paid. Every collection the owner allowlists is fee-free; allowlisting is the trust boundary.
 /// `cancelListing`, `expireListing`, `buy`, `getListing`, the `Listing` struct and all four listing events keep their V4 shapes.
 /// There is deliberately NO V4-shaped `createListing`: every listing is created through `createListingWithMinProceeds`, so every
 /// listing carries a seller floor and no second creation path exists that could skip the checks.
@@ -35,15 +37,14 @@ contract LegacyCollectionMarketplace {
     }
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
-    uint256 public constant REQUIRED_PLATFORM_FEE_BPS = 250;
+    /// @notice Fixed at zero. Kept as a getter so readers of `platformFeeBps()` see the policy on chain.
+    uint256 public constant platformFeeBps = 0;
     uint16 public constant ROYALTY_CEILING_BPS = 1_000;
     uint256 private constant ROYALTY_READ_GAS = 100_000;
     bytes4 private constant ERC1155_INTERFACE_ID = 0xd9b67a26;
     bytes4 private constant ERC2981_INTERFACE_ID = 0x2a55205a;
 
     uint256 public nextListingId = 1;
-    address public immutable feeRecipient;
-    uint256 public immutable platformFeeBps;
     uint256 public immutable deploymentChainId;
     address public owner;
     address public pendingOwner;
@@ -67,17 +68,14 @@ contract LegacyCollectionMarketplace {
 
     error InvalidAddress(); error InvalidAmount(); error InvalidPrice(); error InvalidExpiry(); error ListingNotActive(); error NotSeller();
     error Expired(); error IncorrectPayment(); error InsufficientBalance(); error InsufficientApproval(); error InsufficientQuantity();
-    error FeeTooHigh(); error RoyaltyTooHigh(); error TransferFailed(); error Reentrancy(); error WrongDeploymentChain(uint256 expected, uint256 actual);
+    error RoyaltyTooHigh(); error TransferFailed(); error Reentrancy(); error WrongDeploymentChain(uint256 expected, uint256 actual);
     error NotOwner(); error PausedMarket(); error UnsupportedCollection(); error UnsupportedToken(); error InvalidCollectionConfig();
     error RoyaltyReadFailed(); error RoyaltyAboveCap(); error InvalidRoyaltyReceiver();
     error MinProceedsRequired(); error MinProceedsTooHigh(); error BelowMinimumProceeds(uint256 sellerProceeds, uint256 required);
     error SelfPurchase(); error TokensNotDelivered(); error UnknownListing();
 
-    constructor(address feeRecipient_, uint256 platformFeeBps_, address owner_) {
-        if (feeRecipient_ == address(0) || owner_ == address(0)) revert InvalidAddress();
-        if (platformFeeBps_ != REQUIRED_PLATFORM_FEE_BPS) revert FeeTooHigh();
-        feeRecipient = feeRecipient_;
-        platformFeeBps = platformFeeBps_;
+    constructor(address owner_) {
+        if (owner_ == address(0)) revert InvalidAddress();
         owner = owner_;
         deploymentChainId = block.chainid;
     }
@@ -119,7 +117,7 @@ contract LegacyCollectionMarketplace {
     // ------------------------------------------------------------------ listings
 
     /// @notice The only way to create a listing. A purchase of `q` units reverts unless the seller receives at least
-    /// `minSellerProceedsPerUnit_ * q` wei after the platform fee and the collection's royalty, both computed on that purchase at
+    /// `minSellerProceedsPerUnit_ * q` wei after the collection's royalty, computed on that purchase at
     /// the royalty reported when it is made. The floor is mandatory (non-zero) and must be deliverable at today's royalty.
     function createListingWithMinProceeds(address tokenContract, address seller, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt, uint256 minSellerProceedsPerUnit_) external onlyDeploymentChain returns (uint256 listingId) {
         return _createListing(tokenContract, seller, tokenId, amount, price, expiresAt, minSellerProceedsPerUnit_);
@@ -194,13 +192,12 @@ contract LegacyCollectionMarketplace {
         _settle(listingId, listing.seller, listing.tokenContract, listing.tokenId, quantity, salePrice);
     }
 
-    /// @dev Moves the tokens, then pays the platform fee, the collection's royalty and finally the seller.
+    /// @dev Moves the tokens, then pays the collection's royalty and finally the seller. No platform fee is paid.
     /// Any failed transfer reverts the entire sale, including the token transfer and the listing update.
     function _settle(uint256 listingId, address seller, address tokenContract, uint256 tokenId, uint256 quantity, uint256 salePrice) private {
         (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds) = _settlement(tokenContract, tokenId, salePrice);
         _requireMinimumProceeds(listingId, quantity, sellerProceeds);
         _deliver(tokenContract, seller, tokenId, quantity);
-        _pay(feeRecipient, platformFee);
         _pay(royaltyReceiver, royaltyAmount);
         _pay(seller, sellerProceeds);
         emit ListingSold(listingId, msg.sender, seller, tokenContract, tokenId, quantity, salePrice, platformFee, royaltyAmount);
@@ -246,8 +243,9 @@ contract LegacyCollectionMarketplace {
         if (tokenId < collection.minTokenId || tokenId > collection.maxTokenId) revert UnsupportedToken();
     }
 
-    /// @dev Fee, royalty and seller proceeds for one sale. The royalty is whatever the collection reports for this
-    /// token and price, provided it is within the collection's cap and payable; otherwise the sale is refused.
+    /// @dev Royalty and seller proceeds for one sale; `platformFee` is always 0 (kept for the V4-shaped `ListingSold` and
+    /// `previewSettlement`). The royalty is whatever the collection reports for this token and price, provided it is within
+    /// the collection's cap and payable; otherwise the sale is refused.
     function _settlement(address tokenContract, uint256 tokenId, uint256 salePrice) private view returns (uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds) {
         // Bounded read: capped gas and a fixed 64-byte return buffer, so a hostile collection can neither burn the
         // sale's gas nor return an unbounded payload.
@@ -269,9 +267,9 @@ contract LegacyCollectionMarketplace {
         royaltyReceiver = address(uint160(rawReceiver));
         if (royaltyAmount > (salePrice * collections[tokenContract].maxRoyaltyBps) / BPS_DENOMINATOR) revert RoyaltyAboveCap();
         if (royaltyAmount != 0 && (royaltyReceiver == address(0) || royaltyReceiver == address(this))) revert InvalidRoyaltyReceiver();
-        platformFee = (salePrice * platformFeeBps) / BPS_DENOMINATOR;
-        if (platformFee + royaltyAmount > salePrice) revert RoyaltyTooHigh();
-        sellerProceeds = salePrice - platformFee - royaltyAmount;
+        platformFee = 0;
+        if (royaltyAmount > salePrice) revert RoyaltyTooHigh();
+        sellerProceeds = salePrice - royaltyAmount;
     }
 
     /// @dev The seller's floor, in net wei for this purchase. Evaluated on the actual proceeds of this exact sale

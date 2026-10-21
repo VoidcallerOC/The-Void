@@ -70,7 +70,7 @@ vi.mock("../lib/marketplace-api.js", async (importOriginal) => {
 const edition = { id: "genesis-0", title: "Enough", chainId: 43113, contractAddress: mocks.genesis.toLowerCase(), tokenIds: ["0"] };
 const listingInterface = new Interface(["event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed tokenContract, uint256 tokenId, uint256 amount, uint256 price, uint64 expiresAt)"]);
 const flushPromises = async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve(); };
-const contextFor = (royaltyBps) => ({ balance: "2", approved: true, marketplaceFeeBps: "250", royaltyBps, factoryAddress: null, marketplaceAddress: mocks.legacyMarket, releaseContractAddress: mocks.genesis, tokenId: "0", seller: mocks.seller, chainId: 43113 });
+const contextFor = (royaltyBps) => ({ balance: "2", approved: true, marketplaceFeeBps: "0", royaltyBps, factoryAddress: null, marketplaceAddress: mocks.legacyMarket, releaseContractAddress: mocks.genesis, tokenId: "0", seller: mocks.seller, chainId: 43113 });
 
 function setup() {
   const wallet = {
@@ -108,12 +108,13 @@ describe("Genesis listing on the legacy marketplace: the seller's minimum payout
     await enterPrice("1");
 
     expect(screen.getByRole("group", { name: "Listing review" })).toBeTruthy();
-    expect(screen.getByText(/MARKETPLACE FEE · 2.5%/)).toBeTruthy();
+    expect(screen.getByText(/MARKETPLACE FEE · 0%/)).toBeTruthy();
     expect(screen.getByText(/ARTIST ROYALTY · 5%/)).toBeTruthy();
-    expect(screen.getByText(/ESTIMATED SELLER PROCEEDS · 92.5%/)).toBeTruthy();
+    expect(screen.getByText(/ESTIMATED SELLER PROCEEDS · 95%/)).toBeTruthy();
     expect(screen.getByText("MINIMUM YOU WILL ACCEPT")).toBeTruthy();
     const note = screen.getByRole("note");
-    expect(note.textContent).toMatch(/never receive less than 0\.925 AVAX per edition/i);
+    expect(note.textContent).toMatch(/never receive less than 0\.95 AVAX per edition/i);
+    expect(note.textContent).toMatch(/this marketplace charges no platform fee/i);
     expect(note.textContent).toMatch(/no tolerance added/i);
     expect(note.textContent).toMatch(/purchase fails and nothing moves/i);
 
@@ -121,7 +122,7 @@ describe("Genesis listing on the legacy marketplace: the seller's minimum payout
     await act(async () => { await flushPromises(); });
 
     expect(mocks.submitListing).toHaveBeenCalledOnce();
-    expect(mocks.submitListing.mock.calls[0][0]).toMatchObject({ marketplace: mocks.legacyMarket, tokenId: "0", price: "1000000000000000000", minSellerProceedsPerUnit: "925000000000000000" });
+    expect(mocks.submitListing.mock.calls[0][0]).toMatchObject({ marketplace: mocks.legacyMarket, tokenId: "0", price: "1000000000000000000", minSellerProceedsPerUnit: "950000000000000000" });
   });
 
   it("refuses to sign anything if the royalty changed between review and confirmation", async () => {

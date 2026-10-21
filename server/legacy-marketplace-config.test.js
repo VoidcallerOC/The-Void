@@ -17,7 +17,7 @@ describe("legacy-collection marketplace indexer registration", () => {
   it("registers exactly one MARKETPLACE contract at the recorded address and block, only on its chain", () => {
     const [entry, ...rest] = withLegacyCollectionMarketplace([], { chainId: 43114, manifest: active });
     expect(rest).toHaveLength(0);
-    expect(entry).toMatchObject({ chainId: 43114, address: MARKET, contractType: "MARKETPLACE", startBlock: 12345, platformFeeBps: 250, reconcileListings: true });
+    expect(entry).toMatchObject({ chainId: 43114, address: MARKET, contractType: "MARKETPLACE", startBlock: 12345, platformFeeBps: 0, reconcileListings: true }); // the indexer then rejects any ListingSold with a non-zero fee
     expect(withLegacyCollectionMarketplace([], { chainId: 43113, manifest: active })).toHaveLength(0);
     expect(withLegacyCollectionMarketplace([entry], { chainId: 43114, manifest: active })).toHaveLength(1);
   });

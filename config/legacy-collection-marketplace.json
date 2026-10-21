@@ -6,8 +6,7 @@
   "marketplaceAddress": null,
   "deploymentBlock": null,
   "ownerAddress": null,
-  "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
-  "platformFeeBps": 250,
+  "platformFeeBps": 0,
   "source": "LegacyCollectionMarketplace",
   "record": null,
   "collections": [

@@ -75,13 +75,13 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
     address internal constant SELLER = address(0x5E11);
     address internal constant BUYER = address(0xB0B);
     uint256 internal constant PRICE = 1 ether;
-    uint256 internal constant FLOOR_AT_5PCT = 0.925 ether;
+    uint256 internal constant FLOOR_AT_5PCT = 0.95 ether; // 1 - 5% royalty; no platform fee
 
     LegacyCollectionMarketplace internal market;
     GasSensitiveCollection internal token;
 
     function setUp() public {
-        market = new LegacyCollectionMarketplace(FEE, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         token = new GasSensitiveCollection(CREATOR);
         vm.prank(OWNER);
         market.allowCollection(address(token), 500, 0, 3);
@@ -117,7 +117,7 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
     struct Sweep {
         uint256 okCount; uint256 minOk; uint256 firstRoyalty; bool varies;
         uint256 zeroCount; uint256 fullCount; uint256 windowLo; uint256 windowHi;
-        uint256 maxRoyalty; bool floorHeld; bool conserved; bool failedMovedNothing;
+        uint256 maxRoyalty; bool floorHeld; bool conserved; bool failedMovedNothing; uint256 feePaid;
     }
 
     /// Fresh listing + purchase for every gas limit in [from, to] (step `step`); the marketplace call gets exactly that gas.
@@ -135,6 +135,7 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
             if (o.royalty > s.maxRoyalty) s.maxRoyalty = o.royalty;
             if (o.royalty == 0) { s.zeroCount++; if (s.windowLo == 0) s.windowLo = g; s.windowHi = g; }
             if (o.royalty == PRICE * 500 / 10_000) s.fullCount++;
+            s.feePaid += o.fee;
             if (o.seller < FLOOR_AT_5PCT) s.floorHeld = false;
             if (o.seller + o.royalty + o.fee != PRICE || o.residue != 0) s.conserved = false;
         }
@@ -146,6 +147,7 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
         require(s.floorHeld, "the seller floor holds at every gas limit");
         require(s.conserved, "fee + royalty + seller == price with no residue, at every gas limit");
         require(s.failedMovedNothing, "a purchase that fails for lack of gas moves nothing");
+        require(s.feePaid == 0, "no platform fee at any gas limit");
     }
 
     // ---------------------------------------------------------------- 1. a collection with ordinary costs: no buyer-chosen royalty
@@ -162,23 +164,30 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
         require(!s.varies, "the royalty never depends on the buyer's gas limit once the sale completes");
     }
 
-    /// Even delivering with a single SSTORE on the buyer's existing balance (no seller debit) leaves the proportional collection unable to
-    /// vary: the cheapest completing transaction already forwards the full 100k.
-    function testCheapestDeliveryAloneDoesNotCreateAWindow() public {
+    /// Zero-fee build (2026-10-21): with no platform-fee transfer after the royalty read, the cheapest completing purchase no longer has to
+    /// forward the full 100k, so a gas-READING collection with the cheapest possible delivery returns a royalty that varies with the
+    /// buyer's gas limit. M-1 therefore widens from the threshold design to any gasleft()-reading collection with near-free delivery.
+    /// Every invariant still holds: the cap, the seller floor (a lower royalty only raises the seller's proceeds), conservation, and a failed
+    /// purchase moves nothing. Only that collection's own royalty receiver can be underpaid. Genesis's royaltyInfo reads no gas
+    /// (fork: exactly 5% at every completing gas limit). Recorded for the auditor; no gas gate is added (rejected in the audit, §8a).
+    function testCheapestDeliveryOnAGasReadingCollectionVariesButEveryInvariantHolds() public {
         token.setMode(1, 0);
         token.setCheapest(true);
         token.mint(BUYER, 0, 1_000_000);
         Sweep memory s = sweep(100_000, 200_000, 100);
         emit log_named_uint("lowest completing tx gas limit (cheapest delivery)", s.minOk);
+        emit log_named_uint("royalty at the lowest completing gas limit (wei)", s.firstRoyalty);
+        emit log_named_uint("highest royalty seen (wei)", s.maxRoyalty);
         _assertInvariants(s);
-        require(!s.varies, "no variation: the first completing gas limit already saturates the royalty");
+        require(s.varies, "pinned: without the fee transfer, a gasleft()-reading collection can vary with the buyer's gas limit");
+        require(s.feePaid == 0, "and no platform fee is paid at any gas limit");
     }
 
     // ---------------------------------------------------------------- 2. M-1 as described: reproduced only by a deliberately hostile design
 
     /// Threshold collection + cheapest possible delivery. When the callee sees less than T it returns 0, which also skips the creator payout
     /// and makes the transaction cheaper, so the sale can complete at a gas limit that forwards less than 100k. The buyer who picks such a limit
-    /// makes the creator receive nothing. Everything else holds: cap, seller floor, conservation, fee.
+    /// makes the creator receive nothing. Everything else holds: cap, seller floor, conservation, no platform fee.
     function testAHostileCollectionLetsTheBuyerPickAZeroRoyaltyButNothingElseMoves() public {
         token.setMode(2, 92_500); // a full 100k forward leaves the callee ~93.2k -> 5%; less -> 0%
         token.setCheapest(true);
@@ -194,7 +203,7 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
         require(s.windowHi < 150_000, "and it sits entirely below the gas needed to forward the full cap with the creator payout");
     }
 
-    function testTheSellerReceivesExactlyTheRoyaltyTheCreatorDidNotAndTheFeeIsUnchanged() public {
+    function testTheSellerReceivesExactlyTheRoyaltyTheCreatorDidNotAndNoFeeIsPaid() public {
         token.setMode(2, 92_500);
         token.setCheapest(true);
         token.mint(BUYER, 0, 1_000_000);
@@ -209,7 +218,7 @@ contract LegacyCollectionMarketplaceGasRoyaltyTest {
         Outcome memory hi = buyWithGas(highGas);
         require(lo.royalty == 0 && hi.royalty == 0.05 ether, "creator: 0 vs 5%");
         require(lo.seller == hi.seller + 0.05 ether, "the seller (never the buyer) receives exactly the royalty the creator did not");
-        require(lo.fee == hi.fee, "the platform fee is unchanged");
+        require(lo.fee == 0 && hi.fee == 0, "no platform fee at any gas limit");
         require(lo.seller >= FLOOR_AT_5PCT, "and the seller is never below the floor");
     }
 

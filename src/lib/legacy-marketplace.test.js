@@ -19,7 +19,7 @@ const MARKET_ABI = new Interface([
 const TOKEN_ABI = new Interface(["function balanceOf(address,uint256) view returns (uint256)", "function isApprovedForAll(address,address) view returns (bool)", "function operatorFilterRegistry() view returns (address)"]);
 const FILTER_ABI = new Interface(["function isOperatorAllowed(address,address) view returns (bool)"]);
 
-function providerFor({ chainId = 43114, balance = 2n, approved = false, paused = false, supported = true, feeBps = 250n, receiver = CREATOR, royaltyWei = 50_000_000_000_000_000n, previewReverts = false, filterAllows = true, noFilter = false } = {}) {
+function providerFor({ chainId = 43114, balance = 2n, approved = false, paused = false, supported = true, feeBps = 0n, previewFeeWei = 0n, receiver = CREATOR, royaltyWei = 50_000_000_000_000_000n, previewReverts = false, filterAllows = true, noFilter = false } = {}) {
   return {
     request: vi.fn(async ({ method, params }) => {
       if (method === "eth_chainId") return `0x${BigInt(chainId).toString(16)}`;
@@ -28,7 +28,7 @@ function providerFor({ chainId = 43114, balance = 2n, approved = false, paused =
       if (target === MARKET.toLowerCase()) {
         const parsed = MARKET_ABI.parseTransaction({ data });
         if (parsed.name === "previewSettlement" && previewReverts) throw new Error("execution reverted");
-        const values = { platformFeeBps: [feeBps], deploymentChainId: [43114n], paused: [paused], isSupported: [supported], previewSettlement: [25_000_000_000_000_000n, receiver, royaltyWei, 925_000_000_000_000_000n] }[parsed.name];
+        const values = { platformFeeBps: [feeBps], deploymentChainId: [43114n], paused: [paused], isSupported: [supported], previewSettlement: [previewFeeWei, receiver, royaltyWei, 1_000_000_000_000_000_000n - previewFeeWei - royaltyWei] }[parsed.name];
         return MARKET_ABI.encodeFunctionResult(parsed.name, values);
       }
       if (target === GENESIS.toLowerCase()) {
@@ -63,20 +63,25 @@ describe("legacy-collection marketplace manifest", () => {
     expect(isLegacyCollectionCandidate({ chainId: 43114, contractAddress: GENESIS, tokenIds: ["2"] }, active)).toBe(true);
     expect(legacyMarketplaceActive({ ...active, deploymentBlock: null })).toBe(false);
     expect(legacyMarketplaceActive({ ...active, collections: [] })).toBe(false);
+    // Genesis policy is 0% platform fee: a manifest recording any fee never activates the marketplace.
+    expect(LEGACY_COLLECTION_MARKETPLACE.platformFeeBps).toBe(0);
+    expect(legacyMarketplaceActive({ ...active, platformFeeBps: 250 })).toBe(false);
+    expect(legacyMarketplaceActive({ ...active, platformFeeBps: "0" })).toBe(false);
   });
 
   it("selects the legacy marketplace only for allowlisted editions and leaves factory editions untouched", () => {
     const base = Object.freeze({ ...MARKETPLACE_CONFIG, enabled: true, chainId: 43114, address: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5" });
     expect(marketplaceConfigForEdition({ chainId: 43114, contractAddress: GENESIS, tokenIds: ["0"] }, base, active).address).toBe(MARKET);
+    expect(marketplaceConfigForEdition({ chainId: 43114, contractAddress: GENESIS, tokenIds: ["0"] }, base, active).feeBps).toBe("0");
     expect(marketplaceConfigForEdition({ chainId: 43114, contractAddress: GENESIS, tokenIds: ["0"] }, base, LEGACY_COLLECTION_MARKETPLACE).address).toBe(base.address);
     expect(marketplaceConfigForEdition({ chainId: 43114, contractAddress: "0x2222222222222222222222222222222222222222", tokenIds: ["0"] }, base, active).address).toBe(base.address);
   });
 });
 
 describe("readLegacyListingContext", () => {
-  it("accepts an eligible Genesis holder and reports on-chain balance, approval, 250 bps fee and the live 500 bps royalty", async () => {
+  it("accepts an eligible Genesis holder and reports on-chain balance, approval, the 0% platform fee and the live 500 bps royalty", async () => {
     const result = await readLegacyListingContext(input(providerFor()), active);
-    expect(result).toMatchObject({ balance: "2", approved: false, marketplaceFeeBps: "250", royaltyBps: "500", chainId: 43114, tokenId: "0", marketplaceAddress: getAddress(MARKET), releaseContractAddress: getAddress(GENESIS) });
+    expect(result).toMatchObject({ balance: "2", approved: false, marketplaceFeeBps: "0", royaltyBps: "500", chainId: 43114, tokenId: "0", marketplaceAddress: getAddress(MARKET), releaseContractAddress: getAddress(GENESIS) });
     expect(await readLegacyListingContext(input(providerFor({ approved: true })), active)).toMatchObject({ approved: true });
   });
 
@@ -96,6 +101,9 @@ describe("readLegacyListingContext", () => {
     await expect(readLegacyListingContext(input(providerFor({ chainId: 1 })), active)).rejects.toMatchObject({ code: "WRONG_NETWORK" });
     await expect(readLegacyListingContext(input(providerFor({ paused: true })), active)).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
     await expect(readLegacyListingContext(input(providerFor({ feeBps: 500n })), active)).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
+    await expect(readLegacyListingContext(input(providerFor({ feeBps: 250n })), active)).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
+    // a marketplace that reports 0 bps but would still take a platform share of a real sale is refused too
+    await expect(readLegacyListingContext(input(providerFor({ previewFeeWei: 25_000_000_000_000_000n })), active)).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
     await expect(readLegacyListingContext(input(providerFor({ previewReverts: true })), active)).rejects.toMatchObject({ code: "MARKETPLACE_UNAVAILABLE" });
     await expect(readLegacyListingContext(input(providerFor({ receiver: "0x3333333333333333333333333333333333333333" })), active)).rejects.toMatchObject({ code: "UNSUPPORTED_RELEASE" });
   });
@@ -120,6 +128,21 @@ describe("seller minimum-proceeds floor (client side)", () => {
     // At 1 wei the exact-rate share rounds to 0: no valid (non-zero) floor exists, so there is nothing to send.
     expect(minimumSellerProceedsPerUnit({ priceWei: "1", marketplaceFeeBps: "250", royaltyBps: "500" })).toBeNull();
     expect(minimumSellerProceedsPerUnit({ priceWei: "2", marketplaceFeeBps: "250", royaltyBps: "500" })).toBe("1");
+  });
+
+  it("Genesis policy (0% platform fee): the floor is the price minus the 5% royalty", () => {
+    expect(minimumSellerProceedsPerUnit({ priceWei: WEI.toString(), marketplaceFeeBps: "0", royaltyBps: "500" })).toBe("950000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: (10n * WEI).toString(), marketplaceFeeBps: "0", royaltyBps: "500" })).toBe("9500000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: (100n * WEI).toString(), marketplaceFeeBps: "0", royaltyBps: "500" })).toBe("95000000000000000000");
+    expect(minimumSellerProceedsPerUnit({ priceWei: "333", marketplaceFeeBps: "0", royaltyBps: "500" })).toBe("316");
+    for (const price of [1n, 7n, 21n, 333n, 999n, WEI, 3n * WEI + 1n]) {
+      const floorText = minimumSellerProceedsPerUnit({ priceWei: price, marketplaceFeeBps: 0, royaltyBps: 500 });
+      if (floorText === null) continue;
+      for (const quantity of [1n, 2n, 3n, 7n]) {
+        const sale = price * quantity;
+        expect(sale - (sale * 500n) / 10_000n >= BigInt(floorText) * quantity).toBe(true); // the zero-fee contract's arithmetic
+      }
+    }
   });
 
   it("refuses malformed inputs instead of producing a floor", () => {
@@ -153,8 +176,8 @@ describe("protected listing transaction encoding", () => {
   const args = { contract: GENESIS, seller: SELLER, tokenId: "0", amount: "2", price: "1000000000000000000", expiresAt: 0 };
 
   it("encodes exactly what the ABI encodes and leaves the V4-shaped encoding untouched", () => {
-    expect(encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "925000000000000000" }))
-      .toBe(iface.encodeFunctionData("createListingWithMinProceeds", [GENESIS, SELLER, 0, 2, "1000000000000000000", 0, "925000000000000000"]).toLowerCase());
+    expect(encodeCreateListingWithMinProceeds({ ...args, minSellerProceedsPerUnit: "950000000000000000" }))
+      .toBe(iface.encodeFunctionData("createListingWithMinProceeds", [GENESIS, SELLER, 0, 2, "1000000000000000000", 0, "950000000000000000"]).toLowerCase());
     expect(encodeSetMinSellerProceeds(5, "900")).toBe(iface.encodeFunctionData("setMinSellerProceeds", [5, 900]).toLowerCase());
     expect(encodeCreateListing(args)).toBe(iface.encodeFunctionData("createListing", [GENESIS, SELLER, 0, 2, "1000000000000000000", 0]).toLowerCase());
     expect(MARKETPLACE_SELECTORS.createListing).toBe("0x5201ea65");
@@ -182,7 +205,7 @@ describe("protected listing transaction encoding", () => {
 
   it("submits the protected function to the legacy marketplace, never the unprotected one, and refuses to submit without a floor", async () => {
     const provider = wallet();
-    await submitListing({ ...listing, provider, marketplace: MARKET, minSellerProceedsPerUnit: "925000000000000000", legacy: active });
+    await submitListing({ ...listing, provider, marketplace: MARKET, minSellerProceedsPerUnit: "950000000000000000", legacy: active });
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].to).toBe(MARKET);
     expect(provider.sent[0].data.startsWith("0x068773dd")).toBe(true);

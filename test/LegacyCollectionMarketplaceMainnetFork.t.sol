@@ -56,7 +56,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.createSelectFork(rpc);
         forked = true;
         require(block.chainid == 43114, "not C-Chain");
-        market = new LegacyCollectionMarketplace(PLATFORM, 250, OWNER);
+        market = new LegacyCollectionMarketplace(OWNER);
         vm.prank(OWNER);
         market.allowCollection(address(GENESIS), 500, 0, 3);
         vm.deal(BUYER, 10 ether);
@@ -92,9 +92,9 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         market.buy{value: PRICE}(id, 1);
 
         require(GENESIS.balanceOf(BUYER, 0) == 1 && GENESIS.balanceOf(HOLDER, 0) == holderBefore - 1, "token moved through the real operator filter");
-        require(PLATFORM.balance - feeAvax == 0.025 ether, "2.5% platform fee");
+        require(PLATFORM.balance == feeAvax, "0% platform fee: the platform wallet receives nothing");
         require(CREATOR.balance - creatorAvax == 0.05 ether, "5% Genesis royalty to the creator");
-        require(HOLDER.balance - holderAvax == 0.925 ether, "92.5% to the seller");
+        require(HOLDER.balance - holderAvax == 0.95 ether, "95% to the seller");
         require(address(market).balance == 0, "marketplace holds no funds");
 
         // Ordinary wallet-to-wallet transfer is unaffected by the marketplace.
@@ -122,7 +122,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         vm.prank(HOLDER);
         GENESIS.setApprovalForAll(address(market), true);
         // Floor = exact real-valued share at today's 5% royalty and the 2.5% fee.
-        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        uint256 floorPerUnit = (PRICE * (10_000 - 500)) / 10_000;
         vm.prank(HOLDER);
         uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 2, PRICE, 0, floorPerUnit);
 
@@ -139,7 +139,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         GENESIS.setRoyaltyInfo(CREATOR, 500); // restored: sale settles at the policy
         vm.prank(BUYER);
         market.buy{value: PRICE}(id, 1);
-        require(HOLDER.balance - holderAvax == floorPerUnit && GENESIS.balanceOf(BUYER, 0) == 1, "settles at 92.5% once the royalty is back");
+        require(HOLDER.balance - holderAvax == floorPerUnit && GENESIS.balanceOf(BUYER, 0) == 1, "settles at 95% once the royalty is back");
     }
 
     /// The candidate policy against the real contract: every Genesis id 0-3 lists and sells at the real 5% royalty with the
@@ -148,7 +148,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         if (!forked) return;
         vm.prank(HOLDER);
         GENESIS.setApprovalForAll(address(market), true);
-        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        uint256 floorPerUnit = (PRICE * (10_000 - 500)) / 10_000;
         for (uint256 id = 0; id <= 3; id++) {
             uint256 creatorBefore = CREATOR.balance;
             uint256 holderBefore = HOLDER.balance;
@@ -157,7 +157,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
             vm.prank(BUYER);
             market.buy{value: PRICE}(listingId, 1);
             require(GENESIS.balanceOf(BUYER, id) == 1, "delivered");
-            require(CREATOR.balance - creatorBefore == 0.05 ether && HOLDER.balance - holderBefore == 0.925 ether, "5% / 92.5%");
+            require(CREATOR.balance - creatorBefore == 0.05 ether && HOLDER.balance - holderBefore == 0.95 ether, "5% / 95%");
         }
         vm.prank(HOLDER);
         (bool ok,) = address(market).call(abi.encodeCall(market.createListingWithMinProceeds, (address(GENESIS), HOLDER, 4, 1, PRICE, uint64(0), 1)));
@@ -165,12 +165,12 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
     }
 
     /// M-1 triage on the REAL collection: Genesis's royaltyInfo does not depend on the transaction's gas. Every gas limit at which a real
-    /// purchase completes pays the creator exactly 5%, and the seller exactly 92.5%; the lowest completing limit is reported.
+    /// purchase completes pays the creator exactly 5%, and the seller exactly 95%; the lowest completing limit is reported.
     function testRealGenesisPaysTheSameRoyaltyAtEveryCompletingGasLimit() public {
         if (!forked) return;
         vm.prank(HOLDER);
         GENESIS.setApprovalForAll(address(market), true);
-        uint256 floorPerUnit = (PRICE * (10_000 - 250 - 500)) / 10_000;
+        uint256 floorPerUnit = (PRICE * (10_000 - 500)) / 10_000;
         vm.prank(HOLDER);
         uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 2, PRICE, 0, floorPerUnit);
         uint256 minOk; uint256 completed;
@@ -186,7 +186,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
                 if (minOk == 0) minOk = g;
                 completed++;
                 require(CREATOR.balance - creatorBefore == 0.05 ether, "creator receives exactly 5% at every completing gas limit");
-                require(HOLDER.balance - holderBefore == 0.925 ether, "seller receives exactly 92.5% at every completing gas limit");
+                require(HOLDER.balance - holderBefore == 0.95 ether, "seller receives exactly 95% at every completing gas limit");
             } else {
                 require(CREATOR.balance == creatorBefore && HOLDER.balance == holderBefore && address(market).balance == 0, "a failed purchase moves nothing");
             }
@@ -199,7 +199,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
     }
 
     /// Economic-policy facts (2026-10-21): Genesis reports one deterministic 500 bps royalty for ids 0-3 at every price, floored per
-    /// ERC-2981; the marketplace pays exactly that and never substitutes another rate.
+    /// ERC-2981; the marketplace pays exactly that, never substitutes another rate, and takes no platform fee.
     function testRealGenesisRoyaltyIsDeterministicAcrossIdsAndPrices() public view {
         if (!forked) return;
         uint256[4] memory prices = [uint256(1), 3_333, 1 ether, 123_456_789 ether];
@@ -208,7 +208,7 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
                 (address receiver, uint256 amount) = GENESIS.royaltyInfo(id, prices[i]);
                 require(receiver == CREATOR && amount == (prices[i] * 500) / 10_000, "500 bps to the creator, floored");
                 (uint256 fee, address r, uint256 royalty, uint256 seller) = market.previewSettlement(address(GENESIS), id, prices[i]);
-                require(r == CREATOR && royalty == amount && fee == (prices[i] * 250) / 10_000 && fee + royalty + seller == prices[i], "pays the reported royalty, conserves value");
+                require(r == CREATOR && royalty == amount && fee == 0 && royalty + seller == prices[i], "pays the reported royalty, conserves value");
             }
         }
     }
@@ -231,25 +231,31 @@ contract LegacyCollectionMarketplaceMainnetForkTest {
         require(amount == 500, "unchanged");
     }
 
-    /// What the 2.5/2.5/95 policy would require, replayed on a fork only (nothing is broadcast, no decision is implied): it is reached
-    /// by the Genesis owner lowering the collection's own royalty to 250 bps, with no marketplace change. The factory-only V4
-    /// marketplace still refuses Genesis at 250 bps, so the trust boundary does not move.
-    function testIfTheGenesisOwnerSetTwoPointFivePercentTheUnchangedMarketplaceWouldSettle95() public {
+    /// Locked Genesis policy on the real collection: 0% platform / full reported 5% royalty / 95% seller at 1, 10 and 100 AVAX,
+    /// ids 0-3. The platform wallet's balance never changes; the royalty receiver gets exactly what royaltyInfo reports.
+    function testRealGenesisSalesPayNoPlatformFeeAtOneTenAndOneHundredAvax() public {
         if (!forked) return;
-        vm.prank(CREATOR);
-        GENESIS.setRoyaltyInfo(CREATOR, 250);
+        vm.deal(BUYER, 1_000 ether);
         vm.prank(HOLDER);
         GENESIS.setApprovalForAll(address(market), true);
-        vm.prank(HOLDER);
-        uint256 id = market.createListingWithMinProceeds(address(GENESIS), HOLDER, 0, 1, PRICE, 0, 0.95 ether);
-        uint256 holderAvax = HOLDER.balance;
-        uint256 feeAvax = PLATFORM.balance;
-        uint256 creatorAvax = CREATOR.balance;
-        vm.prank(BUYER);
-        market.buy{value: PRICE}(id, 1);
-        require(PLATFORM.balance - feeAvax == 0.025 ether && CREATOR.balance - creatorAvax == 0.025 ether && HOLDER.balance - holderAvax == 0.95 ether, "2.5 / 2.5 / 95");
-        vm.prank(HOLDER);
-        (bool ok,) = V4_MARKET.call(abi.encodeCall(IV4.createListing, (address(GENESIS), HOLDER, 0, 1, PRICE, 0)));
-        require(!ok, "V4 refuses Genesis even at 250 bps: it is not a factory release");
+        uint256[3] memory prices = [uint256(1 ether), 10 ether, 100 ether];
+        uint256 platformBefore = PLATFORM.balance;
+        for (uint256 i = 0; i < prices.length; i++) {
+            for (uint256 id = 0; id <= 3; id++) {
+                (address receiver, uint256 quoted) = GENESIS.royaltyInfo(id, prices[i]);
+                vm.prank(HOLDER);
+                uint256 listingId = market.createListingWithMinProceeds(address(GENESIS), HOLDER, id, 1, prices[i], 0, (prices[i] * 9_500) / 10_000);
+                uint256 creatorBefore = CREATOR.balance;
+                uint256 holderBefore = HOLDER.balance;
+                vm.prank(BUYER);
+                market.buy{value: prices[i]}(listingId, 1);
+                require(receiver == CREATOR && CREATOR.balance - creatorBefore == quoted && quoted == prices[i] / 20, "full reported 5% royalty to the creator");
+                require(HOLDER.balance - holderBefore == prices[i] - quoted, "seller receives the price minus the royalty (95%)");
+                require(address(market).balance == 0, "nothing retained");
+                vm.prank(BUYER);
+                GENESIS.safeTransferFrom(BUYER, HOLDER, id, 1, ""); // the real holder has only 2 of ids 1-3; reuse the token
+            }
+        }
+        require(PLATFORM.balance == platformBefore, "the platform wallet receives nothing from Genesis sales");
     }
 }
