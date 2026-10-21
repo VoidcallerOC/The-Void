@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useHashScroll } from "../lib/use-hash-scroll.js";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
@@ -252,6 +253,8 @@ export function EditionPage() {
   const catalog = useMarketplaceCatalogs();
   const { edition: editionId } = useParams();
   const result = getEditionCatalog(catalog, editionId);
+  // "List for sale" links here with #secondary-listing; scroll there once the edition (and its ListingPanel) renders.
+  useHashScroll("secondary-listing", Boolean(result));
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading edition…</p></section>;
   }
