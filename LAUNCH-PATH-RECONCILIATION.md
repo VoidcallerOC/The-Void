@@ -106,7 +106,7 @@ deployed → activated → launch verified. Nothing below is past "tests complet
 
 | Gate | Requirement | State | Evidence |
 |---|---|---|---|
-| A. Code approval | #237 and #238 reviewed, CI green | **Waiting on owner review** | #237 CI green at `57e5135`; #238 head `a64b84e` (CI running at time of writing) |
+| A. Code approval | #237, #238, #239 reviewed, CI green | **Waiting on owner review** (all three are drafts with no reviews) | Re-checked 2026-10-21 09:46 UTC: #238 head `a64b84e` CI success; #239 head `bed2746` CI success; #237 CI success on `bdfb87c` (the head before this edit) |
 | B. Deployment-plan approval | Fresh plan from the approved commit, committed to `deploy/mainnet/approved-plans/` by PR; merge = approval | NOT STARTED (follows A) | Provisional plan below |
 | C. Funding | Deployer funded with headroom | **Met by an owner action** (not this agent) | Deployer `0xaBd3…c174` received 0.39679 AVAX from the artist wallet `0x284C…180a`, block 98105278, tx `0x7157a415baf0…`; live balance 0.396793622 AVAX ≥ 0.0521 required |
 | D. On-chain deployment | Owner signs steps 1–2 in Rabby | NOT STARTED | — |
@@ -150,3 +150,4 @@ activation = revert the manifest commit and redeploy services; the original pair
 | Media for the new release | Artwork PNG and preview MP3 downloaded and verified byte-identical (sha256 match with the original upload records) and handed to the owner. The full track and demo must be uploaded again: Studio re-attaches only unused protected files, and both are held by the original edition's experiences (kept for the holder). Master sizes: full-track WAV 65,861,800 B, demo MP3 4,007,809 B | `audit_events`, `docs/studio-registered-media.md` |
 | Production migrations 040/041 | Applied | `schema_migrations` |
 | Sale schedule / first-user test | **Not recorded** in the repo or DB. All release and edition settings are the owner's, set in Studio. No private purchase will be made through deployed contracts | — |
+| Listing exposure of the original (#239 follow-up) | **None.** `listings` and `purchases` tables are empty; live marketplace `0x0e77…` `nextListingId` = 1 (no listing ever created); the holder has not approved the marketplace. No code change: a future listing by the holder would be a legitimate resale of their own token | DB and chain reads, block 98137826 |
