@@ -10,13 +10,15 @@ import { assertReadyToSign } from "../scripts/mainnet-signing-requests.mjs";
 
 // Every committed approved plan must be bound, for C-Chain and the defined deployer, and its
 // transactions must be exactly the contracts compiled from this commit with the plan's constructor
-// arguments. Each plan is checked against the artifacts it names: the committed release plan is the
-// executed VoidReleaseFactoryV2Royalty deployment, while the script now plans the settled factory.
+// arguments. Each plan is checked against the artifacts it names. The executed VoidReleaseFactoryV2Royalty
+// plan lives in deploy/mainnet/executed-plans/, outside the directory the owner page offers for signing.
 // CI builds the contracts (forge test) before this runs; without them the test fails in CI.
 const ROOT = resolve(import.meta.dirname, "..");
 const DIR = resolve(ROOT, "deploy/mainnet/approved-plans");
 const files = readdirSync(DIR).filter((name) => name.endsWith(".json"));
 const load = (name) => JSON.parse(readFileSync(resolve(DIR, name), "utf8"));
+// The executed plan that created factory 0x262B… and marketplace 0x0e77…, kept outside the approved-plans directory.
+const executedPlan = () => JSON.parse(readFileSync(resolve(ROOT, "deploy/mainnet/executed-plans/release-per-contract-mainnet-0x262B774cf9a1949170B58E2d57F6189980FE757b.json"), "utf8"));
 const artifact = (path) => JSON.parse(readFileSync(resolve(ROOT, path), "utf8"));
 const built = existsSync(resolve(ROOT, load("release-per-contract-mainnet.json").plan.artifacts.factory.path));
 
@@ -50,7 +52,8 @@ describe("approved mainnet plans", () => {
   });
 
   it("the executed release plan can never authorize a new deployment", async () => {
-    const entry = load("release-per-contract-mainnet.json");
+    const entry = executedPlan();
+    expect(() => validateApprovedPlan(entry)).not.toThrow();
     const [first] = entry.plan.signingRequests;
     expect(first.predictedAddress).toBe(EXECUTED_RELEASE_FACTORY);
     // Owner page: its live checks refuse the used nonce and the occupied address.
