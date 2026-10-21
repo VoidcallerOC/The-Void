@@ -98,3 +98,40 @@ Unresolved live checks: pinned historical fork (archive RPC); production DB stat
 8. **First controlled purchase**, after 7. Gate: in the same tx, platform wallet +2.5% and `PlatformPaid`; `balances(artist)` = 97.5%; indexer rows. Rollback: pause the sale.
 9. **(Optional) Genesis claim** (C10), before the sale's start time. Gate: same checks as `GenesisHolderClaimSettledRelease.t.sol` on chain. Rollback: claim admin `pause()`; artist revokes ISSUER.
 10. **Controlled resale** on the new marketplace. Gate: 95/2.5/2.5, buyer owns the token, listing indexed under the new marketplace. Rollback: cancel listing.
+
+## G. Launch status and deployment readiness (updated 2026-10-21 01:50 UTC)
+
+Canonical checklist. States: code complete → tests complete → review complete → deployment authorized →
+deployed → activated → launch verified. Nothing below is past "tests complete".
+
+| Gate | Requirement | State | Evidence |
+|---|---|---|---|
+| A. Code approval | #237 and #238 reviewed, CI green | **Waiting on owner review** | #237 CI green at `57e5135`; #238 head `a64b84e` (CI running at time of writing) |
+| B. Deployment-plan approval | Fresh plan from the approved commit, committed to `deploy/mainnet/approved-plans/` by PR; merge = approval | NOT STARTED (follows A) | Provisional plan below |
+| C. Funding | Deployer funded with headroom | **Met by an owner action** (not this agent) | Deployer `0xaBd3…c174` received 0.39679 AVAX from the artist wallet `0x284C…180a`, block 98105278, tx `0x7157a415baf0…`; live balance 0.396793622 AVAX ≥ 0.0521 required |
+| D. On-chain deployment | Owner signs steps 1–2 in Rabby | NOT STARTED | — |
+| E. Activation | Manifest PR + API/indexer/web redeploy | NOT STARTED | — |
+
+**Provisional plan** (read-only dry run from `a64b84e` against live C-Chain at block ~98105872;
+addresses are CREATE predictions, valid only while the deployer's nonce stays 3; not an approved plan):
+
+| Step | Nonce | Contract | Constructor | Predicted address | Gas limit | Creation data hash |
+|---|---|---|---|---|---|---|
+| 1 | 3 | `VoidReleaseFactoryV2RoyaltySettled` | `platformRecipient = 0xb65C…1ce4` | `0xE744D58fA8138042f5f00a28d39f89081539C19B` (implementation `0x36c5D31e9A8e9b4dc9F8CB4B7202C70b3E30734D`) | 6,535,412 | `0x3230f78c…1f9e` |
+| 2 | 4 | `ReleaseMarketplaceV4` | `0xb65C…1ce4, 250, 0xE744…C19B` | `0x75964C44cA586b13e98e7c30E74d2B4114f65b06` | 1,802,318 | `0xcc17294c…26d6` |
+
+Artifacts: factory init code hash `0xdf03ecde…0f6e`; settled sale init code hash `0xebe5749b…f012`, reviewed
+runtime hash `0x0b6a2a7e…de12`; implementation runtime `0x52dc13a5…dec0`; marketplace init code hash
+`0x7c63f9e7…b58a` (the same artifact as the live `0x0e77…`). Estimated cost 0.0347 AVAX at 5 nAVAX max fee;
+0.0521 AVAX with headroom. Every plan check passes except the two recipient rows, which stay UNVERIFIED by
+design until the owner reads the address on the Nano S Plus.
+
+**Guards added in #238:** the factory must embed the exact reviewed `VoidPrimarySaleSettled` creation code
+(an unrelated `PlatformPaid` signature does not satisfy it) and must not embed `VoidPrimarySale`; a new
+approved plan for any factory other than `VoidReleaseFactoryV2RoyaltySettled` is refused. The executed plan
+for `0x262B…` cannot authorize a new deployment (used nonce, occupied address, binding mismatch; tested).
+
+**Containment after deployment:** contracts cannot be removed. Before activation, nothing routes to them
+(the manifest decides). After a replacement release exists, the artist can pause its sale with
+`configureSale(..., paused = true)` (`VoidPrimarySaleSettled.configureSale`, artist-only). Rollback of
+activation = revert the manifest commit and redeploy services; the original pair keeps working throughout.
