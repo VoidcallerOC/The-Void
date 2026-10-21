@@ -128,6 +128,20 @@ describe("summit demo boundary", () => {
     expect(result.experiences).toEqual([]);
   });
 
+  it("withdraws the original mainnet Forgive & Forget from discovery and leaves its replacement draft alone", () => {
+    const original = "release-83611741-c9ee-4487-a438-b6fa844762e6";
+    for (const id of [original, "edition-6e35101c-4987-4695-ac96-d83061ef2673", "edition-11e2e1a2-5a57-47e3-ac3d-e44d409af3a7", "experience-edition-6e35101c-4987-4695-ac96-d83061ef2673-full-track"]) {
+      expect(isWithdrawnPublicListing({ id })).toBe(true);
+    }
+    // Any row carrying the release or edition id leaves discovery too (API rows use snake_case).
+    expect(isWithdrawnPublicListing({ id: "x", release_id: original })).toBe(true);
+    expect(isWithdrawnPublicListing({ id: "x", editionId: "edition-6e35101c-4987-4695-ac96-d83061ef2673" })).toBe(true);
+    // The replacement draft and Genesis are not withdrawn.
+    expect(isWithdrawnPublicListing({ id: "release-273f5476-0cdb-45d3-83d3-5908eb42bc6c" })).toBe(false);
+    expect(isWithdrawnPublicListing({ id: "voidcaller-legacy-genesis" })).toBe(false);
+    expect(isWithdrawnPublicListing({ id: "voidcaller-legacy-edition", releaseId: "voidcaller-legacy-genesis" })).toBe(false);
+  });
+
   it("drops Fuji Rehearsal A everywhere in the public catalog while keeping both Forgive & Forget editions", () => {
     const releaseId = "release-7e7cecfe-73ca-44ed-afca-0b7391b6ebff";
     const editionId = "edition-e2d7f780-5f9f-4499-8030-ebc41c287a0c";

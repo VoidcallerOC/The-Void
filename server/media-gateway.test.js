@@ -8,6 +8,7 @@ import { loadMediaConfig } from "./config.js";
 import { ProtectedMediaGateway } from "./media-gateway.js";
 import { PrivateMediaStorage } from "./media-storage.js";
 import { LEGACY_CHAIN_ID, LEGACY_CONTRACT, LEGACY_IPFS_MEDIA } from "../src/lib/legacy-genesis.js";
+import { isWithdrawnPublicListing } from "../src/lib/summit-demo.js";
 
 const wallet = "0x1111111111111111111111111111111111111111";
 const otherWallet = "0x2222222222222222222222222222222222222222";
@@ -63,6 +64,15 @@ describe("protected media gateway", () => {
     expect(result.accessUrl).not.toContain("ep1-01-the-hollow");
     expect(repository.createGrant).toHaveBeenCalledWith(expect.objectContaining({ wallet, experienceId: experience.id, mediaType: "AUDIO", metadata: expect.objectContaining({ storageKey: "voidcaller-full-ep/ep1-01-the-hollow.mp3" }) }));
     expect(repository.recordMediaAuthorization).toHaveBeenCalledWith(expect.objectContaining({ action: "GRANT_ISSUED", ipHash: expect.any(String), userAgentHash: expect.any(String) }));
+  });
+
+  it("keeps serving the holder of a release withdrawn from discovery (the gateway does not consult the withdrawn list)", async () => {
+    const { gateway, db, repository } = harness();
+    const withdrawn = { ...experience, id: "experience-edition-6e35101c-4987-4695-ac96-d83061ef2673-full-track", edition_id: "edition-6e35101c-4987-4695-ac96-d83061ef2673", release_id: "release-83611741-c9ee-4487-a438-b6fa844762e6" };
+    expect(isWithdrawnPublicListing(withdrawn)).toBe(true);
+    db.query.mockImplementation(async (sql) => (String(sql).includes("media_assets") ? { rows: [assetRow] } : { rows: [withdrawn] }));
+    await expect(gateway.issueGrant({ request: request(), input: { wallet, experienceId: withdrawn.id, mediaType: "AUDIO" } })).resolves.toBeTruthy();
+    expect(repository.createGrant).toHaveBeenCalled();
   });
 
   it("allows an active opaque grant and records protected media access", async () => {
