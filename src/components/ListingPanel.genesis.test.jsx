@@ -217,40 +217,84 @@ describe("Genesis listing lists the exact token the wallet holds (ids 0-3)", () 
     expect(screen.queryByRole("button", { name: "REVIEW LISTING" })).toBeNull();
   });
 
-  it("a listing link's ?token= preselects that token once the wallet is verified to hold it", async () => {
-    mocks.balances = { 1: 1, 3: 1 };
+  it("direct entry with ?token=: that token is the target, the selector is hidden, and it is listed", async () => {
+    mocks.balances = { 0: 1, 1: 1, 3: 1 };
     setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
     await settle();
-    expect(screen.getByRole("radio", { name: "Token #3" }).checked).toBe(true);
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.getByText("LISTING TOKEN #3")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change token" }).getAttribute("aria-expanded")).toBe("false");
     expect(mocks.readContext.mock.calls.map(([args]) => args.tokenId)).toEqual(["3"]);
     await reviewAndConfirm();
     expect(mocks.submitListing.mock.calls.map(([args]) => args.tokenId)).toEqual(["3"]);
   });
 
-  it("a ?token= the wallet does not hold is never used: one held token is used instead, several require a choice", async () => {
-    mocks.balances = { 1: 1 };
+  it("direct entry with a single held token shows no Change token control", async () => {
+    mocks.balances = { 2: 1 };
     setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
     await settle();
-    expect(mocks.readContext.mock.calls.every(([args]) => args.tokenId === "1")).toBe(true);
-    expect(screen.queryByRole("radio", { name: "Token #2" })).toBeNull();
-    cleanup();
-    vi.clearAllMocks();
-    mocks.readContext.mockImplementation(async ({ tokenId }) => contextFor(tokenId));
-    mocks.fetchIndexedListings.mockResolvedValue([]);
-    mocks.balances = { 1: 1, 3: 1 };
-    setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
-    await settle();
-    expect(screen.getByText(/holds more than one of these tokens/)).toBeTruthy();
-    expect(mocks.readContext).not.toHaveBeenCalled();
+    expect(screen.getByText("LISTING TOKEN #2")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change token" })).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 
-  it("the user can still pick another held token after arriving with ?token=", async () => {
+  it("Change token reveals the choices on request, focuses them, and lists the newly chosen token", async () => {
     mocks.balances = { 0: 1, 3: 1 };
     setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
     await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Change token" }));
+    await settle();
+    expect(screen.getByRole("radio", { name: "Token #3" }).checked).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Token #3" }));
     fireEvent.click(screen.getByRole("radio", { name: "Token #0" }));
     await settle();
     expect(screen.getByRole("radio", { name: "Token #0" }).checked).toBe(true);
     expect(mocks.readContext.mock.calls.at(-1)[0].tokenId).toBe("0");
+    await reviewAndConfirm();
+    expect(mocks.submitListing.mock.calls.map(([args]) => args.tokenId)).toEqual(["0"]);
+  });
+
+  it("an unheld ?token= is never replaced by another token: an error, the selector, and no verification until a choice", async () => {
+    for (const balances of [{ 1: 1 }, { 1: 1, 3: 1 }]) {
+      cleanup();
+      vi.clearAllMocks();
+      mocks.readContext.mockImplementation(async ({ tokenId }) => contextFor(tokenId));
+      mocks.fetchIndexedListings.mockResolvedValue([]);
+      mocks.balances = balances;
+      setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
+      await settle();
+      expect(screen.getByText(/The token you chose to list is not held by this wallet/)).toBeTruthy();
+      expect(screen.getAllByRole("radio").every((radio) => !radio.checked)).toBe(true);
+      expect(screen.queryByRole("radio", { name: "Token #2" })).toBeNull();
+      expect(mocks.readContext).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "REVIEW LISTING" })).toBeNull();
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "Token #1" }));
+    await settle();
+    expect(mocks.readContext.mock.calls.map(([args]) => args.tokenId)).toEqual(["1"]);
+  });
+
+  it("without ?token= the existing selector still appears for several held tokens", async () => {
+    mocks.balances = { 1: 1, 3: 1 };
+    setup({}, "/edition/voidcaller-chapter-i#secondary-listing");
+    await settle();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Change token" })).toBeNull();
+    expect(screen.getByText(/holds more than one of these tokens/)).toBeTruthy();
+  });
+
+  it("direct entry: a token transferred away after load is still caught by the pre-submit recheck", async () => {
+    mocks.balances = { 1: 1, 3: 1 };
+    setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
+    await settle();
+    fireEvent.change(screen.getByLabelText(/PRICE \/ EDITION/), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "REVIEW LISTING" }));
+    await settle();
+    mocks.balances = { 1: 1 };
+    fireEvent.click(screen.getByRole("button", { name: "CONFIRM LISTING" }));
+    await settle();
+    expect(mocks.readContext.mock.calls.at(-1)[0].tokenId).toBe("3");
+    expect(mocks.submitApproval).not.toHaveBeenCalled();
+    expect(mocks.submitListing).not.toHaveBeenCalled();
   });
 });

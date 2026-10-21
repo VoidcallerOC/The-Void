@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { requestedTokenId } from "../lib/asset-actions.js";
 import { Btn } from "./Atoms.jsx";
@@ -70,6 +70,7 @@ function statusCopy(stage, message) {
     "not-owner": "This wallet no longer owns the selected edition on chain. Refresh the page after verifying your wallet.",
     "no-token": "This wallet holds none of this collection's listable tokens on chain. New listings are unavailable.",
     "select-token": "This wallet holds more than one of these tokens. Choose the token to list.",
+    "requested-not-held": "The token you chose to list is not held by this wallet on chain. Nothing was selected for you; choose a token this wallet holds.",
     unsupported: `Only a release-per-contract edition on ${RELEASE_DEPLOYMENT.networkName} registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.`,
     unavailable: "Marketplace or ownership verification is unavailable. No listing action was taken.",
     "wrong-network": releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" }),
@@ -102,9 +103,23 @@ export function ListingPanel({ edition }) {
   const ownedIds = tokenChoices && ownedTokens.key === ownershipKey ? ownedTokens.ids : null;
   // A listing link from a token card (?token=N) preselects that token, but only once the wallet is verified to hold it.
   const requested = requestedTokenId(useLocation().search);
-  const preferred = selectedTokenId || requested || "";
+  const [changingToken, setChangingToken] = useState(false);
+  const tokenChoicesRef = useRef(null);
+  // "Change token" reveals the choices and moves keyboard focus to the checked one.
+  useEffect(() => {
+    const choices = tokenChoicesRef.current;
+    if (changingToken && choices) (choices.querySelector("input:checked") || choices.querySelector("input"))?.focus();
+  }, [changingToken]);
+  // A requested token is used only when the wallet is verified to hold it. An unheld request never falls back to another
+  // token: the user must choose explicitly.
+  const requestedHeld = Boolean(requested && ownedIds?.includes(requested));
+  const requestedNotHeld = Boolean(requested && ownedIds && !ownedIds.includes(requested));
   const tokenId = tokenChoices
-    ? (ownedIds?.includes(preferred) ? preferred : ownedIds?.length === 1 ? ownedIds[0] : "")
+    ? (selectedTokenId && ownedIds?.includes(selectedTokenId)
+      ? selectedTokenId
+      : requestedHeld
+        ? requested
+        : !requestedNotHeld && ownedIds?.length === 1 ? ownedIds[0] : "")
     : String(edition?.tokenIds?.[0] ?? "");
   const contract = String(edition?.contractAddress || "");
   const provider = wallet.provider;
@@ -136,7 +151,7 @@ export function ListingPanel({ edition }) {
                 : tokenChoices && ownedIds.length === 0
                   ? "no-token"
                   : tokenChoices && !tokenId
-                    ? "select-token"
+                    ? (requestedNotHeld ? "requested-not-held" : "select-token")
                     : chainState?.stage || "checking";
   const context = chainState?.context || null;
   const currentListing = chainState?.listing || (pending?.assetKey === assetKey ? pending.listing : null);
@@ -523,8 +538,19 @@ export function ListingPanel({ edition }) {
       <h2 id="secondary-listing-title" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(22px, 3vw, 28px)", textTransform: "uppercase", lineHeight: 1, margin: "12px 0" }}>List for sale</h2>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65 }}>{ownerIntro} {ownershipDetail}</p>
       <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".08em", overflowWrap: "anywhere" }}>{identity}</p>
-      {tokenChoices && ownedIds?.length > 0 && (
-        <fieldset style={{ border: "1px solid var(--vc-ash)", padding: "12px 14px", margin: "14px 0" }} disabled={busy}>
+      {tokenChoices && ownedIds?.length > 0 && requestedHeld && !changingToken && !selectedTokenId && (
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", margin: "14px 0", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+          <span role="status" aria-label={`Listing token #${tokenId}`}>LISTING TOKEN #{tokenId}</span>
+          {ownedIds.length > 1 && (
+            <button type="button" onClick={() => setChangingToken(true)} disabled={busy} aria-expanded="false" aria-controls="listing-token-choices"
+              style={{ background: "transparent", border: "1px solid var(--vc-ash)", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", padding: "6px 10px", cursor: "pointer" }}>
+              Change token
+            </button>
+          )}
+        </div>
+      )}
+      {tokenChoices && ownedIds?.length > 0 && (!requestedHeld || changingToken || selectedTokenId) && (
+        <fieldset id="listing-token-choices" ref={tokenChoicesRef} style={{ border: "1px solid var(--vc-ash)", padding: "12px 14px", margin: "14px 0" }} disabled={busy}>
           <legend style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", padding: "0 6px" }}>Token to list (held by this wallet)</legend>
           {ownedIds.map((id) => (
             <label key={id} style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 18, fontFamily: "var(--font-mono)", fontSize: 12 }}>
@@ -553,8 +579,8 @@ export function ListingPanel({ edition }) {
       {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p>{releaseNetworkSwitchAllowed(RELEASE_DEPLOYMENT) && <Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn>}</div>}
       {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && !wallet.needsNetworkSwitch && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
 
-      {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "no-token", "select-token", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (
-        <p role="status" aria-live="polite" style={{ color: ["not-owner", "no-token", "unsupported", "unavailable", "error", "reconciliation-required"].includes(stage) ? "var(--vc-crimson)" : "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, overflowWrap: "anywhere" }}>
+      {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "no-token", "select-token", "requested-not-held", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (
+        <p role="status" aria-live="polite" style={{ color: ["not-owner", "no-token", "requested-not-held", "unsupported", "unavailable", "error", "reconciliation-required"].includes(stage) ? "var(--vc-crimson)" : "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, overflowWrap: "anywhere" }}>
           {pending?.assetKey === assetKey ? pending.message || message : message}
         </p>
       )}
