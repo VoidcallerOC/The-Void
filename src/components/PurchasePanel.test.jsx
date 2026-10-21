@@ -41,7 +41,7 @@ const indexedMarketplace = mocks.address;
 const foreignMarketplace = "0xa03b4b6e384c1d2718b837cd78e6408754aa0c0b";
 const tokenContract = "0x82b26da27136935454bdf1e40801190b521b82e5";
 const transactionHash = `0x${"a".repeat(64)}`;
-const edition = { id: "edition-1", title: "Test edition", chainId: 43113, contractAddress: tokenContract, tokenIds: ["42"] };
+const edition = { id: "edition-1", title: "Test edition", chainId: 43113, contractAddress: tokenContract, tokenIds: ["42", "43"] };
 const activeListing = {
   id: "listing-uuid",
   listingId: "1",
@@ -222,5 +222,27 @@ describe("PurchasePanel authoritative settlement polling", () => {
     expect(mocks.createIntent).not.toHaveBeenCalled();
     expect(mocks.submitPurchase).not.toHaveBeenCalled();
     expect(screen.getByText(/does not belong to the verified marketplace/)).not.toBeNull();
+  });
+});
+
+describe("token page: offers for one exact token", () => {
+  const wallet = { account: buyer, authenticated: true, authHeaders: {}, chainId: 43113, connected: true, getProvider: () => ({ request: vi.fn() }), refreshOwnership: vi.fn() };
+  const other = { ...activeListing, id: "listing-43", listingId: "2", tokenId: "43", price: "30000000000000000" };
+
+  it("with tokenId shows and selects only that token's offers", async () => {
+    mocks.fetchIndexedListings.mockReset().mockResolvedValue([other, activeListing]);
+    render(<WalletCtx.Provider value={wallet}><PurchasePanel edition={edition} tokenId="42" /></WalletCtx.Provider>);
+    await act(async () => { await flushPromises(); });
+    expect(screen.getByText(/Secondary collection · Token #42/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Token #42 · 1 remaining · 0\.01 AVAX/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Token #43/ })).toBeNull();
+  });
+
+  it("with tokenId and no offer for it, shows none rather than another token's", async () => {
+    mocks.fetchIndexedListings.mockReset().mockResolvedValue([other]);
+    render(<WalletCtx.Provider value={wallet}><PurchasePanel edition={edition} tokenId="42" /></WalletCtx.Provider>);
+    await act(async () => { await flushPromises(); });
+    expect(screen.queryByRole("button", { name: /Token #43/ })).toBeNull();
+    expect(screen.getByText("No active indexed listings for this edition.")).toBeTruthy();
   });
 });

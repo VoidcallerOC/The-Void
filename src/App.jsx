@@ -13,6 +13,7 @@ import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
 import { NotFoundPage } from "./components/NotFoundPage.jsx";
+import { TokenPage } from "./components/TokenPage.jsx";
 
 const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 
@@ -85,6 +86,7 @@ export function AppRoutes() {
         <Route path="artist/:artist" element={<ArtistRoutePage />} />
         <Route path="release/:release" element={<ReleaseRoutePage />} />
         <Route path="edition/:edition" element={<EditionPage />} />
+        <Route path="edition/:edition/token/:tokenId" element={<TokenPage />} />
         <Route path="experience/:experience" element={<ExperiencePage />} />
         <Route path="studio" element={<ArtistStudioPage />} />
         <Route path="studio/profile/:artistId" element={<ArtistProfileEditPage />} />

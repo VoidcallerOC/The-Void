@@ -145,7 +145,7 @@ describe("public marketplace inventory", () => {
     const secondary = secondaryHeading.closest("section");
     expect(within(secondary).getByText("Available · 1 · 0.02 AVAX")).toBeTruthy();
     expect(within(secondary).getByText("Full self-titled EP")).toBeTruthy();
-    expect(within(secondary).getByRole("link", { name: "View edition" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);
+    expect(within(secondary).getAllByRole("link", { name: /^View token #/ })[0].getAttribute("href")).toBe(`/edition/${realEditionId}/token/${realTokenId}`);
     expect(within(secondary).getByRole("link", { name: "Collect" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);
     expect(screen.getByText("Official editions grouped below")).toBeTruthy();
     expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION/i);
@@ -276,7 +276,8 @@ describe("secondary listing cards show the exact listed token's metadata", () =>
     expect(el.textContent).toContain("Token #0 · Enough");
     expect(el.textContent).toMatch(/Seller · 0x6a86…d2fb/i);
     expect(el.textContent).toContain("Available · 1 · 0.01 AVAX");
-    expect(within(el).getByRole("link", { name: "View edition" }).getAttribute("href")).toBe("/edition/voidcaller-chapter-i");
+    expect(within(el).getAllByRole("link", { name: "View token #0, Enough" }).map((link) => link.getAttribute("href"))).toEqual(["/edition/voidcaller-chapter-i/token/0", "/edition/voidcaller-chapter-i/token/0"]);
+    expect(within(el).queryByRole("link", { name: "View edition" })).toBeNull();
   });
 
   it("if the token's IPFS image fails, it falls back to that token's local art, then the edition art", async () => {
