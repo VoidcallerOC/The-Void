@@ -114,12 +114,16 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
   // One listed token: the card is about that token, so it leads with that token's own art and name.
   const single = tokens.length === 1 ? tokens[0] : null;
   const heading = single?.name || edition.title;
-  const image = single?.artwork || artworkFor(edition, release);
+  const editionArt = artworkFor(edition, release);
+  const [failedImages, setFailedImages] = useState([]);
+  // Token image, then the token's local art, then the edition art; each is dropped only after it fails to load.
+  const image = [single?.artwork, single?.artworkFallback, editionArt].filter(Boolean).find((src) => !failedImages.includes(src)) || editionArt;
+  const showingTokenArt = Boolean(single) && image !== editionArt;
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>
       <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${heading} secondary listings`}>
-        <img src={image} alt={single?.artwork ? `${single.name}, token #${single.tokenId} artwork` : `${edition.title} edition artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
+        <img src={image} onError={() => setFailedImages((prior) => (prior.includes(image) ? prior : [...prior, image]))} alt={showingTokenArt ? `${single.name}, token #${single.tokenId} artwork` : `${edition.title} edition artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
         <span className={`vc-object-mark ${objectClass(edition, chain).tone}`}>{objectClass(edition, chain).label}</span>
