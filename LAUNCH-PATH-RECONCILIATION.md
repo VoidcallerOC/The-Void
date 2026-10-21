@@ -135,3 +135,18 @@ for `0x262B…` cannot authorize a new deployment (used nonce, occupied address,
 (the manifest decides). After a replacement release exists, the artist can pause its sale with
 `configureSale(..., paused = true)` (`VoidPrimarySaleSettled.configureSale`, artist-only). Rollback of
 activation = revert the manifest commit and redeploy services; the original pair keeps working throughout.
+
+## H. Forgive & Forget release completion (updated 2026-10-21 09:20 UTC)
+
+| Item | State | Evidence |
+|---|---|---|
+| Original release in production | PUBLISHED (release `release-83611741…`, edition `edition-6e35…` published, open edition) | Supabase "The Void Mainnet", read-only queries |
+| Original sale on chain | Sold out and ended: `maxSupply` 1, `sold` 1, price 0.25 AVAX, `endTime` 1792489200, not paused | `sales(tokenId)` on `0x6ae8…9aA3`, block ~98106k |
+| Existing holder | `0x6a86…d2fb`, balance 1 (tx `0xca613e8b…`, block 98046247); `primary_purchases` row FINALIZED, 0.25 AVAX | `balanceOf`, DB |
+| Retirement | **#239** (draft): read-side withdrawal, supersedes #236's archive (archive would cut the holder's protected media and hide the replacement draft in Studio) | `server/media-gateway.js:86`, `retiredByArchivedTitle`; tests in #239 |
+| Replacement record | Draft `release-273f5476…` (`forgive-forget-2`), title "Forgive & Forget", same artwork CID, no editions, no contracts. Stored as `EP`; original was `SINGLE` (**owner decision**) | DB |
+| Release key | Stale key in the draft is recomputed for the active factory at provisioning (no request exists) | `server/studio-service.js` 519–528 |
+| Source media | Artwork `ipfs://bafybeidbhen…qqv4i` (image/png, Pinata 206); preview `ipfs://bafybeiaoy7h…rgd4` (audio/mpeg, 206); full track `asset-155971a7…` (WAV, 65,861,868 B, sha256 `39707a09…`); demo `asset-20e0b78d…` (MP3, 4,007,809 B, sha256 `4ba8386b…`) | `release_metadata`, `media_assets`, gateway range requests |
+| Media on the replacement | NOT STARTED. Studio re-attaches already-registered private files (PR #220); needs the artist's Studio session after activation | — |
+| Production migrations 040/041 | Applied | `schema_migrations` |
+| Sale schedule / first-user test for the replacement | **Not recorded** in the repo or DB. Edition settings (supply, price, window, per-wallet limit) for the replacement are owner decisions. No private purchase will be made through deployed contracts | — |
