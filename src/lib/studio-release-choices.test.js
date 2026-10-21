@@ -110,6 +110,23 @@ describe("Studio release picker", () => {
   });
 });
 
+describe("retiring the original mainnet Forgive & Forget", () => {
+  const artists = [{ id: "voidcaller", name: "Voidcaller" }];
+  const original = { id: "release-83611741-c9ee-4487-a438-b6fa844762e6", artistId: "voidcaller", title: "Forgive & Forget", status: "published" };
+  // Any unpublished release with the same title, such as a new one the artist creates in Studio.
+  const sameTitleDraft = { id: "release-new-same-title", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" };
+
+  it("still offers an unpublished same-title release once the published original is withdrawn", () => {
+    const choices = studioReleaseChoices({ releases: [original, sameTitleDraft], artists, editions: [{ id: "edition-6e35101c-4987-4695-ac96-d83061ef2673", releaseId: original.id }] });
+    expect(choices.map(({ release }) => release.id)).toEqual([sameTitleDraft.id]);
+  });
+
+  it("would hide an unpublished same-title release if the original were ARCHIVED instead (why it is withdrawn, not archived)", () => {
+    const choices = studioReleaseChoices({ releases: [{ ...original, id: "some-archived-original", status: "archived" }, sameTitleDraft], artists, editions: [] });
+    expect(choices).toEqual([]);
+  });
+});
+
 describe("Take this off the site", () => {
   const legacyEdition = { releaseId: LEGACY_ALBUM_ID, chainId: LEGACY_CHAIN_ID, contractAddress: LEGACY_CONTRACT, status: "minted", tokenIds: ["0"] };
   const fujiMintable = { releaseId: "fuji-voidcaller", chainId: FUJI_RELEASE_CONFIG.chainId, contractAddress: FUJI_RELEASE_CONFIG.contractAddress, status: "available", tokenIds: ["9"] };

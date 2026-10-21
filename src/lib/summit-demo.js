@@ -58,7 +58,23 @@ const TEST_PROFILE_LABELS = new Set(["wer", "sdfg", "qwe", "asdf"]);
 // read-side exclusion, at the owner's request (2026-10-15): the same list drives the public API and the
 // storefront, so it leaves discovery in both. Nothing is deleted or changed in the database; the
 // token, the sale, ownership and purchases stay. Reversal: remove these ids.
+//
+// The original mainnet Forgive & Forget (release-83611741 on clone 0x9aa6…d103 from factory 0x262B…,
+// its two editions and four experiences) is retired from discovery because its primary sale credits the
+// platform fee instead of paying it; new releases come from VoidReleaseFactoryV2RoyaltySettled. Its
+// only sale (one token, 0.25 AVAX) is sold out and ended on chain. It is withdrawn here instead of
+// ARCHIVED because ARCHIVED would (a) stop the protected-media gateway, which requires the edition and
+// experience to stay PUBLISHED, from serving the existing holder, and (b) make Studio hide every
+// unpublished release with the same title, including one the artist creates next. Read-side only: the contract,
+// token, holder, sale, purchase record, media and volume history are untouched.
 const WITHDRAWN_PUBLIC_LISTING_IDS = new Set([
+  "release-83611741-c9ee-4487-a438-b6fa844762e6",
+  "edition-6e35101c-4987-4695-ac96-d83061ef2673",
+  "edition-11e2e1a2-5a57-47e3-ac3d-e44d409af3a7",
+  "experience-edition-6e35101c-4987-4695-ac96-d83061ef2673-experience-audio",
+  "experience-edition-6e35101c-4987-4695-ac96-d83061ef2673-full-track",
+  "experience-edition-11e2e1a2-5a57-47e3-ac3d-e44d409af3a7-experience-audio",
+  "experience-edition-11e2e1a2-5a57-47e3-ac3d-e44d409af3a7-full-track",
   "release-1b4a2d71-218f-47a2-afde-cd5171909ace",
   "edition-9362e29d-341d-4e84-a64b-45753e7d0ff1",
   "experience-d798300c-37eb-4cc6-aad3-4b078b77135a",
