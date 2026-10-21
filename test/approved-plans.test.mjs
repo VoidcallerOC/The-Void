@@ -2,7 +2,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { AbiCoder, getCreateAddress, keccak256 } from "ethers";
 import { describe, expect, it } from "vitest";
-import { ApprovedPlanError, validateApprovedPlan } from "../scripts/approved-plan.mjs";
+import { ApprovedPlanError, EXECUTED_RELEASE_FACTORY, validateApprovedPlan } from "../scripts/approved-plan.mjs";
+import { FACTORY_ARTIFACT_PATH } from "../scripts/deploy-release-per-contract-mainnet.mjs";
+import { verifyBinding } from "../scripts/deployment-plan-binding.mjs";
+import { bindPlan } from "../scripts/plan-binding-core.mjs";
+import { assertReadyToSign } from "../scripts/mainnet-signing-requests.mjs";
 
 // Every committed approved plan must be bound, for C-Chain and the defined deployer, and its
 // transactions must be exactly the contracts compiled from this commit with the plan's constructor
@@ -41,6 +45,28 @@ describe("approved mainnet plans", () => {
     expect(plan.artifacts.marketplace.initCodeHash).toBe(keccak256(marketplace.bytecode.object));
     expect(plan.artifacts.implementation.runtimeCodeHash).toBe(keccak256(implementation.deployedBytecode.object));
     expect(factoryTx.predictedImplementation).toBe(getCreateAddress({ from: factoryTx.predictedAddress, nonce: 1 }));
+    // Only the executed plan for 0x262B… may name another factory artifact; every new plan names the settled one.
+    if (factoryTx.predictedAddress !== EXECUTED_RELEASE_FACTORY) expect(plan.artifacts.factory.path).toBe(FACTORY_ARTIFACT_PATH);
+  });
+
+  it("the executed release plan can never authorize a new deployment", async () => {
+    const entry = load("release-per-contract-mainnet.json");
+    const [first] = entry.plan.signingRequests;
+    expect(first.predictedAddress).toBe(EXECUTED_RELEASE_FACTORY);
+    // Owner page: its live checks refuse the used nonce and the occupied address.
+    const live = { getNetwork: async () => ({ chainId: 43114n }), send: async () => "0xa86a", getTransactionCount: async () => 3, getCode: async (target) => (target === first.from ? "0x" : "0x60") };
+    await expect(assertReadyToSign(live, first, [first.predictedAddress])).rejects.toThrow(/nonce is 3|already has code|chain/);
+    // Command-line signer: a fresh plan for the settled factory does not reproduce the executed binding.
+    const fresh = { ...entry.plan, signingRequests: entry.plan.signingRequests.map((request) => ({ ...request, nonce: request.nonce + 3, dataHash: `0x${"ab".repeat(32)}` })) };
+    expect(() => verifyBinding(entry.binding, entry.kind, fresh, entry.binding.sourceCommit)).toThrow();
+    // A new plan naming the deployed credit-only factory is refused outright.
+    const replayed = JSON.parse(JSON.stringify(entry.plan));
+    replayed.signingRequests.forEach((request, index) => { request.nonce = 3 + index; request.predictedAddress = getCreateAddress({ from: request.from, nonce: request.nonce }); });
+    replayed.deployer.nonce = 3;
+    replayed.transactions.forEach((transaction, index) => { transaction.nonce = replayed.signingRequests[index].nonce; transaction.predictedAddress = replayed.signingRequests[index].predictedAddress; });
+    replayed.transactions[1].constructor.releaseFactory = replayed.signingRequests[0].predictedAddress;
+    const rebound = { kind: entry.kind, plan: replayed, binding: bindPlan(entry.kind, replayed, entry.binding.sourceCommit) };
+    expect(() => validateApprovedPlan(rebound)).toThrow(/must deploy VoidReleaseFactoryV2RoyaltySettled/);
   });
 
   it("refuses an approved plan changed after approval, or for another deployer, chain or recipient", () => {

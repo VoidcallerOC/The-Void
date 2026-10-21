@@ -17,6 +17,12 @@ export const APPROVED_KINDS = profileFor("mainnet").kinds;
 export class ApprovedPlanError extends Error {}
 const fail = (message) => { throw new ApprovedPlanError(message); };
 
+// The release-infrastructure plan that created the first mainnet pair (factory 0x262B…, credit-only primary
+// sales). It stays committed as the record of that deployment; any other release-infrastructure plan must
+// deploy the factory whose releases pay the platform fee during the purchase.
+export const EXECUTED_RELEASE_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
+export const RELEASE_FACTORY_CONTRACT = "VoidReleaseFactoryV2RoyaltySettled";
+
 const deployerOf = (kind, plan) => (kind.startsWith("genesis-claim") ? plan.deployer : plan.deployer?.address);
 
 /** Throws unless the entry is internally consistent, bound, for the network's chain and the defined deployer. */
@@ -42,6 +48,8 @@ export function validateApprovedPlan(entry, network = "mainnet") {
   if (kind === "release-per-contract-mainnet") {
     if (getAddress(plan.transactions[0].constructor.platformRecipient) !== MAINNET_FEE_RECIPIENT || getAddress(plan.transactions[1].constructor.feeRecipient) !== MAINNET_FEE_RECIPIENT) fail("The fee recipient is not the recorded Nano S Plus.");
     if (getAddress(plan.transactions[1].constructor.releaseFactory) !== getAddress(requests[0].predictedAddress)) fail("The marketplace is not bound to the factory of step 1.");
+    const executed = getAddress(requests[0].predictedAddress) === EXECUTED_RELEASE_FACTORY;
+    if (!executed && (plan.transactions[0].contract !== RELEASE_FACTORY_CONTRACT || requests[0].contract !== RELEASE_FACTORY_CONTRACT || plan.artifacts?.factory?.path !== `out/${RELEASE_FACTORY_CONTRACT}.sol/${RELEASE_FACTORY_CONTRACT}.json`)) fail(`A new release-infrastructure plan must deploy ${RELEASE_FACTORY_CONTRACT}.`);
   }
   if (kind === "genesis-claim-fuji") {
     if (getAddress(plan.roles.admin) !== FUJI_CLAIM_ARTIST) fail(`The Fuji claim admin must be the artist wallet ${FUJI_CLAIM_ARTIST}, not ${plan.roles.admin}.`);

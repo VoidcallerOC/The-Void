@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { AbiCoder, getAddress, getCreateAddress, id, keccak256 } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
 import { FACTORY_ARTIFACT_PATH, FACTORY_CONTRACT, FEE_RECIPIENT, MAINNET_CHAIN_ID, MARKETPLACE_ARTIFACT_PATH, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, run, settledSaleProblems, validateDeploymentEnv, verifyReleaseStep } from "./deploy-release-per-contract-mainnet.mjs";
-import { ARTIST, DEPLOYER, FACTORY_INIT, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
+import { ARTIST, DEPLOYER, FACTORY_INIT, LEGACY_SALE_INIT, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
+import { SETTLED_SALE_RUNTIME_CODE_HASH } from "../src/lib/sale-authorization.js";
 
 const KEY = `0x${"22".repeat(32)}`;
 const BASE = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
@@ -86,7 +87,7 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     // The only 32-byte hex values are hashes the plan names as such, and the ABI-encoded (padded)
     // public fee recipient passed to the factory constructor.
     const words = [...text.matchAll(/"([a-zA-Z]+)":"0x[0-9a-fA-F]{64}"/g)].map((match) => match[1]);
-    expect(new Set(words)).toEqual(new Set(["initCodeHash", "runtimeCodeHash", "dataHash", "factory"]));
+    expect(new Set(words)).toEqual(new Set(["initCodeHash", "runtimeCodeHash", "reviewedRuntimeHash", "dataHash", "factory"]));
     expect(JSON.parse(text).constructorArgsEncoded.factory).toBe(AbiCoder.defaultAbiCoder().encode(["address"], [RECIPIENT]));
   });
 
@@ -112,6 +113,7 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     expect(plan.readyToBroadcast).toBe(true);
     expect(FACTORY_CONTRACT).toBe("VoidReleaseFactoryV2RoyaltySettled");
     expect(plan.artifacts.factory).toMatchObject({ contract: FACTORY_CONTRACT, path: FACTORY_ARTIFACT_PATH, primarySale: "VoidPrimarySaleSettled", initCodeHash: keccak256(FACTORY_INIT) });
+    expect(plan.artifacts.primarySale).toMatchObject({ contract: "VoidPrimarySaleSettled", path: "out/VoidPrimarySaleSettled.sol/VoidPrimarySaleSettled.json", reviewedRuntimeHash: SETTLED_SALE_RUNTIME_CODE_HASH });
     expect(plan.transactions[0]).toMatchObject({ contract: FACTORY_CONTRACT, constructor: { platformRecipient: RECIPIENT } });
     expect(plan.transactions[0].primarySale).toMatch(/^VoidPrimarySaleSettled /);
     // The marketplace is bound to the factory this plan creates, never to the deployed one.
@@ -120,14 +122,19 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     expect(plan.checks.find((item) => item.check === "factory gives every release the settled primary sale")).toMatchObject({ status: "PASS", value: [] });
   });
 
-  it("refuses a factory artifact that gives releases the legacy credit-only sale", async () => {
-    const legacyTopic = id("PlatformFeeUpdated(uint256,uint256)").slice(2);
-    for (const [object, expected] of [
-      ["0x6001600155", ["no PlatformPaid(address,uint256)"]],
-      [`0x60016001557f${legacyTopic}`, ["no PlatformPaid(address,uint256)", "legacy sale PlatformFeeUpdated(uint256,uint256)"]],
+  it("refuses a factory that does not embed the exact reviewed settled sale, or embeds the legacy sale", async () => {
+    const PlatformPaidOnly = `0x60016001557f${id("PlatformPaid(address,uint256)").slice(2)}`;
+    const factoryWith = (object) => async (path) => (path.includes("Factory") ? { ...(await artifacts(path)), bytecode: { object } } : artifacts(path));
+    const saleWith = (deployed) => async (path) => (path.includes("VoidPrimarySaleSettled") ? { ...(await artifacts(path)), deployedBytecode: { object: deployed } } : artifacts(path));
+    for (const [load, expected] of [
+      // An unrelated PlatformPaid signature is not the sale implementation.
+      [factoryWith(PlatformPaidOnly), ["factory does not embed the VoidPrimarySaleSettled creation code"]],
+      [factoryWith(`0x6001600155${LEGACY_SALE_INIT.slice(2)}`), ["factory does not embed the VoidPrimarySaleSettled creation code", "factory embeds the legacy VoidPrimarySale"]],
+      [factoryWith(`${FACTORY_INIT}${LEGACY_SALE_INIT.slice(2)}`), ["factory embeds the legacy VoidPrimarySale"]],
+      // A sale artifact whose runtime is not the one the Earnings view authorizes.
+      [saleWith(`0x${"60".repeat(4000)}0000`), ["VoidPrimarySaleSettled artifact is not the reviewed sale"]],
     ]) {
-      const legacy = async (path) => (path.includes("Factory") ? { ...(await artifacts(path)), bytecode: { object } } : artifacts(path));
-      const plan = await buildDryRunPlan(validateDeploymentEnv(READY), fakeChain(), { load: legacy });
+      const plan = await buildDryRunPlan(validateDeploymentEnv(READY), fakeChain(), { load });
       expect(plan.checks.find((item) => item.check === "factory gives every release the settled primary sale")).toMatchObject({ status: "FAIL", value: expected });
       expect(plan.readyToBroadcast).toBe(false);
     }
@@ -137,8 +144,9 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     const compiled = (name) => JSON.parse(readFileSync(new URL(`../out/${name}.sol/${name}.json`, import.meta.url), "utf8"));
     const settled = compiled("VoidReleaseFactoryV2RoyaltySettled");
     expect(FACTORY_ARTIFACT_PATH).toBe("out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json");
-    expect(settledSaleProblems(settled.bytecode.object)).toEqual([]);
-    expect(settledSaleProblems(compiled("VoidReleaseFactoryV2Royalty").bytecode.object)).toEqual(["no PlatformPaid(address,uint256)", "legacy sale PlatformFeeUpdated(uint256,uint256)"]);
+    const [sale, legacySale] = [compiled("VoidPrimarySaleSettled"), compiled("VoidPrimarySale")];
+    expect(settledSaleProblems(settled.bytecode.object, sale, legacySale)).toEqual([]);
+    expect(settledSaleProblems(compiled("VoidReleaseFactoryV2Royalty").bytecode.object, sale, legacySale)).toEqual(["factory does not embed the VoidPrimarySaleSettled creation code", "factory embeds the legacy VoidPrimarySale"]);
     // Same constructor as the deployed factory: the one platform recipient.
     expect(settled.abi.find((item) => item.type === "constructor").inputs.map((input) => input.type)).toEqual(["address"]);
   });

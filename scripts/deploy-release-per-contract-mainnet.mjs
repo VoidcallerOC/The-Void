@@ -7,6 +7,7 @@ import mainnetManifest from "../config/mainnet-release-per-contract.json" with {
 import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
 import { assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, runtimeMatchesArtifact, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
 import { checkFactoryState, checkMarketplaceState } from "./mainnet-onchain-checks.mjs";
+import { SETTLED_SALE_RUNTIME_CODE_HASH, maskedRuntimeHash } from "../src/lib/sale-authorization.js";
 
 // C-Chain deployment of the release-per-contract architecture validated on Fuji, with the artist
 // royalty enforced on chain: VoidReleaseFactoryV2RoyaltySettled (whose constructor creates the
@@ -27,6 +28,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const FACTORY_CONTRACT = "VoidReleaseFactoryV2RoyaltySettled";
 export const FACTORY_ARTIFACT_PATH = `out/${FACTORY_CONTRACT}.sol/${FACTORY_CONTRACT}.json`;
 export const PRIMARY_SALE_CONTRACT = "VoidPrimarySaleSettled";
+export const PRIMARY_SALE_ARTIFACT_PATH = `out/${PRIMARY_SALE_CONTRACT}.sol/${PRIMARY_SALE_CONTRACT}.json`;
+export const LEGACY_SALE_ARTIFACT_PATH = "out/VoidPrimarySale.sol/VoidPrimarySale.json";
 export const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV4.sol/ReleaseMarketplaceV4.json";
 export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4Royalty.sol/VoidRelease1155V4Royalty.json";
 export const ROYALTY_BPS = 250;
@@ -37,17 +40,22 @@ export function missingSelectors(runtimeBytecode, signatures) {
   const code = String(runtimeBytecode || "").toLowerCase();
   return signatures.filter((signature) => !code.includes(`63${id(signature).slice(2, 10)}`));
 }
-// The factory's creation code embeds the creation code of the sale it gives every release. The settled sale
-// emits PlatformPaid (its PUSH32 topic); the legacy, credit-only VoidPrimarySale emits PlatformFeeUpdated.
-const SETTLED_SALE_EVENT = "PlatformPaid(address,uint256)";
-const LEGACY_SALE_EVENT = "PlatformFeeUpdated(uint256,uint256)";
-export function settledSaleProblems(factoryInitCode) {
-  const code = String(factoryInitCode || "").toLowerCase();
-  const pushes = (signature) => code.includes(`7f${id(signature).slice(2)}`);
-  return [
-    ...(pushes(SETTLED_SALE_EVENT) ? [] : [`no ${SETTLED_SALE_EVENT}`]),
-    ...(pushes(LEGACY_SALE_EVENT) ? [`legacy sale ${LEGACY_SALE_EVENT}`] : []),
-  ];
+// The factory's creation code embeds, byte for byte, the creation code of the sale it gives every release
+// (`new VoidPrimarySaleSettled(...)`). The plan requires the exact reviewed VoidPrimarySaleSettled creation
+// code from this build, whose runtime is the one the Earnings view authorizes (SETTLED_SALE_RUNTIME_CODE_HASH),
+// and refuses a factory that embeds the legacy, credit-only VoidPrimarySale.
+const hexBody = (value) => String(value || "").replace(/^0x/i, "").toLowerCase();
+export function settledSaleProblems(factoryInitCode, saleArtifact, legacySaleArtifact) {
+  const code = hexBody(factoryInitCode);
+  const sale = hexBody(saleArtifact?.bytecode?.object);
+  const legacy = hexBody(legacySaleArtifact?.bytecode?.object);
+  const problems = [];
+  let reviewed = false;
+  try { reviewed = maskedRuntimeHash(saleArtifact?.deployedBytecode?.object) === SETTLED_SALE_RUNTIME_CODE_HASH; } catch { reviewed = false; }
+  if (!reviewed) problems.push(`${PRIMARY_SALE_CONTRACT} artifact is not the reviewed sale`);
+  if (!sale || !code.includes(sale)) problems.push(`factory does not embed the ${PRIMARY_SALE_CONTRACT} creation code`);
+  if (legacy && code.includes(legacy)) problems.push("factory embeds the legacy VoidPrimarySale");
+  return problems;
 }
 const ROYALTY_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -157,9 +165,9 @@ const PENDING = "<physically verified Nano S Plus address>";
 export async function buildDryRunPlan(config, provider, { load = loadArtifact } = {}) {
   const network = await provider.getNetwork();
   if (network.chainId !== BigInt(MAINNET_CHAIN_ID)) throw new DeploymentError(`Refusing chain ${network.chainId}. Expected Avalanche C-Chain ${MAINNET_CHAIN_ID}.`);
-  const [factoryArtifact, marketplaceArtifact, implementationArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(MARKETPLACE_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH)]);
+  const [factoryArtifact, marketplaceArtifact, implementationArtifact, saleArtifact, legacySaleArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(MARKETPLACE_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH), load(PRIMARY_SALE_ARTIFACT_PATH), load(LEGACY_SALE_ARTIFACT_PATH)]);
   const missingAlbum = missingAlbumSelectors(implementationArtifact.deployedBytecode?.object);
-  const saleProblems = settledSaleProblems(factoryArtifact.bytecode.object);
+  const saleProblems = settledSaleProblems(factoryArtifact.bytecode.object, saleArtifact, legacySaleArtifact);
   const missingRoyaltyLock = [
     ...missingSelectors(implementationArtifact.deployedBytecode?.object, IMPLEMENTATION_ROYALTY_SIGNATURES).map((signature) => `implementation ${signature}`),
     ...missingSelectors(marketplaceArtifact.deployedBytecode?.object, MARKETPLACE_ROYALTY_SIGNATURES).map((signature) => `marketplace ${signature}`),
@@ -221,6 +229,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     deployer: { address: deployer, nonce, pendingNonce, balanceWei: balance.toString(), balanceAvax: formatEther(balance) },
     artifacts: {
       factory: { contract: FACTORY_CONTRACT, path: FACTORY_ARTIFACT_PATH, initCodeHash: keccak256(factoryArtifact.bytecode.object), primarySale: PRIMARY_SALE_CONTRACT },
+      primarySale: { contract: PRIMARY_SALE_CONTRACT, path: PRIMARY_SALE_ARTIFACT_PATH, initCodeHash: keccak256(saleArtifact.bytecode.object), reviewedRuntimeHash: SETTLED_SALE_RUNTIME_CODE_HASH },
       implementation: { path: IMPLEMENTATION_ARTIFACT_PATH, runtimeCodeHash: keccak256(implementationArtifact.deployedBytecode.object), albumCapable: missingAlbum.length === 0 },
       marketplace: { path: MARKETPLACE_ARTIFACT_PATH, initCodeHash: keccak256(marketplaceArtifact.bytecode.object) },
     },
