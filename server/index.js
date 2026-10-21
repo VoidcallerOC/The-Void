@@ -27,6 +27,7 @@ import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { checkGenesisSignerConfig, createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
 import { createGenesisClaimReservationStore } from "./genesis-claim-store.js";
+import { createXAccountLinkService, loadXLinkConfig } from "./x-link.js";
 import { primarySaleStateReaderFromEnv } from "./primary-sale-state.js";
 
 export function createApiServer({ config = loadServerConfig(), mediaConfig = null, db = null, authenticator = null, authService = null, ownershipVerifier = null, blockchainVerifier = null, mediaGateway = null, logger = createStructuredLogger() } = {}) {
@@ -83,7 +84,11 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   const marketplaceHeroStore = createLocalMarketplaceHeroStore({ root: fileURLToPath(new URL("../public/assets/marketplace-heroes", import.meta.url)), db: pool });
   const marketplacePresentation = createMarketplacePresentationService({ db: pool, authenticator: resolvedAuthenticator, heroStore: marketplaceHeroStore });
   const provenanceAnchor = createProvenanceAnchorService({ db: pool, authenticator: resolvedAuthenticator, config: loadProvenanceAnchorConfig(process.env), audit: (event) => repository.appendAuditEvent(event) });
-  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, genesisClaim, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
+  // Optional X account linking (OAuth 2.0 + PKCE). Missing config disables it with a clear 503; it is never fatal.
+  const xLinkConfig = loadXLinkConfig(process.env);
+  if (!xLinkConfig.configured) logger.warn?.("x.link.config_missing", { missing: [...xLinkConfig.missing, ...xLinkConfig.invalid] });
+  const xLink = createXAccountLinkService({ db: pool, authenticator: resolvedAuthenticator, config: xLinkConfig, logger, audit: (event) => repository.appendAuditEvent(event) });
+  const handler = createApiHandler({ service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, marketplacePresentation, contractOwnerVerification, provenanceAnchor, genesisClaim, xLink, rateLimiter, allowedOrigins: config.apiAllowedOrigins, logger });
   const server = createServer(handler);
   return { server, handler, pool, service, authService: resolvedAuthService, mediaGateway: resolvedMediaGateway, studioService, verificationService, verificationNotifier, genesisClaim };
 }

@@ -12,6 +12,7 @@ import { MarketplacePage } from "./components/MarketplacePage.jsx";
 import { ClaimPage } from "./components/ClaimPage.jsx";
 import { VerifyApplyPage, VerifyDashboardPage, VerifyLanding, VerifyReceivedPage, VerifyReviewApplicationPage, VerifyReviewQueuePage } from "./components/VerifyPages.jsx";
 import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
+import { XLinkCallbackPage } from "./components/XLinkCallbackPage.jsx";
 import { NotFoundPage } from "./components/NotFoundPage.jsx";
 import { TokenPage } from "./components/TokenPage.jsx";
 
@@ -90,6 +91,7 @@ export function AppRoutes() {
         <Route path="experience/:experience" element={<ExperiencePage />} />
         <Route path="studio" element={<ArtistStudioPage />} />
         <Route path="studio/profile/:artistId" element={<ArtistProfileEditPage />} />
+        <Route path="x/callback" element={<XLinkCallbackPage />} />
         <Route path="admin/roles" element={<ContractRolesPage />} />
         <Route path="verify" element={<VerifyLanding />} />
         <Route path="verify/apply" element={<VerifyApplyPage />} />
