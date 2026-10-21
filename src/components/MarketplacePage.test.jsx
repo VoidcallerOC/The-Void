@@ -271,7 +271,7 @@ describe("secondary listing cards show the exact listed token's metadata", () =>
     const el = card();
     expect(within(el).getByRole("heading", { name: "Enough" })).toBeTruthy();
     expect(el.textContent).toMatch(/Token #0 · from the .+ edition/);
-    expect(el.querySelector("img").getAttribute("src")).toBe("/assets/track-art/ep1-enough.png");
+    expect(el.querySelector("img").getAttribute("src")).toBe("https://gateway.pinata.cloud/ipfs/QmfCKKX55HdmKw6cFiM1qCFeLhXc3UNrs3rmHfG8CjMbJP/0.gif");
     expect(el.querySelector("img").getAttribute("alt")).toBe("Enough, token #0 artwork");
     expect(el.textContent).toContain("Token #0 · Enough");
     expect(el.textContent).toMatch(/Seller · 0x6a86…d2fb/i);
@@ -279,12 +279,25 @@ describe("secondary listing cards show the exact listed token's metadata", () =>
     expect(within(el).getByRole("link", { name: "View edition" }).getAttribute("href")).toBe("/edition/voidcaller-chapter-i");
   });
 
+  it("if the token's IPFS image fails, it falls back to that token's local art, then the edition art", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(0)]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    const img = () => card().querySelector("img");
+    expect(img().getAttribute("src")).toBe("https://gateway.pinata.cloud/ipfs/QmfCKKX55HdmKw6cFiM1qCFeLhXc3UNrs3rmHfG8CjMbJP/0.gif");
+    fireEvent.error(img());
+    expect(img().getAttribute("src")).toBe("/assets/track-art/ep1-enough.png");
+    expect(img().getAttribute("alt")).toBe("Enough, token #0 artwork");
+    fireEvent.error(img());
+    expect(img().getAttribute("alt")).toMatch(/edition artwork$/);
+  });
+
   it("a different token id resolves to its own, different metadata", async () => {
     fetchListings.mockResolvedValueOnce([genesis(2)]);
     renderMarketplace();
     await waitFor(() => expect(card()).toBeTruthy());
     expect(within(card()).getByRole("heading", { name: "Don't Look Down" })).toBeTruthy();
-    expect(card().querySelector("img").getAttribute("src")).toBe("/assets/track-art/ep1-dont-look-down.png");
+    expect(card().querySelector("img").getAttribute("src")).toBe("https://gateway.pinata.cloud/ipfs/QmeR8MoKr3PYDUVvVy1PzhXzBNPFtNZjoioGMBapYqBePs");
     expect(card().textContent).not.toContain("Enough");
   });
 

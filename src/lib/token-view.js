@@ -71,10 +71,14 @@ export function playableTrackFor(token, { artwork = "", protectedExperience = nu
  */
 export function listedTokenView(catalog, edition, release, tokenId) {
   const view = tokenView(catalog, { edition, release, tokenId });
-  if (!view.token) return { tokenId: String(tokenId), name: null, artwork: null };
+  if (!view.token) return { tokenId: String(tokenId), name: null, artwork: null, artworkFallback: null };
   const metadata = view.token.metadata && typeof view.token.metadata === "object" ? view.token.metadata : {};
   // Only token-level fields: never the edition/release title or art standing in for the token's own.
   const name = metadata.name || view.token.name || null;
-  const artwork = view.token.media?.art || (metadata.image ? ipfsToHttp(metadata.image) : null);
-  return { tokenId: String(tokenId), name, artwork };
+  // The token's own metadata image (uri(id) -> image, e.g. the Genesis GIFs) first; the site's copy of that
+  // token's art only if the IPFS image is absent or fails to load.
+  const metadataImage = metadata.image ? ipfsToHttp(metadata.image) : null;
+  const localArt = view.token.media?.art || null;
+  const artwork = metadataImage || localArt;
+  return { tokenId: String(tokenId), name, artwork, artworkFallback: localArt && localArt !== artwork ? localArt : null };
 }
