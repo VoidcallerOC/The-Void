@@ -25,7 +25,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isLegacyMarketplace } from "../../config/legacy-collection-marketplace.js";
-import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, sellerFloorTerms } from "../lib/secondary-listing.js";
+import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, sellerFloorTerms, genesisTokenChoices, readOwnedTokenIds } from "../lib/secondary-listing.js";
 import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
 const field = { width: "100%", boxSizing: "border-box", background: "var(--vc-void)", border: "1px solid var(--vc-ash)", color: "var(--vc-bone)", fontFamily: "var(--font-mono)", fontSize: 12, padding: "11px 12px" };
@@ -67,6 +67,8 @@ function statusCopy(stage, message) {
     listed: "The authoritative marketplace index confirms this edition is listed.",
     "already-listed": "An active listing already exists for this exact contract and token. A second listing will not be created.",
     "not-owner": "This wallet no longer owns the selected edition on chain. Refresh the page after verifying your wallet.",
+    "no-token": "This wallet holds none of this collection's listable tokens on chain. New listings are unavailable.",
+    "select-token": "This wallet holds more than one of these tokens. Choose the token to list.",
     unsupported: `Only a release-per-contract edition on ${RELEASE_DEPLOYMENT.networkName} registered by The-Void’s canonical factory can be listed here. This edition is unsupported; no transaction can be submitted.`,
     unavailable: "Marketplace or ownership verification is unavailable. No listing action was taken.",
     "wrong-network": releaseNetworkRequiredMessage(RELEASE_DEPLOYMENT, { action: "list this release" }),
@@ -91,7 +93,15 @@ export function ListingPanel({ edition }) {
   const marketplaceConfigured = infrastructure === MARKETPLACE_STATE.LIVE
     && Number(marketplace.chainId) === canonicalChainId
     && sameAddress(marketplace.address, canonicalMarketplace);
-  const tokenId = String(edition?.tokenIds?.[0] ?? "");
+  // A multi-token catalog entry (Genesis ids 0-3) lists one exact token the wallet holds, never a representative id.
+  const tokenChoices = useMemo(() => genesisTokenChoices(edition), [edition]);
+  const [ownedTokens, setOwnedTokens] = useState({ key: "", ids: null, message: "" });
+  const [selectedTokenId, setSelectedTokenId] = useState("");
+  const ownershipKey = `${String(edition?.contractAddress || "").toLowerCase()}:${String(wallet.account || "").toLowerCase()}:${Number(wallet.chainId || 0)}`;
+  const ownedIds = tokenChoices && ownedTokens.key === ownershipKey ? ownedTokens.ids : null;
+  const tokenId = tokenChoices
+    ? (ownedIds?.includes(selectedTokenId) ? selectedTokenId : ownedIds?.length === 1 ? ownedIds[0] : "")
+    : String(edition?.tokenIds?.[0] ?? "");
   const contract = String(edition?.contractAddress || "");
   const provider = wallet.provider;
   const assetKey = `${Number(edition?.chainId)}:${contract.toLowerCase()}:${tokenId}`;
@@ -115,7 +125,15 @@ export function ListingPanel({ edition }) {
           ? "disconnected"
           : wrongNetwork
             ? "wrong-network"
-            : chainState?.stage || "checking";
+            : tokenChoices && ownedTokens.key === ownershipKey && ownedTokens.message
+              ? "unavailable"
+              : tokenChoices && !ownedIds
+                ? "checking"
+                : tokenChoices && ownedIds.length === 0
+                  ? "no-token"
+                  : tokenChoices && !tokenId
+                    ? "select-token"
+                    : chainState?.stage || "checking";
   const context = chainState?.context || null;
   const currentListing = chainState?.listing || (pending?.assetKey === assetKey ? pending.listing : null);
   const priceWei = parseAvaxToWei(priceAvax);
@@ -130,10 +148,19 @@ export function ListingPanel({ edition }) {
   const inputDisabled = stage !== "ready" || busy || !wallet.authenticated;
   const reviewing = reviewKey === verificationKey;
   const expiringSeconds = expiresAt ? Math.floor(new Date(expiresAt).getTime() / 1000) : 0;
-  const message = chainState?.message || statusCopy(stage);
+  const message = (stage === "unavailable" && tokenChoices && ownedTokens.message) || chainState?.message || statusCopy(stage);
 
   useEffect(() => {
-    if (!candidate || !marketplaceConfigured || !wallet.connected || !wallet.account || wrongNetwork) return undefined;
+    if (!tokenChoices || !candidate || !marketplaceConfigured || !wallet.connected || !wallet.account || wrongNetwork) return undefined;
+    let active = true;
+    readOwnedTokenIds({ provider, tokenContractAddress: contract, owner: wallet.account, tokenIds: tokenChoices })
+      .then((ids) => { if (active) setOwnedTokens({ key: ownershipKey, ids, message: "" }); })
+      .catch((error) => { if (active) setOwnedTokens({ key: ownershipKey, ids: null, message: error?.message || statusCopy("unavailable") }); });
+    return () => { active = false; };
+  }, [tokenChoices, candidate, marketplaceConfigured, wallet.connected, wallet.account, wrongNetwork, provider, contract, ownershipKey, retry]);
+
+  useEffect(() => {
+    if (!candidate || !marketplaceConfigured || !wallet.connected || !wallet.account || wrongNetwork || !tokenId) return undefined;
     const controller = new AbortController();
     let active = true;
     Promise.resolve().then(async () => {
@@ -492,6 +519,17 @@ export function ListingPanel({ edition }) {
       <h2 id="secondary-listing-title" style={{ fontFamily: "var(--font-display)", fontSize: "clamp(22px, 3vw, 28px)", textTransform: "uppercase", lineHeight: 1, margin: "12px 0" }}>List for sale</h2>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 640, lineHeight: 1.65 }}>{ownerIntro} {ownershipDetail}</p>
       <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".08em", overflowWrap: "anywhere" }}>{identity}</p>
+      {tokenChoices && ownedIds?.length > 0 && (
+        <fieldset style={{ border: "1px solid var(--vc-ash)", padding: "12px 14px", margin: "14px 0" }} disabled={busy}>
+          <legend style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)", padding: "0 6px" }}>Token to list (held by this wallet)</legend>
+          {ownedIds.map((id) => (
+            <label key={id} style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 18, fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              <input type="radio" name="listing-token" value={id} checked={tokenId === id} onChange={() => setSelectedTokenId(id)} />
+              Token #{id}
+            </label>
+          ))}
+        </fieldset>
+      )}
       {(!candidate || !marketplaceConfigured) && <Btn kind="ash" disabled>LIST FOR SALE</Btn>}
       <details style={{ maxWidth: 760, margin: "12px 0", border: "1px solid var(--vc-ash)", padding: "10px 12px", background: "var(--vc-abyss)" }}>
         <summary style={{ cursor: "pointer", color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em" }}>VERIFIED NETWORK AND CONTRACT TARGETS</summary>
@@ -511,8 +549,8 @@ export function ListingPanel({ edition }) {
       {stage === "wrong-network" && <div style={{ margin: "18px 0" }}><p role="status" style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{message}</p>{releaseNetworkSwitchAllowed(RELEASE_DEPLOYMENT) && <Btn onClick={switchToReleaseNetwork}>{releaseNetworkSwitchLabel(RELEASE_DEPLOYMENT)}</Btn>}</div>}
       {wallet.connected && candidate && marketplaceConfigured && !wallet.authenticated && stage !== "wrong-network" && !wallet.needsNetworkSwitch && <div style={{ margin: "14px 0" }}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>A wallet signature is required to register a listing with the marketplace index. No signature is requested for ownership checks.</p><Btn onClick={authenticate}>AUTHENTICATE WALLET</Btn></div>}
 
-      {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (
-        <p role="status" aria-live="polite" style={{ color: ["not-owner", "unsupported", "unavailable", "error", "reconciliation-required"].includes(stage) ? "var(--vc-crimson)" : "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, overflowWrap: "anywhere" }}>
+      {candidate && marketplaceConfigured && ["checking", "ready", "listed", "already-listed", "not-owner", "no-token", "select-token", "unsupported", "unavailable", "error", "reconciliation-required", "approval", "listing", "cancelling"].includes(stage) && (
+        <p role="status" aria-live="polite" style={{ color: ["not-owner", "no-token", "unsupported", "unavailable", "error", "reconciliation-required"].includes(stage) ? "var(--vc-crimson)" : "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.65, overflowWrap: "anywhere" }}>
           {pending?.assetKey === assetKey ? pending.message || message : message}
         </p>
       )}
