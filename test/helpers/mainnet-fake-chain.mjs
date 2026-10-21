@@ -28,9 +28,13 @@ export const MARKETPLACE_ABI = [
 ];
 const IMPLEMENTATION_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
 
+// Factory creation code carrying the settled sale's PlatformPaid topic (PUSH32), as the real
+// VoidReleaseFactoryV2RoyaltySettled creation code does.
+export const FACTORY_INIT = `0x60016001557f${id("PlatformPaid(address,uint256)").slice(2)}`;
+
 /** Artifact loader with the real constructor shapes and distinct creation code per contract. */
 export const artifacts = async (path) => {
-  if (path.includes("Factory")) return { abi: FACTORY_ABI, bytecode: { object: "0x6001600155" }, deployedBytecode: { object: "0x6001" } };
+  if (path.includes("Factory")) return { abi: FACTORY_ABI, bytecode: { object: FACTORY_INIT }, deployedBytecode: { object: "0x6001" } };
   if (path.includes("Marketplace")) return { abi: MARKETPLACE_ABI, bytecode: { object: "0x6002600255" }, deployedBytecode: { object: marketplaceRuntime } };
   return { abi: [], bytecode: { object: "0x6003" }, deployedBytecode: { object: albumRuntime } };
 };

@@ -3,17 +3,18 @@ import { resolve } from "node:path";
 import { AbiCoder, getCreateAddress, keccak256 } from "ethers";
 import { describe, expect, it } from "vitest";
 import { ApprovedPlanError, validateApprovedPlan } from "../scripts/approved-plan.mjs";
-import { FACTORY_ARTIFACT_PATH, IMPLEMENTATION_ARTIFACT_PATH, MARKETPLACE_ARTIFACT_PATH } from "../scripts/deploy-release-per-contract-mainnet.mjs";
 
 // Every committed approved plan must be bound, for C-Chain and the defined deployer, and its
 // transactions must be exactly the contracts compiled from this commit with the plan's constructor
-// arguments. CI builds the contracts (forge test) before this runs; without them the test fails in CI.
+// arguments. Each plan is checked against the artifacts it names: the committed release plan is the
+// executed VoidReleaseFactoryV2Royalty deployment, while the script now plans the settled factory.
+// CI builds the contracts (forge test) before this runs; without them the test fails in CI.
 const ROOT = resolve(import.meta.dirname, "..");
 const DIR = resolve(ROOT, "deploy/mainnet/approved-plans");
 const files = readdirSync(DIR).filter((name) => name.endsWith(".json"));
 const load = (name) => JSON.parse(readFileSync(resolve(DIR, name), "utf8"));
 const artifact = (path) => JSON.parse(readFileSync(resolve(ROOT, path), "utf8"));
-const built = existsSync(resolve(ROOT, FACTORY_ARTIFACT_PATH));
+const built = existsSync(resolve(ROOT, load("release-per-contract-mainnet.json").plan.artifacts.factory.path));
 
 describe("approved mainnet plans", () => {
   it("has the release-infrastructure plan, and only known kinds", () => {
@@ -29,7 +30,7 @@ describe("approved mainnet plans", () => {
 
   it.runIf(built || process.env.CI)("release-per-contract-mainnet.json: every transaction is the contract compiled from this commit", () => {
     const { plan } = load("release-per-contract-mainnet.json");
-    const [factory, marketplace, implementation] = [FACTORY_ARTIFACT_PATH, MARKETPLACE_ARTIFACT_PATH, IMPLEMENTATION_ARTIFACT_PATH].map(artifact);
+    const [factory, marketplace, implementation] = [plan.artifacts.factory.path, plan.artifacts.marketplace.path, plan.artifacts.implementation.path].map(artifact);
     const coder = AbiCoder.defaultAbiCoder();
     const [factoryTx, marketplaceTx] = plan.transactions;
     const factoryData = `${factory.bytecode.object}${coder.encode(["address"], [factoryTx.constructor.platformRecipient]).slice(2)}`.toLowerCase();

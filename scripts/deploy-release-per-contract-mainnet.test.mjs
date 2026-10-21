@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AbiCoder, getAddress, getCreateAddress, id, keccak256 } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
-import { FEE_RECIPIENT, MAINNET_CHAIN_ID, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, run, validateDeploymentEnv, verifyReleaseStep } from "./deploy-release-per-contract-mainnet.mjs";
-import { ARTIST, DEPLOYER, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
+import { FACTORY_ARTIFACT_PATH, FACTORY_CONTRACT, FEE_RECIPIENT, MAINNET_CHAIN_ID, MARKETPLACE_ARTIFACT_PATH, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, run, settledSaleProblems, validateDeploymentEnv, verifyReleaseStep } from "./deploy-release-per-contract-mainnet.mjs";
+import { ARTIST, DEPLOYER, FACTORY_INIT, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
+import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 
 const KEY = `0x${"22".repeat(32)}`;
 const BASE = { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER };
@@ -69,10 +70,10 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     const plan = await readyPlan();
     const factory = getCreateAddress({ from: DEPLOYER, nonce: 0 });
     const coder = AbiCoder.defaultAbiCoder();
-    const factoryData = `0x6001600155${coder.encode(["address"], [RECIPIENT]).slice(2)}`;
+    const factoryData = `${FACTORY_INIT}${coder.encode(["address"], [RECIPIENT]).slice(2)}`;
     const marketplaceData = `0x6002600255${coder.encode(["address", "uint256", "address"], [RECIPIENT, 250, factory]).slice(2)}`;
     expect(plan.signingRequests).toEqual([
-      { step: 1, contract: "VoidReleaseFactoryV2Royalty", chainId: 43114, from: DEPLOYER, to: null, nonce: 0, value: "0", data: factoryData.toLowerCase(), dataHash: keccak256(factoryData), gasLimit: "1200000", predictedAddress: factory },
+      { step: 1, contract: "VoidReleaseFactoryV2RoyaltySettled", chainId: 43114, from: DEPLOYER, to: null, nonce: 0, value: "0", data: factoryData.toLowerCase(), dataHash: keccak256(factoryData), gasLimit: "1200000", predictedAddress: factory },
       { step: 2, contract: "ReleaseMarketplaceV4", chainId: 43114, from: DEPLOYER, to: null, nonce: 1, value: "0", data: marketplaceData.toLowerCase(), dataHash: keccak256(marketplaceData), gasLimit: "1200000", predictedAddress: getCreateAddress({ from: DEPLOYER, nonce: 1 }) },
     ]);
     expect(plan.transactions[0].predictedImplementation).toBe(getCreateAddress({ from: factory, nonce: 1 }));
@@ -103,6 +104,44 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
     expect(plan.checks.find((item) => item.check === "artifacts enforce the 2.5% artist royalty on chain")).toMatchObject({ status: "FAIL" });
     expect(plan.readyToBroadcast).toBe(false);
   });
+
+  it("plans the corrected factory, whose releases pay the platform fee during the purchase", async () => {
+    // Nonce 0 of the defined deployer created the deployed factory 0x262B…; the next factory comes from a later nonce.
+    const plan = await buildDryRunPlan(validateDeploymentEnv({ ...READY, EXPECTED_DEPLOYER_NONCE: "2" }), fakeChain({ nonce: 2 }), { load: artifacts });
+    expect(getCreateAddress({ from: DEPLOYER, nonce: 0 })).toBe(getAddress(mainnetManifest.factoryAddress));
+    expect(plan.readyToBroadcast).toBe(true);
+    expect(FACTORY_CONTRACT).toBe("VoidReleaseFactoryV2RoyaltySettled");
+    expect(plan.artifacts.factory).toMatchObject({ contract: FACTORY_CONTRACT, path: FACTORY_ARTIFACT_PATH, primarySale: "VoidPrimarySaleSettled", initCodeHash: keccak256(FACTORY_INIT) });
+    expect(plan.transactions[0]).toMatchObject({ contract: FACTORY_CONTRACT, constructor: { platformRecipient: RECIPIENT } });
+    expect(plan.transactions[0].primarySale).toMatch(/^VoidPrimarySaleSettled /);
+    // The marketplace is bound to the factory this plan creates, never to the deployed one.
+    expect(plan.transactions[1].constructor.releaseFactory).toBe(plan.transactions[0].predictedAddress);
+    expect(plan.transactions[1].constructor.releaseFactory).not.toBe(getAddress(mainnetManifest.factoryAddress));
+    expect(plan.checks.find((item) => item.check === "factory gives every release the settled primary sale")).toMatchObject({ status: "PASS", value: [] });
+  });
+
+  it("refuses a factory artifact that gives releases the legacy credit-only sale", async () => {
+    const legacyTopic = id("PlatformFeeUpdated(uint256,uint256)").slice(2);
+    for (const [object, expected] of [
+      ["0x6001600155", ["no PlatformPaid(address,uint256)"]],
+      [`0x60016001557f${legacyTopic}`, ["no PlatformPaid(address,uint256)", "legacy sale PlatformFeeUpdated(uint256,uint256)"]],
+    ]) {
+      const legacy = async (path) => (path.includes("Factory") ? { ...(await artifacts(path)), bytecode: { object } } : artifacts(path));
+      const plan = await buildDryRunPlan(validateDeploymentEnv(READY), fakeChain(), { load: legacy });
+      expect(plan.checks.find((item) => item.check === "factory gives every release the settled primary sale")).toMatchObject({ status: "FAIL", value: expected });
+      expect(plan.readyToBroadcast).toBe(false);
+    }
+  });
+
+  it.skipIf(!existsSync(new URL("../out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json", import.meta.url)))("tells the compiled corrected factory from the deployed one", () => {
+    const compiled = (name) => JSON.parse(readFileSync(new URL(`../out/${name}.sol/${name}.json`, import.meta.url), "utf8"));
+    const settled = compiled("VoidReleaseFactoryV2RoyaltySettled");
+    expect(FACTORY_ARTIFACT_PATH).toBe("out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json");
+    expect(settledSaleProblems(settled.bytecode.object)).toEqual([]);
+    expect(settledSaleProblems(compiled("VoidReleaseFactoryV2Royalty").bytecode.object)).toEqual(["no PlatformPaid(address,uint256)", "legacy sale PlatformFeeUpdated(uint256,uint256)"]);
+    // Same constructor as the deployed factory: the one platform recipient.
+    expect(settled.abi.find((item) => item.type === "constructor").inputs.map((input) => input.type)).toEqual(["address"]);
+  });
 });
 
 describe("release-per-contract mainnet: verifying owner-signed transactions from chain", () => {
@@ -124,8 +163,11 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
     const second = await verifyReleaseStep(chain, plan, 2, hash, { load: artifacts });
     expect(second).toMatchObject({ address: marketplace.predictedAddress, factoryAddress: factory.predictedAddress, feeRecipient: RECIPIENT, feeBps: 250 });
     const record = buildDeploymentRecord(plan, [first, second], { sourceCommit: "a".repeat(40), planDigest: "b".repeat(64) });
-    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, signedBy: { deployer: DEPLOYER }, factory: { address: factory.predictedAddress, contract: "VoidReleaseFactoryV2Royalty", deploymentTransaction: first.transaction }, marketplace: { address: marketplace.predictedAddress, contract: "ReleaseMarketplaceV4", factoryAddress: factory.predictedAddress } });
+    expect(record).toMatchObject({ network: "mainnet", chainId: 43114, signedBy: { deployer: DEPLOYER }, factory: { address: factory.predictedAddress, contract: "VoidReleaseFactoryV2RoyaltySettled", artifact: "out/VoidReleaseFactoryV2RoyaltySettled.sol/VoidReleaseFactoryV2RoyaltySettled.json", primarySale: "VoidPrimarySaleSettled", deploymentTransaction: first.transaction }, marketplace: { address: marketplace.predictedAddress, contract: "ReleaseMarketplaceV4", artifact: MARKETPLACE_ARTIFACT_PATH, factoryAddress: factory.predictedAddress } });
     expect(deploymentRecordPath(factory.predictedAddress)).toMatch(/^deployments\/release-per-contract-mainnet-0x/);
+    // Every field the manifest update needs for the new active pair is in the record.
+    expect(record.factory).toMatchObject({ address: expect.any(String), deploymentBlock: expect.any(Number), implementationAddress: factory.predictedImplementation, platformRecipient: RECIPIENT });
+    expect(record.marketplace).toMatchObject({ address: expect.any(String), deploymentBlock: expect.any(Number), factoryAddress: record.factory.address, feeRecipient: RECIPIENT, feeBps: 250 });
   });
 
   it.each([

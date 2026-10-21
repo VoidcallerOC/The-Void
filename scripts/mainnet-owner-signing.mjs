@@ -38,7 +38,7 @@ const fail = (message) => { throw new OwnerSigningError(message); };
 /** The two separately planned and separately signed mainnet operations. */
 export const KINDS = Object.freeze({
   "release-per-contract-mainnet": {
-    title: "Release infrastructure: VoidReleaseFactoryV2Royalty, then ReleaseMarketplaceV4",
+    title: "Release infrastructure: VoidReleaseFactoryV2RoyaltySettled, then ReleaseMarketplaceV4",
     needsDeviceConfirmation: true,
     async replan(inputs, { rpcUrl, provider }) {
       return buildDryRunPlan(validateDeploymentEnv({ ...inputs, AVALANCHE_MAINNET_RPC_URL: rpcUrl }), provider);
