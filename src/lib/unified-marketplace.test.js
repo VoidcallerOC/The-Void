@@ -134,3 +134,15 @@ describe("indexer", () => {
     expect(decodeMarketplaceLog(log, { chainId: 43114, expectedAddress: UNIFIED })).toMatchObject({ eventType: "SaleSettled", assetClass: "GENESIS", royaltyReceiver: CREATOR.toLowerCase(), sellerProceedsWei: "950000000000000000", listingId: "1" });
   });
 });
+
+describe("genesisTokenChoices", () => {
+  it("offers each Genesis id 0-3 only for the multi-token Genesis entry on the active chain, never for factory editions", async () => {
+    const { genesisTokenChoices } = await import("./secondary-listing.js");
+    expect(genesisTokenChoices({ chainId: 43114, contractAddress: GENESIS, tokenIds: [0, 1, 2, 3] }, active)).toEqual(["0", "1", "2", "3"]);
+    expect(genesisTokenChoices({ chainId: 43114, contractAddress: GENESIS, tokenIds: [0, 1, 2, 3, 4] }, active)).toBeNull();
+    expect(genesisTokenChoices({ chainId: 43114, contractAddress: GENESIS, tokenIds: [0] }, active)).toBeNull();
+    expect(genesisTokenChoices({ chainId: 43113, contractAddress: GENESIS, tokenIds: [0, 1] }, active)).toBeNull();
+    expect(genesisTokenChoices({ chainId: 43114, contractAddress: "0x0000000000000000000000000000000000000123", tokenIds: ["1", "2"] }, active)).toBeNull();
+    expect(genesisTokenChoices({ chainId: 43114, contractAddress: GENESIS, tokenIds: [0, 1] }, { ...active, deployed: false })).toBeNull();
+  });
+});

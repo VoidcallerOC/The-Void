@@ -53,6 +53,29 @@ export function isLegacyCollectionCandidate(edition, config = LEGACY_COLLECTION_
   return Boolean(legacyCollectionFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId: edition?.tokenIds?.[0] }, config));
 }
 
+/**
+ * The Genesis catalog entry covers several token ids (0-3) of one contract. Returns those ids (strings) when the
+ * unified marketplace is active and every id is in the recorded Genesis range; null for any other edition, which keeps
+ * listing its single tokenIds[0]. This only says which ids may be offered; ownership is read per exact id.
+ */
+export function genesisTokenChoices(edition, config = UNIFIED_MARKETPLACE) {
+  const ids = Array.isArray(edition?.tokenIds) ? edition.tokenIds.map((id) => String(id)) : [];
+  if (ids.length < 2 || !unifiedMarketplaceActive(config) || Number(edition?.chainId) !== Number(config.chainId)) return null;
+  return ids.every((id) => isGenesisAsset(edition?.contractAddress, id, config)) ? Object.freeze([...new Set(ids)]) : null;
+}
+
+/** The ids among `tokenIds` that `owner` holds right now, read with balanceOf on each exact id. Throws on any failed read. */
+export async function readOwnedTokenIds({ provider, tokenContractAddress, owner, tokenIds }) {
+  if (!provider?.request) fail("Connect a browser wallet to read token ownership.", "WALLET_REQUIRED");
+  if (!validContractAddress(tokenContractAddress) || !validContractAddress(owner)) fail("The token contract or wallet address is invalid.", "UNSUPPORTED_RELEASE");
+  try {
+    const balances = await Promise.all(tokenIds.map((id) => read(provider, getAddress(tokenContractAddress), LEGACY_TOKEN_VIEW, "balanceOf", [getAddress(owner), String(id)]).then(([value]) => BigInt(value))));
+    return tokenIds.filter((_, index) => balances[index] > 0n);
+  } catch {
+    fail("On-chain ownership could not be read. Eligibility was not assumed.", "OWNERSHIP_READ_FAILED");
+  }
+}
+
 export function isReleasePerContractCandidate(edition) {
   if (isLegacyCollectionCandidate(edition)) return true;
   if (unifiedMarketplaceActive() && Number(edition?.chainId) === Number(UNIFIED_MARKETPLACE.chainId) && isGenesisAsset(edition?.contractAddress, edition?.tokenIds?.[0])) return true;
