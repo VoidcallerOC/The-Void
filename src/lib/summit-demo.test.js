@@ -128,7 +128,7 @@ describe("summit demo boundary", () => {
     expect(result.experiences).toEqual([]);
   });
 
-  it("withdraws the original mainnet Forgive & Forget from discovery and leaves its replacement draft alone", () => {
+  it("withdraws the original mainnet Forgive & Forget from discovery and leaves other Forgive & Forget records alone", () => {
     const original = "release-83611741-c9ee-4487-a438-b6fa844762e6";
     for (const id of [original, "edition-6e35101c-4987-4695-ac96-d83061ef2673", "edition-11e2e1a2-5a57-47e3-ac3d-e44d409af3a7", "experience-edition-6e35101c-4987-4695-ac96-d83061ef2673-full-track"]) {
       expect(isWithdrawnPublicListing({ id })).toBe(true);
@@ -136,7 +136,7 @@ describe("summit demo boundary", () => {
     // Any row carrying the release or edition id leaves discovery too (API rows use snake_case).
     expect(isWithdrawnPublicListing({ id: "x", release_id: original })).toBe(true);
     expect(isWithdrawnPublicListing({ id: "x", editionId: "edition-6e35101c-4987-4695-ac96-d83061ef2673" })).toBe(true);
-    // The replacement draft and Genesis are not withdrawn.
+    // The unrelated forgive-forget-2 draft and Genesis are not withdrawn.
     expect(isWithdrawnPublicListing({ id: "release-273f5476-0cdb-45d3-83d3-5908eb42bc6c" })).toBe(false);
     expect(isWithdrawnPublicListing({ id: "voidcaller-legacy-genesis" })).toBe(false);
     expect(isWithdrawnPublicListing({ id: "voidcaller-legacy-edition", releaseId: "voidcaller-legacy-genesis" })).toBe(false);

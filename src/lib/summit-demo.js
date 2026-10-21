@@ -61,11 +61,11 @@ const TEST_PROFILE_LABELS = new Set(["wer", "sdfg", "qwe", "asdf"]);
 //
 // The original mainnet Forgive & Forget (release-83611741 on clone 0x9aa6…d103 from factory 0x262B…,
 // its two editions and four experiences) is retired from discovery because its primary sale credits the
-// platform fee instead of paying it; a release from VoidReleaseFactoryV2RoyaltySettled replaces it. Its
+// platform fee instead of paying it; new releases come from VoidReleaseFactoryV2RoyaltySettled. Its
 // only sale (one token, 0.25 AVAX) is sold out and ended on chain. It is withdrawn here instead of
 // ARCHIVED because ARCHIVED would (a) stop the protected-media gateway, which requires the edition and
 // experience to stay PUBLISHED, from serving the existing holder, and (b) make Studio hide every
-// unpublished release with the same title, which is the replacement. Read-side only: the contract,
+// unpublished release with the same title, including one the artist creates next. Read-side only: the contract,
 // token, holder, sale, purchase record, media and volume history are untouched.
 const WITHDRAWN_PUBLIC_LISTING_IDS = new Set([
   "release-83611741-c9ee-4487-a438-b6fa844762e6",

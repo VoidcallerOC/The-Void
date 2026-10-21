@@ -113,15 +113,16 @@ describe("Studio release picker", () => {
 describe("retiring the original mainnet Forgive & Forget", () => {
   const artists = [{ id: "voidcaller", name: "Voidcaller" }];
   const original = { id: "release-83611741-c9ee-4487-a438-b6fa844762e6", artistId: "voidcaller", title: "Forgive & Forget", status: "published" };
-  const replacement = { id: "release-273f5476-0cdb-45d3-83d3-5908eb42bc6c", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" };
+  // Any unpublished release with the same title, such as a new one the artist creates in Studio.
+  const sameTitleDraft = { id: "release-new-same-title", artistId: "voidcaller", title: "Forgive & Forget", status: "draft" };
 
-  it("offers the replacement draft once the published original is withdrawn", () => {
-    const choices = studioReleaseChoices({ releases: [original, replacement], artists, editions: [{ id: "edition-6e35101c-4987-4695-ac96-d83061ef2673", releaseId: original.id }] });
-    expect(choices.map(({ release }) => release.id)).toEqual([replacement.id]);
+  it("still offers an unpublished same-title release once the published original is withdrawn", () => {
+    const choices = studioReleaseChoices({ releases: [original, sameTitleDraft], artists, editions: [{ id: "edition-6e35101c-4987-4695-ac96-d83061ef2673", releaseId: original.id }] });
+    expect(choices.map(({ release }) => release.id)).toEqual([sameTitleDraft.id]);
   });
 
-  it("would hide the replacement draft if the original were ARCHIVED instead (why it is withdrawn, not archived)", () => {
-    const choices = studioReleaseChoices({ releases: [{ ...original, id: "some-archived-original", status: "archived" }, replacement], artists, editions: [] });
+  it("would hide an unpublished same-title release if the original were ARCHIVED instead (why it is withdrawn, not archived)", () => {
+    const choices = studioReleaseChoices({ releases: [{ ...original, id: "some-archived-original", status: "archived" }, sameTitleDraft], artists, editions: [] });
     expect(choices).toEqual([]);
   });
 });
