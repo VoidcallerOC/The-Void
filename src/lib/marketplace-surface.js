@@ -308,6 +308,43 @@ export function featuredMarketplaceRecord(records = []) {
     || null;
 }
 
+const PUBLIC_RELEASE_STATES = new Set(["published", "minted"]);
+const PUBLIC_EDITION_STATES = new Set(["published", "available", "minted"]);
+
+export function hasPublicLifecycle(item) {
+  const releaseStatus = String(item.release?.status || "").toLowerCase();
+  const editionStatus = String(item.edition?.status || "").toLowerCase();
+  return PUBLIC_RELEASE_STATES.has(releaseStatus) && PUBLIC_EDITION_STATES.has(editionStatus);
+}
+
+export function editionOwnedByWallet(item, wallet) {
+  const chainKey = item.chain?.key;
+  const ownedTokens = chainKey ? wallet?.owned?.[chainKey] : null;
+  return Boolean(ownedTokens?.has)
+    && (item.edition.tokenIds || []).some((tokenId) => ownedTokens.has(String(tokenId)) || ownedTokens.has(tokenId));
+}
+
+/**
+ * Public official editions whose primary sale is genuinely open (same rule the
+ * edition page uses), grouped once each by the collection that lists their release.
+ * Releases no collection lists fall into a trailing group with `collection: null`.
+ */
+export function collectableEditionGroups(catalog) {
+  const items = releaseScopedFirst(flattenMarketplaceEditions([catalog])
+    .filter(hasPublicLifecycle)
+    .filter((item) => editionIsCollectable(item.edition, item.primary)));
+  const groups = [];
+  const placed = new Set();
+  for (const collection of catalog?.collections || []) {
+    const members = items.filter((item) => !placed.has(item.edition.id) && (collection.releaseIds || []).includes(item.release.id));
+    members.forEach((item) => placed.add(item.edition.id));
+    if (members.length) groups.push({ collection, items: members });
+  }
+  const rest = items.filter((item) => !placed.has(item.edition.id));
+  if (rest.length) groups.push({ collection: null, items: rest });
+  return groups;
+}
+
 export function collectableFirst(items = []) {
   return [...items].sort((a, b) => Number((b.primary || b.editions?.[0]?.primary)?.availability === "available") - Number((a.primary || a.editions?.[0]?.primary)?.availability === "available"));
 }

@@ -7,18 +7,19 @@ import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
+import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
 import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
-import { flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionSupplyLabel, editionTypeLabel, primaryCollectForEdition, releaseScopedFirst, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { collectableEditionGroups, editionOwnedByWallet, flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionSupplyLabel, editionTypeLabel, primaryCollectForEdition, releaseScopedFirst, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { CollectionMarketplaceCallout } from "./MarketplaceRails.jsx";
 import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
 import { PurchasePanel } from "./PurchasePanel.jsx";
 import { ListingPanel } from "./ListingPanel.jsx";
-import { ArtistAvatar, ArtistCard, EditionCard } from "./MarketplaceCards.jsx";
+import { ArtistAvatar, ArtistCard, EditionCard, EmptyRail, SectionHead } from "./MarketplaceCards.jsx";
 import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chrome.js";
 import { WalletButton } from "./WalletButton.jsx";
 import { NotFoundPage } from "./NotFoundPage.jsx";
@@ -68,12 +69,14 @@ export function DiscoverPage() {
       ? flattenMarketplaceEditions([catalog]).filter((item) => !ids.length || ids.includes(item.edition.id))
       : records.filter((record) => !ids.length || ids.includes(record.release.id));
   const secondary = resolveSecondaryStatus();
+  const wallet = useWallet();
+  const collectGroups = useMemo(() => collectableEditionGroups(collapsePublicCatalog(catalog)), [catalog]);
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Discovery" title="Currently featuring Voidcaller">
-        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The catalog currently features Voidcaller. What is on the shelf is what exists.</p>
+        <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600 }}>The catalog currently features Voidcaller.</p>
       </PlatformHeader>
-      <div style={{ margin: "0 0 28px" }}><Link to="/marketplace" style={ghostBtn}>Enter marketplace</Link></div>
+      <div style={{ margin: "0 0 28px", display: "flex", gap: 10, flexWrap: "wrap" }}><Link to="/collection" style={ghostBtn}>Browse collections</Link><Link to="/marketplace" style={ghostBtn}>Secondary marketplace</Link></div>
       <nav aria-label="Discovery categories" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 28 }}>
         {DISCOVERY_CATEGORIES.map((item) => (
           <button key={item} onClick={() => setCategory(item)} style={{ ...ghostBtn, background: category === item ? "var(--vc-crimson)" : "transparent", borderColor: category === item ? "var(--vc-crimson)" : "var(--vc-ash)", color: category === item ? "#fff" : "var(--vc-bone)" }}>{item.replace("-", " ")}</button>
@@ -93,6 +96,25 @@ export function DiscoverPage() {
           </Link>
         ))}
       </div>
+      <section aria-labelledby="official-editions-heading" style={{ marginTop: 56 }}>
+        <SectionHead id="official-editions-heading" eyebrow="Collect" title="Official editions available to collect">
+          Each official edition appears once, under its collection, and only while its primary sale is open.
+        </SectionHead>
+        {collectGroups.length > 0 ? collectGroups.map(({ collection, items: groupItems }) => (
+          <div key={collection?.id || "more"} aria-label={collection ? `${collection.name} editions` : "More official editions"} style={{ marginBottom: 32 }}>
+            {collection
+              ? <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "0 0 16px" }}><Link to={`/collection/${collection.id}`} style={{ color: "inherit", textDecoration: "none" }}>{collection.name}</Link></h3>
+              : collectGroups.length > 1 && <Eyebrow>More official editions</Eyebrow>}
+            <div className="vc-market-grid">
+              {groupItems.map((item) => <EditionCard key={item.edition.id} item={item} owned={editionOwnedByWallet(item, wallet)} />)}
+            </div>
+          </div>
+        )) : catalog.publishedLoading ? (
+          <p role="status" className="vc-card-meta">Loading official editions…</p>
+        ) : (
+          <EmptyRail title="Nothing to collect right now">No official edition has an open primary sale. Collections are still open to explore above.</EmptyRail>
+        )}
+      </section>
     </section>
   );
 }
