@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
-import { EditionCard, EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
+import { EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
 import { fetchIndexedListings, fetchMarketplacePresentation, fetchMarketplaceVolume } from "../lib/marketplace-api.js";
 import { marketplaceHeroImage } from "../lib/marketplace-presentation.js";
 import { MarketplaceHeroEditor } from "./MarketplaceHeroEditor.jsx";
@@ -12,33 +12,23 @@ import { contentShell } from "../lib/marketplace-chrome.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import {
   MARKETPLACE_STATE,
+  editionOwnedByWallet,
   flattenMarketplaceEditions,
+  hasPublicLifecycle,
   formatWeiAsAvax,
   listingIsDisplayable,
   listingsForEdition,
   marketplaceSecondaryAvailability,
-  marketplaceCopy,
   resolveInfrastructureStatus,
-  releaseScopedFirst,
   resolveSecondaryStatus,
 } from "../lib/marketplace-surface.js";
 
-const PUBLIC_RELEASE_STATES = new Set(["published", "minted"]);
-const PUBLIC_EDITION_STATES = new Set(["published", "available", "minted"]);
 const EMPTY_LISTINGS = [];
-
-function hasPublicLifecycle(item) {
-  const releaseStatus = String(item.release?.status || "").toLowerCase();
-  const editionStatus = String(item.edition?.status || "").toLowerCase();
-  return PUBLIC_RELEASE_STATES.has(releaseStatus) && PUBLIC_EDITION_STATES.has(editionStatus);
-}
-
-function editionOwnedByWallet(item, wallet) {
-  const chainKey = item.chain?.key;
-  const ownedTokens = chainKey ? wallet.owned?.[chainKey] : null;
-  return Boolean(ownedTokens?.has)
-    && (item.edition.tokenIds || []).some((tokenId) => ownedTokens.has(String(tokenId)) || ownedTokens.has(tokenId));
-}
+const INDEX_NOTE = {
+  [MARKETPLACE_STATE.LIVE]: "Buy from and sell to other holders. A listing appears only when the indexer confirms a real marketplace event.",
+  [MARKETPLACE_STATE.UNAVAILABLE]: "The listing index is unreachable, so no listings are shown or invented.",
+  [MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE]: "Secondary trading is not yet live.",
+};
 
 export function MarketplacePage() {
   const [params] = useSearchParams();
@@ -48,7 +38,6 @@ export function MarketplacePage() {
   const catalog = useMemo(() => collapsePublicCatalog(rawCatalog), [rawCatalog]);
   const wallet = useWallet();
   const infrastructure = resolveInfrastructureStatus();
-  const copy = marketplaceCopy(infrastructure);
   const editions = useMemo(() => flattenMarketplaceEditions([catalog])
     .filter(hasPublicLifecycle)
     .filter((item) => !focusRelease || item.release.id === focusRelease)
@@ -117,49 +106,8 @@ export function MarketplacePage() {
   const listedEditions = useMemo(() => editions
     .map((item) => ({ item, listings: listingsForEdition(liveListings, item.edition) }))
     .filter((entry) => entry.listings.length > 0), [editions, liveListings]);
-  const listedEditionIds = useMemo(() => new Set(listedEditions.map(({ item }) => item.edition.id)), [listedEditions]);
-  const officialEditions = useMemo(
-    () => releaseScopedFirst(editions.filter((item) => item.primary.availability === "available" && !listedEditionIds.has(item.edition.id))),
-    [editions, listedEditionIds],
-  );
   const heroImage = marketplaceHeroImage(presentation);
 
-  const primarySections = (
-    <>
-    <section aria-label="The shelf">
-      <SectionHead eyebrow="The shelf" title="Pressings">
-        Every public pressing. Relic and rehearsal are marked. Collect only appears when a pressing can actually be taken.
-      </SectionHead>
-      {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).length > 0 ? (
-        <div className="vc-market-grid">
-          {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).map((item) => (
-            <EditionCard key={`shelf-${item.edition.id}`} item={item} owned={editionOwnedByWallet(item, wallet)} />
-          ))}
-        </div>
-      ) : (
-        <EmptyRail title="The shelf is empty">No held or completed pressings sit outside the collectable list.</EmptyRail>
-      )}
-    </section>
-    <section aria-labelledby="official-editions-heading">
-      <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
-        Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out, ended or not-yet-started pressing is not offered as collectable. An open edition stays collectable until its sale ends.
-      </SectionHead>
-      {officialEditions.length > 0 ? (
-        <div className="vc-market-grid">
-          {officialEditions.map((item) => (
-            <EditionCard key={item.edition.id} item={item} owned={editionOwnedByWallet(item, wallet)} />
-          ))}
-        </div>
-      ) : (
-        <EmptyRail title={editions.some((item) => item.primary.availability === "available") ? "Official editions grouped below" : "No official editions available"}>
-          {editions.some((item) => item.primary.availability === "available")
-            ? "Every available official edition currently has an active indexed offer, so its single card and primary collect action are shown with that offer below."
-            : "There are no published primary editions available to collect in this catalog view."}
-        </EmptyRail>
-      )}
-    </section>
-    </>
-  );
   const secondarySection = (
     <section aria-labelledby="secondary-listings-heading">
       <SectionHead id="secondary-listings-heading" eyebrow="II · Secondhand" title="Secondary collector listings">
@@ -178,7 +126,7 @@ export function MarketplacePage() {
           ))}
         </div>
       ) : (
-        <EmptyRail title="No active listings">No pressings available. The index confirms no secondhand offer. Nothing is invented in its place.</EmptyRail>
+        <EmptyRail title="No active listings">There are no secondary listings right now. Nothing is invented in their place.</EmptyRail>
       )}
       {indexError && <p role="alert" style={{ color: "var(--vc-crimson)", marginTop: 14 }}>{indexError}</p>}
     </section>
@@ -190,23 +138,21 @@ export function MarketplacePage() {
         {heroImage && <div className="vc-market-hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden />}
         {heroImage && <div className="vc-market-hero-shade" aria-hidden />}
         <div className="vc-market-hero-copy">
-          <Eyebrow red>† The catalog</Eyebrow>
-          <h1 className="vc-market-hero-title">Releases</h1>
-          <p className="vc-market-hero-lede">Collect the pressing. Hear what it unlocks.</p>
+          <Eyebrow red>† Secondary market</Eyebrow>
+          <h1 className="vc-market-hero-title">Marketplace</h1>
+          <p className="vc-market-hero-lede">Buy from and sell to other holders. New editions to collect are on Discover.</p>
           {volume && <div className="vc-market-volume" aria-label="Overall volume">
             <Eyebrow>Overall volume</Eyebrow>
             <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
           </div>}
-          <QuietStatus primary="Published catalog" secondary={marketplaceSecondaryAvailability(secondary)} />
-          <details className="vc-colophon"><summary>Index note</summary><p>{copy.body}</p></details>
+          <QuietStatus secondary={marketplaceSecondaryAvailability(secondary)} />
+          <details className="vc-colophon"><summary>Index note</summary><p>{INDEX_NOTE[secondary] || INDEX_NOTE[MARKETPLACE_STATE.IMPLEMENTED_NOT_LIVE]}</p></details>
           <MarketplaceHeroEditor current={presentation?.heroArtwork || ""} onSaved={setPresentation} />
         </div>
       </header>
 
       <div style={contentShell}>
-        {/* Real offers come first when they exist: on a phone, two empty primary rails above them pushed the only
-            listing ~1,700px down, behind the fixed audio player. With no offers the original order is kept. */}
-        {listedEditions.length > 0 ? <>{secondarySection}{primarySections}</> : <>{primarySections}{secondarySection}</>}
+        {secondarySection}
       </div>
     </section>
   );

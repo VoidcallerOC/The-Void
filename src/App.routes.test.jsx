@@ -69,7 +69,7 @@ const location = () => screen.getByTestId("location").textContent;
 // Visible page identity of each primary destination: the URL, the H1 and the document title.
 const PRIMARY_PAGES = [
   ["/discover", /Currently featuring Voidcaller/i, "Discover · The Void"],
-  ["/marketplace", /Releases/i, "Marketplace · The Void"],
+  ["/marketplace", /^Marketplace$/i, "Marketplace · The Void"],
   ["/claim", /Genesis claim/i, "Genesis claim · The Void"],
   ["/artists", /^Artists$/i, "Artists · The Void"],
   ["/collection", /^The Void$/i, "Catalog · The Void"],
@@ -266,5 +266,36 @@ describe("route table · unknown routes and ids", () => {
     mount("/discover/");
     await waitFor(() => expect(heading()).toMatch(/Currently featuring Voidcaller/i));
     expect(document.title).toBe("Discover · The Void");
+  });
+});
+
+describe("route table · one purpose per destination", () => {
+  const hasCollectHeading = () => screen.queryByRole("heading", { name: "Official editions available to collect" });
+
+  it("Discover carries the primary collect section and Marketplace does not", async () => {
+    mount("/discover");
+    await waitFor(() => expect(heading()).toMatch(/Currently featuring Voidcaller/i));
+    expect(hasCollectHeading()).toBeTruthy();
+    cleanup();
+    mount("/marketplace");
+    await waitFor(() => expect(heading()).toBe("Marketplace"));
+    expect(hasCollectHeading()).toBeNull();
+    expect(screen.queryByRole("region", { name: "The shelf" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Secondary collector listings" })).toBeTruthy();
+  });
+
+  it("My Collection stays the owned-assets page, with no collect catalog or shelf", async () => {
+    mount("/my-collection");
+    await waitFor(() => expect(heading()).toBe("My collection"));
+    expect(hasCollectHeading()).toBeNull();
+    expect(screen.queryByRole("region", { name: "The shelf" })).toBeNull();
+    expect(screen.getByText("Connect a wallet to reveal your collection.")).toBeTruthy();
+  });
+
+  it("the Discover secondary-marketplace link reaches the real Marketplace route", async () => {
+    mount("/discover");
+    fireEvent.click(await screen.findByRole("link", { name: "Secondary marketplace" }));
+    await waitFor(() => expect(location()).toBe("/marketplace"));
+    await waitFor(() => expect(heading()).toBe("Marketplace"));
   });
 });

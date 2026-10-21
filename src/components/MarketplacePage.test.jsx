@@ -98,57 +98,50 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("public marketplace inventory", () => {
-  it("shows only official collectible editions and one concise empty secondary state, not artist or publishing rails", async () => {
+  const listing = { id: "listing-1", listingId: "1", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "20000000000000000", status: "ACTIVE", authority: "INDEXED" };
+
+  it("renders no primary collecting catalog, and its empty state speaks of secondary listings only", async () => {
     const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
 
-    expect(screen.getByRole("heading", { name: "Official editions available to collect" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Secondary collector listings" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "VOIDCALLER" })).toBeTruthy();
-    expect(screen.getByText("Full self-titled EP")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Official editions available to collect" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "The shelf" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Collect" })).toBeNull();
+    expect(container.querySelectorAll("[data-edition-id]")).toHaveLength(0);
+    expect(container.textContent).not.toMatch(/primary edition|official edition|The shelf|Pressings/i);
+    expect(screen.getByText(/no secondary listings/i)).toBeTruthy();
     expect(screen.getByLabelText("Overall volume").textContent).toMatch(/Overall volume\s*0\.03 AVAX/i);
-    expect(container.textContent).toMatch(/Avalanche Fuji.*43113|Fuji.*43113/i);
-    expect(container.textContent).toContain("0.01 AVAX");
-    expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION|\bwer\b|\bqwe\b/i);
-    expect(container.textContent).not.toMatch(/Forgive & Forget/);
-    expect(container.querySelectorAll("[data-edition-id='edition-9362e29d-341d-4e84-a64b-45753e7d0ff1']")).toHaveLength(0);
     expect(container.textContent).not.toMatch(/Recently listed|Add tracks|Open artist studio|From the artists/i);
-    expect(container.textContent).not.toMatch(/Overall Mint Volume|Floor over mint|25x|25×/i);
-    expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
-    expect(container.querySelectorAll("[data-edition-id='edition-b87f40b1-9419-4e90-8e2f-5b8986df043c']")).toHaveLength(0);
-    expect(screen.getByRole("link", { name: "Collect" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);
-
-    const secondaryHeading = screen.getByRole("heading", { name: "Secondary collector listings" });
-    const secondary = secondaryHeading.closest("section");
-    expect(within(secondary).getByText("No active listings")).toBeTruthy();
-    expect(secondary.querySelectorAll("[data-edition-id]")).toHaveLength(0);
   });
 
-  it("shows an indexed offer once and keeps its primary collect action in that single card", async () => {
-    fetchListings.mockResolvedValueOnce([{
-      id: "listing-1",
-      listingId: "1",
-      seller,
-      chain: 43113,
-      tokenContract: contractAddress,
-      tokenId: realTokenId,
-      amount: "1",
-      price: "20000000000000000",
-      status: "ACTIVE",
-      authority: "INDEXED",
-    }]);
+  it("does not render a collectable edition just because it has no resale listing", async () => {
+    // The edition is collectable (Discover shows it) yet Marketplace stays empty.
+    const { container } = renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
+    expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(0);
+    expect(container.textContent).not.toContain("Full self-titled EP");
+  });
+
+  it("shows an indexed offer once, with seller, price, exact token and edition link", async () => {
+    fetchListings.mockResolvedValueOnce([listing]);
     const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("Seller · 0xaBd3…c174")).toBeTruthy());
 
     expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
-    const secondaryHeading = screen.getByRole("heading", { name: "Secondary collector listings" });
-    const secondary = secondaryHeading.closest("section");
+    const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
     expect(within(secondary).getByText("Available · 1 · 0.02 AVAX")).toBeTruthy();
     expect(within(secondary).getByText("Full self-titled EP")).toBeTruthy();
     expect(within(secondary).getAllByRole("link", { name: /^View token #/ })[0].getAttribute("href")).toBe(`/edition/${realEditionId}/token/${realTokenId}`);
-    expect(within(secondary).getByRole("link", { name: "Collect" }).getAttribute("href")).toBe(`/edition/${realEditionId}`);
-    expect(screen.getByText("Official editions grouped below")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Official editions available to collect" })).toBeNull();
+    expect(screen.queryByText("Official editions grouped below")).toBeNull();
     expect(container.textContent).not.toMatch(/Marketplace Fuji E2E|PINATA CERTIFICATION/i);
+  });
+
+  it("an expired, cancelled or zero-amount listing is not shown", async () => {
+    fetchListings.mockResolvedValueOnce([{ ...listing, status: "CANCELLED" }, { ...listing, id: "z", amount: "0" }]);
+    renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
   });
 });
 
@@ -208,13 +201,7 @@ describe("marketplace card destinations", () => {
   });
 });
 
-describe("secondary listings come first on the page when they exist", () => {
-  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-  const headings = () => ({
-    shelf: screen.getByRole("region", { name: "The shelf" }),
-    official: screen.getByRole("heading", { name: "Official editions available to collect" }),
-    secondary: screen.getByRole("heading", { name: "Secondary collector listings" }),
-  });
+describe("secondary listings are the only catalog on the page", () => {
   const genesisListing = {
     id: "07b7aa4a-312a-4a22-bd50-2de63e674192", listingId: "1", seller: "0x6a86efa012feda64b70112022487fee22e67d2fb", chain: 43114,
     marketplace: "0x75964c44ca586b13e98e7c30e74d2b4114f65b06", tokenContract: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
@@ -222,36 +209,32 @@ describe("secondary listings come first on the page when they exist", () => {
     price: "10000000000000000", currency: "native", expiresAt: 0, status: "ACTIVE", authority: "INDEXED",
   };
 
-  it("an active Genesis listing (production listing #1 shape) renders above the empty primary rails with its seller and price", async () => {
+  it("an active Genesis listing (production listing #1 shape) renders as the first and only section with its seller and price", async () => {
     catalogState.current = mergeCatalogs(baseCatalogs()); // the shipped catalog, where Genesis is the public Voidcaller edition
     fetchListings.mockResolvedValueOnce([genesisListing]);
     const { container } = renderMarketplace();
     await waitFor(() => expect(container.querySelector("[data-edition-id='voidcaller-chapter-i']")).toBeTruthy());
-    const { shelf, official, secondary } = headings();
-    expect(before(secondary, shelf)).toBe(true);
-    expect(before(secondary, official)).toBe(true);
-    const section = secondary.closest("section");
-    expect(within(section).getByText(/0X6A86…D2FB|0x6a86…d2fb/i)).toBeTruthy();
-    expect(section.textContent).toContain("0.01 AVAX");
-    expect(within(section).queryByText("No active listings")).toBeNull();
+    const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
+    expect(within(secondary).getByText(/0X6A86…D2FB|0x6a86…d2fb/i)).toBeTruthy();
+    expect(secondary.textContent).toContain("0.01 AVAX");
+    expect(within(secondary).queryByText("No active listings")).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+    expect(container.querySelectorAll("[data-edition-id='voidcaller-chapter-i']")).toHaveLength(1);
   });
 
-  it("a factory-release listing also moves the secondary section first", async () => {
+  it("a factory-release listing renders in the same single section", async () => {
     fetchListings.mockResolvedValueOnce([{ id: "l", listingId: "2", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "20000000000000000", status: "ACTIVE", authority: "INDEXED" }]);
     const { container } = renderMarketplace();
     await waitFor(() => expect(container.textContent).toContain("0.02 AVAX"));
-    const { official, secondary } = headings();
-    expect(before(secondary, official)).toBe(true);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
   });
 
-  it("with no eligible listing the original order and the empty state are kept", async () => {
+  it("with no eligible listing only the secondary empty state shows", async () => {
     catalogState.current = mergeCatalogs(baseCatalogs());
     fetchListings.mockResolvedValueOnce([{ ...genesisListing, status: "CANCELLED" }, { ...genesisListing, id: "x", amount: "0" }]);
-    renderMarketplace();
+    const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
-    const { shelf, official, secondary } = headings();
-    expect(before(shelf, secondary)).toBe(true);
-    expect(before(official, secondary)).toBe(true);
+    expect(container.querySelectorAll("[data-edition-id]")).toHaveLength(0);
   });
 });
 

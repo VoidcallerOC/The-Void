@@ -20,10 +20,10 @@ export function SectionHead({ id, eyebrow, title, children, action }) {
   );
 }
 
-export function QuietStatus({ primary, secondary }) {
+export function QuietStatus({ secondary }) {
   return (
     <p className="vc-quiet-status" style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--vc-bone-dim)", margin: 0 }}>
-      Official editions · {primary} · Secondary index · {secondary}
+      Secondary index · {secondary}
     </p>
   );
 }
