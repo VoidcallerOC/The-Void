@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useHashScroll } from "../lib/use-hash-scroll.js";
+import { ListForSaleLink } from "./AssetActions.jsx";
 import { Eyebrow } from "./Atoms.jsx";
 import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
@@ -567,6 +568,7 @@ export function MyCollectionPage() {
                 <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
                   <PrimaryPlayButton token={view.token} playback={playback} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
+                  <ListForSaleLink edition={edition} tokenId={tokenId} owned style={ghostBtn} />
                   <Link to={`/edition/${edition.id}`} style={ghostBtn}>Owned</Link>
                   {experience && <Link to={`/experience/${experience.id}`} style={ghostBtn}>Open experience</Link>}
                 </div>

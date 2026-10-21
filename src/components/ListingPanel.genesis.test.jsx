@@ -85,10 +85,10 @@ function listingReceipt(token) {
   return { status: "0x1", transactionHash: mocks.transactionHash, from: mocks.seller, to: mocks.market, logs: [{ address: mocks.market, ...event }] };
 }
 
-function setup(walletOverrides = {}) {
+function setup(walletOverrides = {}, url = "/") {
   const provider = chainProvider();
   const wallet = { account: mocks.seller, authenticated: true, authHeaders: { authorization: "Bearer test" }, chainId: 43114, connected: true, provider, getProvider: () => provider, authenticate: vi.fn(), ...walletOverrides };
-  render(<MemoryRouter><WalletCtx.Provider value={wallet}><ListingPanel edition={genesisEdition} /></WalletCtx.Provider></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[url]}><WalletCtx.Provider value={wallet}><ListingPanel edition={genesisEdition} /></WalletCtx.Provider></MemoryRouter>);
   return { provider, wallet };
 }
 const settle = () => act(async () => { await flushPromises(); });
@@ -215,5 +215,42 @@ describe("Genesis listing lists the exact token the wallet holds (ids 0-3)", () 
     await settle();
     expect(screen.getByText(/does not match the recorded policy/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "REVIEW LISTING" })).toBeNull();
+  });
+
+  it("a listing link's ?token= preselects that token once the wallet is verified to hold it", async () => {
+    mocks.balances = { 1: 1, 3: 1 };
+    setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
+    await settle();
+    expect(screen.getByRole("radio", { name: "Token #3" }).checked).toBe(true);
+    expect(mocks.readContext.mock.calls.map(([args]) => args.tokenId)).toEqual(["3"]);
+    await reviewAndConfirm();
+    expect(mocks.submitListing.mock.calls.map(([args]) => args.tokenId)).toEqual(["3"]);
+  });
+
+  it("a ?token= the wallet does not hold is never used: one held token is used instead, several require a choice", async () => {
+    mocks.balances = { 1: 1 };
+    setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
+    await settle();
+    expect(mocks.readContext.mock.calls.every(([args]) => args.tokenId === "1")).toBe(true);
+    expect(screen.queryByRole("radio", { name: "Token #2" })).toBeNull();
+    cleanup();
+    vi.clearAllMocks();
+    mocks.readContext.mockImplementation(async ({ tokenId }) => contextFor(tokenId));
+    mocks.fetchIndexedListings.mockResolvedValue([]);
+    mocks.balances = { 1: 1, 3: 1 };
+    setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
+    await settle();
+    expect(screen.getByText(/holds more than one of these tokens/)).toBeTruthy();
+    expect(mocks.readContext).not.toHaveBeenCalled();
+  });
+
+  it("the user can still pick another held token after arriving with ?token=", async () => {
+    mocks.balances = { 0: 1, 3: 1 };
+    setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
+    await settle();
+    fireEvent.click(screen.getByRole("radio", { name: "Token #0" }));
+    await settle();
+    expect(screen.getByRole("radio", { name: "Token #0" }).checked).toBe(true);
+    expect(mocks.readContext.mock.calls.at(-1)[0].tokenId).toBe("0");
   });
 });

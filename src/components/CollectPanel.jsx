@@ -32,6 +32,7 @@ import {
 import { readReleaseBalance, readReleasePaused } from "../lib/release-asset.js";
 import { loadPrimaryPurchaseEvidence, savePrimaryPurchaseEvidence } from "../lib/primary-purchase-evidence.js";
 import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
+import { ListForSaleLink } from "./AssetActions.jsx";
 import { SALE_AVAILABILITY, formatSaleTime, primarySaleAvailability, saleAvailabilityLabel } from "../lib/primary-sale-availability.js";
 
 // The API's live sale tuple (decimal strings) in the shape readReleasePrimarySale returns.
@@ -303,7 +304,7 @@ export function CollectPanel({ edition, release, artist, experiences = [], catal
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
         {action}
         {variant === "hero" && linkedExperience && !primaryOpensExperience && <Link to={`/experience/${linkedExperience.id}`} style={ghostBtn}>Open experience</Link>}
-        {owned && resaleCandidate && <Link to={`/edition/${edition.id}#secondary-listing`} style={primaryBtn}>List for sale</Link>}
+        <ListForSaleLink edition={edition} owned={owned && resaleCandidate} style={primaryBtn} />
         {variant !== "hero" && owned && (
           <>
             <Link to={experienceHref} style={ghostBtn}>{experienceLabel}</Link>

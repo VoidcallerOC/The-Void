@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { createArtist, createCatalog, createEdition, createRelease } from "../domain/models.js";
 
@@ -22,7 +23,7 @@ const wallet = "0x1111111111111111111111111111111111111111";
 function renderReliquary(ownershipRecords) {
   return renderToStaticMarkup(
     <WalletCtx.Provider value={{ connected: true, account: wallet, loadingOwnership: false, ownershipRecords, owned: {}, disconnect: () => {} }}>
-      <Reliquary />
+      <MemoryRouter><Reliquary /></MemoryRouter>
     </WalletCtx.Provider>,
   );
 }

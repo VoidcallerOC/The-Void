@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
+import { ListForSaleLink } from "./AssetActions.jsx";
 
 export function SectionHead({ id, eyebrow, title, children, action }) {
   return (
@@ -62,7 +63,7 @@ export function EditionCard({ item, owned = false }) {
   const object = objectClass(edition, chain);
   const collectable = editionIsCollectable(edition, primary);
   const supplyLabel = editionSupplyLabel(edition, primary);
-  const action = owned ? experienceAction(item) : collectable
+  const action = owned ? <>{experienceAction(item)}<ListForSaleLink edition={edition} owned style={ghostBtn} /></> : collectable
     ? <Link to={primary.href} style={primaryBtn}>Collect</Link>
     : <Link to={`/edition/${edition.id}`} style={ghostBtn}>View edition</Link>;
 
