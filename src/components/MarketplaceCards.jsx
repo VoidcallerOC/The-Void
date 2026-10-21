@@ -5,6 +5,7 @@ import { Eyebrow } from "./Atoms.jsx";
 import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTypeLabel, formatWeiAsAvax } from "../lib/marketplace-surface.js";
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import { ListForSaleLink } from "./AssetActions.jsx";
+import { listedTokenView } from "../lib/token-view.js";
 
 export function SectionHead({ id, eyebrow, title, children, action }) {
   return (
@@ -103,21 +104,28 @@ function shortWallet(wallet) {
   return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value || "Seller unavailable";
 }
 
-export function SecondaryListingCard({ item, listings = [], owned = false }) {
+export function SecondaryListingCard({ item, listings = [], owned = false, catalog = null }) {
   const { edition, artist, release, primary, chain } = item;
   const chainName = chain?.name || edition.chain || "Avalanche";
   const chainId = chain?.id || edition.chainId;
   const active = listings.filter((listing) => listing?.authority === "INDEXED" && String(listing.status).toUpperCase() === "ACTIVE");
+  const tokens = [...new Set(active.map((listing) => String(listing.tokenId)))].map((tokenId) => listedTokenView(catalog, edition, release, tokenId));
+  const tokenById = new Map(tokens.map((token) => [token.tokenId, token]));
+  // One listed token: the card is about that token, so it leads with that token's own art and name.
+  const single = tokens.length === 1 ? tokens[0] : null;
+  const heading = single?.name || edition.title;
+  const image = single?.artwork || artworkFor(edition, release);
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>
-      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${edition.title} secondary listings`}>
-        <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
+      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${heading} secondary listings`}>
+        <img src={image} alt={single?.artwork ? `${single.name}, token #${single.tokenId} artwork` : `${edition.title} edition artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
         <span className={`vc-object-mark ${objectClass(edition, chain).tone}`}>{objectClass(edition, chain).label}</span>
         <p className="vc-card-kicker">{artist?.name || "The Void"} · Secondary pressing</p>
-        <h3 className="vc-card-title">{edition.title}</h3>
+        <h3 className="vc-card-title">{heading}</h3>
+        {single?.name && <p className="vc-card-meta" style={{ margin: 0 }}>Token #{single.tokenId} · from the {edition.title} edition</p>}
         <p className="vc-card-release">{release?.id ? <Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{release.title}</Link> : release?.title || "Official release"}</p>
         <p className="vc-card-meta">{active.length} active indexed offer{active.length === 1 ? "" : "s"}</p>
         <details className="vc-colophon"><summary>Provenance</summary><p>{chainName} · Chain {chainId}</p></details>
@@ -125,6 +133,7 @@ export function SecondaryListingCard({ item, listings = [], owned = false }) {
         <div aria-label="Active indexed offers" style={{ display: "grid", gap: 10 }}>
           {active.map((listing) => (
             <div key={listing.id || listing.listingId} style={{ borderTop: "1px solid var(--vc-ash)", paddingTop: 10 }}>
+              <p className="vc-card-meta" style={{ margin: "0 0 4px" }}>Token #{String(listing.tokenId)} · {tokenById.get(String(listing.tokenId))?.name || "Token metadata unavailable"}</p>
               <p className="vc-card-meta" style={{ margin: "0 0 4px" }}>Seller · {shortWallet(listing.seller)}</p>
               <p className="vc-card-meta" style={{ margin: 0 }}>
                 Available · {listing.amount || "—"} · {formatWeiAsAvax(listing.price) || "Price unavailable"}

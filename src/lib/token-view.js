@@ -63,3 +63,18 @@ export function playableTrackFor(token, { artwork = "", protectedExperience = nu
     : null;
   return { n: String(token.tokenId), tokenId: token.tokenId, title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, ...(protectedMedia ? { protectedMedia } : {}), art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
 }
+
+/**
+ * What an offer is for: the exact listed token, resolved from the catalog's per-token metadata (each Genesis token is
+ * its own track with its own on-chain name and art). Null `name` means the token's metadata is not in the catalog;
+ * the card then says so instead of passing edition presentation off as the token's.
+ */
+export function listedTokenView(catalog, edition, release, tokenId) {
+  const view = tokenView(catalog, { edition, release, tokenId });
+  if (!view.token) return { tokenId: String(tokenId), name: null, artwork: null };
+  const metadata = view.token.metadata && typeof view.token.metadata === "object" ? view.token.metadata : {};
+  // Only token-level fields: never the edition/release title or art standing in for the token's own.
+  const name = metadata.name || view.token.name || null;
+  const artwork = view.token.media?.art || (metadata.image ? ipfsToHttp(metadata.image) : null);
+  return { tokenId: String(tokenId), name, artwork };
+}

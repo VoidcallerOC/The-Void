@@ -174,7 +174,7 @@ export function MarketplacePage() {
       ) : listedEditions.length > 0 ? (
         <div className="vc-market-grid">
           {listedEditions.map(({ item, listings: editionListings }) => (
-            <SecondaryListingCard key={`indexed-${item.edition.id}`} item={item} listings={editionListings} owned={editionOwnedByWallet(item, wallet)} />
+            <SecondaryListingCard key={`indexed-${item.edition.id}`} item={item} listings={editionListings} owned={editionOwnedByWallet(item, wallet)} catalog={catalog} />
           ))}
         </div>
       ) : (
