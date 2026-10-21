@@ -62,3 +62,16 @@ describe("experience player title", () => {
     expect(experienceTrackTitle({ view: { name: "Token" } })).toBe("Token");
   });
 });
+
+describe("listedTokenView", () => {
+  const edition = { id: "e", title: "Edition", artwork: "/edition.png" };
+  it("returns null name/art when the token is absent or its metadata is malformed", async () => {
+    const { listedTokenView } = await import("./token-view.js");
+    expect(listedTokenView({ tokens: [] }, edition, null, "5")).toEqual({ tokenId: "5", name: null, artwork: null });
+    expect(listedTokenView(null, edition, null, "5")).toEqual({ tokenId: "5", name: null, artwork: null });
+    const malformed = { tokens: [{ editionId: "e", tokenId: 5, metadata: "not-an-object" }] };
+    const view = listedTokenView(malformed, edition, null, "5");
+    expect(view.artwork).toBeNull();
+    expect(view.name).toBeNull();
+  });
+});

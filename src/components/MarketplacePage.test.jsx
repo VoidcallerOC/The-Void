@@ -254,3 +254,68 @@ describe("secondary listings come first on the page when they exist", () => {
     expect(before(official, secondary)).toBe(true);
   });
 });
+
+describe("secondary listing cards show the exact listed token's metadata", () => {
+  const genesis = (tokenId, extra = {}) => ({
+    id: `g-${tokenId}-${extra.listingId || "1"}`, listingId: "1", seller: "0x6a86efa012feda64b70112022487fee22e67d2fb", chain: 43114,
+    tokenContract: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenId: String(tokenId), amount: "1", price: "10000000000000000",
+    status: "ACTIVE", authority: "INDEXED", ...extra,
+  });
+  const card = () => document.querySelector("[data-edition-id='voidcaller-chapter-i']");
+  beforeEach(() => { catalogState.current = mergeCatalogs(baseCatalogs()); });
+
+  it("listing #1 (token 0) leads with that token's own name and art, keeping edition context, seller, price and links", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(0)]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    const el = card();
+    expect(within(el).getByRole("heading", { name: "Enough" })).toBeTruthy();
+    expect(el.textContent).toMatch(/Token #0 · from the .+ edition/);
+    expect(el.querySelector("img").getAttribute("src")).toBe("/assets/track-art/ep1-enough.png");
+    expect(el.querySelector("img").getAttribute("alt")).toBe("Enough, token #0 artwork");
+    expect(el.textContent).toContain("Token #0 · Enough");
+    expect(el.textContent).toMatch(/Seller · 0x6a86…d2fb/i);
+    expect(el.textContent).toContain("Available · 1 · 0.01 AVAX");
+    expect(within(el).getByRole("link", { name: "View edition" }).getAttribute("href")).toBe("/edition/voidcaller-chapter-i");
+  });
+
+  it("a different token id resolves to its own, different metadata", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(2)]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    expect(within(card()).getByRole("heading", { name: "Don't Look Down" })).toBeTruthy();
+    expect(card().querySelector("img").getAttribute("src")).toBe("/assets/track-art/ep1-dont-look-down.png");
+    expect(card().textContent).not.toContain("Enough");
+  });
+
+  it("offers for two different tokens keep the edition heading and name each token on its own offer row", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(0), genesis(3, { listingId: "2" })]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    const el = card();
+    expect(within(el).queryByRole("heading", { name: "Enough" })).toBeNull();
+    expect(el.querySelector("img").getAttribute("alt")).toMatch(/edition artwork$/);
+    expect(el.textContent).toContain("Token #0 · Enough");
+    expect(el.textContent).toContain("Token #3 · Complex");
+  });
+
+  it("two offers for the same token share one identical token identity without inventing differences", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(1), genesis(1, { listingId: "2", seller: "0x0000000000000000000000000000000000000abc" })]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    expect(within(card()).getByRole("heading", { name: "The Hollow" })).toBeTruthy();
+    expect(card().textContent.match(/Token #1 · The Hollow/g)).toHaveLength(2);
+  });
+
+  it("a token with no catalog metadata says so and never presents edition art as the token's", async () => {
+    const catalog = mergeCatalogs(baseCatalogs());
+    catalogState.current = { ...catalog, tokens: (catalog.tokens || []).filter((token) => !(token.editionId === "voidcaller-chapter-i" && String(token.tokenId) === "0")) };
+    fetchListings.mockResolvedValueOnce([genesis(0)]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    const el = card();
+    expect(el.textContent).toContain("Token #0 · Token metadata unavailable");
+    expect(el.querySelector("img").getAttribute("alt")).toMatch(/edition artwork$/);
+    expect(within(el).queryByRole("heading", { name: "Enough" })).toBeNull();
+  });
+});
