@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { requestedTokenId } from "../lib/asset-actions.js";
 import { Btn } from "./Atoms.jsx";
 import { WalletButton } from "./WalletButton.jsx";
 import { useWallet } from "../lib/wallet-context.js";
@@ -99,8 +100,11 @@ export function ListingPanel({ edition }) {
   const [selectedTokenId, setSelectedTokenId] = useState("");
   const ownershipKey = `${String(edition?.contractAddress || "").toLowerCase()}:${String(wallet.account || "").toLowerCase()}:${Number(wallet.chainId || 0)}`;
   const ownedIds = tokenChoices && ownedTokens.key === ownershipKey ? ownedTokens.ids : null;
+  // A listing link from a token card (?token=N) preselects that token, but only once the wallet is verified to hold it.
+  const requested = requestedTokenId(useLocation().search);
+  const preferred = selectedTokenId || requested || "";
   const tokenId = tokenChoices
-    ? (ownedIds?.includes(selectedTokenId) ? selectedTokenId : ownedIds?.length === 1 ? ownedIds[0] : "")
+    ? (ownedIds?.includes(preferred) ? preferred : ownedIds?.length === 1 ? ownedIds[0] : "")
     : String(edition?.tokenIds?.[0] ?? "");
   const contract = String(edition?.contractAddress || "");
   const provider = wallet.provider;
