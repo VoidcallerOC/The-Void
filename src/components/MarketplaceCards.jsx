@@ -104,6 +104,8 @@ function shortWallet(wallet) {
   return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value || "Seller unavailable";
 }
 
+const tokenHref = (edition, tokenId) => `/edition/${encodeURIComponent(edition.id)}/token/${encodeURIComponent(String(tokenId))}`;
+
 export function SecondaryListingCard({ item, listings = [], owned = false, catalog = null }) {
   const { edition, artist, release, primary, chain } = item;
   const chainName = chain?.name || edition.chain || "Avalanche";
@@ -122,7 +124,7 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>
-      <Link to={`/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={`View ${heading} secondary listings`}>
+      <Link to={single ? tokenHref(edition, single.tokenId) : `/edition/${edition.id}`} style={{ display: "block", color: "inherit", textDecoration: "none" }} aria-label={single ? `View token #${single.tokenId}, ${heading}` : `View ${heading} secondary listings`}>
         <img src={image} onError={() => setFailedImages((prior) => (prior.includes(image) ? prior : [...prior, image]))} alt={showingTokenArt ? `${single.name}, token #${single.tokenId} artwork` : `${edition.title} edition artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block", borderBottom: "1px solid var(--vc-ash)" }} />
       </Link>
       <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
@@ -142,11 +144,14 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
               <p className="vc-card-meta" style={{ margin: 0 }}>
                 Available · {listing.amount || "—"} · {formatWeiAsAvax(listing.price) || "Price unavailable"}
               </p>
+              {!single && <Link to={tokenHref(edition, listing.tokenId)} style={{ ...ghostBtn, display: "inline-block", marginTop: 8 }}>View token #{String(listing.tokenId)}</Link>}
             </div>
           ))}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: "auto", paddingTop: 8 }}>
-          <Link to={`/edition/${edition.id}`} style={primaryBtn}>View edition</Link>
+          {single
+            ? <Link to={tokenHref(edition, single.tokenId)} style={primaryBtn} aria-label={`View token #${single.tokenId}, ${heading}`}>View token</Link>
+            : <Link to={`/edition/${edition.id}`} style={primaryBtn}>View edition</Link>}
           {primary.availability === "available" && <Link to={primary.href} style={ghostBtn}>Collect</Link>}
           {owned && primaryExperience(item.experiences)?.id && <Link to={`/experience/${primaryExperience(item.experiences).id}`} style={ghostBtn}>Open experience</Link>}
         </div>
