@@ -11,7 +11,9 @@ const mainnet = RELEASE_PER_CONTRACT_MANIFESTS.mainnet;
 const MARKET = "0x00000000000000000000000000000000000a11ce";
 const SAFE = "0x1111111111111111111111111111111111111111";
 const active = Object.freeze({ ...manifest, deployed: true, marketplaceAddress: MARKET, deploymentBlock: 123, ownerAddress: SAFE });
-const v4Base = Object.freeze({ enabled: true, chainId: 43114, address: mainnet.marketplaceAddress, feeBps: "250", currency: "native" });
+// The production V4 marketplace (historical once the unified marketplace is active).
+const V4_MARKETPLACE = "0x0e77116142844478a55EEd2Ab79de9F93770F8f5";
+const v4Base = Object.freeze({ enabled: true, chainId: 43114, address: V4_MARKETPLACE, feeBps: "250", currency: "native" });
 const genesisEdition = { chainId: 43114, contractAddress: manifest.collections[0].address.toLowerCase(), tokenIds: ["0"] };
 
 describe("deployment gate and candidate scope (manifest)", () => {
@@ -33,7 +35,7 @@ describe("deployment gate and candidate scope (manifest)", () => {
   });
 
   it("does not touch the V4 deployment record", () => {
-    expect(mainnet.marketplaceAddress).toBe("0x0e77116142844478a55EEd2Ab79de9F93770F8f5");
+    expect(mainnet.historicalDeployments.map((item) => item.marketplaceAddress)).toContain(V4_MARKETPLACE);
     expect(mainnet.marketplaceFeeBps).toBe(250);
     expect(mainnet.artistRoyaltyBps).toBe(250);
   });

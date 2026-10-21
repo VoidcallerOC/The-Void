@@ -38,7 +38,8 @@ export const MARKETPLACE_CONTRACT = "VoidUnifiedMarketplace";
 export const MARKETPLACE_ARTIFACT_PATH = `out/${MARKETPLACE_CONTRACT}.sol/${MARKETPLACE_CONTRACT}.json`;
 // Immutable marketplace inputs other than the fee recipient and the new factory. Read-only on-chain facts
 // (scripts/mainnet-onchain-checks.mjs re-reads them after mining); none of these contracts is changed.
-export const PRODUCTION_FACTORY = getAddress(mainnetManifest.factoryAddress);
+// The production factory the unified marketplace also accepts (historical once the corrected factory is active).
+export const PRODUCTION_FACTORY = getAddress(unifiedManifest.legacyReleaseFactoryAddress);
 export const GENESIS_COLLECTION = getAddress(unifiedManifest.genesis.address);
 export const GENESIS_MAX_TOKEN_ID = Number(unifiedManifest.genesis.maxTokenId);
 export const GENESIS_ROYALTY_RECEIVER = getAddress(unifiedManifest.genesis.royaltyReceiver);

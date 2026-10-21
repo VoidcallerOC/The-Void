@@ -187,7 +187,9 @@ describe("mainnet workflows plan only: no key, no signing, no broadcast", () => 
 describe("mainnet authorization and Fuji state are untouched", () => {
   it("records the verified mainnet factory and marketplace on the passive fee recipient", () => {
     const manifest = JSON.parse(read("config/mainnet-release-per-contract.json"));
-    expect(manifest).toMatchObject({ chainId: 43114, deployed: true, deploymentAuthorized: true, provisioningEnabled: true, factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b", implementationAddress: "0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006", marketplaceAddress: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5" });
+    expect(manifest).toMatchObject({ chainId: 43114, deployed: true, deploymentAuthorized: true, provisioningEnabled: true, factoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", implementationAddress: "0x36c5D31e9A8e9b4dc9F8CB4B7202C70b3E30734D", marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", factoryDeploymentBlock: 98161422, marketplaceDeploymentBlock: 98161532, source: "VoidReleaseFactoryV2RoyaltySettled" });
+    // The first pair stays recorded verbatim as historical: its releases keep their factory and marketplace.
+    expect(manifest.historicalDeployments).toEqual([expect.objectContaining({ factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b", implementationAddress: "0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006", marketplaceAddress: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5", factoryDeploymentBlock: 97619965, marketplaceDeploymentBlock: 97619978 })]);
     expect(manifest.platformRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
     expect(manifest.marketplaceFeeRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
     // The defined deployer (Rabby) and the artist wallet are fixed and distinct from the fee recipient.

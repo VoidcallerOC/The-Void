@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:mainnet": "VITE_RELEASE_NETWORK=mainnet VITE_MARKETPLACE_CHAIN_ID=43114 VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5 VITE_MARKETPLACE_FEE_BPS=250 vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
+    "build:mainnet": "VITE_RELEASE_NETWORK=mainnet VITE_MARKETPLACE_CHAIN_ID=43114 VITE_MARKETPLACE_ADDRESS=0x75964C44cA586b13e98e7c30E74d2B4114f65b06 VITE_MARKETPLACE_FEE_BPS=250 vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

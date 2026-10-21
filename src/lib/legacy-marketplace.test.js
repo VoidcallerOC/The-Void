@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Interface, getAddress } from "ethers";
 import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor, legacyMarketplaceActive } from "../../config/legacy-collection-marketplace.js";
 import { MARKETPLACE_CONFIG, MARKETPLACE_SELECTORS, encodeCreateListing, encodeCreateListingWithMinProceeds, encodeSetMinSellerProceeds, marketplaceConfigForEdition, submitListing } from "./marketplace.js";
-import { isLegacyCollectionCandidate, isReleasePerContractCandidate, minimumSellerProceedsPerUnit, readLegacyListingContext, readReleaseListingContext } from "./secondary-listing.js";
+import { isLegacyCollectionCandidate, minimumSellerProceedsPerUnit, readLegacyListingContext, readReleaseListingContext } from "./secondary-listing.js";
 
 const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 const CREATOR = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
@@ -50,7 +50,7 @@ describe("legacy-collection marketplace manifest", () => {
     expect(legacyMarketplaceActive()).toBe(false);
     const edition = { chainId: 43114, contractAddress: GENESIS.toLowerCase(), tokenIds: ["0"] };
     expect(isLegacyCollectionCandidate(edition)).toBe(false);
-    expect(isReleasePerContractCandidate(edition)).toBe(false);
+    // Genesis is now a candidate only through the active unified marketplace, never through the legacy one.
     expect(isLegacyMarketplace(MARKET)).toBe(false);
   });
 
