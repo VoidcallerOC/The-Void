@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, formatEther, getAddress, getCreateAddress, id, isAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
+import unifiedManifest from "../config/unified-marketplace.json" with { type: "json" };
 import { missingAlbumSelectors } from "./deploy-release-per-contract-fuji.mjs";
 import { assertDefinedDeployer, assertNoPrivateKeyInEnv, creationRequest, runtimeMatchesArtifact, verifyCreationTransaction } from "./mainnet-signing-requests.mjs";
 import { checkFactoryState, checkMarketplaceState } from "./mainnet-onchain-checks.mjs";
@@ -13,8 +14,11 @@ import { SETTLED_SALE_RUNTIME_CODE_HASH, maskedRuntimeHash } from "../src/lib/sa
 // royalty enforced on chain: VoidReleaseFactoryV2RoyaltySettled (whose constructor creates the
 // VoidRelease1155V4Royalty clone implementation: every edition pays exactly 2.5% to an artist wallet of its
 // release, never to the fee recipient; and whose releases sell through VoidPrimarySaleSettled, which pays the
-// 2.5% platform fee during the purchase) followed by ReleaseMarketplaceV4 bound to that factory (V3 that
-// independently enforces the same royalty at listing and settlement). The first factory,
+// 2.5% platform fee during the purchase) followed by VoidUnifiedMarketplace, the single resale marketplace: it
+// accepts releases of that factory and of the production factory 0x262B…757b (2.5% platform / 2.5% royalty /
+// 95% seller, royalty independently enforced at listing and settlement) and the Genesis collection 0xD1B4…98eE
+// token ids 0-3 (0% platform / its existing 5% ERC-2981 royalty, pinned to 0x284C…180a / 95% seller).
+// Genesis is not modified. ReleaseMarketplaceV4 is no longer planned: its registry is a single factory. The first factory,
 // VoidReleaseFactoryV2Royalty, is already deployed (deployments/release-per-contract-mainnet-0x262B…json)
 // and this script no longer plans it. The new factory and marketplace are ownerless and their fee recipients
 // and fee rates are immutable, so the recipient must be the owner's physically verified address.
@@ -30,12 +34,19 @@ export const FACTORY_ARTIFACT_PATH = `out/${FACTORY_CONTRACT}.sol/${FACTORY_CONT
 export const PRIMARY_SALE_CONTRACT = "VoidPrimarySaleSettled";
 export const PRIMARY_SALE_ARTIFACT_PATH = `out/${PRIMARY_SALE_CONTRACT}.sol/${PRIMARY_SALE_CONTRACT}.json`;
 export const LEGACY_SALE_ARTIFACT_PATH = "out/VoidPrimarySale.sol/VoidPrimarySale.json";
-export const MARKETPLACE_ARTIFACT_PATH = "out/ReleaseMarketplaceV4.sol/ReleaseMarketplaceV4.json";
+export const MARKETPLACE_CONTRACT = "VoidUnifiedMarketplace";
+export const MARKETPLACE_ARTIFACT_PATH = `out/${MARKETPLACE_CONTRACT}.sol/${MARKETPLACE_CONTRACT}.json`;
+// Immutable marketplace inputs other than the fee recipient and the new factory. Read-only on-chain facts
+// (scripts/mainnet-onchain-checks.mjs re-reads them after mining); none of these contracts is changed.
+export const PRODUCTION_FACTORY = getAddress(mainnetManifest.factoryAddress);
+export const GENESIS_COLLECTION = getAddress(unifiedManifest.genesis.address);
+export const GENESIS_MAX_TOKEN_ID = Number(unifiedManifest.genesis.maxTokenId);
+export const GENESIS_ROYALTY_RECEIVER = getAddress(unifiedManifest.genesis.royaltyReceiver);
 export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4Royalty.sol/VoidRelease1155V4Royalty.json";
 export const ROYALTY_BPS = 250;
 // Runtime-bytecode markers of the royalty lock (Solidity dispatch PUSH4 of each selector).
 const IMPLEMENTATION_ROYALTY_SIGNATURES = Object.freeze(["REQUIRED_ROYALTY_BPS()", "platformFeeRecipient()"]);
-const MARKETPLACE_ROYALTY_SIGNATURES = Object.freeze(["REQUIRED_ROYALTY_BPS()", "REQUIRED_PLATFORM_FEE_BPS()"]);
+const MARKETPLACE_ROYALTY_SIGNATURES = Object.freeze(["FACTORY_ROYALTY_BPS()", "FACTORY_PLATFORM_FEE_BPS()", "GENESIS_ROYALTY_BPS()", "assetClassOf(address,uint256)"]);
 export function missingSelectors(runtimeBytecode, signatures) {
   const code = String(runtimeBytecode || "").toLowerCase();
   return signatures.filter((signature) => !code.includes(`63${id(signature).slice(2, 10)}`));
@@ -186,7 +197,9 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
   const coder = AbiCoder.defaultAbiCoder();
   const recipientForGas = config.platformRecipient || deployer;
   const factoryArgs = [recipientForGas];
-  const marketplaceArgs = [config.marketplaceFeeRecipient || deployer, config.marketplaceFeeBps, factoryAddress];
+  // The production factory already has code, so "predicted addresses are empty" also guarantees the new factory is not it
+  // (the marketplace constructor would revert if both registries were the same address).
+  const marketplaceArgs = [config.marketplaceFeeRecipient || deployer, factoryAddress, PRODUCTION_FACTORY, GENESIS_COLLECTION, GENESIS_MAX_TOKEN_ID, GENESIS_ROYALTY_RECEIVER];
   const factoryData = new ContractFactory(factoryArtifact.abi, factoryArtifact.bytecode.object).interface.encodeDeploy(factoryArgs);
   const marketplaceData = new ContractFactory(marketplaceArtifact.abi, marketplaceArtifact.bytecode.object).interface.encodeDeploy(marketplaceArgs);
   const factoryCreation = factoryArtifact.bytecode.object + factoryData.slice(2);
@@ -235,11 +248,11 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     },
     transactions: [
       { step: 1, nonce, contract: FACTORY_CONTRACT, constructor: { platformRecipient: config.platformRecipient || PENDING }, sealedInBytecode: { PLATFORM_FEE_BPS: FEE_BPS, RELEASE_VERSION: 2, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, implementation: "VoidRelease1155V4Royalty (royalty locked to 250 bps to an artist wallet of the release; platformFeeRecipient forbidden)", primarySale: `${PRIMARY_SALE_CONTRACT} (2.5% paid to platformRecipient during each purchase; the purchase reverts if that transfer fails; 97.5% withdrawable by the artist)`, predictedAddress: factoryAddress, predictedImplementation: implementationAddress, estimatedGas: factoryGas.toString() },
-      { step: 2, nonce: nonce + 1, contract: "ReleaseMarketplaceV4", sealedInBytecode: { REQUIRED_PLATFORM_FEE_BPS: FEE_BPS, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, constructor: { feeRecipient: config.marketplaceFeeRecipient || PENDING, platformFeeBps: config.marketplaceFeeBps, releaseFactory: factoryAddress }, predictedAddress: marketplaceAddress, estimatedGas: marketplaceGas.toString() },
+      { step: 2, nonce: nonce + 1, contract: MARKETPLACE_CONTRACT, sealedInBytecode: { FACTORY_PLATFORM_FEE_BPS: FEE_BPS, FACTORY_ROYALTY_BPS: ROYALTY_BPS, GENESIS_PLATFORM_FEE_BPS: 0, GENESIS_ROYALTY_BPS: 500 }, constructor: { feeRecipient: config.marketplaceFeeRecipient || PENDING, releaseFactory: factoryAddress, legacyReleaseFactory: PRODUCTION_FACTORY, genesisCollection: GENESIS_COLLECTION, genesisMaxTokenId: GENESIS_MAX_TOKEN_ID, genesisRoyaltyReceiver: GENESIS_ROYALTY_RECEIVER }, predictedAddress: marketplaceAddress, estimatedGas: marketplaceGas.toString() },
     ],
     constructorArgsEncoded: config.platformRecipient ? {
       factory: coder.encode(["address"], [config.platformRecipient]),
-      marketplace: coder.encode(["address", "uint256", "address"], [config.marketplaceFeeRecipient, config.marketplaceFeeBps, factoryAddress]),
+      marketplace: coder.encode(["address", "address", "address", "address", "uint256", "address"], [config.marketplaceFeeRecipient, factoryAddress, PRODUCTION_FACTORY, GENESIS_COLLECTION, GENESIS_MAX_TOKEN_ID, GENESIS_ROYALTY_RECEIVER]),
     } : null,
     gas: { maxFeePerGasWei: gasPrice.toString(), estimatedCostAvax: formatEther(estimatedCost), requiredWithHeadroomAvax: formatEther(requiredBalance), note: config.platformRecipient ? null : "Estimated with the deployer standing in for the pending recipient; the address does not change the gas cost." },
     checks,
@@ -247,7 +260,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     // recipient is named, because the recipient is part of the creation data.
     signingRequests: config.platformRecipient ? [
       creationRequest({ step: 1, contract: FACTORY_CONTRACT, from: deployer, nonce, data: factoryCreation, estimatedGas: factoryGas, predictedAddress: factoryAddress }),
-      creationRequest({ step: 2, contract: "ReleaseMarketplaceV4", from: deployer, nonce: nonce + 1, data: marketplaceCreation, estimatedGas: marketplaceGas, predictedAddress: marketplaceAddress }),
+      creationRequest({ step: 2, contract: MARKETPLACE_CONTRACT, from: deployer, nonce: nonce + 1, data: marketplaceCreation, estimatedGas: marketplaceGas, predictedAddress: marketplaceAddress }),
     ] : null,
     planInputs: planInputs(config),
     // "Ready to sign": every check passes (the recipient's device confirmation is taken by the signing tool).
@@ -301,7 +314,7 @@ export function buildDeploymentRecord(plan, [factory, marketplace], { sourceComm
     signedBy: { deployer: plan.deployer.address, method: "owner-signed in Rabby; no private key left the wallet" },
     plan: { sourceCommit, digest: planDigest },
     factory: { address: factory.address, deploymentTransaction: factory.transaction, deploymentBlock: factory.block, implementationAddress: factory.implementationAddress, implementation: "VoidRelease1155V4Royalty", implementationVersion: 2, implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: FACTORY_CONTRACT, artifact: FACTORY_ARTIFACT_PATH, primarySale: PRIMARY_SALE_CONTRACT, sourceCommit, platformRecipient: factory.platformRecipient, platformFeeBps: FEE_BPS },
-    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.transaction, deploymentBlock: marketplace.block, chainId: MAINNET_CHAIN_ID, factoryAddress: marketplace.factoryAddress, feeRecipient: marketplace.feeRecipient, feeBps: marketplace.feeBps, requiredRoyaltyBps: ROYALTY_BPS, contract: "ReleaseMarketplaceV4", artifact: MARKETPLACE_ARTIFACT_PATH },
+    marketplace: { address: marketplace.address, deploymentTransaction: marketplace.transaction, deploymentBlock: marketplace.block, chainId: MAINNET_CHAIN_ID, factoryAddress: marketplace.factoryAddress, feeRecipient: marketplace.feeRecipient, feeBps: marketplace.feeBps, requiredRoyaltyBps: ROYALTY_BPS, legacyReleaseFactory: marketplace.legacyReleaseFactory, genesisCollection: marketplace.genesisCollection, genesisMaxTokenId: marketplace.genesisMaxTokenId, genesisRoyaltyReceiver: marketplace.genesisRoyaltyReceiver, contract: MARKETPLACE_CONTRACT, artifact: MARKETPLACE_ARTIFACT_PATH },
   };
 }
 

@@ -1,6 +1,7 @@
 import { zeroAddress, retry } from "./indexer-utils.js";
 import { collectionIndexerConfig, primarySaleIndexerConfig, releaseIndexerConfig } from "./config.js";
 import { decodeMarketplaceLog } from "./marketplace-events.js";
+import { unifiedPlatformFeeBps } from "../config/unified-marketplace.js";
 import { reconcileMarketplaceListing } from "./marketplace-reconcile.js";
 
 export { retry } from "./indexer-utils.js";
@@ -620,13 +621,15 @@ export class BlockchainIndexer {
     if (config.contractType === "MARKETPLACE") {
       let marketplaceEvent;
       try {
-        marketplaceEvent = decodeMarketplaceLog({ ...log, ...base }, { chainId, expectedAddress: config.address, blockTimestamp: base.blockTimestamp, platformFeeBps: config.platformFeeBps ?? null });
+        marketplaceEvent = decodeMarketplaceLog({ ...log, ...base }, { chainId, expectedAddress: config.address, blockTimestamp: base.blockTimestamp, platformFeeBps: config.feePolicy === "unified" ? (token) => unifiedPlatformFeeBps(token) : config.platformFeeBps ?? null });
       } catch (error) {
         await this.store.recordEvent({ ...base, eventType: "MALFORMED", eventData: {}, isMalformed: true, errorMessage: error.message });
         await this.store.recordIndexerError({ ...base, errorType: "MALFORMED_MARKETPLACE_EVENT", message: error.message, payload: log });
         return { duplicate: false, malformed: true };
       }
       const inserted = await this.store.recordEvent({ ...base, eventType: marketplaceEvent.eventType, eventData: marketplaceEvent, isMalformed: false });
+      // SaleSettled (unified marketplace) annotates the ListingSold just before it; it is recorded, never projected.
+      if (marketplaceEvent.eventType === "SaleSettled") return { duplicate: !inserted, eventType: "SaleSettled", projectionApplied: false };
       try {
         const projection = await this.store.applyMarketplaceEvent(marketplaceEvent);
         let reconciliation = null;

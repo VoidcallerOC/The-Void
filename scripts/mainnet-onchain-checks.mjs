@@ -14,8 +14,10 @@ const FACTORY = new Interface([
 ]);
 const IMPLEMENTATION = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
 const MARKETPLACE = new Interface([
-  "function registry() view returns (address)", "function feeRecipient() view returns (address)", "function platformFeeBps() view returns (uint256)",
-  "function deploymentChainId() view returns (uint256)", "function REQUIRED_ROYALTY_BPS() view returns (uint96)",
+  "function releaseFactory() view returns (address)", "function legacyReleaseFactory() view returns (address)", "function feeRecipient() view returns (address)",
+  "function genesisCollection() view returns (address)", "function genesisMaxTokenId() view returns (uint256)", "function genesisRoyaltyReceiver() view returns (address)",
+  "function deploymentChainId() view returns (uint256)", "function FACTORY_PLATFORM_FEE_BPS() view returns (uint256)", "function FACTORY_ROYALTY_BPS() view returns (uint96)",
+  "function GENESIS_PLATFORM_FEE_BPS() view returns (uint256)", "function GENESIS_ROYALTY_BPS() view returns (uint256)",
 ]);
 
 /** The mined factory and the implementation it created, against the plan's step 1. */
@@ -36,16 +38,24 @@ export async function checkFactoryState(provider, plan, factoryAddress) {
   return { problems, facts: { implementationAddress, platformRecipient: recipient, platformFeeBps: FEE_BPS, releaseVersion: 2, requiredRoyaltyBps: ROYALTY_BPS } };
 }
 
-/** The mined marketplace, against the plan's step 2 (bound to the step-1 factory). */
+/** The mined VoidUnifiedMarketplace, against the plan's step 2 (bound to the step-1 factory, the production factory and Genesis). */
 export async function checkMarketplaceState(provider, plan, marketplaceAddress) {
   const step = plan.transactions[1];
+  const expected = step.constructor;
   const marketplace = new Contract(marketplaceAddress, MARKETPLACE, provider);
-  const [registry, feeRecipient, platformFeeBps, deploymentChainId, marketplaceRoyalty] = await Promise.all([marketplace.registry(), marketplace.feeRecipient(), marketplace.platformFeeBps(), marketplace.deploymentChainId(), marketplace.REQUIRED_ROYALTY_BPS()]);
+  const [releaseFactory, legacyReleaseFactory, feeRecipient, genesisCollection, genesisMaxTokenId, genesisRoyaltyReceiver, deploymentChainId, factoryFee, factoryRoyalty, genesisFee, genesisRoyalty] = await Promise.all([
+    marketplace.releaseFactory(), marketplace.legacyReleaseFactory(), marketplace.feeRecipient(), marketplace.genesisCollection(), marketplace.genesisMaxTokenId(), marketplace.genesisRoyaltyReceiver(),
+    marketplace.deploymentChainId(), marketplace.FACTORY_PLATFORM_FEE_BPS(), marketplace.FACTORY_ROYALTY_BPS(), marketplace.GENESIS_PLATFORM_FEE_BPS(), marketplace.GENESIS_ROYALTY_BPS(),
+  ]);
   const problems = [];
-  if (getAddress(registry) !== getAddress(step.constructor.releaseFactory)) problems.push(`registry ${registry}`);
-  if (getAddress(feeRecipient) !== getAddress(step.constructor.feeRecipient)) problems.push(`feeRecipient ${feeRecipient}`);
-  if (Number(platformFeeBps) !== FEE_BPS) problems.push(`platformFeeBps ${platformFeeBps}`);
+  if (getAddress(releaseFactory) !== getAddress(expected.releaseFactory)) problems.push(`releaseFactory ${releaseFactory}`);
+  if (getAddress(legacyReleaseFactory) !== getAddress(expected.legacyReleaseFactory)) problems.push(`legacyReleaseFactory ${legacyReleaseFactory}`);
+  if (getAddress(feeRecipient) !== getAddress(expected.feeRecipient)) problems.push(`feeRecipient ${feeRecipient}`);
+  if (getAddress(genesisCollection) !== getAddress(expected.genesisCollection)) problems.push(`genesisCollection ${genesisCollection}`);
+  if (Number(genesisMaxTokenId) !== Number(expected.genesisMaxTokenId)) problems.push(`genesisMaxTokenId ${genesisMaxTokenId}`);
+  if (getAddress(genesisRoyaltyReceiver) !== getAddress(expected.genesisRoyaltyReceiver)) problems.push(`genesisRoyaltyReceiver ${genesisRoyaltyReceiver}`);
   if (Number(deploymentChainId) !== MAINNET_CHAIN_ID) problems.push(`deploymentChainId ${deploymentChainId}`);
-  if (Number(marketplaceRoyalty) !== ROYALTY_BPS) problems.push(`REQUIRED_ROYALTY_BPS ${marketplaceRoyalty}`);
-  return { problems, facts: { factoryAddress: getAddress(registry), feeRecipient: getAddress(feeRecipient), feeBps: FEE_BPS, requiredRoyaltyBps: ROYALTY_BPS } };
+  if (Number(factoryFee) !== FEE_BPS || Number(factoryRoyalty) !== ROYALTY_BPS) problems.push(`factory economics ${factoryFee}/${factoryRoyalty}`);
+  if (Number(genesisFee) !== 0 || Number(genesisRoyalty) !== 500) problems.push(`Genesis economics ${genesisFee}/${genesisRoyalty}`);
+  return { problems, facts: { factoryAddress: getAddress(releaseFactory), legacyReleaseFactory: getAddress(legacyReleaseFactory), feeRecipient: getAddress(feeRecipient), feeBps: FEE_BPS, requiredRoyaltyBps: ROYALTY_BPS, genesisCollection: getAddress(genesisCollection), genesisMaxTokenId: Number(genesisMaxTokenId), genesisRoyaltyReceiver: getAddress(genesisRoyaltyReceiver) } };
 }

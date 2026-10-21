@@ -2,6 +2,7 @@ import { Interface, getAddress, isAddress } from "ethers";
 import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
 import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
+import { UNIFIED_MARKETPLACE, isUnifiedMarketplace, isGenesisAsset, unifiedMarketplaceActive } from "../../config/unified-marketplace.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MARKETPLACE_VIEW = new Interface([
@@ -54,6 +55,7 @@ export function isLegacyCollectionCandidate(edition, config = LEGACY_COLLECTION_
 
 export function isReleasePerContractCandidate(edition) {
   if (isLegacyCollectionCandidate(edition)) return true;
+  if (unifiedMarketplaceActive() && Number(edition?.chainId) === Number(UNIFIED_MARKETPLACE.chainId) && isGenesisAsset(edition?.contractAddress, edition?.tokenIds?.[0])) return true;
   const tokenId = edition?.tokenIds?.[0];
   return Number(edition?.chainId) === Number(RELEASE_PER_CONTRACT.chainId)
     && !isCertifiedFujiEdition(edition)
@@ -72,6 +74,9 @@ export async function readReleaseListingContext({
   tokenId,
   seller,
 }) {
+  if (isUnifiedMarketplace(marketplaceAddress)) {
+    return readUnifiedListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress: releaseContractAddress, tokenId, seller });
+  }
   if (isLegacyMarketplace(marketplaceAddress)) {
     return readLegacyListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress: releaseContractAddress, tokenId, seller });
   }
@@ -229,6 +234,93 @@ export async function readLegacyListingContext({ provider, marketplaceAddress, m
     marketplaceFeeBps: feeBps.toString(),
     royaltyBps: royaltyBps.toString(),
     factoryAddress: null,
+    marketplaceAddress: market,
+    releaseContractAddress: token,
+    tokenId: String(tokenId),
+    seller: getAddress(seller),
+    chainId: expectedChainId,
+  });
+}
+
+const UNIFIED_MARKETPLACE_VIEW = new Interface([
+  "function deploymentChainId() view returns (uint256)",
+  "function feeRecipient() view returns (address)",
+  "function releaseFactory() view returns (address)",
+  "function genesisCollection() view returns (address)",
+  "function previewSettlement(address tokenContract, uint256 tokenId, uint256 salePrice) view returns (uint8 assetClass, uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount, uint256 sellerProceeds)",
+]);
+const UNIFIED_ASSET_CLASS = Object.freeze({ 1: "FACTORY_RELEASE", 2: "GENESIS" });
+
+/**
+ * Pre-listing checks for VoidUnifiedMarketplace. The contract classifies the asset and computes the settlement; this reads
+ * that answer for a 1 AVAX probe, checks it against the recorded policy (0/5/95 Genesis, 2.5/2.5/95 factory), the operator
+ * filter, balance and approval, and refuses with an actionable code instead of letting a doomed transaction be signed.
+ */
+export async function readUnifiedListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress, tokenId, seller }, config = UNIFIED_MARKETPLACE) {
+  const expectedChainId = Number(config.chainId);
+  if (!provider?.request) fail("Connect a browser wallet to verify this asset on chain.", "WALLET_REQUIRED");
+  if (!isUnifiedMarketplace(marketplaceAddress, config) || Number(marketplaceChainId) !== expectedChainId) fail("The configured marketplace is not the recorded unified marketplace.", "MARKETPLACE_UNAVAILABLE");
+  if (!validContractAddress(tokenContractAddress) || !validContractAddress(seller) || !/^\d+$/.test(String(tokenId))) fail("The asset or connected wallet address is invalid.", "UNSUPPORTED_RELEASE");
+  let connectedChainId;
+  try { connectedChainId = Number(BigInt(await provider.request({ method: "eth_chainId" }))); } catch { fail("The wallet network could not be verified. No listing action was taken.", "OWNERSHIP_READ_FAILED"); }
+  if (connectedChainId !== expectedChainId) fail(`Switch to Avalanche C-Chain (${expectedChainId}) to list this asset.`, "WRONG_NETWORK");
+
+  const token = getAddress(tokenContractAddress);
+  const market = getAddress(marketplaceAddress);
+  const probe = 1_000_000_000_000_000_000n;
+  let deployedChainId; let feeRecipient; let releaseFactory; let genesisCollection;
+  try {
+    [deployedChainId, feeRecipient, releaseFactory, genesisCollection] = await Promise.all([
+      read(provider, market, UNIFIED_MARKETPLACE_VIEW, "deploymentChainId").then(([v]) => BigInt(v)),
+      read(provider, market, UNIFIED_MARKETPLACE_VIEW, "feeRecipient").then(([v]) => getAddress(v)),
+      read(provider, market, UNIFIED_MARKETPLACE_VIEW, "releaseFactory").then(([v]) => getAddress(v)),
+      read(provider, market, UNIFIED_MARKETPLACE_VIEW, "genesisCollection").then(([v]) => getAddress(v)),
+    ]);
+  } catch {
+    fail("The unified marketplace could not be verified on chain. Listing is unavailable.", "MARKETPLACE_UNAVAILABLE");
+  }
+  if (deployedChainId !== BigInt(expectedChainId) || feeRecipient !== getAddress(config.feeRecipient) || releaseFactory !== getAddress(config.releaseFactoryAddress) || genesisCollection !== getAddress(config.genesis.address)) {
+    fail("The marketplace deployment does not match the recorded chain, fee recipient, factory or Genesis collection.", "MARKETPLACE_UNAVAILABLE");
+  }
+  let preview;
+  try { preview = await read(provider, market, UNIFIED_MARKETPLACE_VIEW, "previewSettlement", [token, String(tokenId), probe.toString()]); } catch {
+    fail("The marketplace does not accept this asset, or its royalty does not match the marketplace policy. Listing is unavailable.", "UNSUPPORTED_RELEASE");
+  }
+  const assetClass = UNIFIED_ASSET_CLASS[Number(preview[0])];
+  const feeBps = (BigInt(preview[1]) * 10_000n) / probe;
+  const royaltyBps = (BigInt(preview[3]) * 10_000n) / probe;
+  const expected = assetClass === "GENESIS" ? [BigInt(config.genesis.platformFeeBps), BigInt(config.genesis.royaltyBps)] : [BigInt(config.factoryPlatformFeeBps), BigInt(config.factoryRoyaltyBps)];
+  if (!assetClass || feeBps !== expected[0] || royaltyBps !== expected[1]) fail("The marketplace settlement for this asset does not match the recorded policy.", "INVALID_ECONOMICS");
+  if (assetClass === "GENESIS" && getAddress(preview[2]) !== getAddress(config.genesis.royaltyReceiver)) fail("The Genesis royalty recipient changed from the recorded creator wallet.", "UNSUPPORTED_RELEASE");
+
+  if (assetClass === "GENESIS") {
+    try {
+      const [filter] = await read(provider, token, LEGACY_TOKEN_VIEW, "operatorFilterRegistry");
+      if (validContractAddress(filter)) {
+        const [allowed] = await read(provider, filter, OPERATOR_FILTER_VIEW, "isOperatorAllowed", [token, market]);
+        if (!allowed) fail("This collection's operator filter blocks the marketplace, so listings cannot settle.", "MARKETPLACE_UNAVAILABLE");
+      }
+    } catch (error) {
+      if (error?.code) throw error;
+    }
+  }
+  let balance; let approved;
+  try {
+    [balance, approved] = await Promise.all([
+      read(provider, token, LEGACY_TOKEN_VIEW, "balanceOf", [getAddress(seller), String(tokenId)]).then(([v]) => BigInt(v)),
+      read(provider, token, LEGACY_TOKEN_VIEW, "isApprovedForAll", [getAddress(seller), market]).then(([v]) => Boolean(v)),
+    ]);
+  } catch {
+    fail("On-chain ownership could not be read. Eligibility was not assumed.", "OWNERSHIP_READ_FAILED");
+  }
+  return Object.freeze({
+    balance: balance.toString(),
+    approved,
+    assetClass,
+    marketplaceFeeBps: feeBps.toString(),
+    royaltyBps: royaltyBps.toString(),
+    royaltyReceiver: getAddress(preview[2]),
+    factoryAddress: assetClass === "GENESIS" ? null : releaseFactory,
     marketplaceAddress: market,
     releaseContractAddress: token,
     tokenId: String(tokenId),
