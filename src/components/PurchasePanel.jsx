@@ -24,7 +24,8 @@ const failureStates = new Set([
 ]);
 const nextPollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
 
-export function PurchasePanel({ edition }) {
+// With `tokenId`, only offers for that exact token are shown and bought (the token page).
+export function PurchasePanel({ edition, tokenId = null }) {
   const wallet = useWallet();
   const walletAccount = wallet.account;
   const refreshOwnership = wallet.refreshOwnership;
@@ -53,7 +54,7 @@ export function PurchasePanel({ edition }) {
       signal: controller.signal,
     })
       .then((rows) => {
-        const matches = listingsForEdition(rows, edition);
+        const matches = listingsForEdition(rows, edition).filter((item) => tokenId === null || String(item.tokenId) === String(tokenId));
         setListings(matches);
         setListing(matches[0] || null);
         setListingsState("ready");
@@ -67,7 +68,7 @@ export function PurchasePanel({ edition }) {
         setMessage(error?.message || "The marketplace index is unavailable.");
       });
     return () => controller.abort();
-  }, [live, chain, edition, editionKey, marketplace]);
+  }, [live, chain, edition, editionKey, marketplace, tokenId]);
 
   const collect = async () => {
     if (!wallet.connected || !wallet.account) { setMessage("Connect your wallet before collecting."); return; }
@@ -244,7 +245,7 @@ export function PurchasePanel({ edition }) {
   const disabled = !live || busy || state === PURCHASE_STATE.CONFIRMED;
   return (
     <section style={{ marginTop: 40, borderTop: "1px solid var(--vc-ash)", paddingTop: 28 }}>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>Secondary collection · {edition.title}</div>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase" }}>Secondary collection · {tokenId === null ? edition.title : `Token #${tokenId}`}</div>
       <p style={{ color: "var(--vc-bone-dim)", maxWidth: 600, lineHeight: 1.6 }}>Offers are loaded from the indexed backend for this edition. A wallet receipt only records a pending submission; collection state updates after the authoritative blockchain index confirms settlement.</p>
       {secondary !== MARKETPLACE_STATE.LIVE && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{secondary} · no secondary offers are displayed, and purchase stays disabled.</p>}
       {live && listingsState === "ready" && listings.length === 0 && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11 }}>No active indexed listings for this edition.</p>}
@@ -266,7 +267,7 @@ export function PurchasePanel({ edition }) {
                 fontSize: 12,
               }}
             >
-              {item.amount} remaining · {formatWeiAsAvax(item.price) || "Indexed price"} · {item.status}
+              Token #{item.tokenId} · {item.amount} remaining · {formatWeiAsAvax(item.price) || "Indexed price"} · {item.status}
             </button>
           ))}
         </div>
