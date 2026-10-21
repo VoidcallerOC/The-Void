@@ -131,6 +131,9 @@ export function ListingPanel({ edition }) {
   const [priceAvax, setPriceAvax] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [reviewKey, setReviewKey] = useState("");
+  // Why REVIEW LISTING did not advance, shown next to the button (the panel status line sits above the form, often off-screen on mobile).
+  const [draftError, setDraftError] = useState("");
+  const draftErrorRef = useRef(null);
   const [pending, setPending] = useState(null);
   const [retry, setRetry] = useState(0);
   const chainState = session.key === verificationKey ? session : null;
@@ -323,9 +326,11 @@ export function ListingPanel({ edition }) {
   const review = () => {
     const error = listingDraftError();
     if (error) {
-      setSession((prior) => ({ ...prior, key: verificationKey, message: error }));
+      setDraftError(error);
+      requestAnimationFrame(() => draftErrorRef.current?.scrollIntoView?.({ block: "nearest" }));
       return;
     }
+    setDraftError("");
     setReviewKey(verificationKey);
   };
 
@@ -599,13 +604,13 @@ export function ListingPanel({ edition }) {
       {stage === "ready" && context && !reviewing && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginTop: 18 }}>
           <label htmlFor="listing-amount" style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)" }}>QUANTITY · MAX {context.balance}
-            <input id="listing-amount" type="number" min="1" max={context.balance} step="1" value={amount} onChange={(event) => setAmount(event.target.value)} style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
+            <input id="listing-amount" type="number" min="1" max={context.balance} step="1" value={amount} onChange={(event) => { setAmount(event.target.value); setDraftError(""); }} style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
           </label>
           <label htmlFor="listing-price" style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)" }}>PRICE / EDITION · AVAX
-            <input id="listing-price" inputMode="decimal" value={priceAvax} onChange={(event) => setPriceAvax(event.target.value.replace(/[^0-9.]/g, ""))} placeholder="0.01" style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
+            <input id="listing-price" inputMode="decimal" value={priceAvax} onChange={(event) => { setPriceAvax(event.target.value.replace(/[^0-9.]/g, "")); setDraftError(""); }} placeholder="0.01" style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
           </label>
           <label htmlFor="listing-expiry" style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", color: "var(--vc-bone-dim)" }}>EXPIRATION · OPTIONAL
-            <input id="listing-expiry" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
+            <input id="listing-expiry" type="datetime-local" value={expiresAt} onChange={(event) => { setExpiresAt(event.target.value); setDraftError(""); }} style={{ ...field, display: "block", marginTop: 7 }} disabled={inputDisabled} />
           </label>
           <div style={{ gridColumn: "1 / -1", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>
             {priceWei && economics
@@ -617,6 +622,7 @@ export function ListingPanel({ edition }) {
             <Btn onClick={review} disabled={!wallet.authenticated || !context}>REVIEW LISTING</Btn>
             <span style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10 }}>{!wallet.authenticated ? "Authenticate before submitting a listing." : context.approved ? "Marketplace approval already verified." : "One approval transaction may be required before listing."}</span>
           </div>
+          {draftError && <p id="listing-draft-error" ref={draftErrorRef} role="alert" style={{ gridColumn: "1 / -1", margin: 0, color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{draftError}</p>}
         </div>
       )}
 
