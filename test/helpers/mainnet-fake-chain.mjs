@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { Interface, getAddress, id, keccak256 } from "ethers";
 import { ALBUM_SIGNATURES } from "../../scripts/deploy-release-per-contract-fuji.mjs";
 
@@ -28,9 +29,22 @@ export const MARKETPLACE_ABI = [
 ];
 const IMPLEMENTATION_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
 
+// Stand-ins for the two sale artifacts. The settled sale's runtime is the real reviewed runtime when the
+// contracts are built, so its masked hash matches SETTLED_SALE_RUNTIME_CODE_HASH; without a build the
+// settled-sale plan check reports it (only that check reads it).
+const SETTLED_SALE_ARTIFACT = new URL("../../out/VoidPrimarySaleSettled.sol/VoidPrimarySaleSettled.json", import.meta.url);
+export const SALE_INIT = "0x6004600455";
+export const LEGACY_SALE_INIT = "0x6005600555";
+export const SALE_RUNTIME = existsSync(SETTLED_SALE_ARTIFACT) ? JSON.parse(readFileSync(SETTLED_SALE_ARTIFACT, "utf8")).deployedBytecode.object : "0x6004";
+// Factory creation code that embeds the settled sale's creation code, as the real
+// VoidReleaseFactoryV2RoyaltySettled creation code does.
+export const FACTORY_INIT = `0x6001600155${SALE_INIT.slice(2)}`;
+
 /** Artifact loader with the real constructor shapes and distinct creation code per contract. */
 export const artifacts = async (path) => {
-  if (path.includes("Factory")) return { abi: FACTORY_ABI, bytecode: { object: "0x6001600155" }, deployedBytecode: { object: "0x6001" } };
+  if (path.includes("Factory")) return { abi: FACTORY_ABI, bytecode: { object: FACTORY_INIT }, deployedBytecode: { object: "0x6001" } };
+  if (path.includes("VoidPrimarySaleSettled")) return { abi: [], bytecode: { object: SALE_INIT }, deployedBytecode: { object: SALE_RUNTIME } };
+  if (path.includes("VoidPrimarySale")) return { abi: [], bytecode: { object: LEGACY_SALE_INIT }, deployedBytecode: { object: "0x6005" } };
   if (path.includes("Marketplace")) return { abi: MARKETPLACE_ABI, bytecode: { object: "0x6002600255" }, deployedBytecode: { object: marketplaceRuntime } };
   return { abi: [], bytecode: { object: "0x6003" }, deployedBytecode: { object: albumRuntime } };
 };
