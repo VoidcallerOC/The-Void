@@ -177,12 +177,10 @@ describe("FactoryV2 → ReleaseMarketplaceV3 secondary listing verification", ()
     })).toBe(true);
   });
 
-  it("never treats the mainnet Genesis ERC-1155 (not factory-registered) as a listing candidate", () => {
-    expect(isReleasePerContractCandidate({
-      chainId: 43114,
-      contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
-      tokenIds: ["0"],
-    })).toBe(false);
+  it("treats mainnet Genesis ids 0-3 as candidates only through the unified marketplace", () => {
+    expect(isReleasePerContractCandidate({ chainId: 43114, contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenIds: ["0"] })).toBe(true);
+    expect(isReleasePerContractCandidate({ chainId: 43114, contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenIds: ["4"] })).toBe(false);
+    expect(isReleasePerContractCandidate({ chainId: 43113, contractAddress: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenIds: ["0"] })).toBe(false);
   });
 
   it("reports an existing marketplace approval and a seller with insufficient balance without throwing", async () => {

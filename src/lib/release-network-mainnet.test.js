@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Verified C-Chain release-per-contract infrastructure (config/mainnet-release-per-contract.json).
-const MAINNET_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
-const MAINNET_MARKETPLACE = "0x0e77116142844478a55EEd2Ab79de9F93770F8f5";
+const MAINNET_FACTORY = "0xE744D58fA8138042f5f00a28d39f89081539C19B";
+const MAINNET_MARKETPLACE = "0x75964C44cA586b13e98e7c30E74d2B4114f65b06";
 
 // With VITE_RELEASE_NETWORK=mainnet the web build selects the mainnet manifests. Production mainnet
 // FE must resolve AUTH_CHAIN_ID / RELEASE_DEPLOYMENT to C-Chain 43114 and the recorded factory +
@@ -35,6 +35,13 @@ describe("frontend release config with mainnet selected", () => {
         factoryAddress: MAINNET_FACTORY,
         marketplaceAddress: MAINNET_MARKETPLACE,
         active: true,
+      }),
+      // The production pair stays supported for the releases it already holds.
+      expect.objectContaining({
+        chainId: 43114,
+        factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b",
+        marketplaceAddress: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5",
+        active: false,
       }),
     ]);
     expect(network.releaseDeploymentForFactory(MAINNET_FACTORY)).toMatchObject({

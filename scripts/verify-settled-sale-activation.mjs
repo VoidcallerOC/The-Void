@@ -180,7 +180,9 @@ export async function verifyActivation(provider, options, { onProgress = () => {
 async function main() {
   const manifest = JSON.parse(await readFile(resolve(ROOT, "config/mainnet-release-per-contract.json"), "utf8"));
   let options;
-  try { options = parseArgs(process.argv.slice(2), manifest); } catch (error) { console.error(error.message); process.exit(2); }
+  // The release this checks was created by the production factory, which is historical once the corrected factory is active.
+  const production = [manifest, ...(manifest.historicalDeployments || [])].find((item) => lower(item.factoryAddress) === "0x262b774cf9a1949170b58e2d57f6189980fe757b") || manifest;
+  try { options = parseArgs(process.argv.slice(2), { ...manifest, factoryAddress: production.factoryAddress, marketplaceAddress: production.marketplaceAddress }); } catch (error) { console.error(error.message); process.exit(2); }
   if (!options.rpc || !options.sale) { console.error("usage: --rpc <url> --sale <address> [--release --factory --old-sale --artist --platform-recipient --marketplace --from-block --chunk --concurrency]"); process.exit(2); }
   console.log(`Read-only activation check on ${options.rpc}\n  sale ${options.sale}\n  release ${options.release}\n  scanning role events from block ${options.fromBlock} in chunks of ${options.chunk}\n`);
   const result = await verifyActivation(rpcProvider(options.rpc), options, { onProgress: (check) => console.log(`${check.pass ? "PASS" : "FAIL"}  ${check.name}${check.detail ? `\n        ${check.detail}` : ""}`) });

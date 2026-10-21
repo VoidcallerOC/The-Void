@@ -12,6 +12,8 @@ const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 
 vi.mock("../../config/mainnet-release-per-contract.json", async (importOriginal) => {
   const live = (await importOriginal()).default;
+  // The production pair, now recorded as historical in the live manifest.
+  const production = live.historicalDeployments.find((item) => item.factoryAddress === "0x262B774cf9a1949170B58E2d57F6189980FE757b");
   return {
     default: {
       ...live,
@@ -22,13 +24,13 @@ vi.mock("../../config/mainnet-release-per-contract.json", async (importOriginal)
       marketplaceDeploymentBlock: 99000010,
       source: "VoidReleaseFactoryV2RoyaltySettled",
       historicalDeployments: [{
-        factoryAddress: live.factoryAddress,
-        implementationAddress: live.implementationAddress,
-        marketplaceAddress: live.marketplaceAddress,
-        factoryDeploymentBlock: live.factoryDeploymentBlock,
-        marketplaceDeploymentBlock: live.marketplaceDeploymentBlock,
-        releaseVersion: live.releaseVersion,
-        albumCapable: live.albumCapable,
+        factoryAddress: production.factoryAddress,
+        implementationAddress: production.implementationAddress,
+        marketplaceAddress: production.marketplaceAddress,
+        factoryDeploymentBlock: production.factoryDeploymentBlock,
+        marketplaceDeploymentBlock: production.marketplaceDeploymentBlock,
+        releaseVersion: production.releaseVersion,
+        albumCapable: production.albumCapable,
       }],
     },
   };

@@ -96,7 +96,10 @@ describe("mainnet runtime configuration", () => {
     expect(swap(routing)).toEqual(withoutFujiTest);
     expect(buildCommand).toContain("VITE_RELEASE_NETWORK=mainnet");
     expect(buildCommand).toContain("VITE_MARKETPLACE_CHAIN_ID=43114");
-    expect(buildCommand).toContain("VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5");
+    // The canonical marketplace is the recorded unified marketplace; the build target, the manifest and the buy-target check agree.
+    expect(buildCommand).toContain("VITE_MARKETPLACE_ADDRESS=0x75964C44cA586b13e98e7c30E74d2B4114f65b06");
+    expect(JSON.parse(readFileSync(new URL("../config/unified-marketplace.json", import.meta.url), "utf8")).marketplaceAddress).toBe("0x75964C44cA586b13e98e7c30E74d2B4114f65b06");
+    expect(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).scripts["build:mainnet"]).toContain("VITE_MARKETPLACE_ADDRESS=0x75964C44cA586b13e98e7c30E74d2B4114f65b06");
     expect(buildCommand).toContain("VITE_MARKETPLACE_FEE_BPS=250");
     expect(JSON.stringify(mainnetVercel)).not.toMatch(/fuji|43113|avax-test/);
     expect({ installCommand, outputDirectory }).toEqual({ installCommand: "cd ../.. && npm ci", outputDirectory: "dist" });

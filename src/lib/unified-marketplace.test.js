@@ -17,10 +17,9 @@ const active = Object.freeze({ ...UNIFIED_MARKETPLACE, deployed: true, marketpla
 const base = Object.freeze({ address: UNIFIED, chainId: 43114, enabled: true });
 
 describe("unified marketplace manifest", () => {
-  it("is committed inert: not deployed, no address", () => {
-    expect(UNIFIED_MARKETPLACE.deployed).toBe(false);
-    expect(UNIFIED_MARKETPLACE.marketplaceAddress).toBeNull();
-    expect(unifiedMarketplaceActive()).toBe(false);
+  it("is active at the verified mainnet deployment", () => {
+    expect(UNIFIED_MARKETPLACE).toMatchObject({ deployed: true, chainId: 43114, marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", deploymentBlock: 98161532, releaseFactoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", feeRecipient: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", record: "deployments/release-per-contract-mainnet-0xE744D58fA8138042f5f00a28d39f89081539C19B.json" });
+    expect(unifiedMarketplaceActive()).toBe(true);
     expect(UNIFIED_MARKETPLACE.genesis).toMatchObject({ address: GENESIS, platformFeeBps: 0, royaltyBps: 500, royaltyReceiver: CREATOR, minTokenId: 0, maxTokenId: 3 });
     expect(UNIFIED_MARKETPLACE.legacyReleaseFactoryAddress).toBe(PRODUCTION_FACTORY);
   });
@@ -53,7 +52,7 @@ describe("routing: one canonical marketplace address", () => {
 
   it("is inert while the manifest is not deployed", () => {
     const edition = { chainId: 43114, contractAddress: GENESIS, tokenIds: ["1"] };
-    expect(marketplaceConfigForEdition(edition, base).assetClass).toBeUndefined();
+    expect(marketplaceConfigForEdition(edition, base, undefined, { ...active, deployed: false }).assetClass).toBeUndefined();
   });
 });
 
@@ -106,7 +105,8 @@ describe("listing preflight reads economics from the contract", () => {
 describe("indexer", () => {
   it("adds the unified marketplace once, with a per-asset fee policy that replaces a single-bps entry", () => {
     const address = UNIFIED.toLowerCase();
-    expect(withUnifiedMarketplace([], { chainId: 43114 })).toEqual([]);
+    expect(withUnifiedMarketplace([], { chainId: 43113 })).toEqual([]);
+    expect(withUnifiedMarketplace([], { chainId: 43114, manifest: { ...active, deployed: false } })).toEqual([]);
     const result = withUnifiedMarketplace([{ chainId: 43114, address, contractType: "MARKETPLACE", platformFeeBps: 250 }], { chainId: 43114, manifest: active });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ address, contractType: "MARKETPLACE", feePolicy: "unified", platformFeeBps: null, startBlock: 99000000 });

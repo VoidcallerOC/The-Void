@@ -6,7 +6,8 @@ import { withLegacyCollectionMarketplace } from "./config.js";
 
 const MARKET = "0x00000000000000000000000000000000000a11ce";
 const active = { ...LEGACY_COLLECTION_MARKETPLACE, deployed: true, marketplaceAddress: MARKET, deploymentBlock: 12345 };
-const v4 = RELEASE_PER_CONTRACT_DEPLOYMENTS.find((item) => item.chainId === 43114);
+// The production V4 pair (historical once the unified marketplace is active).
+const v4 = RELEASE_PER_CONTRACT_DEPLOYMENTS.find((item) => item.chainId === 43114 && item.marketplaceAddress === "0x0e77116142844478a55EEd2Ab79de9F93770F8f5");
 
 describe("legacy-collection marketplace indexer registration", () => {
   it("adds nothing while the marketplace is not deployed", () => {
