@@ -297,4 +297,70 @@ describe("Genesis listing lists the exact token the wallet holds (ids 0-3)", () 
     expect(mocks.submitApproval).not.toHaveBeenCalled();
     expect(mocks.submitListing).not.toHaveBeenCalled();
   });
+
+  describe("REVIEW LISTING always responds", () => {
+    const reviewButton = () => screen.getByRole("button", { name: "REVIEW LISTING" });
+    it("valid inputs advance to the review step carrying the exact direct-link token", async () => {
+      mocks.balances = { 1: 1, 2: 1 };
+      setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
+      await settle();
+      fireEvent.change(screen.getByLabelText(/PRICE \/ EDITION/), { target: { value: "0.5" } });
+      fireEvent.click(reviewButton());
+      await settle();
+      const group = screen.getByRole("group", { name: "Listing review" });
+      expect(group.textContent).toContain(`${mocks.genesis} · 2`);
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    it("normal edition-page flow (no ?token=) advances to review", async () => {
+      mocks.balances = { 0: 1 };
+      setup();
+      await settle();
+      fireEvent.change(screen.getByLabelText(/PRICE \/ EDITION/), { target: { value: "1" } });
+      fireEvent.click(reviewButton());
+      await settle();
+      expect(screen.getByRole("group", { name: "Listing review" })).toBeTruthy();
+    });
+    it("a click with no price shows an explanation beside the button, not a silent no-op", async () => {
+      mocks.balances = { 0: 1 };
+      setup();
+      await settle();
+      fireEvent.click(reviewButton());
+      await settle();
+      expect(screen.getByRole("alert").textContent).toMatch(/valid native AVAX price/);
+      expect(screen.queryByRole("group", { name: "Listing review" })).toBeNull();
+      fireEvent.change(screen.getByLabelText(/PRICE \/ EDITION/), { target: { value: "1" } });
+      expect(screen.queryByRole("alert")).toBeNull();
+      fireEvent.click(reviewButton());
+      await settle();
+      expect(screen.getByRole("group", { name: "Listing review" })).toBeTruthy();
+    });
+    it("an invalid quantity or past expiry is explained", async () => {
+      mocks.balances = { 0: 1 };
+      setup();
+      await settle();
+      fireEvent.change(screen.getByLabelText(/PRICE \/ EDITION/), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText(/QUANTITY/), { target: { value: "5" } });
+      fireEvent.click(reviewButton());
+      expect(screen.getByRole("alert").textContent).toMatch(/exceeds the on-chain balance/);
+      fireEvent.change(screen.getByLabelText(/QUANTITY/), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText(/EXPIRATION/), { target: { value: "2000-01-01T00:00" } });
+      fireEvent.click(reviewButton());
+      expect(screen.getByRole("alert").textContent).toMatch(/future date/);
+    });
+    it("an unowned direct-link token never reaches a review button", async () => {
+      mocks.balances = { 0: 1 };
+      setup({}, "/edition/voidcaller-chapter-i?token=3#secondary-listing");
+      await settle();
+      expect(screen.queryByRole("button", { name: "REVIEW LISTING" })).toBeNull();
+    });
+    it("after review, confirming still runs the ownership recheck before any submission", async () => {
+      mocks.balances = { 2: 1 };
+      setup({}, "/edition/voidcaller-chapter-i?token=2#secondary-listing");
+      await settle();
+      const before = mocks.readContext.mock.calls.length;
+      await reviewAndConfirm();
+      expect(mocks.readContext.mock.calls.length).toBeGreaterThan(before);
+      expect(mocks.submitListing.mock.calls[0][0].tokenId).toBe("2");
+    });
+  });
 });
