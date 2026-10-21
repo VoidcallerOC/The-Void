@@ -207,3 +207,50 @@ describe("marketplace card destinations", () => {
     expect(screen.getByRole("link", { name: "View edition" }).getAttribute("href")).toBe("/edition/voidcaller-chapter-i");
   });
 });
+
+describe("secondary listings come first on the page when they exist", () => {
+  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const headings = () => ({
+    shelf: screen.getByRole("region", { name: "The shelf" }),
+    official: screen.getByRole("heading", { name: "Official editions available to collect" }),
+    secondary: screen.getByRole("heading", { name: "Secondary collector listings" }),
+  });
+  const genesisListing = {
+    id: "07b7aa4a-312a-4a22-bd50-2de63e674192", listingId: "1", seller: "0x6a86efa012feda64b70112022487fee22e67d2fb", chain: 43114,
+    marketplace: "0x75964c44ca586b13e98e7c30e74d2b4114f65b06", tokenContract: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee",
+    contract: "0xd1b4367dd9f235f9ee61878019d66e31511e98ee", tokenId: "0", amount: "1", initialAmount: "1",
+    price: "10000000000000000", currency: "native", expiresAt: 0, status: "ACTIVE", authority: "INDEXED",
+  };
+
+  it("an active Genesis listing (production listing #1 shape) renders above the empty primary rails with its seller and price", async () => {
+    catalogState.current = mergeCatalogs(baseCatalogs()); // the shipped catalog, where Genesis is the public Voidcaller edition
+    fetchListings.mockResolvedValueOnce([genesisListing]);
+    const { container } = renderMarketplace();
+    await waitFor(() => expect(container.querySelector("[data-edition-id='voidcaller-chapter-i']")).toBeTruthy());
+    const { shelf, official, secondary } = headings();
+    expect(before(secondary, shelf)).toBe(true);
+    expect(before(secondary, official)).toBe(true);
+    const section = secondary.closest("section");
+    expect(within(section).getByText(/0X6A86…D2FB|0x6a86…d2fb/i)).toBeTruthy();
+    expect(section.textContent).toContain("0.01 AVAX");
+    expect(within(section).queryByText("No active listings")).toBeNull();
+  });
+
+  it("a factory-release listing also moves the secondary section first", async () => {
+    fetchListings.mockResolvedValueOnce([{ id: "l", listingId: "2", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "20000000000000000", status: "ACTIVE", authority: "INDEXED" }]);
+    const { container } = renderMarketplace();
+    await waitFor(() => expect(container.textContent).toContain("0.02 AVAX"));
+    const { official, secondary } = headings();
+    expect(before(secondary, official)).toBe(true);
+  });
+
+  it("with no eligible listing the original order and the empty state are kept", async () => {
+    catalogState.current = mergeCatalogs(baseCatalogs());
+    fetchListings.mockResolvedValueOnce([{ ...genesisListing, status: "CANCELLED" }, { ...genesisListing, id: "x", amount: "0" }]);
+    renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
+    const { shelf, official, secondary } = headings();
+    expect(before(shelf, secondary)).toBe(true);
+    expect(before(official, secondary)).toBe(true);
+  });
+});

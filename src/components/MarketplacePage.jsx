@@ -124,6 +124,66 @@ export function MarketplacePage() {
   );
   const heroImage = marketplaceHeroImage(presentation);
 
+  const primarySections = (
+    <>
+    <section aria-label="The shelf">
+      <SectionHead eyebrow="The shelf" title="Pressings">
+        Every public pressing. Relic and rehearsal are marked. Collect only appears when a pressing can actually be taken.
+      </SectionHead>
+      {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).length > 0 ? (
+        <div className="vc-market-grid">
+          {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).map((item) => (
+            <EditionCard key={`shelf-${item.edition.id}`} item={item} owned={editionOwnedByWallet(item, wallet)} />
+          ))}
+        </div>
+      ) : (
+        <EmptyRail title="The shelf is empty">No held or completed pressings sit outside the collectable list.</EmptyRail>
+      )}
+    </section>
+    <section aria-labelledby="official-editions-heading">
+      <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
+        Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out, ended or not-yet-started pressing is not offered as collectable. An open edition stays collectable until its sale ends.
+      </SectionHead>
+      {officialEditions.length > 0 ? (
+        <div className="vc-market-grid">
+          {officialEditions.map((item) => (
+            <EditionCard key={item.edition.id} item={item} owned={editionOwnedByWallet(item, wallet)} />
+          ))}
+        </div>
+      ) : (
+        <EmptyRail title={editions.some((item) => item.primary.availability === "available") ? "Official editions grouped below" : "No official editions available"}>
+          {editions.some((item) => item.primary.availability === "available")
+            ? "Every available official edition currently has an active indexed offer, so its single card and primary collect action are shown with that offer below."
+            : "There are no published primary editions available to collect in this catalog view."}
+        </EmptyRail>
+      )}
+    </section>
+    </>
+  );
+  const secondarySection = (
+    <section aria-labelledby="secondary-listings-heading">
+      <SectionHead id="secondary-listings-heading" eyebrow="II · Secondhand" title="Secondary collector listings">
+        A secondhand pressing appears only when a real listing is confirmed. Empty means no pressing is offered — not a hidden catalog.
+      </SectionHead>
+      {secondary === MARKETPLACE_STATE.UNAVAILABLE ? (
+        <EmptyRail title="Listings unavailable">The authoritative listing index could not be reached. No offers are shown.</EmptyRail>
+      ) : secondary !== MARKETPLACE_STATE.LIVE ? (
+        <EmptyRail title="Secondary market not yet live">No secondary offers are displayed until the configured marketplace index is live.</EmptyRail>
+      ) : listingsState === "loading" ? (
+        <p role="status" className="vc-card-meta">Loading index-confirmed listings…</p>
+      ) : listedEditions.length > 0 ? (
+        <div className="vc-market-grid">
+          {listedEditions.map(({ item, listings: editionListings }) => (
+            <SecondaryListingCard key={`indexed-${item.edition.id}`} item={item} listings={editionListings} owned={editionOwnedByWallet(item, wallet)} />
+          ))}
+        </div>
+      ) : (
+        <EmptyRail title="No active listings">No pressings available. The index confirms no secondhand offer. Nothing is invented in its place.</EmptyRail>
+      )}
+      {indexError && <p role="alert" style={{ color: "var(--vc-crimson)", marginTop: 14 }}>{indexError}</p>}
+    </section>
+  );
+
   return (
     <section>
       <header className={heroImage ? "vc-market-hero-bleed" : "vc-market-mast"}>
@@ -144,60 +204,9 @@ export function MarketplacePage() {
       </header>
 
       <div style={contentShell}>
-        <section aria-label="The shelf">
-          <SectionHead eyebrow="The shelf" title="Pressings">
-            Every public pressing. Relic and rehearsal are marked. Collect only appears when a pressing can actually be taken.
-          </SectionHead>
-          {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).length > 0 ? (
-            <div className="vc-market-grid">
-              {editions.filter((item) => !officialEditions.some((official) => official.edition.id === item.edition.id) && !listedEditionIds.has(item.edition.id)).map((item) => (
-                <EditionCard key={`shelf-${item.edition.id}`} item={item} owned={editionOwnedByWallet(item, wallet)} />
-              ))}
-            </div>
-          ) : (
-            <EmptyRail title="The shelf is empty">No held or completed pressings sit outside the collectable list.</EmptyRail>
-          )}
-        </section>
-        <section aria-labelledby="official-editions-heading">
-          <SectionHead id="official-editions-heading" eyebrow="I · The pressings" title="Official editions available to collect">
-            Each official pressing appears once. The relic and the rehearsal are marked apart. A sold-out, ended or not-yet-started pressing is not offered as collectable. An open edition stays collectable until its sale ends.
-          </SectionHead>
-          {officialEditions.length > 0 ? (
-            <div className="vc-market-grid">
-              {officialEditions.map((item) => (
-                <EditionCard key={item.edition.id} item={item} owned={editionOwnedByWallet(item, wallet)} />
-              ))}
-            </div>
-          ) : (
-            <EmptyRail title={editions.some((item) => item.primary.availability === "available") ? "Official editions grouped below" : "No official editions available"}>
-              {editions.some((item) => item.primary.availability === "available")
-                ? "Every available official edition currently has an active indexed offer, so its single card and primary collect action are shown with that offer below."
-                : "There are no published primary editions available to collect in this catalog view."}
-            </EmptyRail>
-          )}
-        </section>
-
-        <section aria-labelledby="secondary-listings-heading">
-          <SectionHead id="secondary-listings-heading" eyebrow="II · Secondhand" title="Secondary collector listings">
-            A secondhand pressing appears only when a real listing is confirmed. Empty means no pressing is offered — not a hidden catalog.
-          </SectionHead>
-          {secondary === MARKETPLACE_STATE.UNAVAILABLE ? (
-            <EmptyRail title="Listings unavailable">The authoritative listing index could not be reached. No offers are shown.</EmptyRail>
-          ) : secondary !== MARKETPLACE_STATE.LIVE ? (
-            <EmptyRail title="Secondary market not yet live">No secondary offers are displayed until the configured marketplace index is live.</EmptyRail>
-          ) : listingsState === "loading" ? (
-            <p role="status" className="vc-card-meta">Loading index-confirmed listings…</p>
-          ) : listedEditions.length > 0 ? (
-            <div className="vc-market-grid">
-              {listedEditions.map(({ item, listings: editionListings }) => (
-                <SecondaryListingCard key={`indexed-${item.edition.id}`} item={item} listings={editionListings} owned={editionOwnedByWallet(item, wallet)} />
-              ))}
-            </div>
-          ) : (
-            <EmptyRail title="No active listings">No pressings available. The index confirms no secondhand offer. Nothing is invented in its place.</EmptyRail>
-          )}
-          {indexError && <p role="alert" style={{ color: "var(--vc-crimson)", marginTop: 14 }}>{indexError}</p>}
-        </section>
+        {/* Real offers come first when they exist: on a phone, two empty primary rails above them pushed the only
+            listing ~1,700px down, behind the fixed audio player. With no offers the original order is kept. */}
+        {listedEditions.length > 0 ? <>{secondarySection}{primarySections}</> : <>{primarySections}{secondarySection}</>}
       </div>
     </section>
   );
