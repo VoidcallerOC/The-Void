@@ -46,7 +46,7 @@ async function sendMedia(response, media, cors = {}) {
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
 
-export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, marketplacePresentation = null, contractOwnerVerification = null, provenanceAnchor = null, genesisClaim = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
+export function createApiHandler({ service, authService = null, mediaGateway = null, studioService = null, verificationService = null, marketplacePresentation = null, contractOwnerVerification = null, provenanceAnchor = null, genesisClaim = null, xLink = null, rateLimiter = null, allowedOrigins = [], logger = console } = {}) {
   if (!service) throw new TypeError("createApiHandler requires an ApiService.");
   return async function handle(request, response) {
     const requestId = request.headers["x-request-id"] || createRequestId();
@@ -130,6 +130,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       else if (method === "GET" && base[0] === "marketplace" && base[1] === "transactions" && base.length === 4) data = await service.getMarketplaceTransaction({ chainId: base[2], transactionHash: base[3] });
       else if (method === "GET" && base[0] === "collectors" && base.length === 2) data = await service.getCollector({ request: apiRequest, wallet: base[1] });
       else if (method === "GET" && base[0] === "collection" && base[1] === "activity") data = await service.collectionActivity({ request: apiRequest, wallet: url.searchParams.get("wallet"), limit: url.searchParams.get("limit"), offset: url.searchParams.get("offset") });
+      else if (method === "GET" && base.join("/") === "x-link") {
+        if (!xLink) throw new ApiError(503, "X_LINK_UNAVAILABLE", "X account linking is unavailable.");
+        data = await xLink.status({ request: apiRequest });
+      }
       else if (method === "GET" && base[0] === "verification") {
         if (!verificationService) throw new ApiError(503, "VERIFICATION_UNAVAILABLE", "Artist verification is unavailable.");
         if (base.length === 2 && base[1] === "me") data = await verificationService.getMine({ request: apiRequest });
@@ -148,6 +152,12 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "POST" && base.join("/") === "auth/verify") {
           if (!authService) throw new ApiError(503, "AUTH_UNAVAILABLE", "Wallet authentication is unavailable.");
           data = await authService.verifyChallenge({ ...body, requestId });
+        }
+        else if (method === "POST" && base[0] === "x-link" && base.length === 2 && ["start", "callback", "disconnect"].includes(base[1])) {
+          if (!xLink) throw new ApiError(503, "X_LINK_UNAVAILABLE", "X account linking is unavailable.");
+          if (base[1] === "start") data = await xLink.start({ request: apiRequest });
+          else if (base[1] === "callback") data = await xLink.complete({ request: apiRequest, input: body });
+          else data = await xLink.disconnect({ request: apiRequest, input: body });
         }
         else if (method === "POST" && base.join("/") === "claims/eligibility") {
           if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");

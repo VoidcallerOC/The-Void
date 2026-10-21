@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
+import { XAccountLink } from "./XAccountLink.jsx";
 import { shell } from "../lib/marketplace-chrome.js";
 
 // /studio/profile/:artistId — where Studio's "Edit artist profile" link goes.
@@ -20,6 +21,7 @@ export function ArtistProfileEditPage() {
       <div style={{ maxWidth: 720 }}>
         <ArtistProfileEditor artistId={artistId} standalone />
       </div>
+      <div style={{ marginTop: 32 }}><XAccountLink /></div>
     </section>
   );
 }
