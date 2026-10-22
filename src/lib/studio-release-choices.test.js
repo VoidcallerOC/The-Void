@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LEGACY_ALBUM_ID, LEGACY_CHAIN_ID, LEGACY_CONTRACT } from "./legacy-genesis.js";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
+import { mapPublishedCatalog } from "./catalog-source.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "./studio-release-choices.js";
 
 // Mirrors the Studio picker the user reported: real releases buried among
@@ -167,5 +168,30 @@ describe("existingDraftsForTitle (Create release must not clone a draft)", () =>
     expect(existingDraftsForTitle(owned, { artistId: "voidcaller", title: "Brand New" })).toEqual([]);
     expect(existingDraftsForTitle(owned, { title: "Forgive & Forget" })).toEqual([]);
     expect(existingDraftsForTitle(undefined, { artistId: "voidcaller", title: "x" })).toEqual([]);
+  });
+});
+
+describe("Create release selector against the Studio catalog payload", () => {
+  // Row shapes as GET /api/studio/catalog returns them from the mainnet database:
+  // the original Forgive & Forget is PUBLISHED (withdrawn by id, not ARCHIVED), a same-title draft exists.
+  const payload = {
+    artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }],
+    releases: [
+      { id: "release-83611741-c9ee-4487-a438-b6fa844762e6", artist_id: "voidcaller", slug: "forgive-forget", title: "Forgive & Forget", status: "PUBLISHED", release_metadata: {} },
+      { id: "release-273f5476-0cdb-45d3-83d3-5908eb42bc6c", artist_id: "voidcaller", slug: "forgive-forget-2", title: "Forgive & Forget", status: "DRAFT", release_metadata: {} },
+      { id: "release-b96d6a64-3379-4da0-b834-ae2e00bf9571", artist_id: "voidcaller", slug: "forgive-forget-18", title: "Forgive & Forget", status: "ARCHIVED", release_metadata: {} },
+      { id: "release-active-vc", artist_id: "voidcaller", slug: "voidcaller-ep", title: "VOIDCALLER", status: "PUBLISHED", release_metadata: {} },
+    ],
+    editions: [],
+    experiences: [],
+  };
+
+  it("never offers the withdrawn or archived original; active releases stay; source rows are not mutated", () => {
+    const before = JSON.stringify(payload);
+    const ids = studioReleaseChoices(mapPublishedCatalog(payload)).map(({ release }) => release.id);
+    expect(ids).not.toContain("release-83611741-c9ee-4487-a438-b6fa844762e6");
+    expect(ids).not.toContain("release-b96d6a64-3379-4da0-b834-ae2e00bf9571");
+    expect(ids).toContain("release-active-vc");
+    expect(JSON.stringify(payload)).toBe(before);
   });
 });
