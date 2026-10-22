@@ -1061,6 +1061,9 @@ export class ArtistStudioService {
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot manage this release.");
+    // A retired release stays exactly as it was archived; a stale client cannot edit it (and so cannot leave an
+    // "updated" trace on it). Start a new release instead.
+    if (String(release.status).toUpperCase() === "ARCHIVED") throw new ApiError(409, "RELEASE_ARCHIVED", "This release was taken off the site and can no longer be edited. Create a new release instead.");
     assertPublishedMayChange(release.status, input, "Published releases cannot return to an earlier lifecycle state.");
     const status = patchStatus(input, release.status, "release");
     if (status === "ARCHIVED" && await this.legacyCatalogStaysOnSite(release)) {
