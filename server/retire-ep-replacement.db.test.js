@@ -233,9 +233,12 @@ describe.skipIf(!testDatabaseUrl)("Retire the EP replacement and finish the Sing
     await applyMigration();
     expect(JSON.stringify(await q("SELECT id, status, updated_at FROM experiences ORDER BY id"))).toBe(snapshot);
     expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);
-    const result = await migrate({ pool, config: q.config });
+    // Migrate only through 044: later migrations (045 retires the Single this suite keeps as a DRAFT fixture) have their own tests.
+    const through = await mkdtemp(join(tmpdir(), "void-migrations-through-"));
+    for (const name of (await readdir(migrationsDirectory)).filter((file) => file <= MIGRATION)) await copyFile(join(migrationsDirectory, name), join(through, name));
+    const result = await migrate({ pool, config: q.config, directory: through });
     expect(result.applied).toContain(MIGRATION);
-    await migrate({ pool, config: q.config });
+    await migrate({ pool, config: q.config, directory: through });
     expect(await q("SELECT count(*)::int AS n FROM schema_migrations WHERE name=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     expect(await protectedDigests()).toEqual(digestsBefore);
