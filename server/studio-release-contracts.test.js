@@ -35,6 +35,30 @@ describe("Studio release contract binding", () => {
     expect(repo.saveReleaseContract).not.toHaveBeenCalled();
   });
 
+  it("never attaches an existing clone to a new release: another release's key or an unindexed key is refused", async () => {
+    const { instance, repo, db } = harness();
+    const NEW_KEY = `0x${"11".repeat(32)}`;
+    const OLD_CLONE = "0x8192cc13caec165afd802af691f952573bb3d817";
+    const fresh = { id: "release-fresh", artist_id: "artist-1", slug: "fresh", status: "DRAFT", release_metadata: { releaseKey: NEW_KEY } };
+    repo.getReleaseProvisioningRequest.mockResolvedValue({ release_key: NEW_KEY, artist_wallet: OWNER, factory_address: "0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8", chain_id: 43113, state: "PENDING" });
+    // The indexer knows the old clone only under the old release's key; nothing is indexed under the new key.
+    db.query.mockImplementation(async (sql, params = []) => {
+      if (String(sql).includes("FROM releases r JOIN artist_owners")) return { rows: [fresh] };
+      if (String(sql).includes("FROM factory_releases")) return { rows: params.some((value) => String(value).toLowerCase() === KEY) ? [{ chain_id: 43113, release_contract_address: OLD_CLONE, release_key: KEY, artist_wallet: OWNER }] : [] };
+      return { rows: [] };
+    });
+    const request = { headers: {} };
+    // Presenting the old clone's key for the new release does not match the new release's own key.
+    await expect(instance.bindReleaseContract({ request, releaseId: "release-fresh", input: { chainId: 43113, releaseContractAddress: OLD_CLONE, releaseKey: KEY } })).rejects.toMatchObject({ status: 409, code: "RELEASE_PROVISIONING_MISMATCH" });
+    // Presenting the new key with the old clone finds no matching deployment.
+    await expect(instance.bindReleaseContract({ request, releaseId: "release-fresh", input: { chainId: 43113, releaseContractAddress: OLD_CLONE, releaseKey: NEW_KEY } })).rejects.toMatchObject({ status: 409, code: "RELEASE_DEPLOYMENT_NOT_INDEXED" });
+    expect(repo.inTransaction).not.toHaveBeenCalled();
+    expect(repo.saveReleaseContract).not.toHaveBeenCalled();
+    // Status refresh for the new release binds nothing while its own key is not indexed.
+    await expect(instance.releaseProvisioningStatus({ request, releaseId: "release-fresh" })).resolves.toMatchObject({ state: "PENDING", releaseId: "release-fresh" });
+    expect(repo.saveReleaseContract).not.toHaveBeenCalled();
+  });
+
   it("never binds, submits or refreshes a retired release, even when its clone exists on-chain", async () => {
     const { instance, repo, db } = harness();
     const archived = { id: "release-1", artist_id: "artist-1", slug: "one", status: "ARCHIVED", release_metadata: { releaseKey: KEY } };

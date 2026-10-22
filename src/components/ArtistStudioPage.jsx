@@ -391,6 +391,8 @@ export function ArtistStudioPage() {
   const [releaseId, setReleaseId] = useState("");
   const [provisioning, setProvisioning] = useState(null);
   const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
+  // Deploying a release contract is permanent and costs gas, so it needs its own explicit acknowledgement each time.
+  const [deployAcknowledged, setDeployAcknowledged] = useState(false);
   // The symbol read from the deployed contract once creation is confirmed; the draft value is never shown then.
   const [onChainSymbol, setOnChainSymbol] = useState("");
   // Album state is read from the release clone, never assumed locally: clones of the
@@ -503,14 +505,18 @@ export function ArtistStudioPage() {
     setSelectedReleaseId(requestedReleaseId);
     setArtistId(release.artistId || "");
     setForm((prior) => ({ ...prior, releaseTitle: release.title || prior.releaseTitle, releaseType: release.releaseType || prior.releaseType, releaseDescription: release.description || "", releaseArtwork: release.artwork || "", releaseSymbol: normalizeContractSymbol(release.contractSymbol) || prior.releaseSymbol }));
-    studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers })
-      .then(async (prepared) => {
+    // Opening a draft only reads its deployment status. It never prepares a deployment, and a draft that has none
+    // stays a plain saved draft with no contract request, no metadata upload and no wallet involvement.
+    studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers })
+      .then(async (status) => {
+        if (cancelled) return;
+        setProvisioningState(status.state || "NOT_STARTED");
+        if (!status.state || status.state === "NOT_STARTED") return;
+        // A deployment was already prepared or submitted: re-read its exact parameters (idempotent, creates nothing).
+        const prepared = await studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
         if (cancelled) return;
         setProvisioning(prepared);
         setForm((prior) => ({ ...prior, releaseSymbol: prior.releaseSymbol || normalizeContractSymbol(prepared.symbol) }));
-        const status = await studioFetch(`/studio/releases/${encodeURIComponent(requestedReleaseId)}/provisioning/status`, { method: "POST", payload: {}, headers });
-        if (cancelled) return;
-        setProvisioningState(status.state || prepared.state || "PENDING");
         if (status.state === "CONFIRMED") {
           setOnChainSymbol(status.symbol || "");
           setActiveReleaseAsset({ chainId: Number(status.chainId || prepared.chainId), releaseContractAddress: status.releaseContractAddress, primarySaleAddress: status.primarySaleAddress, provenanceAnchorAddress: status.provenanceAnchorAddress });
@@ -568,7 +574,7 @@ export function ArtistStudioPage() {
         setSelectedReleaseId(draft.id);
         setReleaseId(draft.id);
         setForm((prior) => ({ ...prior, releaseTitle: draft.title || prior.releaseTitle, releaseType: draft.releaseType || prior.releaseType, releaseDescription: draft.description || "", releaseArtwork: draft.artwork || "", releaseSymbol: normalizeContractSymbol(draft.contractSymbol) || prior.releaseSymbol }));
-        throw Object.assign(new Error(`A draft named "${draft.title}" already exists (${draft.id}). It is loaded; review it, then select Create release again to prepare it.`), { code: "DRAFT_ALREADY_EXISTS" });
+        throw Object.assign(new Error(`A draft named "${draft.title}" already exists (${draft.id}). It is loaded; review it, then continue editing it. No new draft was created.`), { code: "DRAFT_ALREADY_EXISTS" });
       }
       if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Open the one you want at /studio?release=<id> so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
     }
@@ -582,8 +588,33 @@ export function ArtistStudioPage() {
     return { artistId: nextArtistId, releaseId: nextReleaseId };
   };
 
+  // Saves (or updates) the release draft. Application data only: no wallet, no contract, no gas, and no
+  // deployment request. Deploying is the separate "Prepare deployment" and "Deploy release contract" steps.
   const createReleaseRecord = async () => {
     setBusy("release"); setNotice(""); setReleaseStatus(null);
+    let draftSaved = false;
+    try {
+      if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
+      const ids = await ensureArtistAndRelease();
+      draftSaved = true;
+      setSelectedReleaseId(ids.releaseId);
+      const saved = "Release draft saved. No contract was created and no gas was spent. Deploying on-chain is a separate step below.";
+      setNotice(saved);
+      setReleaseStatus({ ok: true, message: saved });
+    } catch (error) {
+      // Only claim the draft was saved when it was. The message is also shown beside the button, because the page
+      // notice sits at the top of a long form and a failure there looks like the button did nothing.
+      const message = error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : draftSaved ? `Release draft saved. ${error.message}` : (error.message || "Saving the release draft failed.");
+      setNotice(message);
+      setReleaseStatus({ ok: false, message });
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Prepares the exact deployment parameters for review. Still application data only: the wallet is not asked to sign.
+  const prepareDeployment = async () => {
+    setBusy("release"); setNotice(""); setReleaseStatus(null); setDeployAcknowledged(false);
     let draftSaved = false;
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
@@ -594,13 +625,11 @@ export function ArtistStudioPage() {
       setProvisioning(prepared);
       setProvisioningState(prepared.state || "PENDING");
       setForm((prior) => ({ ...prior, releaseSymbol: normalizeContractSymbol(prepared.symbol) || prior.releaseSymbol }));
-      const saved = "Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.";
-      setNotice(saved);
-      setReleaseStatus({ ok: true, message: saved });
+      const message = "Deployment parameters prepared. Nothing is on-chain yet. Review them, then deploy only if you want a permanent contract that costs gas.";
+      setNotice(message);
+      setReleaseStatus({ ok: true, message });
     } catch (error) {
-      // Only claim the draft was saved when it was. The message is also shown beside the button, because the page
-      // notice sits at the top of a long form and a failure there looks like the button did nothing.
-      const message = error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : draftSaved ? `Release draft saved. ${error.message}` : (error.message || "Create release failed.");
+      const message = error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : draftSaved ? `Release draft saved. ${error.message}` : (error.message || "Preparing the deployment failed.");
       setNotice(message);
       setReleaseStatus({ ok: false, message });
     } finally {
@@ -628,12 +657,13 @@ export function ArtistStudioPage() {
     try {
       if (!canUseStudio || !wallet.account) throw new Error("Connect and authenticate the canonical artist OWNER wallet first.");
       if (!releaseId) throw new Error("Save the release draft before provisioning it.");
+      if (!deployAcknowledged) throw new Error("Confirm that you understand this creates a permanent contract and costs gas before deploying.");
       let expected = provisioning;
       if (!expected) {
         expected = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
         setProvisioning(expected);
         setProvisioningState(expected.state || "PENDING");
-        setNotice("Exact parameters prepared. Review them above, then select Create release on-chain to authorize the transaction.");
+        setNotice("Exact parameters prepared. Review them above, then confirm and select Deploy release contract to authorize the transaction.");
         return;
       }
       if (String(expected.artistWallet).toLowerCase() !== String(wallet.account).toLowerCase()) throw new Error("The connected wallet is not the canonical artist OWNER authorized for this release.");
@@ -642,12 +672,14 @@ export function ArtistStudioPage() {
       const fresh = await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
       if (!preparedParametersAreCurrent(expected, fresh)) {
         setProvisioning(fresh);
-        setNotice("The release parameters changed since you reviewed them. Review the updated parameters, then select Create release on-chain again.");
+        setDeployAcknowledged(false);
+        setNotice("The release parameters changed since you reviewed them. Review the updated parameters, confirm again, then select Deploy release contract.");
         return;
       }
       const walletProvider = wallet.getProvider?.();
       if (!walletProvider?.request) throw new Error("The artist wallet provider is unavailable.");
       const publicProvider = createFujiPublicProvider({ rpcUrl: FUJI_RELEASE_FACTORY_V2_CONFIG.rpcUrl });
+      setDeployAcknowledged(false);
       const submitted = await submitArtistReleaseCreation({ provider: walletProvider, from: wallet.account, payload: expected });
       // Save the hash immediately after wallet submission, before waiting for a receipt.
       await studioFetch(`/studio/releases/${encodeURIComponent(releaseId)}/provisioning/submit`, { method: "POST", payload: { transactionHash: submitted.hash }, headers });
@@ -1200,7 +1232,7 @@ export function ArtistStudioPage() {
           {symbolState.locked
             ? <TextField title="On-chain tag (fixed — read from the deployed contract)" value={symbolState.displayed} onChange={() => {}} readOnly />
             : <TextField title="On-chain tag / contract symbol (1 to 11 letters or digits; fixed once the release is created on-chain)" value={form.releaseSymbol} onChange={(value) => set("releaseSymbol", normalizeContractSymbol(value))} placeholder="Derived from the title if left empty" />}
-          {symbolState.stale && <p role="alert" style={{ color: "var(--vc-crimson)" }}>The on-chain tag changed. Select Create release (or Prepare) to save it to this draft and re-prepare before creating the release on-chain.</p>}
+          {symbolState.stale && <p role="alert" style={{ color: "var(--vc-crimson)" }}>The on-chain tag changed. Select Prepare deployment to save it to this draft and re-prepare before deploying the release contract.</p>}
           <label style={label}>Release type
             <select value={form.releaseType} onChange={(event) => set("releaseType", event.target.value)} style={field}>
               {RELEASE_TYPES.map((type) => <option key={type} value={type}>{RELEASE_TYPE_LABELS[type]}</option>)}
@@ -1209,24 +1241,30 @@ export function ArtistStudioPage() {
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
           {releaseId && <div style={{ ...card, marginTop: 18 }}>
-            <Eyebrow red>Create this release on-chain</Eyebrow>
-            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Your connected wallet creates the release. You pay the gas. Nothing is published until this step succeeds.</p>
+            <Eyebrow red>Deploy the release contract on-chain (separate step)</Eyebrow>
+            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Saving a draft never creates a contract. Deploying creates a permanent release contract on {FUJI_RELEASE_CONFIG.network} that can never be removed, and your connected wallet pays the gas. Nothing is published until this step succeeds.</p>
             {provisioning ? (
               <p style={{ color: "var(--vc-bone-dim)", margin: "12px 0" }}>
-                Ready to create <strong style={{ color: "var(--vc-bone)" }}>{provisioning.name}</strong>
-                {provisioning.symbol ? <> ({provisioning.symbol})</> : null} on {FUJI_RELEASE_CONFIG.network}.
+                Deployment prepared for <strong style={{ color: "var(--vc-bone)" }}>{provisioning.name}</strong>
+                {provisioning.symbol ? <> ({provisioning.symbol})</> : null} on {FUJI_RELEASE_CONFIG.network}. Nothing is on-chain yet.
               </p>
             ) : (
-              <p style={{ color: "var(--vc-bone-dim)" }}>Preparing the release. This only takes a moment.</p>
+              <p style={{ color: "var(--vc-bone-dim)" }}>No deployment is prepared. Your draft stays saved without a contract until you choose to deploy.</p>
             )}
             <p role="status" style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase" }}>Status: {provisioningState}</p>
             {provisioningSubmitted && <p role="status" style={{ color: "var(--vc-bone-dim)" }}>The creation transaction was already submitted for this release and cannot be sent again. Use Check status; the release is on-chain once it shows CONFIRMED.</p>}
             {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
             {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on {FUJI_RELEASE_CONFIG.network}: {albumState.message}</p>}
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
+            {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && (
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: "var(--vc-bone-dim)", margin: "12px 0" }}>
+                <input type="checkbox" checked={deployAcknowledged} onChange={(event) => setDeployAcknowledged(event.target.checked)} />
+                <span>I understand this creates a permanent contract that cannot be removed, and my wallet will pay gas.</span>
+              </label>
+            )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh" : "Prepare"}</button>
-              {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
+              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={prepareDeployment}>{provisioning ? "Refresh deployment" : "Prepare deployment"}</button>
+              {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !deployAcknowledged} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Deploy release contract (permanent, costs gas)"}</button>}
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Check status</button> : null}
             </div>
@@ -1252,7 +1290,7 @@ export function ArtistStudioPage() {
           </div>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 22 }}>
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
-              {busy === "release" ? "Creating…" : "Create release"}
+              {busy === "release" ? "Saving…" : "Save release draft"}
             </button>
             {releaseStatus && <p role="alert" style={{ margin: 0, alignSelf: "center", color: releaseStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{releaseStatus.message}</p>}
             {releaseId && provisioningState === "CONFIRMED" && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
