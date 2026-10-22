@@ -739,6 +739,10 @@ export class ArtistStudioService {
     const publishContract = binding ? String(binding.release_contract_address).toLowerCase() : legacySharedContract();
     const publishTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
     await assertTokenNotOwnedByAnotherArtist(this.db, { artistId: release.artist_id, contractAddress: publishContract, chainId: publishChainId, tokenId: publishTokenId });
+    // Once an edition-creation transaction is recorded its metadata URI is frozen: regenerating or republishing
+    // would only make the stored URI differ from what the chain holds. Confirm from the recorded transaction.
+    const attempt = edition.application_metadata?.publicationAttempt;
+    if (attempt?.transactionHash) throw new ApiError(409, "PUBLICATION_ATTEMPT_RECORDED", "A creation transaction was already submitted for this edition and its metadata is frozen. Confirm that transaction instead of republishing.", { transactionHash: attempt.transactionHash, tokenId: attempt.tokenId, metadataUri: attempt.metadataUri });
     // Editions are immutable and keyed by identity: if this one is already on-chain, republishing metadata would only
     // overwrite the stored URI and make the app lose track of it. Reconcile through confirm instead.
     if (binding) {
@@ -755,6 +759,42 @@ export class ArtistStudioService {
     // refuses success unless the same transaction recorded it on the release contract.
     const provenanceAtCreation = bindingAnchorsAtCreation(binding);
     return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, implementationVersion: binding ? Number(binding.implementation_version) : null, provenanceAtCreation, ...(provenanceAtCreation ? { provenanceRootBytes32: provenanceRootBytes32(provenance.root) } : {}), chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
+  }
+
+  /** Records the edition-creation transaction the moment the wallet returns it, freezing the metadata URI and the
+   * derived token ID this attempt used. Confirmation later verifies exactly this record against the chain. */
+  async recordPublicationSubmission({ request, releaseId, input }) {
+    const identity = await this.identity(request);
+    const transactionHash = requiredText(input?.transactionHash, "transactionHash", { max: 128 }).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The publication transaction could not be verified.");
+    const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
+    const release = rows[0];
+    if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
+    await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
+    const edition = await this.openPublishingEdition(release);
+    if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before a creation transaction can be recorded.");
+    const existing = edition.application_metadata?.publicationAttempt;
+    if (existing?.transactionHash) {
+      if (existing.transactionHash === transactionHash) return { ...existing, alreadyRecorded: true };
+      throw new ApiError(409, "PUBLICATION_ATTEMPT_EXISTS", "A different creation transaction is already recorded for this edition.", { transactionHash: existing.transactionHash });
+    }
+    const binding = await this.releaseContractBinding(release.id);
+    const tokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
+    const attempt = { transactionHash, metadataUri: edition.metadata_uri, tokenId: tokenId.toString(), provenanceRoot: edition.metadata?.provenance?.root || null, submittedAt: new Date().toISOString() };
+    await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: edition.status, metadata: { ...(edition.application_metadata || {}), publicationAttempt: attempt } });
+    await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_SUBMITTED", subjectType: "release", subjectId: release.id, payload: attempt });
+    return attempt;
+  }
+
+  // The open edition with its canonical token row: the row whose token ID the contract derives from the edition's
+  // current identity (a renamed draft can still carry a stale one).
+  async openPublishingEdition(release) {
+    const result = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY CASE WHEN e.status IN ('DRAFT','REVIEW') THEN 0 ELSE 1 END, e.created_at DESC LIMIT 20", [release.id]);
+    const first = result.rows[0];
+    if (!first || result.rows.length === 1) return first;
+    const binding = await this.releaseContractBinding(release.id);
+    const wanted = String(binding ? releaseCloneTokenId(generatedSlug(first.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(first.title, "edition name")));
+    return result.rows.find((row) => row.id === first.id && String(row.token_id) === wanted) || first;
   }
 
   async confirmPublication({ request, releaseId, input }) {
@@ -777,10 +817,18 @@ export class ArtistStudioService {
       edition = editionResult.rows.find((row) => row.id === edition.id && String(row.token_id) === wanted) || edition;
     }
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
+    // The recorded creation attempt is authoritative: its transaction and frozen metadata URI are what the chain must show.
+    const attempt = edition.application_metadata?.publicationAttempt?.transactionHash ? edition.application_metadata.publicationAttempt : null;
+    if (attempt && transactionHash !== null && transactionHash !== attempt.transactionHash) throw new ApiError(409, "PUBLICATION_TRANSACTION_MISMATCH", "This edition's recorded creation transaction is different from the one supplied.", { transactionHash: attempt.transactionHash });
+    if (attempt && transactionHash === null) transactionHash = attempt.transactionHash;
     await this.assertSingleOpenForEdition(release, edition.id);
     let provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
     let currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
     const editionOpen = edition.status === "DRAFT" || edition.status === "REVIEW";
+    if (!editionOpen && release.status === "PUBLISHED" && attempt?.confirmedBlock != null && attempt.transactionHash === transactionHash) {
+      // Repeating the confirmation of an already-confirmed attempt changes nothing and reports the stored outcome.
+      return { releaseId: release.id, editionId: edition.id, tokenId: attempt.emittedTokenId || attempt.tokenId, transactionHash, alreadyConfirmed: true, copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }) };
+    }
     if (!editionOpen && release.status === "PUBLISHED" && publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }).fullyPublished) {
       throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release is already published and its provenance is verified.");
     }
@@ -804,6 +852,9 @@ export class ArtistStudioService {
       // Only the exact release contract's own logs count; any other contract can emit a look-alike event.
       const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === publicationContract).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId);
       if (!event) throw new Error("expected EditionCreated event was not found");
+      // With a recorded attempt the frozen URI must match the stored draft and the chain exactly; a recorded attempt is
+      // never reconciled by adopting a different URI.
+      if (attempt && (edition.metadata_uri !== attempt.metadataUri || event.args.metadataUri !== attempt.metadataUri)) throw new ApiError(409, "PUBLICATION_METADATA_DIVERGED", "The metadata URI no longer matches the one frozen for the submitted creation transaction, or the chain shows a different one. Nothing was changed.", { frozenMetadataUri: attempt.metadataUri, onChainMetadataUri: event.args.metadataUri });
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
         : await new ethers.Contract(publicationContract, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
@@ -889,7 +940,7 @@ export class ArtistStudioService {
       }
       // Only token rows with no metadata URI that point elsewhere are stale duplicates (same predicate as the rename fix).
       await this.db.query("DELETE FROM tokens WHERE edition_id=$1 AND (contract_id<>$2 OR token_id<>$3::numeric) AND metadata_uri IS NULL", [edition.id, edition.contract_id, String(expectedTokenId)]);
-      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: unattachedDraft ? { ...(edition.application_metadata || {}), unattachedDraftMetadata: { ...unattachedDraft, reason: "EDITION_ALREADY_ON_CHAIN", transactionHash } } : edition.application_metadata || {} });
+      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: { ...(edition.application_metadata || {}), publicationAttempt: { ...(attempt || { transactionHash, metadataUri: edition.metadata_uri, submittedAt: null }), tokenId: expectedTokenId.toString(), emittedTokenId: event.args.tokenId.toString(), confirmedBlock: Number(receipt.blockNumber) }, ...(unattachedDraft ? { unattachedDraftMetadata: { ...unattachedDraft, reason: "EDITION_ALREADY_ON_CHAIN", transactionHash } } : {}) } });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
       await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root, provenanceAnchoredAtCreation: Boolean(onChainProvenance), ...(unattachedDraft ? { adoptedOnChainMetadataUri: edition.metadata_uri, unattachedDraftMetadataUri: unattachedDraft.uri } : {}) } });

@@ -775,8 +775,9 @@ export function ArtistStudioPage() {
           headers,
         });
       } catch (error) {
-        if (error?.code !== "EDITION_ALREADY_ON_CHAIN") throw error;
-        // The edition is already on-chain and immutable: reconcile it instead of sending a second creation.
+        if (!["EDITION_ALREADY_ON_CHAIN", "PUBLICATION_ATTEMPT_RECORDED"].includes(error?.code)) throw error;
+        // The edition is already on-chain (or its creation transaction is recorded with frozen metadata): confirm it
+        // instead of republishing or sending a second creation.
         const confirmed = await reconcileExistingEdition({
           studioFetch,
           confirmPath: studioPublicationPath(saved.releaseId, "publication/confirm"),
@@ -809,6 +810,9 @@ export function ArtistStudioPage() {
       // reason before a transaction is ever broadcast.
       await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
       const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data });
+      // Record the transaction (and with it the frozen metadata URI) before anything else can change; if this call
+      // fails the hash is still passed to confirmation below.
+      await studioFetch(studioPublicationPath(saved.releaseId, "publication/submitted"), { method: "POST", payload: { transactionHash: transaction.hash }, headers }).catch(() => null);
       await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId, provenanceRoot });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
