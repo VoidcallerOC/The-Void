@@ -177,12 +177,12 @@ describe.skipIf(!testDatabaseUrl)("Retire the original release and reuse its pri
     const snapshot = JSON.stringify(await q("SELECT id, status, updated_at FROM experiences ORDER BY id"));
     await applyMigration();
     expect(JSON.stringify(await q("SELECT id, status, updated_at FROM experiences ORDER BY id"))).toBe(snapshot);
-    expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION'")).toEqual([{ n: 1 }]);
+    expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     const result = await migrate({ pool, config: q.config });
     expect(result.applied).toContain(MIGRATION);
     await migrate({ pool, config: q.config }); // second run: checksum matches, nothing applied twice
     expect(await q("SELECT count(*)::int AS n FROM schema_migrations WHERE name=$1", [MIGRATION])).toEqual([{ n: 1 }]);
-    expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION'")).toEqual([{ n: 1 }]);
+    expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);
   });
 
   it("lists files held only by archived experiences as available, and never a file an active experience holds", async () => {
