@@ -55,12 +55,12 @@ function world({ wallet = owner, assets, experiences = [], locks = true, extraAs
       if (text.includes("FROM experiences WHERE edition_id=$1 ORDER BY id")) return { rows: rows().filter((row) => row.edition_id === params[0]).sort((a, b) => a.id.localeCompare(b.id)) };
       if (text.includes("FROM experiences WHERE release_id=$1")) return { rows: rows().filter((row) => row.release_id === params[0]) };
       if (text.includes("FROM experiences WHERE id=$1 FOR UPDATE")) return { rows: rows().filter((row) => row.id === params[0]) };
-      if (text.includes("FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2")) return { rows: rows().filter((row) => row.edition_id !== params[0] && JSON.stringify(row.media_config).includes(String(params[1]).replaceAll("%", ""))).slice(0, 1) };
+      if (text.includes("FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2")) return { rows: rows().filter((row) => row.edition_id !== params[0] && (!text.includes("status<>'ARCHIVED'") || row.status !== "ARCHIVED") && JSON.stringify(row.media_config).includes(String(params[1]).replaceAll("%", ""))).slice(0, 1) };
       if (text.includes("FROM tokens")) return { rows: tokens };
       if (text.includes("payload->>'uri' IS NOT NULL")) return { rows: [...state.previews].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at)) };
       if (text.includes("payload->>'uri'=$2")) return { rows: state.previews.some((preview) => preview.uri === params[1]) ? [{ id: "audit-preview" }] : [] };
       if (text.includes("FROM media_assets a WHERE a.artist_id=$1")) {
-        const attached = (id) => rows().some((row) => JSON.stringify(row.media_config).includes(`"${id}"`));
+        const attached = (id) => rows().some((row) => (!text.includes("x.status<>'ARCHIVED'") || row.status !== "ARCHIVED") && JSON.stringify(row.media_config).includes(`"${id}"`));
         return { rows: state.assets.filter((asset) => asset.artist_id === params[0] && asset.visibility === "PROTECTED" && !attached(asset.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((asset) => ({ id: asset.id, media_type: asset.media_type, created_at: asset.created_at, byte_size: String(asset.metadata.byteSize), content_type: asset.contentType })) };
       }
       if (text.includes("FROM media_assets WHERE artist_id=$1 AND storage_key=$2")) return { rows: state.assets.filter((asset) => asset.artist_id === params[0] && asset.storage_key === String(params[1])).map((asset) => ({ id: asset.id })) };
@@ -211,6 +211,53 @@ describe("server checks that make reuse safe", () => {
     expect([...w.state.experiences.values()].every((row) => row.edition_id === "edition-1")).toBe(true);
     await expect(save(w, { fullTrack: FULL, experienceAudio: DEMO }, "edition-1")).resolves.toHaveLength(2);
     expect(w.state.experiences.size).toBe(2);
+  });
+
+  it("names the conflict in an actionable error: an active experience of another edition, and what to do", async () => {
+    const w = world();
+    await save(w, { fullTrack: FULL }, "edition-1");
+    await expect(save(w, { fullTrack: FULL }, "edition-2")).rejects.toMatchObject({ status: 409, code: "PROTECTED_MEDIA_IN_USE", message: expect.stringMatching(/active experience of a different edition.*different file.*retire the other edition/s) });
+  });
+
+  describe("a retired (ARCHIVED) edition no longer reserves its files", () => {
+    const archived = (id, asset, mediaType) => ({ id, edition_id: "edition-1", release_id: "release-1", artist_id: "artist-1", status: "ARCHIVED", version: 1, media_config: { protected: true, protectedMedia: [{ assetId: asset, mediaType }] } });
+
+    it("lets a different edition use a file only archived experiences hold, and keeps the archived rows exactly as they were", async () => {
+      const retired = [archived("exp-old-full", "asset-master", "AUDIO"), archived("exp-old-demo", "asset-demo", "DEMO")];
+      const w = world({ experiences: retired.map((row) => ({ ...row })) });
+      await expect(save(w, { fullTrack: FULL, experienceAudio: DEMO }, "edition-2")).resolves.toHaveLength(2);
+      for (const row of retired) expect(w.state.experiences.get(row.id)).toEqual(row); // status, edition and association unchanged
+      const claimed = [...w.state.experiences.values()].filter((row) => row.edition_id === "edition-2");
+      expect(claimed).toHaveLength(2);
+      expect(claimed.every((row) => row.status !== "ARCHIVED")).toBe(true);
+    });
+
+    it("lists a file only archived experiences hold as available again", async () => {
+      const w = world({ experiences: [archived("exp-old-full", "asset-master", "AUDIO")] });
+      const ids = (await w.studio.listRegisteredMedia({ request, artistId: "artist-1" })).protected.map((item) => item.assetId);
+      expect(ids).toEqual(["asset-demo", "asset-master"]);
+    });
+
+    it("still refuses the file while any active experience of another edition holds it, even next to an archived one", async () => {
+      const w = world({ experiences: [archived("exp-old-full", "asset-master", "AUDIO"), { id: "exp-live", edition_id: "edition-3", release_id: "release-3", artist_id: "artist-1", status: "PUBLISHED", version: 1, media_config: { protected: true, protectedMedia: [{ assetId: "asset-master", mediaType: "AUDIO" }] } }] });
+      await expect(save(w, { fullTrack: FULL }, "edition-2")).rejects.toMatchObject({ code: "PROTECTED_MEDIA_IN_USE" });
+      expect([...w.state.experiences.values()].some((row) => row.edition_id === "edition-2")).toBe(false);
+    });
+
+    it("keeps one experience per file within an edition: a second save of the same file updates it instead of adding another", async () => {
+      const w = world({ experiences: [archived("exp-old-full", "asset-master", "AUDIO")] });
+      await save(w, { fullTrack: FULL }, "edition-2");
+      await w.studio.createExperience({ request, editionId: "edition-2", input: { ...planCatalogExperiences({ ...FORM, editionId: "edition-2", fullTrack: FULL })[0].payload, id: "experience-edition-2-another-id" } });
+      expect([...w.state.experiences.values()].filter((row) => row.edition_id === "edition-2")).toHaveLength(1);
+    });
+
+    it("leaves an archived experience's file unreservable by publication too: re-publishing it is blocked while an active edition holds the file", async () => {
+      const w = world({ experiences: [archived("exp-old-full", "asset-master", "AUDIO")] });
+      await save(w, { fullTrack: FULL }, "edition-2");
+      const old = w.state.experiences.get("exp-old-full");
+      await w.studio.publishExperience(RELEASE_1, { ...old, status: "DRAFT" });
+      expect(w.state.experiences.get("exp-old-full").status).toBe("ARCHIVED"); // blocked: nothing was written
+    });
   });
 });
 

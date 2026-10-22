@@ -266,6 +266,14 @@ function expectedReleaseVersion(factory) {
   return Number.isSafeInteger(version) && version > 0 ? version : 2;
 }
 
+// A private file belongs to one edition at a time. An experience reserves its files unless it is
+// ARCHIVED: archiving (taking an edition off the site) keeps the row and its media association as
+// history but ends the reservation, and the gateway no longer serves an archived experience, so a
+// retired edition's file can back a new active edition. Any non-archived experience of another
+// edition still reserves it.
+const ACTIVE_MEDIA_CLAIM_SQL = "SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 AND status<>'ARCHIVED' LIMIT 1";
+const PROTECTED_MEDIA_IN_USE_MESSAGE = "This file is already used by an active experience of a different edition. Identical file bytes always resolve to the same stored file, so upload a different file for this edition, or retire the other edition first.";
+
 function requiresFactoryRelease(release) {
   return String(release?.release_metadata?.publicationArchitecture || "").trim().toLowerCase() === "release-per-contract";
 }
@@ -644,8 +652,8 @@ export class ArtistStudioService {
       await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`void:edition-experiences:${editionId}`]);
       for (const assetId of ids) await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`void:media-asset:${assetId}`]);
       for (const assetId of ids) {
-        const { rows } = await tx.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [editionId, `%"${assetId}"%`]);
-        if (rows.length) throw new ApiError(409, "PROTECTED_MEDIA_IN_USE", "This file is already used by a different edition. Upload a separate file for this one.");
+        const { rows } = await tx.query(ACTIVE_MEDIA_CLAIM_SQL, [editionId, `%"${assetId}"%`]);
+        if (rows.length) throw new ApiError(409, "PROTECTED_MEDIA_IN_USE", PROTECTED_MEDIA_IN_USE_MESSAGE);
       }
       const siblings = (await tx.query("SELECT id, artist_id, edition_id, status, version, media_config FROM experiences WHERE edition_id=$1 ORDER BY id", [editionId])).rows;
       return write({ repository, siblings });
@@ -1255,7 +1263,7 @@ export class ArtistStudioService {
         const needed = [...new Set(protectedAssetIds(bound.mediaConfig))].sort();
         if (needed.some((assetId) => !locked.includes(assetId))) return { state: "relock", locked: [...new Set([...locked, ...needed])].sort() };
         for (const assetId of needed) {
-          const claimed = await tx.query("SELECT id FROM experiences WHERE edition_id<>$1 AND media_config::text LIKE $2 LIMIT 1", [current.edition_id, `%"${assetId}"%`]);
+          const claimed = await tx.query(ACTIVE_MEDIA_CLAIM_SQL, [current.edition_id, `%"${assetId}"%`]);
           if (claimed.rows.length) return { state: "blocked", detail: "A file this experience unlocks is already used by a different edition." };
         }
         await repository.saveExperience({ id: current.id, artistId: current.artist_id, releaseId: current.release_id, editionId: current.edition_id, title: current.title, description: current.description, experienceType: current.experience_type, requirements: bound.requirements, mediaConfig: bound.mediaConfig, version: Number(current.version || 1), status: "PUBLISHED" });
@@ -1294,7 +1302,7 @@ export class ArtistStudioService {
   async listRegisteredMedia({ request, artistId }) {
     const { artist } = await this.ownedArtist({ artistId, request });
     const [assets, previews] = await Promise.all([
-      this.db.query("SELECT a.id, a.media_type, a.created_at, (a.metadata->>'byteSize') AS byte_size, (SELECT i.payload->>'contentType' FROM audit_events u JOIN audit_events i ON i.event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND i.subject_type='artist' AND i.subject_id=a.artist_id AND i.payload->>'uploadId'=u.payload->>'uploadId' WHERE u.event_type='STUDIO_MEDIA_UPLOADED' AND u.subject_type='media_asset' AND u.subject_id=a.id LIMIT 1) AS content_type FROM media_assets a WHERE a.artist_id=$1 AND a.visibility='PROTECTED' AND NOT EXISTS (SELECT 1 FROM experiences x WHERE x.media_config::text LIKE '%\"' || a.id || '\"%') ORDER BY a.created_at DESC LIMIT 100", [artist.id]),
+      this.db.query("SELECT a.id, a.media_type, a.created_at, (a.metadata->>'byteSize') AS byte_size, (SELECT i.payload->>'contentType' FROM audit_events u JOIN audit_events i ON i.event_type='STUDIO_MEDIA_UPLOAD_ISSUED' AND i.subject_type='artist' AND i.subject_id=a.artist_id AND i.payload->>'uploadId'=u.payload->>'uploadId' WHERE u.event_type='STUDIO_MEDIA_UPLOADED' AND u.subject_type='media_asset' AND u.subject_id=a.id LIMIT 1) AS content_type FROM media_assets a WHERE a.artist_id=$1 AND a.visibility='PROTECTED' AND NOT EXISTS (SELECT 1 FROM experiences x WHERE x.status<>'ARCHIVED' AND x.media_config::text LIKE '%\"' || a.id || '\"%') ORDER BY a.created_at DESC LIMIT 100", [artist.id]),
       this.db.query("SELECT payload->>'uri' AS uri, max(payload->>'contentType') AS content_type, max(payload->>'byteSize') AS byte_size, max(created_at) AS uploaded_at FROM audit_events WHERE event_type='STUDIO_AUDIO_PREVIEW_UPLOADED' AND subject_type='artist' AND subject_id=$1 AND payload->>'uri' IS NOT NULL GROUP BY payload->>'uri' ORDER BY max(created_at) DESC LIMIT 20", [artist.id]),
     ]);
     const size = (value) => (value === null || value === undefined ? null : Number(value));
