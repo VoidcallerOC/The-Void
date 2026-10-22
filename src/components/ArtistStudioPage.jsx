@@ -766,11 +766,22 @@ export function ArtistStudioPage() {
       // Persist the open-edition 0 before createEdition. A saved hard cap must
       // not stay behind while the chain is minted unlimited.
       const saved = await saveDraft(ids, { manageBusy: false, quantity: checked.supply });
-      const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
-        method: "POST",
-        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: form.releaseType },
-        headers,
-      });
+      let metadata;
+      try {
+        metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
+          method: "POST",
+          payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: form.releaseType },
+          headers,
+        });
+      } catch (error) {
+        if (error?.code !== "PUBLICATION_ATTEMPT_RECORDED") throw error;
+        // A creation transaction was already submitted with frozen metadata: confirm it, never republish or create again.
+        const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: {}, headers });
+        setNotice(publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true }).message);
+        setPublishedTokenId(String(confirmed.tokenId));
+        setStep("sale");
+        return;
+      }
       if (metadata.releaseContractAddress && metadata.primarySaleAddress) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: metadata.tokenId });
       const provider = wallet.getProvider?.();
       const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.primarySaleAddress && metadata.provenanceAnchorAddress && Number(metadata.chainId) === Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId));
@@ -791,6 +802,9 @@ export function ArtistStudioPage() {
       // reason before a transaction is ever broadcast.
       await simulateReleaseCall(provider, { from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data, chainId: metadata.chainId });
       const transaction = await sendReleaseTransaction({ provider, from: wallet.account, to: metadata.releaseContractAddress, data: encoded.data });
+      // Record the transaction (and with it the frozen metadata URI) before anything else can change; if this call
+      // fails the hash is still passed to confirmation below.
+      await studioFetch(studioPublicationPath(saved.releaseId, "publication/submitted"), { method: "POST", payload: { transactionHash: transaction.hash }, headers }).catch(() => null);
       await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId, provenanceRoot });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
