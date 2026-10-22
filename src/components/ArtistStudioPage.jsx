@@ -22,6 +22,7 @@ import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactor
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState } from "../lib/contract-symbol.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
+import { reconcileExistingEdition } from "../lib/studio-publication-recovery.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, fetchRegisteredMedia, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings, mapReleaseSales, mapSecondaryRoyalties } from "../lib/sale-earnings.js";
@@ -766,11 +767,28 @@ export function ArtistStudioPage() {
       // Persist the open-edition 0 before createEdition. A saved hard cap must
       // not stay behind while the chain is minted unlimited.
       const saved = await saveDraft(ids, { manageBusy: false, quantity: checked.supply });
-      const metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
-        method: "POST",
-        payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: form.releaseType },
-        headers,
-      });
+      let metadata;
+      try {
+        metadata = await studioFetch(studioPublicationPath(saved.releaseId, "metadata"), {
+          method: "POST",
+          payload: { artwork: form.trackArtwork || form.releaseArtwork, ...(form.trackPreview ? { previewAudio: form.trackPreview } : {}), includes: form.includes.split("\n").map((line) => line.trim()).filter(Boolean), releaseType: form.releaseType },
+          headers,
+        });
+      } catch (error) {
+        if (error?.code !== "EDITION_ALREADY_ON_CHAIN") throw error;
+        // The edition is already on-chain and immutable: reconcile it instead of sending a second creation.
+        const confirmed = await reconcileExistingEdition({
+          studioFetch,
+          confirmPath: studioPublicationPath(saved.releaseId, "publication/confirm"),
+          headers,
+          askToAdopt: ({ onChainMetadataUri, draftMetadataUri }) => window.confirm(`This edition already exists on-chain and its metadata cannot be changed.\n\nOn-chain: ${onChainMetadataUri}\nYour draft: ${draftMetadataUri}\n\nUse the on-chain edition? Your draft metadata stays recorded and is not published.`),
+        });
+        setNotice(publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true }).message);
+        setPublishedTokenId(String(confirmed.tokenId));
+        setActiveReleaseAsset((current) => ({ ...(current || {}), chainId: Number(confirmed.chainId), releaseContractAddress: confirmed.releaseContractAddress, tokenId: String(confirmed.tokenId) }));
+        setStep("sale");
+        return;
+      }
       if (metadata.releaseContractAddress && metadata.primarySaleAddress) setActiveReleaseAsset({ chainId: Number(metadata.chainId), releaseContractAddress: metadata.releaseContractAddress, primarySaleAddress: metadata.primarySaleAddress, provenanceAnchorAddress: metadata.provenanceAnchorAddress, tokenId: metadata.tokenId });
       const provider = wallet.getProvider?.();
       const releaseScoped = Boolean(metadata.releaseKey && metadata.releaseContractAddress && metadata.primarySaleAddress && metadata.provenanceAnchorAddress && Number(metadata.chainId) === Number(FUJI_RELEASE_FACTORY_V2_CONFIG.chainId));
