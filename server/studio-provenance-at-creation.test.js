@@ -124,10 +124,12 @@ describe("Factory V3 publication records the provenance root in the edition tran
   });
 
   it("hands Studio the bytes32 root to pass into the creation call for V3 releases only", async () => {
-    const v3 = await harness({ version: 3 }).instance.publishMetadata({ request, releaseId: "release-1", input: { releaseType: "EP" } });
+    // Metadata is published before the edition exists on-chain.
+    const notCreated = (h) => { h.chain.edition.mockResolvedValue([releaseKey, editionId, owner, 10n, 0n, "", false]); return h; };
+    const v3 = await notCreated(harness({ version: 3 })).instance.publishMetadata({ request, releaseId: "release-1", input: { releaseType: "EP" } });
     expect(v3).toMatchObject({ provenanceAtCreation: true, implementationVersion: 3, provenanceAnchorAddress: releaseContract });
     expect(v3.provenanceRootBytes32).toBe(`0x${v3.provenanceRoot}`);
-    const v2 = await harness({ version: 2 }).instance.publishMetadata({ request, releaseId: "release-1", input: { releaseType: "EP" } });
+    const v2 = await notCreated(harness({ version: 2 })).instance.publishMetadata({ request, releaseId: "release-1", input: { releaseType: "EP" } });
     expect(v2).toMatchObject({ provenanceAtCreation: false, implementationVersion: 2, provenanceAnchorAddress: v2Anchor });
     expect(v2.provenanceRootBytes32).toBeUndefined();
   });
