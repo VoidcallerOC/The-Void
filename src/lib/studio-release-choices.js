@@ -21,11 +21,34 @@ function rememberTitle(index, key, title) {
   index.set(key, titles);
 }
 
+const ADDRESS = /^0x[0-9a-f]{40}$/i;
+const ZERO_ADDRESS = /^0x0{40}$/i;
+// The Studio catalog's releaseBindings are release_contracts rows with status DEPLOYED or
+// VERIFIED. A binding counts only with a real release contract address; when a row does carry
+// a status, anything but DEPLOYED/VERIFIED is not a deployment.
+function bindingIsDeployed(binding) {
+  const status = normalizedText(binding?.status);
+  if (status && status !== "deployed" && status !== "verified") return false;
+  const address = String(binding?.releaseContractAddress ?? binding?.release_contract_address ?? "").trim();
+  return ADDRESS.test(address) && !ZERO_ADDRESS.test(address);
+}
+
+function deployedReleaseIds(releaseBindings) {
+  const ids = new Set();
+  for (const binding of Array.isArray(releaseBindings) ? releaseBindings : []) {
+    const id = normalizedText(binding?.releaseId ?? binding?.release_id);
+    if (id && bindingIsDeployed(binding)) ids.add(id);
+  }
+  return ids;
+}
+
 // Unpublished copies of a title this artist already retired. A published
-// release with that title is the live card and stays. Matching is by artist
-// id or artist name, and by title, all case-insensitive.
-function retiredByArchivedTitle(release, artist, retiredByArtistId, retiredByArtistName) {
+// release with that title is the live card and stays, and so does a draft
+// whose release contract is already deployed (a replacement, not a leftover).
+// Matching is by artist id or artist name, and by title, all case-insensitive.
+function retiredByArchivedTitle(release, artist, retiredByArtistId, retiredByArtistName, deployedIds) {
   if (normalizedText(release?.status) === "published") return false;
+  if (deployedIds.has(normalizedText(release?.id))) return false;
   const title = normalizedText(release?.title);
   if (!title) return false;
   const artistId = normalizedText(release?.artistId);
@@ -46,9 +69,11 @@ export function studioArtistChoices(artists = []) {
  * artist + title. Of duplicates, the published one wins, then the one with
  * the most editions, then the first returned (the API lists newest first).
  * A draft whose title matches an archived release for the same artist is
- * left out. The published release of that title, if there is one, stays.
+ * left out. The published release of that title, if there is one, stays, and
+ * so does a draft with a deployed release contract in `releaseBindings`.
  */
-export function studioReleaseChoices({ releases = [], artists = [], editions = [] } = {}) {
+export function studioReleaseChoices({ releases = [], artists = [], editions = [], releaseBindings = [] } = {}) {
+  const deployedIds = deployedReleaseIds(releaseBindings);
   const artistById = new Map(artists.map((artist) => [artist.id, artist]));
   const editionCount = new Map();
   for (const edition of editions) editionCount.set(edition.releaseId, (editionCount.get(edition.releaseId) || 0) + 1);
@@ -77,7 +102,7 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
   const live = releases.filter((release) => {
     if (isWithdrawnPublicListing(release)) return false;
     if (normalizedText(release.status) === "archived") return false;
-    return !retiredByArchivedTitle(release, artistFor(release), retiredByArtistId, retiredByArtistName);
+    return !retiredByArchivedTitle(release, artistFor(release), retiredByArtistId, retiredByArtistName, deployedIds);
   });
   const all = live.map((release) => ({ release, artist: artistById.get(release.artistId) || null }));
   const real = all.filter(({ release, artist }) => !isHidden(release) && !isHidden(artist));

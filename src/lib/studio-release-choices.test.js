@@ -195,3 +195,62 @@ describe("Create release selector against the Studio catalog payload", () => {
     expect(JSON.stringify(payload)).toBe(before);
   });
 });
+
+describe("a deployed replacement draft is not a retired leftover", () => {
+  // The incident: the original was archived (migration 043), so every unpublished same-title
+  // release was hidden, including the replacement whose release contract was already deployed.
+  const payload = {
+    artists: [{ id: "voidcaller", slug: "voidcaller", display_name: "Voidcaller", status: "ACTIVE" }],
+    releases: [
+      { id: "release-original", artist_id: "voidcaller", slug: "forgive-forget", title: "Forgive & Forget", status: "ARCHIVED", release_metadata: {} },
+      { id: "release-replacement", artist_id: "voidcaller", slug: "forgive-forget-2", title: "Forgive & Forget", status: "DRAFT", release_metadata: {} },
+      { id: "release-abandoned", artist_id: "voidcaller", slug: "forgive-forget-3", title: "Forgive & Forget", status: "DRAFT", release_metadata: {} },
+      { id: "voidcaller-legacy-genesis", artist_id: "voidcaller", slug: "voidcaller-legacy-genesis", title: "VOIDCALLER", status: "PUBLISHED", release_metadata: {} },
+    ],
+    editions: [],
+    experiences: [],
+  };
+  const DEPLOYED = "0x09969f81308f28516736492ddded643abac5670d";
+  const SALE = "0x3b4cb323693894929c4b7a9f1747e7390219023e";
+  const binding = (overrides = {}) => ({ release_id: "release-replacement", chain_id: 43114, release_contract_address: DEPLOYED, primary_sale_address: SALE, ...overrides });
+  const ids = (releaseBindings) => studioReleaseChoices({ ...mapPublishedCatalog(payload), releaseBindings }).map(({ release }) => release.id);
+
+  it("keeps the replacement and VOIDCALLER, drops the archived original and the abandoned draft", () => {
+    expect(ids([binding()])).toEqual(["release-replacement", "voidcaller-legacy-genesis"]);
+  });
+
+  it("accepts mapped (camelCase) bindings and a DEPLOYED or VERIFIED status", () => {
+    const mapped = { releaseId: "release-replacement", chainId: 43114, releaseContractAddress: DEPLOYED, primarySaleAddress: SALE };
+    expect(ids([mapped])).toContain("release-replacement");
+    expect(ids([binding({ status: "DEPLOYED" })])).toContain("release-replacement");
+    expect(ids([binding({ status: "verified" })])).toContain("release-replacement");
+  });
+
+  it("hides the replacement again without a binding, as before the fix", () => {
+    expect(ids([])).toEqual(["voidcaller-legacy-genesis"]);
+    expect(studioReleaseChoices(mapPublishedCatalog(payload)).map(({ release }) => release.id)).toEqual(["voidcaller-legacy-genesis"]);
+  });
+
+  it("grants no exemption for missing, malformed, zero-address, wrong-release or non-deployed bindings", () => {
+    const hidden = (releaseBindings) => expect(ids(releaseBindings)).not.toContain("release-replacement");
+    hidden(undefined);
+    hidden(null);
+    hidden("release-replacement");
+    hidden([null, {}, { release_id: "release-replacement" }]);
+    hidden([binding({ release_contract_address: "" })]);
+    hidden([binding({ release_contract_address: "0x1234" })]);
+    hidden([binding({ release_contract_address: "0x0000000000000000000000000000000000000000" })]);
+    hidden([binding({ release_id: "release-other" })]);
+    hidden([binding({ release_id: "" })]);
+    hidden([binding({ status: "PENDING" })]);
+    hidden([binding({ status: "FAILED" })]);
+  });
+
+  it("does not exempt the abandoned draft because another release has a binding", () => {
+    expect(ids([binding()])).not.toContain("release-abandoned");
+  });
+
+  it("does not bring the archived original back, even with a deployed binding", () => {
+    expect(ids([binding({ release_id: "release-original" })])).not.toContain("release-original");
+  });
+});
