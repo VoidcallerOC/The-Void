@@ -682,13 +682,22 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     });
   }
 
-  it("shows an editable on-chain tag for a loaded, undeployed draft, populated with its current symbol", async () => {
+  const preparedPanel = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare deployment" }));
+    await screen.findByRole("button", { name: "Refresh deployment" });
+  };
+  const acknowledge = async () => fireEvent.click(await screen.findByRole("checkbox", { name: /permanent contract/i }));
+
+  it("shows an editable on-chain tag for a loaded, undeployed draft and prepares nothing just by opening it", async () => {
     mockDraft();
     renderStudio("rel-draft");
     const field = await tagField();
-    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
+    await waitFor(() => expect(calls("POST", "/provisioning/status")).toHaveLength(1));
     expect(field.readOnly).toBe(false);
+    expect(field.value).toBe("");
     expect(screen.getByLabelText(/Release type/).value).toBe("SINGLE");
+    expect(calls("POST", "/provisioning/prepare")).toHaveLength(0);
+    expect(walletProvider.request).not.toHaveBeenCalled();
   });
 
   it("prefers the symbol the artist already stored on the draft", async () => {
@@ -701,52 +710,94 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     mockDraft();
     renderStudio("rel-draft");
     const field = await tagField();
-    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
     fireEvent.change(field, { target: { value: "fnf-12 abcdefghij" } });
     expect(field.value).toBe("FNF12ABCDEF");
   });
 
-  it("saves an edited symbol onto the existing draft (PATCH) and re-prepares, never creating a draft", async () => {
-    mockDraft({ onPrepare: (n) => (n === 1 ? prepared("FORGIVEFORG", DIGEST_A) : prepared("FNF", DIGEST_B)) });
+  it("saves an edited symbol onto the existing draft (PATCH) and prepares it, never creating a draft", async () => {
+    mockDraft({ onPrepare: () => prepared("FNF", DIGEST_B) });
     renderStudio("rel-draft");
     const field = await tagField();
-    await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
     fireEvent.change(field, { target: { value: "fnf" } });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare deployment" }));
     await waitFor(() => expect(calls("PATCH", "/studio/releases/rel-draft")).toHaveLength(1));
     expect(calls("PATCH", "/studio/releases/rel-draft")[0][1].payload).toMatchObject({ symbol: "FNF", releaseType: "SINGLE", title: "Forgive & Forget" });
     expect(calls("POST", "/releases")).toHaveLength(0);
-    await waitFor(() => expect(calls("POST", "/provisioning/prepare")).toHaveLength(2));
+    await waitFor(() => expect(calls("POST", "/provisioning/prepare")).toHaveLength(1));
     await waitFor(() => expect(screen.getByText(/\(FNF\)/)).toBeTruthy());
     expect(field.value).toBe("FNF");
+    expect(walletProvider.request).not.toHaveBeenCalled();
   });
 
-  it("withholds Create release on-chain while the prepared request is stale, until it is re-prepared", async () => {
+  it("withholds Deploy release contract while the prepared request is stale, until it is re-prepared", async () => {
     mockDraft();
     renderStudio("rel-draft");
     const field = await tagField();
-    await screen.findByRole("button", { name: "Create release on-chain" });
+    await preparedPanel();
+    await acknowledge();
+    await screen.findByRole("button", { name: /Deploy release contract/ });
     fireEvent.change(field, { target: { value: "NEWTAG" } });
-    expect(screen.queryByRole("button", { name: "Create release on-chain" })).toBeNull();
-    expect(screen.getByRole("alert").textContent).toMatch(/on-chain tag changed/i);
+    expect(screen.queryByRole("button", { name: /Deploy release contract/ })).toBeNull();
+    expect(screen.getAllByRole("alert").map((node) => node.textContent).join(" ")).toMatch(/on-chain tag changed/i);
   });
 
-  it("offers no second Create release on-chain once the creation transaction was submitted", async () => {
+  it("offers no second deployment once the creation transaction was submitted", async () => {
     mockDraft({ status: { state: "SUBMITTED", chainId: CHAIN_ID, transactionHash: `0x${"3a".repeat(32)}` } });
     renderStudio("rel-draft");
     expect(await screen.findByText(/already submitted for this release and cannot be sent again/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Create release on-chain" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Deploy release contract/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
   });
 
   it("never opens the wallet when a fresh preparation differs from the parameters the artist reviewed", async () => {
     mockDraft({ onPrepare: (n) => (n === 1 ? prepared("FORGIVEFORG", DIGEST_A) : prepared("FORGIVEFORG", DIGEST_B)) });
     renderStudio("rel-draft");
-    fireEvent.click(await screen.findByRole("button", { name: "Create release on-chain" }));
+    await preparedPanel();
+    await acknowledge();
+    fireEvent.click(await screen.findByRole("button", { name: /Deploy release contract/ }));
     await waitFor(() => expect(calls("POST", "/provisioning/prepare")).toHaveLength(2));
     expect(await screen.findByText(/parameters changed since you reviewed them/i)).toBeTruthy();
     expect(walletProvider.request).not.toHaveBeenCalled();
     expect(calls("POST", "/provisioning/submit")).toHaveLength(0);
+  });
+
+  it("saves a draft with no deployment request, no wallet request and no transaction", async () => {
+    mockDraft();
+    renderStudio("rel-draft");
+    await tagField();
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
+    await waitFor(() => expect(calls("PATCH", "/studio/releases/rel-draft")).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByText(/No contract was created and no gas was spent/i).length).toBeGreaterThan(0));
+    expect(calls("POST", "/provisioning/prepare")).toHaveLength(0);
+    expect(calls("POST", "/provisioning/submit")).toHaveLength(0);
+    expect(walletProvider.request).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Deploy release contract/ })).toBeNull();
+  });
+
+  it("keeps the saved draft after a reload: it reloads from the catalog with its details and no deployment", async () => {
+    mockDraft({ stored: "FNF" });
+    const first = renderStudio("rel-draft");
+    await tagField();
+    first.unmount();
+    renderStudio("rel-draft");
+    expect(await screen.findByDisplayValue("Forgive & Forget")).toBeTruthy();
+    expect((await tagField()).value).toBe("FNF");
+    expect(calls("POST", "/provisioning/prepare")).toHaveLength(0);
+    expect(walletProvider.request).not.toHaveBeenCalled();
+  });
+
+  it("deploys only after the explicit acknowledgement, and only through the Deploy release contract button", async () => {
+    mockDraft();
+    renderStudio("rel-draft");
+    await preparedPanel();
+    const deploy = await screen.findByRole("button", { name: /Deploy release contract/ });
+    expect(deploy.disabled).toBe(true);
+    fireEvent.click(deploy);
+    expect(walletProvider.request).not.toHaveBeenCalled();
+    expect(calls("POST", "/provisioning/submit")).toHaveLength(0);
+    await acknowledge();
+    expect(screen.getByRole("button", { name: /Deploy release contract/ }).disabled).toBe(false);
+    expect(screen.getByText(/permanent contract that cannot be removed/i)).toBeTruthy();
   });
 
   it("locks the tag only after on-chain creation is confirmed, and shows the deployed contract's symbol", async () => {
@@ -776,20 +827,20 @@ describe("Artist Studio Create release with an archived release in the URL", () 
   const mockApi = () => studioFetch.mockImplementation(async (path, options = {}) => {
     if (path === "/studio/catalog") return archivedCatalog();
     if (path === "/studio/artists/artist-a/releases" && options.method === "POST") return { id: "release-new", title: options.payload.title, status: "DRAFT" };
-    if (path === "/studio/releases/release-new/provisioning/prepare") return { state: "PENDING", chainId: CHAIN_ID, releaseKey: `0x${"cd".repeat(32)}`, artistWallet: wallet.account, symbol: "FORGIVEFORG" };
     throw new Error(`unexpected ${options.method || "GET"} ${path}`);
   });
 
-  it("does not load the archived release from the URL, and Create release makes a new release", async () => {
+  it("does not load the archived release from the URL, and Save release draft makes a new draft with no deployment", async () => {
     mockApi();
     renderStudio(ARCHIVED);
     await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
     fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Create release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
     await waitFor(() => expect(calls()).toContain("POST /studio/artists/artist-a/releases"));
-    // Never touches the archived release: no prepare, no PATCH.
+    // Never touches the archived release, and never prepares or submits a deployment for the new draft.
     expect(calls().filter((call) => call.includes(ARCHIVED))).toEqual([]);
-    expect(calls()).toContain("POST /studio/releases/release-new/provisioning/prepare");
+    expect(calls().filter((call) => call.includes("provisioning"))).toEqual([]);
+    expect(walletProvider.request).not.toHaveBeenCalled();
   });
 
   it("shows a failure beside the button and does not claim the draft was saved when nothing was", async () => {
@@ -801,7 +852,7 @@ describe("Artist Studio Create release with an archived release in the URL", () 
     renderStudio(ARCHIVED);
     await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
     fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Create release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("The release could not be created.");
     expect(alert.textContent).not.toMatch(/draft saved/i);
