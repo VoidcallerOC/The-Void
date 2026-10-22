@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ethers } from "ethers";
 
 // Verified C-Chain release-per-contract infrastructure (config/mainnet-release-per-contract.json).
 const MAINNET_FACTORY = "0xE744D58fA8138042f5f00a28d39f89081539C19B";
@@ -97,5 +98,43 @@ describe("frontend release config with mainnet selected", () => {
     // Genuinely Fuji build: buyer-path collect errors still read "Avalanche Fuji".
     const primarySale = await import("./primary-sale.js");
     expect(primarySale.explainCollectError({ message: "insufficient funds" }).message).toContain("Avalanche Fuji");
+  });
+  describe("publish simulation errors name the chain that was simulated", () => {
+    const FROM = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
+    const TO = "0x2222222222222222222222222222222222222222";
+    const walletOn = async (release, callError) => ({ request: async ({ method }) => { if (method === "eth_chainId") return release.RELEASE_FACTORY_CONFIG.chainHexId; if (method === "eth_call") throw callError; throw new Error(`unexpected ${method}`); } });
+
+    it("mainnet: an unrecognised revert is labelled C-Chain 43114, never Fuji, and keeps its details", async () => {
+      vi.stubEnv("VITE_RELEASE_NETWORK", "mainnet");
+      vi.stubEnv("RELEASE_NETWORK", "mainnet");
+      vi.resetModules();
+      const release = await import("./fuji-release.js");
+      expect(release.RELEASE_FACTORY_CONFIG.chainId).toBe(43114);
+      const unknown = Object.assign(new Error("execution reverted at https://rpc.example/key123"), { data: "0xdeadbeef00" });
+      const error = await release.simulateReleaseCall(await walletOn(release, unknown), { from: FROM, to: TO, data: "0x", chainId: 43114 }).catch((e) => e);
+      expect(error.message).toMatch(/would revert on Avalanche C-Chain \(chain 43114\)/);
+      expect(error.message).toContain("0xdeadbeef00");
+      expect(error.message).toContain("Nothing was sent");
+      expect(error.message).not.toMatch(/Fuji|rpc\.example|key123/);
+      expect(error.revertData).toBe("0xdeadbeef00");
+      // Known custom errors name the real chain too.
+      const paused = new ethers.Interface(["error ContractPaused()"]).encodeErrorResult("ContractPaused");
+      expect(release.explainFujiEditionError({ data: paused }).message).toContain("Avalanche C-Chain");
+      expect(release.explainFujiEditionError({ data: paused }).message).not.toMatch(/Fuji/);
+      // A wallet on the wrong chain is rejected before any simulation.
+      await expect(release.simulateReleaseCall({ request: async () => "0xa869" }, { from: FROM, to: TO, data: "0x", chainId: 43114 })).rejects.toMatchObject({ code: "CHAIN_MISMATCH" });
+    });
+
+    it("Fuji build: still 43113 and still labelled Fuji", async () => {
+      vi.stubEnv("VITE_RELEASE_NETWORK", "");
+      vi.stubEnv("RELEASE_NETWORK", "");
+      vi.resetModules();
+      const release = await import("./fuji-release.js");
+      expect(release.RELEASE_FACTORY_CONFIG.chainId).toBe(43113);
+      const error = await release.simulateReleaseCall(await walletOn(release, new Error("execution reverted")), { from: FROM, to: TO, data: "0x", chainId: 43113 }).catch((e) => e);
+      expect(error.message).toMatch(/would revert on Fuji \(chain 43113\).*Nothing was sent\./);
+      const paused = new ethers.Interface(["error ContractPaused()"]).encodeErrorResult("ContractPaused");
+      expect(release.explainFujiEditionError({ data: paused }).message).toBe("The Fuji release contract is currently paused. Publishing is disabled until an admin unpauses it.");
+    });
   });
 });
