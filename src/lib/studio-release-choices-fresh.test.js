@@ -22,4 +22,14 @@ describe("the retired broken release and a completely new release", () => {
     expect(existingDraftsForTitle([retired], { artistId: "voidcaller", title: "forgive & forget" })).toEqual([]);
     expect(existingDraftsForTitle([retired, fresh], { artistId: "voidcaller", title: "forgive & forget" }).map((release) => release.id)).toEqual(["release-fresh"]);
   });
+
+  it("offers a brand-new draft that reuses a retired title, but not a leftover draft that predates the retirement", () => {
+    const archived = { ...retired, updatedAt: "2026-10-22T16:00:00.000Z" };
+    const leftover = { ...fresh, id: "release-leftover", updatedAt: "2026-10-22T15:00:00.000Z" };
+    const created = { ...fresh, id: "release-created-after", updatedAt: "2026-10-22T17:00:00.000Z" };
+    expect(ids([archived, leftover])).toEqual([]);
+    expect(ids([archived, leftover, created])).toEqual(["release-created-after"]);
+    // Without timestamps the previous behaviour holds: an unpublished same-title release is a leftover.
+    expect(ids([retired, fresh])).toEqual([]);
+  });
 });

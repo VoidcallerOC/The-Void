@@ -14,10 +14,17 @@ function normalizedText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function rememberTitle(index, key, title) {
+function timestampOf(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+// Remembers, per key, each retired title and when its latest retired release was last changed
+// (its archive time), so a draft started afterwards is not mistaken for a leftover of it.
+function rememberTitle(index, key, title, retiredAt = 0) {
   if (!key || !title) return;
-  const titles = index.get(key) || new Set();
-  titles.add(title);
+  const titles = index.get(key) || new Map();
+  titles.set(title, Math.max(titles.get(title) || 0, retiredAt));
   index.set(key, titles);
 }
 
@@ -44,7 +51,9 @@ function deployedReleaseIds(releaseBindings) {
 
 // Unpublished copies of a title this artist already retired. A published
 // release with that title is the live card and stays, and so does a draft
-// whose release contract is already deployed (a replacement, not a leftover).
+// whose release contract is already deployed (a replacement, not a leftover),
+// and so does a draft last changed after the retired release was archived (a new release
+// that reuses the title; leftovers predate the archive).
 // Matching is by artist id or artist name, and by title, all case-insensitive.
 function retiredByArchivedTitle(release, artist, retiredByArtistId, retiredByArtistName, deployedIds) {
   if (normalizedText(release?.status) === "published") return false;
@@ -53,10 +62,14 @@ function retiredByArchivedTitle(release, artist, retiredByArtistId, retiredByArt
   if (!title) return false;
   const artistId = normalizedText(release?.artistId);
   const artistName = normalizedText(artist?.name);
-  return Boolean(
-    (artistId && retiredByArtistId.get(artistId)?.has(title))
-    || (artistName && retiredByArtistName.get(artistName)?.has(title)),
-  );
+  const retiredTimes = [
+    artistId ? retiredByArtistId.get(artistId)?.get(title) : undefined,
+    artistName ? retiredByArtistName.get(artistName)?.get(title) : undefined,
+  ].filter((time) => time !== undefined);
+  if (!retiredTimes.length) return false;
+  const retiredAt = Math.max(...retiredTimes);
+  const changedAt = timestampOf(release?.updatedAt);
+  return !(retiredAt > 0 && changedAt > retiredAt);
 }
 
 export function studioArtistChoices(artists = []) {
@@ -96,8 +109,9 @@ export function studioReleaseChoices({ releases = [], artists = [], editions = [
     if (normalizedText(release.status) !== "archived") continue;
     const title = normalizedText(release.title);
     const artist = artistFor(release);
-    rememberTitle(retiredByArtistId, normalizedText(release.artistId), title);
-    rememberTitle(retiredByArtistName, normalizedText(artist?.name), title);
+    const retiredAt = timestampOf(release.updatedAt);
+    rememberTitle(retiredByArtistId, normalizedText(release.artistId), title, retiredAt);
+    rememberTitle(retiredByArtistName, normalizedText(artist?.name), title, retiredAt);
   }
   const live = releases.filter((release) => {
     if (isWithdrawnPublicListing(release)) return false;

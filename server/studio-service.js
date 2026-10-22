@@ -457,6 +457,8 @@ export class ArtistStudioService {
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may bind a release contract.");
     if (release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_CONTRACT_LOCKED", "A published release cannot be rebound to a different contract.");
+    // A retired release is never bound to a contract, even one its own provisioning request created on-chain.
+    if (release.status === "ARCHIVED") throw new ApiError(409, "RELEASE_ARCHIVED", "This release was taken off the site, so no contract can be bound to it. Create a new release instead.");
     const selectedChainId = chainId(input.chainId, "chainId");
     const selectedReleaseAddress = contractAddress(input.releaseContractAddress, "releaseContractAddress");
     const selectedReleaseKey = releaseKey(input.releaseKey);
@@ -560,8 +562,9 @@ export class ArtistStudioService {
   async recordReleaseProvisioningSubmission({ request, releaseId, input = {} }) {
     const identity = await this.identity(request);
     const id = requiredText(releaseId, "releaseId");
-    const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
+    const { rows: owned } = await this.db.query("SELECT r.id, r.status FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
     if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may submit this release deployment.");
+    if (owned[0].status === "ARCHIVED") throw new ApiError(409, "RELEASE_ARCHIVED", "This release was taken off the site. Create a new release instead.");
     const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: provisioningFactoryConfig().chainId });
     const factory = provisioningFactoryFor(provisioning);
     if (!provisioning || String(provisioning.artist_wallet).toLowerCase() !== identity.wallet.toLowerCase() || String(provisioning.factory_address).toLowerCase() !== factory.factoryAddress.toLowerCase()) throw new ApiError(409, "PROVISIONING_REQUEST_REQUIRED", "Prepare this exact release deployment in Studio before submitting its transaction.");
@@ -586,8 +589,9 @@ export class ArtistStudioService {
   async releaseProvisioningStatus({ request, releaseId }) {
     const identity = await this.identity(request);
     const id = requiredText(releaseId, "releaseId");
-    const { rows: owned } = await this.db.query("SELECT r.id FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
+    const { rows: owned } = await this.db.query("SELECT r.id, r.status FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id AND ao.role='OWNER' WHERE r.id=$1 AND lower(ao.owner_wallet)=lower($2) LIMIT 1", [id, identity.wallet]);
     if (!owned[0]) throw new ApiError(403, "ARTIST_OWNER_REQUIRED", "Only the canonical artist OWNER may view this provisioning request.");
+    if (owned[0].status === "ARCHIVED") throw new ApiError(409, "RELEASE_ARCHIVED", "This release was taken off the site. Its provisioning request is closed; create a new release instead.");
     const provisioning = await this.repository.getReleaseProvisioningRequest({ releaseId: id, chainId: provisioningFactoryConfig().chainId });
     if (!provisioning) return { state: "NOT_STARTED", releaseId: id };
     const factory = provisioningFactoryFor(provisioning);

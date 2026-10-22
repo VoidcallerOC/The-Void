@@ -35,6 +35,18 @@ describe("Studio release contract binding", () => {
     expect(repo.saveReleaseContract).not.toHaveBeenCalled();
   });
 
+  it("never binds, submits or refreshes a retired release, even when its clone exists on-chain", async () => {
+    const { instance, repo, db } = harness();
+    const archived = { id: "release-1", artist_id: "artist-1", slug: "one", status: "ARCHIVED", release_metadata: { releaseKey: KEY } };
+    db.query.mockImplementation(async (sql) => (String(sql).includes("FROM releases r JOIN artist_owners") ? { rows: [archived] } : { rows: [] }));
+    const request = { headers: {} };
+    await expect(instance.bindReleaseContract({ request, releaseId: "release-1", input: { chainId: 43113, releaseContractAddress: RELEASE, releaseKey: KEY } })).rejects.toMatchObject({ status: 409, code: "RELEASE_ARCHIVED" });
+    await expect(instance.releaseProvisioningStatus({ request, releaseId: "release-1" })).rejects.toMatchObject({ status: 409, code: "RELEASE_ARCHIVED" });
+    await expect(instance.recordReleaseProvisioningSubmission({ request, releaseId: "release-1", input: { transactionHash: `0x${"cd".repeat(32)}` } })).rejects.toMatchObject({ status: 409, code: "RELEASE_ARCHIVED" });
+    expect(repo.getReleaseProvisioningRequest).not.toHaveBeenCalled();
+    expect(repo.saveReleaseContract).not.toHaveBeenCalled();
+  });
+
   it("loads the release, dedicated sale, and provenance-anchor addresses from a verified binding", async () => {
     const { instance, db } = harness();
     db.query.mockResolvedValueOnce({ rows: [{ release_contract_id: "release-contract-id", release_contract_address: RELEASE, factory_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", primary_sale_address: "0xcccccccccccccccccccccccccccccccccccccc", provenance_anchor_address: "0xdddddddddddddddddddddddddddddddddddddd", release_key: KEY, chain_id: 43113, implementation_version: 2, status: "DEPLOYED" }] });
