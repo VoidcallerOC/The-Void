@@ -1107,6 +1107,10 @@ export class ArtistStudioService {
         : await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
       const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: editionQuantity(input.quantity, "edition.quantity") ?? "0", status: "DRAFT", metadata: jsonObject({ ...withoutRemovedDraftFlag(input.metadata), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
       await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
+      // The token ID derives from the edition title. Renaming a draft whose metadata was never submitted leaves
+      // its earlier row behind, giving the edition two token rows. A row with no metadata URI was never submitted
+      // for publication, so it cannot be on-chain yet; only that stale row of this edition is replaced.
+      if (existing && repository.db?.query) await repository.db.query("DELETE FROM tokens WHERE edition_id=$1 AND (contract_id<>$2 OR token_id<>$3::numeric) AND metadata_uri IS NULL", [saved.id, contract.id, String(tokenId)]);
       return saved;
     });
     await this.audit({ identity, request, eventType: "STUDIO_EDITION_CREATED", subjectType: "edition", subjectId: edition.id, payload: { releaseId: release.id, chainId: selectedChainId } });
