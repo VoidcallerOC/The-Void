@@ -10,6 +10,9 @@ export const FUJI_RELEASE_FACTORY_CONFIG = Object.freeze({ ...FUJI_RELEASE_PER_C
 // VITE_RELEASE_NETWORK=mainnet). The FUJI_ name is kept for existing imports.
 export const RELEASE_FACTORY_CONFIG = Object.freeze({ ...RELEASE_PER_CONTRACT, network: RELEASE_PER_CONTRACT.networkName });
 export const FUJI_RELEASE_FACTORY_V2_CONFIG = RELEASE_FACTORY_CONFIG;
+// Short, chain-accurate name for user-facing errors: "Fuji" on the Fuji build, "Avalanche C-Chain" on
+// mainnet. A mainnet publish must never tell the artist their transaction reverted on Fuji.
+export const RELEASE_NETWORK_LABEL = RELEASE_FACTORY_CONFIG.chainId === FUJI_RELEASE_FACTORY_CONFIG.chainId ? "Fuji" : RELEASE_FACTORY_CONFIG.networkName;
 // The legacy shared contract exists on Fuji only; "" on a network without one, which matches nothing.
 const LEGACY_SHARED_CONTRACT = String(deployment.contractAddress || "").toLowerCase();
 export const FUJI_RELEASE_ABI = Object.freeze(deployment.abi);
@@ -290,11 +293,11 @@ export function explainFujiEditionError(error) {
   const base = { code: name, revertData: data || null };
   switch (name) {
     case "AccessDenied":
-      return { ...base, message: "Connected wallet is not authorized to create Fuji editions (missing ARTIST_ROLE)." };
+      return { ...base, message: `Connected wallet is not authorized to create ${RELEASE_NETWORK_LABEL} editions (missing ARTIST_ROLE).` };
     case "AlreadyInitialized":
-      return { ...base, message: "This edition already exists on Fuji. Load the existing edition instead of publishing it again." };
+      return { ...base, message: `This edition already exists on ${RELEASE_NETWORK_LABEL}. Load the existing edition instead of publishing it again.` };
     case "ContractPaused":
-      return { ...base, message: "The Fuji release contract is currently paused. Publishing is disabled until an admin unpauses it." };
+      return { ...base, message: `The ${RELEASE_NETWORK_LABEL} release contract is currently paused. Publishing is disabled until an admin unpauses it.` };
     case "InvalidSupply":
       return { ...base, message: "Maximum supply must be greater than zero." };
     case "InvalidIdentifier":
@@ -304,9 +307,9 @@ export function explainFujiEditionError(error) {
     case "RoyaltyTooHigh":
       return { ...base, message: "Royalty exceeds the 10% (1000 basis points) cap." };
     case "EditionNotFound":
-      return { ...base, message: "This token's edition does not exist on Fuji yet. Publish the release before minting it." };
+      return { ...base, message: `This token's edition does not exist on ${RELEASE_NETWORK_LABEL} yet. Publish the release before minting it.` };
     case "InactiveEdition":
-      return { ...base, message: "This edition is not active on Fuji, so it cannot be minted." };
+      return { ...base, message: `This edition is not active on ${RELEASE_NETWORK_LABEL}, so it cannot be minted.` };
     case "ExceedsSupply":
       return { ...base, message: `Mint exceeds the edition's remaining supply (${String(decoded.args?.[1] ?? "?")} left).` };
     case "ZeroQuantity":
@@ -331,6 +334,15 @@ export function explainFujiEditionError(error) {
       return { code: name || "REVERTED", revertData: data || null, message: null };
     }
   }
+}
+
+// Fallback for a simulation revert with no known custom error. Names the chain that was actually
+// simulated and keeps the decoded code, raw revert data, and the node's reason so the failure stays
+// diagnosable (URLs are dropped; they can carry RPC keys).
+export function unexplainedSimulationMessage(subject, explained, error) {
+  const reason = String(error?.shortMessage || error?.reason || error?.message || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const details = [explained?.code && explained.code !== "REVERTED" ? `code ${explained.code}` : "", explained?.revertData ? `revert data ${String(explained.revertData).slice(0, 138)}` : "", reason ? `node said: ${reason}` : ""].filter(Boolean);
+  return `${subject} would revert on ${RELEASE_NETWORK_LABEL} (chain ${RELEASE_FACTORY_CONFIG.chainId})${details.length ? ` [${details.join("; ")}]` : ""}. Nothing was sent.`;
 }
 
 // Static, read-only simulation of the exact createEdition calldata from the exact
@@ -467,7 +479,7 @@ export async function simulateFujiCall(provider, { from, to, data }) {
     await provider.request({ method: "eth_call", params: [{ from, to: target, data }, "latest"] });
   } catch (error) {
     const explained = explainFujiEditionError(error);
-    throw Object.assign(new Error(explained.message || `This transaction would revert on Fuji${explained.code ? ` (${explained.code})` : ""}. Nothing was sent.`), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
+    throw Object.assign(new Error(explained.message || unexplainedSimulationMessage("This transaction", explained, error)), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
   }
 }
 
@@ -481,7 +493,7 @@ export async function simulateReleaseCall(provider, { from, to, data, chainId = 
     await provider.request({ method: "eth_call", params: [{ from, to: ethers.getAddress(to), data }, "latest"] });
   } catch (error) {
     const explained = explainFujiEditionError(error);
-    throw Object.assign(new Error(explained.message || "This release transaction would revert on Fuji. Nothing was sent."), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
+    throw Object.assign(new Error(explained.message || unexplainedSimulationMessage("This release transaction", explained, error)), { code: explained.code || "SIMULATION_REVERTED", revertData: explained.revertData, cause: error });
   }
 }
 
