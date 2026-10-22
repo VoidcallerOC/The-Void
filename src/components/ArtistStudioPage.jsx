@@ -23,6 +23,7 @@ import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState } from "../lib/contract-symbol.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
 import { reconcileExistingEdition } from "../lib/studio-publication-recovery.js";
+import { TransactionEvidence } from "./TransactionEvidence.jsx";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, fetchRegisteredMedia, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings, mapReleaseSales, mapSecondaryRoyalties } from "../lib/sale-earnings.js";
@@ -1094,13 +1095,7 @@ export function ArtistStudioPage() {
       </nav>}
 
       {notice && <div role="status" style={{ ...card, margin: "20px 0", borderColor: /saved|published|configured|confirmed|uploaded|off the site/i.test(notice) ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{notice}</div>}
-      {txEvidence && (
-        <div role="status" style={{ ...card, margin: "20px 0", borderColor: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
-          <div>Failed transaction {txEvidence.code ? `(${txEvidence.code})` : ""} — inspect the exact revert on Snowtrace:</div>
-          <a href={txEvidence.explorerUrl} target="_blank" rel="noreferrer" style={{ color: "var(--vc-bone)" }}>{txEvidence.transactionHash}</a>
-          <div style={{ marginTop: 6 }}>Contract {txEvidence.contractAddress} · chain {txEvidence.chainId}</div>
-        </div>
-      )}
+      <TransactionEvidence evidence={txEvidence} style={card} />
 
       {workflow === "earnings" && (canUseStudio
         ? (ownedStudioCatalog ? <StudioEarnings catalog={ownedStudioCatalog} wallet={wallet} /> : <p role="status" style={{ color: "var(--vc-bone-dim)" }}>Loading your catalog…</p>)
