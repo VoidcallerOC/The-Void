@@ -49,6 +49,13 @@ describe("release types", () => {
     await expect(instance.createRelease({ request, artistId: "artist-1", input: { title: "Mixtape", releaseType: "MIXTAPE" } })).rejects.toMatchObject({ status: 400, code: "INVALID_RELEASE_TYPE" });
   });
 
+  it("never edits an archived (retired) release, so a stale client cannot touch it", async () => {
+    const { instance, repo } = service((sql) => (sql.includes("FROM releases r JOIN artist_owners") ? [release("release-retired", "SINGLE", "ARCHIVED")] : []));
+    await expect(instance.updateRelease({ request, releaseId: "release-retired", input: { title: "Forgive & Forget", releaseType: "SINGLE" } })).rejects.toMatchObject({ status: 409, code: "RELEASE_ARCHIVED" });
+    expect(repo.saveRelease).not.toHaveBeenCalled();
+    expect(repo.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
   it("locks the release type once any edition is published, and allows the change before that", async () => {
     const locked = service((sql) => (sql.includes("FROM releases r JOIN artist_owners") ? [release("release-1", "EP", "PUBLISHED")] : sql.includes("status='PUBLISHED'") ? [{ "?column?": 1 }] : []));
     await expect(locked.instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: "SINGLE" } })).rejects.toMatchObject({ status: 409, code: "RELEASE_TYPE_LOCKED" });

@@ -752,3 +752,50 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     expect(field.readOnly).toBe(true);
   });
 });
+
+// Production incident (2026-10-22): after the broken Forgive & Forget single was archived, Create release did
+// nothing visible. A stale ?release=<archived id> in the URL put the archived release into releaseId, so each click
+// PATCHed that archived release (six STUDIO_RELEASE_UPDATED events) instead of creating a new one.
+describe("Artist Studio Create release with an archived release in the URL", () => {
+  const ARCHIVED = "release-cd9c689c-8b90-41ee-b4e4-0124a63d6819";
+  const archivedCatalog = () => ({
+    artists,
+    releases: [{ id: ARCHIVED, artist_id: "artist-a", title: "Forgive & Forget", status: "ARCHIVED", release_metadata: { releaseType: "SINGLE", abandoned: { reason: "ON_CHAIN_EDITION_DIVERGED_FROM_DRAFT" } } }],
+    editions: [],
+    experiences: [],
+  });
+  const calls = () => studioFetch.mock.calls.map(([path, options]) => `${options?.method || "GET"} ${path}`);
+  const mockApi = () => studioFetch.mockImplementation(async (path, options = {}) => {
+    if (path === "/studio/catalog") return archivedCatalog();
+    if (path === "/studio/artists/artist-a/releases" && options.method === "POST") return { id: "release-new", title: options.payload.title, status: "DRAFT" };
+    if (path === "/studio/releases/release-new/provisioning/prepare") return { state: "PENDING", chainId: CHAIN_ID, releaseKey: `0x${"cd".repeat(32)}`, artistWallet: wallet.account, symbol: "FORGIVEFORG" };
+    throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+  });
+
+  it("does not load the archived release from the URL, and Create release makes a new release", async () => {
+    mockApi();
+    renderStudio(ARCHIVED);
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Create release" }));
+    await waitFor(() => expect(calls()).toContain("POST /studio/artists/artist-a/releases"));
+    // Never touches the archived release: no prepare, no PATCH.
+    expect(calls().filter((call) => call.includes(ARCHIVED))).toEqual([]);
+    expect(calls()).toContain("POST /studio/releases/release-new/provisioning/prepare");
+  });
+
+  it("shows a failure beside the button and does not claim the draft was saved when nothing was", async () => {
+    studioFetch.mockImplementation(async (path, options = {}) => {
+      if (path === "/studio/catalog") return archivedCatalog();
+      if (path === "/studio/artists/artist-a/releases" && options.method === "POST") throw Object.assign(new Error("The release could not be created."), { code: "INTERNAL_ERROR" });
+      throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+    });
+    renderStudio(ARCHIVED);
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Create release" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("The release could not be created.");
+    expect(alert.textContent).not.toMatch(/draft saved/i);
+  });
+});

@@ -418,6 +418,8 @@ export function ArtistStudioPage() {
   const [gatedEditionId, setGatedEditionId] = useState("");
   // Outcome of "Save catalog structure", shown beside the button (the page notice is far above it).
   const [catalogStatus, setCatalogStatus] = useState(null);
+  // Outcome of "Create release", shown beside the button for the same reason.
+  const [releaseStatus, setReleaseStatus] = useState(null);
   const [uploads, setUploads] = useState({});
   // Private files and previews this artist already registered, offered instead of uploading them again.
   const [registered, setRegistered] = useState({ protected: [], previews: [] });
@@ -492,7 +494,8 @@ export function ArtistStudioPage() {
   useEffect(() => {
     let cancelled = false;
     const release = (ownedStudioCatalog?.releases || []).find((item) => item.id === requestedReleaseId);
-    if (!canUseStudio || !requestedReleaseId || !release || release.status === "published") return undefined;
+    // A published release opens its sale view instead; an archived (retired) release is never resumed as a draft.
+    if (!canUseStudio || !requestedReleaseId || !release || ["published", "archived"].includes(String(release.status || "").toLowerCase())) return undefined;
     setReleaseId(requestedReleaseId);
     setSelectedReleaseId(requestedReleaseId);
     setArtistId(release.artistId || "");
@@ -547,10 +550,15 @@ export function ArtistStudioPage() {
   const ensureArtistAndRelease = async () => {
     if (!form.releaseTitle) throw new Error("Enter a release title before creating a track.");
     const nextArtistId = await ensureArtist();
-    let nextReleaseId = releaseId;
+    // A stale selection can name a release that has since been archived. Archived releases are retired, never edited:
+    // start from a clean slate so the title below creates a new release.
+    const staleArchived = Boolean(releaseId) && String((ownedStudioCatalog?.releases || []).find((item) => item.id === releaseId)?.status || "").toLowerCase() === "archived";
+    if (staleArchived) { setReleaseId(""); setSelectedReleaseId(""); }
+    const activeReleaseId = staleArchived ? "" : releaseId;
+    let nextReleaseId = activeReleaseId;
     // No draft id in memory (reload, second tab) but a draft with this title already exists:
     // never POST a second one. Load the single match, or ask for an explicit pick.
-    if (!releaseId) {
+    if (!activeReleaseId) {
       const drafts = existingDraftsForTitle(ownedStudioCatalog?.releases, { artistId: nextArtistId, title: form.releaseTitle });
       if (drafts.length === 1) {
         const [draft] = drafts;
@@ -561,8 +569,8 @@ export function ArtistStudioPage() {
       }
       if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Open the one you want at /studio?release=<id> so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
     }
-    const release = await studioFetch(releaseId ? `/studio/releases/${encodeURIComponent(releaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
-      method: releaseId ? "PATCH" : "POST",
+    const release = await studioFetch(activeReleaseId ? `/studio/releases/${encodeURIComponent(activeReleaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
+      method: activeReleaseId ? "PATCH" : "POST",
       payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(!normalizeContractSymbol(form.releaseSymbol) || symbolState.locked ? {} : { symbol: normalizeContractSymbol(form.releaseSymbol) }) },
       headers,
     });
@@ -572,18 +580,26 @@ export function ArtistStudioPage() {
   };
 
   const createReleaseRecord = async () => {
-    setBusy("release"); setNotice("");
+    setBusy("release"); setNotice(""); setReleaseStatus(null);
+    let draftSaved = false;
     try {
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
+      draftSaved = true;
       setSelectedReleaseId(ids.releaseId);
       const prepared = await studioFetch(`/studio/releases/${encodeURIComponent(ids.releaseId)}/provisioning/prepare`, { method: "POST", payload: {}, headers });
       setProvisioning(prepared);
       setProvisioningState(prepared.state || "PENDING");
       setForm((prior) => ({ ...prior, releaseSymbol: normalizeContractSymbol(prepared.symbol) || prior.releaseSymbol }));
-      setNotice("Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.");
+      const saved = "Draft saved. Review the exact contract parameters below; the next wallet transaction will create this release and charge gas to your artist wallet.";
+      setNotice(saved);
+      setReleaseStatus({ ok: true, message: saved });
     } catch (error) {
-      setNotice(error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : `Release draft saved. ${error.message}`);
+      // Only claim the draft was saved when it was. The message is also shown beside the button, because the page
+      // notice sits at the top of a long form and a failure there looks like the button did nothing.
+      const message = error?.code === "DRAFT_ALREADY_EXISTS" ? error.message : draftSaved ? `Release draft saved. ${error.message}` : (error.message || "Create release failed.");
+      setNotice(message);
+      setReleaseStatus({ ok: false, message });
     } finally {
       setBusy("");
     }
@@ -1240,6 +1256,7 @@ export function ArtistStudioPage() {
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Creating…" : "Create release"}
             </button>
+            {releaseStatus && <p role="alert" style={{ margin: 0, alignSelf: "center", color: releaseStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{releaseStatus.message}</p>}
             {releaseId && provisioningState === "CONFIRMED" && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
           </div>
         </section>
