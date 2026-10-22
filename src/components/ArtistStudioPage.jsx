@@ -22,6 +22,7 @@ import { RELEASE_CHAIN_STATE_UNAVAILABLE_MESSAGE, lifecycleExpectationsForFactor
 import { tracksOnRelease } from "../lib/studio-tracks.js";
 import { normalizeContractSymbol, preparedParametersAreCurrent, symbolFieldState } from "../lib/contract-symbol.js";
 import { canTakeReleaseOffTheSite, existingDraftsForTitle, studioArtistChoices, studioReleaseChoices } from "../lib/studio-release-choices.js";
+import { reconcileExistingEdition } from "../lib/studio-publication-recovery.js";
 import { ARCHIVE_ACCEPT, ARTWORK_ACCEPT, AUDIO_ACCEPT, MAX_FULL_TRACK_BYTES, VIDEO_ACCEPT, formatMegabytes, studioFetch, fetchRegisteredMedia, uploadStudioArtwork, uploadStudioFullTrack, uploadStudioPreview } from "../lib/studio-api.js";
 import { ipfsToHttp } from "../lib/web3.js";
 import { mapReleaseBindings, mapReleaseSales, mapSecondaryRoyalties } from "../lib/sale-earnings.js";
@@ -774,11 +775,18 @@ export function ArtistStudioPage() {
           headers,
         });
       } catch (error) {
-        if (error?.code !== "PUBLICATION_ATTEMPT_RECORDED") throw error;
-        // A creation transaction was already submitted with frozen metadata: confirm it, never republish or create again.
-        const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: {}, headers });
+        if (!["EDITION_ALREADY_ON_CHAIN", "PUBLICATION_ATTEMPT_RECORDED"].includes(error?.code)) throw error;
+        // The edition is already on-chain (or its creation transaction is recorded with frozen metadata): confirm it
+        // instead of republishing or sending a second creation.
+        const confirmed = await reconcileExistingEdition({
+          studioFetch,
+          confirmPath: studioPublicationPath(saved.releaseId, "publication/confirm"),
+          headers,
+          askToAdopt: ({ onChainMetadataUri, draftMetadataUri }) => window.confirm(`This edition already exists on-chain and its metadata cannot be changed.\n\nOn-chain: ${onChainMetadataUri}\nYour draft: ${draftMetadataUri}\n\nUse the on-chain edition? Your draft metadata stays recorded and is not published.`),
+        });
         setNotice(publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true }).message);
         setPublishedTokenId(String(confirmed.tokenId));
+        setActiveReleaseAsset((current) => ({ ...(current || {}), chainId: Number(confirmed.chainId), releaseContractAddress: confirmed.releaseContractAddress, tokenId: String(confirmed.tokenId) }));
         setStep("sale");
         return;
       }

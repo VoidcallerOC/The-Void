@@ -743,10 +743,11 @@ export class ArtistStudioService {
     // would only make the stored URI differ from what the chain holds. Confirm from the recorded transaction.
     const attempt = edition.application_metadata?.publicationAttempt;
     if (attempt?.transactionHash) throw new ApiError(409, "PUBLICATION_ATTEMPT_RECORDED", "A creation transaction was already submitted for this edition and its metadata is frozen. Confirm that transaction instead of republishing.", { transactionHash: attempt.transactionHash, tokenId: attempt.tokenId, metadataUri: attempt.metadataUri });
-    // An edition that exists on-chain is immutable and is never reused or overwritten here.
+    // Editions are immutable and keyed by identity: if this one is already on-chain, republishing metadata would only
+    // overwrite the stored URI and make the app lose track of it. Reconcile through confirm instead.
     if (binding) {
       const existing = await this.onChainEdition(binding, publishTokenId);
-      if (existing?.[6]) throw new ApiError(409, "EDITION_ALREADY_ON_CHAIN", "This edition identity already exists on-chain and cannot be created again. Nothing was published; start a new release instead.", { tokenId: publishTokenId.toString() });
+      if (existing?.[6]) throw new ApiError(409, "EDITION_ALREADY_ON_CHAIN", "This edition already exists on-chain and its metadata cannot change. Nothing was republished; confirm the existing edition instead.", { tokenId: publishTokenId.toString(), onChainMetadataUri: existing[5] });
     }
     const stored = previous || await this.metadataStorage.write({ metadata: metadataDocument, name: `${release.slug}-${edition.id}` });
     await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: publishTokenId, metadataUri: stored.uri, metadata: metadataDocument, metadataVersion: generated.digest });
@@ -758,16 +759,6 @@ export class ArtistStudioService {
     // refuses success unless the same transaction recorded it on the release contract.
     const provenanceAtCreation = bindingAnchorsAtCreation(binding);
     return { releaseId: release.id, editionId: edition.id, releaseSlug: release.slug, editionSlug, tokenId: publishTokenId.toString(), releaseContractAddress: publishContract, primarySaleAddress: binding?.primary_sale_address || null, provenanceAnchorAddress: binding?.provenance_anchor_address || null, factoryAddress: binding?.factory_address || null, releaseKey: binding?.release_key || null, implementationVersion: binding ? Number(binding.implementation_version) : null, provenanceAtCreation, ...(provenanceAtCreation ? { provenanceRootBytes32: provenanceRootBytes32(provenance.root) } : {}), chainId: publishChainId, metadataUri: stored.uri, digest: generated.digest, provenanceRoot: provenance.root, ...publicationView({ releaseStatus: release.status, proof }) };
-  }
-
-  /** Reads an edition from the release contract; null when the chain cannot be read (the create simulation still guards publishing). */
-  async onChainEdition(binding, tokenId) {
-    try {
-      if (this.publicationChain?.edition) return await this.publicationChain.edition(tokenId);
-      if (Number(binding.chain_id) !== Number(RELEASE_PER_CONTRACT.chainId)) return null;
-      const provider = new ethers.JsonRpcProvider(RELEASE_PER_CONTRACT.rpcUrl, Number(binding.chain_id), { staticNetwork: true });
-      return await new ethers.Contract(String(binding.release_contract_address), [EDITION_ABI], provider).edition(tokenId);
-    } catch { return null; }
   }
 
   /** Records the edition-creation transaction the moment the wallet returns it, freezing the metadata URI and the
@@ -808,24 +799,33 @@ export class ArtistStudioService {
 
   async confirmPublication({ request, releaseId, input }) {
     const identity = await this.identity(request);
-    const suppliedHash = input?.transactionHash == null || input.transactionHash === "" ? null : requiredText(input.transactionHash, "transactionHash", { max: 128 }).toLowerCase();
-    if (suppliedHash !== null && !/^0x[0-9a-f]{64}$/.test(suppliedHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The publication transaction could not be verified.");
+    // The hash is optional: when the app lost track of a mined creation, the chain is searched for it.
+    let transactionHash = input?.transactionHash == null || input.transactionHash === "" ? null : requiredText(input.transactionHash, "transactionHash", { max: 128 }).toLowerCase();
+    if (transactionHash !== null && !/^0x[0-9a-f]{64}$/.test(transactionHash)) throw new ApiError(400, "TRANSACTION_INVALID", "The publication transaction could not be verified.");
+    const acceptOnChainMetadata = input?.acceptOnChainMetadata === true;
     const { rows } = await this.db.query("SELECT r.*, ao.owner_wallet FROM releases r JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
     if (!release) throw new ApiError(403, "ARTIST_ACCESS_DENIED", "The authenticated wallet cannot publish this release.");
     await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
-    const edition = await this.openPublishingEdition(release);
-    // The recorded creation attempt is authoritative: its transaction and frozen metadata URI are what the chain must show.
-    const attempt = edition?.application_metadata?.publicationAttempt?.transactionHash ? edition.application_metadata.publicationAttempt : null;
-    if (attempt && suppliedHash && suppliedHash !== attempt.transactionHash) throw new ApiError(409, "PUBLICATION_TRANSACTION_MISMATCH", "This edition's recorded creation transaction is different from the one supplied.", { transactionHash: attempt.transactionHash });
-    const transactionHash = suppliedHash || attempt?.transactionHash || null;
-    if (!transactionHash) throw new ApiError(400, "TRANSACTION_REQUIRED", "A creation transaction hash is required to confirm publication.");
+    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.token_id, t.metadata, t.metadata_version FROM editions e JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 ORDER BY CASE WHEN e.status IN ('DRAFT','REVIEW') THEN 0 ELSE 1 END, e.created_at DESC LIMIT 20", [release.id]);
+    // An edition can own several token rows (a renamed draft keeps its stale one). The row whose token ID
+    // the contract derives from the edition's current identity is the one the chain can contain.
+    let edition = editionResult.rows[0];
+    const earlyBinding = edition ? await this.releaseContractBinding(release.id) : null;
+    if (edition && editionResult.rows.length > 1) {
+      const wanted = String(earlyBinding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")));
+      edition = editionResult.rows.find((row) => row.id === edition.id && String(row.token_id) === wanted) || edition;
+    }
     if (!edition?.metadata_uri) throw new ApiError(409, "METADATA_REQUIRED", "Metadata must be published before the blockchain transaction can be confirmed.");
+    // The recorded creation attempt is authoritative: its transaction and frozen metadata URI are what the chain must show.
+    const attempt = edition.application_metadata?.publicationAttempt?.transactionHash ? edition.application_metadata.publicationAttempt : null;
+    if (attempt && transactionHash !== null && transactionHash !== attempt.transactionHash) throw new ApiError(409, "PUBLICATION_TRANSACTION_MISMATCH", "This edition's recorded creation transaction is different from the one supplied.", { transactionHash: attempt.transactionHash });
+    if (attempt && transactionHash === null) transactionHash = attempt.transactionHash;
     await this.assertSingleOpenForEdition(release, edition.id);
-    const provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
-    const currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
+    let provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: edition.metadata, provenanceRoot: edition.metadata?.provenance?.root });
+    let currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
     const editionOpen = edition.status === "DRAFT" || edition.status === "REVIEW";
-    if (!editionOpen && release.status === "PUBLISHED" && attempt?.confirmedAt && attempt.transactionHash === transactionHash) {
+    if (!editionOpen && release.status === "PUBLISHED" && attempt?.confirmedBlock != null && attempt.transactionHash === transactionHash) {
       // Repeating the confirmation of an already-confirmed attempt changes nothing and reports the stored outcome.
       return { releaseId: release.id, editionId: edition.id, tokenId: attempt.emittedTokenId || attempt.tokenId, transactionHash, alreadyConfirmed: true, copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof: currentProof }) };
     }
@@ -833,7 +833,7 @@ export class ArtistStudioService {
       throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release is already published and its provenance is verified.");
     }
     try {
-      const binding = await this.releaseContractBinding(release.id);
+      const binding = earlyBinding;
       if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
       if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
       const publicationChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
@@ -841,18 +841,39 @@ export class ArtistStudioService {
       const expectedTokenId = binding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name"));
       const expectedReleaseId = binding ? binding.release_key : ethers.encodeBytes32String(requiredText(release.slug, "release.slug", { max: 31 }));
       const provider = this.publicationChain || new ethers.JsonRpcProvider(deployment.rpcUrl);
+      if (transactionHash === null) {
+        transactionHash = await this.findEditionCreationTransaction({ provider, binding, publicationContract, tokenId: expectedTokenId });
+        if (!transactionHash) throw new ApiError(409, "EDITION_CREATION_NOT_FOUND", "No edition-creation transaction was found on-chain for this release. Nothing was changed.");
+      }
       const receipt = await provider.getTransactionReceipt(transactionHash);
       if (!receipt || receipt.status !== 1) throw new Error("receipt unavailable or unsuccessful");
       const eventInterface = new ethers.Interface([...deployment.abi, "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
       const expectedEditionId = ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
       // Only the exact release contract's own logs count; any other contract can emit a look-alike event.
-      const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === publicationContract).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId && parsed.args.metadataUri === (attempt?.metadataUri ?? edition.metadata_uri));
+      const event = receipt.logs.filter((log) => String(log.address || "").toLowerCase() === publicationContract).map((log) => { try { return eventInterface.parseLog(log); } catch { return null; } }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === expectedTokenId && parsed.args.releaseId === expectedReleaseId && parsed.args.editionId === expectedEditionId);
       if (!event) throw new Error("expected EditionCreated event was not found");
-      if (attempt && edition.metadata_uri !== attempt.metadataUri) throw new ApiError(409, "PUBLICATION_METADATA_DIVERGED", "The stored metadata URI no longer matches the one frozen for the submitted creation transaction. Nothing was changed.", { frozenMetadataUri: attempt.metadataUri });
+      // With a recorded attempt the frozen URI must match the stored draft and the chain exactly; a recorded attempt is
+      // never reconciled by adopting a different URI.
+      if (attempt && (edition.metadata_uri !== attempt.metadataUri || event.args.metadataUri !== attempt.metadataUri)) throw new ApiError(409, "PUBLICATION_METADATA_DIVERGED", "The metadata URI no longer matches the one frozen for the submitted creation transaction, or the chain shows a different one. Nothing was changed.", { frozenMetadataUri: attempt.metadataUri, onChainMetadataUri: event.args.metadataUri });
       const onChain = this.publicationChain
         ? await this.publicationChain.edition(expectedTokenId)
         : await new ethers.Contract(publicationContract, [...deployment.abi, EDITION_ABI], provider).edition(expectedTokenId);
-      if (!onChain[6] || onChain[5] !== edition.metadata_uri) throw new Error("on-chain edition verification failed");
+      // The chain is authoritative: an edition's stored URI is immutable, so it is what the event and contract agree on.
+      if (!onChain[6] || onChain[5] !== event.args.metadataUri) throw new Error("on-chain edition verification failed");
+      let unattachedDraft = null;
+      if (event.args.metadataUri !== edition.metadata_uri) {
+        // Metadata was republished after this creation was mined. Never overwrite the draft silently: the artist
+        // must accept the on-chain URI, and the draft's own URI stays recorded in application_metadata.
+        if (!acceptOnChainMetadata) throw new ApiError(409, "METADATA_URI_MISMATCH", "This edition already exists on-chain with different metadata than the current draft. Its metadata cannot be changed. Confirm to adopt the on-chain edition; the draft metadata stays recorded and is not published.", { onChainMetadataUri: event.args.metadataUri, draftMetadataUri: edition.metadata_uri, tokenId: expectedTokenId.toString(), transactionHash });
+        if (!this.metadataFetcher) throw new ApiError(503, "METADATA_FETCH_UNAVAILABLE", "The on-chain metadata could not be read to verify it, so the edition was not adopted.");
+        let chainMetadata;
+        try { chainMetadata = JSON.parse(Buffer.from(await this.metadataFetcher(event.args.metadataUri)).toString("utf8")); } catch { throw new ApiError(409, "ONCHAIN_METADATA_UNREADABLE", "The on-chain metadata could not be read or parsed, so the edition was not adopted."); }
+        if (chainMetadata?._void?.digest !== edition.metadata?._void?.digest) throw new ApiError(409, "ONCHAIN_METADATA_DIVERGED", "The on-chain metadata has different content than the draft, so the edition was not adopted automatically.");
+        unattachedDraft = { uri: edition.metadata_uri, provenanceRoot: edition.metadata?.provenance?.root || null, digest: edition.metadata?._void?.digest || null };
+        provenance = assertProvenanceConsistency({ releaseId: release.id, editionId: edition.id, metadata: chainMetadata, provenanceRoot: chainMetadata?.provenance?.root });
+        edition = { ...edition, metadata_uri: event.args.metadataUri, metadata: chainMetadata };
+        currentProof = this.provenanceRecords ? await this.provenanceRecords.findOwnedByRoot({ releaseId: release.id, editionId: edition.id, manifestSha256: provenance.root, creatorWallet: identity.wallet }) : null;
+      }
       // The edition, as stored on the certified contract, must have been created by a wallet of this release's own artist.
       const creator = String(onChain[2] || "").toLowerCase();
       if (creator !== String(event.args.artist || "").toLowerCase()) throw new Error("on-chain edition creator does not match the publication event");
@@ -914,19 +935,45 @@ export class ArtistStudioService {
           }
         }
       }
-      // Only token rows with no metadata URI that point at another token ID are stale duplicates (same predicate as the rename fix).
+      if (unattachedDraft) {
+        await this.repository.saveToken({ editionId: edition.id, contractId: edition.contract_id, tokenId: expectedTokenId, metadataUri: edition.metadata_uri, metadata: edition.metadata, metadataVersion: edition.metadata?._void?.digest || null });
+      }
+      // Only token rows with no metadata URI that point elsewhere are stale duplicates (same predicate as the rename fix).
       await this.db.query("DELETE FROM tokens WHERE edition_id=$1 AND (contract_id<>$2 OR token_id<>$3::numeric) AND metadata_uri IS NULL", [edition.id, edition.contract_id, String(expectedTokenId)]);
-      const confirmedAttempt = { ...(attempt || { transactionHash, metadataUri: edition.metadata_uri, submittedAt: null }), tokenId: expectedTokenId.toString(), emittedTokenId: event.args.tokenId.toString(), confirmedAt: new Date().toISOString() };
-      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: { ...(edition.application_metadata || {}), publicationAttempt: confirmedAttempt } });
+      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: { ...(edition.application_metadata || {}), publicationAttempt: { ...(attempt || { transactionHash, metadataUri: edition.metadata_uri, submittedAt: null }), tokenId: expectedTokenId.toString(), emittedTokenId: event.args.tokenId.toString(), confirmedBlock: Number(receipt.blockNumber) }, ...(unattachedDraft ? { unattachedDraftMetadata: { ...unattachedDraft, reason: "EDITION_ALREADY_ON_CHAIN", transactionHash } } : {}) } });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
-      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root, provenanceAnchoredAtCreation: Boolean(onChainProvenance) } });
+      await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root, provenanceAnchoredAtCreation: Boolean(onChainProvenance), ...(unattachedDraft ? { adoptedOnChainMetadataUri: edition.metadata_uri, unattachedDraftMetadataUri: unattachedDraft.uri } : {}) } });
       return { releaseId: release.id, editionId: edition.id, tokenId: expectedTokenId.toString(), transactionHash, chainId: publicationChainId, releaseContractAddress: publicationContract, anchorEvent: "EditionCreated", provenanceAtCreation, onChainProvenance, separateAnchorAvailable: Boolean(binding) && !provenanceAtCreation, copyrightOwnership: false, ...publicationView({ releaseStatus: "PUBLISHED", proof }) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       this.logger.error?.("studio.publication.verify_failed", { releaseId: release.id, transactionHash, detail: error.message });
       throw new ApiError(409, "PUBLICATION_NOT_CONFIRMED", "The blockchain publication could not be verified. Your release remains unpublished and can be retried.");
     }
+  }
+
+  /** Finds the transaction that emitted EditionCreated for this token on the release contract, scanning forward from
+   * the contract's creation block in public-RPC-sized windows. Returns null when none exists. */
+  async findEditionCreationTransaction({ provider, binding, publicationContract, tokenId, windowBlocks = 2000, maxWindows = 200 }) {
+    const topic0 = ethers.id("EditionCreated(uint256,bytes32,bytes32,address,uint256,string)");
+    const topic1 = ethers.zeroPadValue(ethers.toBeHex(tokenId), 32);
+    const head = Number(await provider.getBlockNumber());
+    let from = Math.max(Number(binding?.deployment_block_number) || 0, 0);
+    for (let window = 0; from <= head && window < maxWindows; window += 1, from += windowBlocks) {
+      const logs = await provider.getLogs({ address: publicationContract, topics: [topic0, topic1], fromBlock: from, toBlock: Math.min(from + windowBlocks - 1, head) });
+      if (logs.length) return String(logs[0].transactionHash).toLowerCase();
+    }
+    return null;
+  }
+
+  /** Reads an edition from the release contract; null when the chain cannot be read (the create simulation still guards publishing). */
+  async onChainEdition(binding, tokenId) {
+    try {
+      if (this.publicationChain?.edition) return await this.publicationChain.edition(tokenId);
+      if (Number(binding.chain_id) !== Number(RELEASE_PER_CONTRACT.chainId)) return null;
+      const provider = new ethers.JsonRpcProvider(RELEASE_PER_CONTRACT.rpcUrl, Number(binding.chain_id), { staticNetwork: true });
+      return await new ethers.Contract(String(binding.release_contract_address), [EDITION_ABI], provider).edition(tokenId);
+    } catch { return null; }
   }
 
   /** Factory V3 publication: the edition transaction itself must carry the release contract's

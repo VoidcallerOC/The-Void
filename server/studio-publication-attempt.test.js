@@ -74,7 +74,7 @@ describe("a clean new release: submission is recorded, then confirmed from the r
     const saved = repo.saveEdition.mock.calls[0][0];
     expect(saved).toMatchObject({ status: "PUBLISHED" });
     expect(saved.metadata.publicationAttempt).toMatchObject({ transactionHash: tx, metadataUri: frozenUri, emittedTokenId: tokenId.toString(), tokenId: tokenId.toString() });
-    expect(saved.metadata.publicationAttempt.confirmedAt).toBeTruthy();
+    expect(saved.metadata.publicationAttempt.confirmedBlock).toBe(90);
   });
 
   it("publishes metadata exactly once for a fresh edition that is not yet on-chain", async () => {
@@ -117,7 +117,7 @@ describe("the original URI-mismatch failure cannot recur", () => {
 
   it("fails closed when the chain's URI differs from the frozen one", async () => {
     const { instance, repo } = harness({ attempt: attemptFor(), onChainUri: republishedUri });
-    await expect(confirm(instance)).rejects.toMatchObject({ code: "PUBLICATION_NOT_CONFIRMED" });
+    await expect(confirm(instance)).rejects.toMatchObject({ code: "PUBLICATION_METADATA_DIVERGED", details: { frozenMetadataUri: frozenUri, onChainMetadataUri: republishedUri } });
     expect(repo.saveEdition).not.toHaveBeenCalled();
   });
 
@@ -127,15 +127,18 @@ describe("the original URI-mismatch failure cannot recur", () => {
     expect(repo.saveEdition).not.toHaveBeenCalled();
   });
 
-  it("needs a transaction hash when none was ever recorded", async () => {
-    const { instance } = harness();
-    await expect(confirm(instance)).rejects.toMatchObject({ code: "TRANSACTION_REQUIRED" });
+  it("with no recorded attempt and no creation on-chain, changes nothing", async () => {
+    const { instance, chain, repo } = harness();
+    chain.getBlockNumber = vi.fn().mockResolvedValue(100);
+    chain.getLogs = vi.fn().mockResolvedValue([]);
+    await expect(confirm(instance)).rejects.toMatchObject({ code: "EDITION_CREATION_NOT_FOUND" });
+    expect(repo.saveEdition).not.toHaveBeenCalled();
   });
 });
 
 describe("confirmation is idempotent and leaves one canonical token row", () => {
   it("repeating a confirmed attempt returns the stored outcome and writes nothing", async () => {
-    const confirmedAttempt = attemptFor({ confirmedAt: "2026-10-22T10:35:00.000Z", emittedTokenId: tokenId.toString() });
+    const confirmedAttempt = attemptFor({ confirmedBlock: 90, emittedTokenId: tokenId.toString() });
     const { instance, repo, chain } = harness({ attempt: confirmedAttempt, editionStatus: "PUBLISHED", releaseStatus: "PUBLISHED" });
     const again = await confirm(instance);
     expect(again).toMatchObject({ alreadyConfirmed: true, tokenId: tokenId.toString(), transactionHash: tx });
