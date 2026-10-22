@@ -429,6 +429,8 @@ export function ArtistStudioPage() {
   const editionGated = Boolean(editionId) && (gatedEditionId === editionId || editionHasGatedTrack(ownedStudioCatalog, editionId));
   const headers = useMemo(() => wallet.authHeaders, [wallet.authHeaders]);
   const set = (key, value) => setForm((prior) => ({ ...prior, [key]: value }));
+  // Once a creation transaction is submitted the release key is used on-chain; a second createRelease would only revert.
+  const provisioningSubmitted = provisioningState === "SUBMITTED" || provisioningState === "RECONCILING";
   const symbolState = symbolFieldState({ input: form.releaseSymbol, provisioning, provisioningState, onChainSymbol });
   const existingReleases = useMemo(() => studioReleaseChoices(ownedStudioCatalog || {}), [ownedStudioCatalog]);
   const ownedArtists = useMemo(() => studioArtistChoices(ownedStudioCatalog?.artists || []), [ownedStudioCatalog]);
@@ -1218,12 +1220,13 @@ export function ArtistStudioPage() {
               <p style={{ color: "var(--vc-bone-dim)" }}>Preparing the release. This only takes a moment.</p>
             )}
             <p role="status" style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase" }}>Status: {provisioningState}</p>
+            {provisioningSubmitted && <p role="status" style={{ color: "var(--vc-bone-dim)" }}>The creation transaction was already submitted for this release and cannot be sent again. Use Check status; the release is on-chain once it shows CONFIRMED.</p>}
             {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
             {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on {FUJI_RELEASE_CONFIG.network}: {albumState.message}</p>}
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>{provisioning ? "Refresh" : "Prepare"}</button>
-              {provisioning && provisioningState !== "CONFIRMED" && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
+              {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Create release on-chain"}</button>}
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Check status</button> : null}
             </div>

@@ -731,6 +731,14 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/on-chain tag changed/i);
   });
 
+  it("offers no second Create release on-chain once the creation transaction was submitted", async () => {
+    mockDraft({ status: { state: "SUBMITTED", chainId: CHAIN_ID, transactionHash: `0x${"3a".repeat(32)}` } });
+    renderStudio("rel-draft");
+    expect(await screen.findByText(/already submitted for this release and cannot be sent again/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create release on-chain" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+  });
+
   it("never opens the wallet when a fresh preparation differs from the parameters the artist reviewed", async () => {
     mockDraft({ onPrepare: (n) => (n === 1 ? prepared("FORGIVEFORG", DIGEST_A) : prepared("FORGIVEFORG", DIGEST_B)) });
     renderStudio("rel-draft");
