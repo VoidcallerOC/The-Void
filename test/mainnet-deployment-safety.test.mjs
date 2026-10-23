@@ -187,9 +187,12 @@ describe("mainnet workflows plan only: no key, no signing, no broadcast", () => 
 describe("mainnet authorization and Fuji state are untouched", () => {
   it("records the verified mainnet factory and marketplace on the passive fee recipient", () => {
     const manifest = JSON.parse(read("config/mainnet-release-per-contract.json"));
-    expect(manifest).toMatchObject({ chainId: 43114, deployed: true, deploymentAuthorized: true, provisioningEnabled: true, factoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", implementationAddress: "0x36c5D31e9A8e9b4dc9F8CB4B7202C70b3E30734D", marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", factoryDeploymentBlock: 98161422, marketplaceDeploymentBlock: 98161532, source: "VoidReleaseFactoryV2RoyaltySettled" });
-    // The first pair stays recorded verbatim as historical: its releases keep their factory and marketplace.
-    expect(manifest.historicalDeployments).toEqual([expect.objectContaining({ factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b", implementationAddress: "0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006", marketplaceAddress: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5", factoryDeploymentBlock: 97619965, marketplaceDeploymentBlock: 97619978 })]);
+    expect(manifest).toMatchObject({ chainId: 43114, deployed: true, deploymentAuthorized: true, provisioningEnabled: true, factoryAddress: "0xEa0c345cE84025b4e8462d145100dce1848254B4", implementationAddress: "0x4409913aC043E1772b1b7Ff2D5F8CE31868F9ddA", marketplaceAddress: "0x0F5930113Ec750d867741E05F302053472115eb2", factoryDeploymentBlock: 98367434, marketplaceDeploymentBlock: 98367443, source: "VoidReleaseFactoryV4Sequential", releaseVersion: 4, tokenIdScheme: "sequential", record: "deployments/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json" });
+    // Earlier pairs stay recorded verbatim as historical: their releases keep their factory and marketplace.
+    expect(manifest.historicalDeployments).toEqual([
+      expect.objectContaining({ factoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", implementationAddress: "0x36c5D31e9A8e9b4dc9F8CB4B7202C70b3E30734D", marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", factoryDeploymentBlock: 98161422, marketplaceDeploymentBlock: 98161532, releaseVersion: 2, source: "VoidReleaseFactoryV2RoyaltySettled" }),
+      expect.objectContaining({ factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b", implementationAddress: "0x8064238e8385093c9fFC8aB10F92a8DC1f2A9006", marketplaceAddress: "0x0e77116142844478a55EEd2Ab79de9F93770F8f5", factoryDeploymentBlock: 97619965, marketplaceDeploymentBlock: 97619978 }),
+    ]);
     expect(manifest.platformRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
     expect(manifest.marketplaceFeeRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
     // The defined deployer (Rabby) and the artist wallet are fixed and distinct from the fee recipient.

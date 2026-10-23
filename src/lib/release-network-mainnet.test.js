@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ethers } from "ethers";
 
-// Verified C-Chain release-per-contract infrastructure (config/mainnet-release-per-contract.json).
-const MAINNET_FACTORY = "0xE744D58fA8138042f5f00a28d39f89081539C19B";
-const MAINNET_MARKETPLACE = "0x75964C44cA586b13e98e7c30E74d2B4114f65b06";
+// Verified C-Chain release-per-contract infrastructure (config/mainnet-release-per-contract.json): the sequential
+// factory and its unified marketplace are active; the corrected factory 0xE744… and its marketplace are historical.
+const MAINNET_FACTORY = "0xEa0c345cE84025b4e8462d145100dce1848254B4";
+const MAINNET_MARKETPLACE = "0x0F5930113Ec750d867741E05F302053472115eb2";
+const CORRECTED_FACTORY = "0xE744D58fA8138042f5f00a28d39f89081539C19B";
+const CORRECTED_MARKETPLACE = "0x75964C44cA586b13e98e7c30E74d2B4114f65b06";
 
 // With VITE_RELEASE_NETWORK=mainnet the web build selects the mainnet manifests. Production mainnet
 // FE must resolve AUTH_CHAIN_ID / RELEASE_DEPLOYMENT to C-Chain 43114 and the recorded factory +
@@ -35,9 +38,17 @@ describe("frontend release config with mainnet selected", () => {
         chainId: 43114,
         factoryAddress: MAINNET_FACTORY,
         marketplaceAddress: MAINNET_MARKETPLACE,
+        releaseVersion: 4,
         active: true,
       }),
-      // The production pair stays supported for the releases it already holds.
+      // Earlier pairs stay supported for the releases they already hold, but never create new ones.
+      expect.objectContaining({
+        chainId: 43114,
+        factoryAddress: CORRECTED_FACTORY,
+        marketplaceAddress: CORRECTED_MARKETPLACE,
+        releaseVersion: 2,
+        active: false,
+      }),
       expect.objectContaining({
         chainId: 43114,
         factoryAddress: "0x262B774cf9a1949170B58E2d57F6189980FE757b",
@@ -53,6 +64,8 @@ describe("frontend release config with mainnet selected", () => {
       chainId: 43114,
       factoryAddress: MAINNET_FACTORY,
     });
+    expect(network.releaseDeploymentForFactory(CORRECTED_FACTORY)).toMatchObject({ marketplaceAddress: CORRECTED_MARKETPLACE, active: false });
+    expect(network.usesSequentialTokenIds(network.RELEASE_PER_CONTRACT.releaseVersion)).toBe(true);
 
     const release = await import("./fuji-release.js");
     expect(release.FUJI_RELEASE_CONFIG.chainId).toBe(43114);
