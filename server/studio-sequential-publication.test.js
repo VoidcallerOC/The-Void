@@ -46,7 +46,7 @@ function harness({ reserved = "1", maxOnContract = "0", nextTokenId = 1n, onChai
     if (text.includes("SELECT token_id::text AS token_id FROM tokens WHERE edition_id=$1")) return { rows: reserved == null ? [] : [{ token_id: reserved }] };
     if (text.includes("COALESCE(MAX(token_id), 0)")) return { rows: [{ last_token_id: maxOnContract }] };
     if (text.includes("FROM tokens t JOIN contracts c")) return { rows: [] };
-    if (text.includes("FROM editions e")) return { rows: editionRows ? editionRows(row) : [row] };
+    if (text.includes("FROM editions e")) return { rows: editionRows ? editionRows(row, text) : [row] };
     if (text.startsWith("DELETE")) return { rows: [] };
     return { rows: [release] };
   }) };
@@ -118,10 +118,14 @@ describe("a sequential release: token 1 is the reserved number, never the title 
 
 describe("several open tracks and replaced transactions", () => {
   it("publishes the lowest-numbered open track first, whatever order the drafts were edited in", async () => {
-    const { instance, queries } = harness();
-    await publish(instance);
-    const selection = queries.find(({ text }) => text.includes("FROM editions e LEFT JOIN tokens t") && text.includes("ORDER BY t.token_id ASC"));
-    expect(selection?.params).toEqual(["release-1", "contract-release"]);
+    // The newest open draft (#2) is picked first; the sequential contract can only create #1 next.
+    const trackTwo = { id: "edition-2", title: "Next Track", token_id: "2" };
+    const editionRows = (row, text) => (text.includes("ORDER BY t.token_id ASC") ? [{ id: row.id }] : text.includes("e.id=$2") ? [row] : [{ ...row, ...trackTwo }]);
+    const { instance, queries, repo } = harness({ editionRows });
+    await expect(publish(instance)).resolves.toMatchObject({ editionId: "edition-1", tokenId: "1" });
+    expect(queries.find(({ text }) => text.includes("ORDER BY t.token_id ASC"))?.params).toEqual(["release-1", "contract-release"]);
+    expect(repo.saveToken).toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-1", tokenId: 1n }));
+    expect(repo.saveToken).not.toHaveBeenCalledWith(expect.objectContaining({ editionId: "edition-2" }));
   });
 
   it("records and confirms the lowest-numbered open track when a newer draft holds a higher number", async () => {

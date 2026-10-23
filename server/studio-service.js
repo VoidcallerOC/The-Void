@@ -744,7 +744,7 @@ export class ArtistStudioService {
     return { mediaConfig: protectedMedia.length ? { ...config, protected: true, protectedMedia: boundMedia } : config, requirements: normalizedRequirements };
   }
 
-  async publishMetadata({ request, releaseId, input = {} }) {
+  async publishMetadata({ request, releaseId, input = {}, editionIdOverride = null }) {
     const identity = await this.identity(request);
     const { rows } = await this.db.query("SELECT r.*, a.display_name, ao.owner_wallet FROM releases r JOIN artists a ON a.id=r.artist_id JOIN artist_owners ao ON ao.artist_id=r.artist_id WHERE r.id=$1 AND ao.owner_wallet=$2 LIMIT 1", [requiredText(releaseId, "releaseId"), identity.wallet]);
     const release = rows[0];
@@ -752,10 +752,8 @@ export class ArtistStudioService {
     await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
     // Published editions keep immutable metadata; a published release may still add new draft editions (tracks).
-    const binding = await this.releaseContractBinding(release.id);
-    // Sequential release contracts create tracks in number order: publish the lowest-numbered open track.
-    const editionResult = bindingUsesSequentialIds(binding)
-      ? await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version, t.token_id FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id AND t.contract_id=$2 WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY t.token_id ASC NULLS LAST, e.created_at ASC LIMIT 1", [release.id, binding.release_contract_id])
+    const editionResult = editionIdOverride
+      ? await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 AND e.id=$2 AND e.status IN ('DRAFT','REVIEW') LIMIT 1", [release.id, editionIdOverride])
       : await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition && release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
@@ -770,6 +768,13 @@ export class ArtistStudioService {
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
+    const binding = await this.releaseContractBinding(release.id);
+    // A sequential release contract creates tracks in number order, so the lowest-numbered open track is the only
+    // one that can be published next. Nothing has been written yet, so publishing restarts on that track.
+    if (bindingUsesSequentialIds(binding) && !editionIdOverride) {
+      const lowest = (await this.db.query("SELECT e.id FROM editions e JOIN tokens t ON t.edition_id=e.id AND t.contract_id=$2 WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY t.token_id ASC LIMIT 1", [release.id, binding.release_contract_id])).rows[0];
+      if (lowest && lowest.id !== edition.id) return this.publishMetadata({ request, releaseId, input, editionIdOverride: lowest.id });
+    }
     if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
     if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
     const publishChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
