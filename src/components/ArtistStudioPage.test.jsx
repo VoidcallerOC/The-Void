@@ -844,6 +844,38 @@ describe("Artist Studio with on-chain deployment switched off (the default)", ()
     expect(calls().filter((call) => call.includes("provisioning/prepare") || call.includes("provisioning/submit"))).toEqual([]);
     expect(walletProvider.request).not.toHaveBeenCalled();
   });
+
+  it("shows a visible saved state below the button that names the blocker and offers no fake next action", async () => {
+    mockApi();
+    renderStudio("rel-draft");
+    await screen.findByDisplayValue("Forgive & Forget");
+    const save = await screen.findByRole("button", { name: "Save release draft" });
+    fireEvent.click(save);
+    const panel = await screen.findByLabelText("Release draft status");
+    expect(within(panel).getByText(/Release draft saved\. No contract was created and no gas was spent/)).toBeTruthy();
+    expect(within(panel).getByText(/Contract deployment is switched off in Studio/)).toBeTruthy();
+    expect(within(panel).getByText(/no next step available until deployment is switched on/)).toBeTruthy();
+    // The panel follows the Save button in the page, and has no button that would lead into a server refusal.
+    expect(save.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(panel).queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Prepare deployment|Deploy release contract/ })).toBeNull();
+    expect(walletProvider.request).not.toHaveBeenCalled();
+  });
+
+  it("shows a saving state, and a failure as an alert with no saved panel claim", async () => {
+    studioFetch.mockImplementation(async (path, options = {}) => {
+      if (path === "/studio/catalog") return draftCatalog();
+      if (path === "/studio/releases/rel-draft" && options.method === "PATCH") throw new Error("Server said no.");
+      if (path.endsWith("/provisioning/status")) return { state: "NOT_STARTED" };
+      throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+    });
+    renderStudio("rel-draft");
+    await screen.findByDisplayValue("Forgive & Forget");
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
+    expect(await screen.findByText("Saving your release draft…")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Server said no/);
+    expect(screen.queryByText(/Release draft saved\. No contract/)).toBeNull();
+  });
 });
 
 // Production incident (2026-10-22): after the broken Forgive & Forget single was archived, Create release did
