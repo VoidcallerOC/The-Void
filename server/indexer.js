@@ -262,6 +262,9 @@ export class BlockchainIndexer {
     this.retryOptions = retryOptions;
     this.logger = logger;
     this.onProgress = onProgress;
+    // Release clones and sales of abandoned releases. Loaded from the database at startup; nothing in this set is
+    // ever (re-)registered, whether it came from factory discovery or from explicit configuration.
+    this.excludedContracts = new Set();
   }
 
   // Factories sync first so a collection created in this range is indexed from its
@@ -297,6 +300,7 @@ export class BlockchainIndexer {
 
   addRelease({ chainId, address, startBlock, factoryAddress }) {
     const normalized = String(address).toLowerCase();
+    if (this.excludedContracts.has(normalized)) return false;
     if (this.configs.some((item) => String(item.address).toLowerCase() === normalized)) return false;
     this.configs.push(releaseIndexerConfig({ chainId, address: normalized, startBlock, skipMintOperators: this.saleOperators(), factoryAddress }));
     this.logger.info?.("indexer.release.added", { chainId: Number(chainId), address: normalized, startBlock: Number(startBlock) });
@@ -305,6 +309,7 @@ export class BlockchainIndexer {
 
   addPrimarySale({ chainId, address, startBlock, tokenAddress }) {
     const normalized = String(address).toLowerCase();
+    if (this.excludedContracts.has(normalized)) return false;
     if (this.configs.some((item) => String(item.address).toLowerCase() === normalized)) return false;
     this.configs.push(primarySaleIndexerConfig({ chainId, address: normalized, startBlock, tokenAddress }));
     this.logger.info?.("indexer.primary-sale.added", { chainId: Number(chainId), address: normalized, tokenAddress: String(tokenAddress).toLowerCase(), startBlock: Number(startBlock) });
@@ -331,7 +336,23 @@ export class BlockchainIndexer {
     this.collectionsLoaded = true;
   }
 
+  async loadExcludedReleaseContracts() {
+    if (typeof this.store.listAbandonedReleaseContracts !== "function") return;
+    const chainIds = [...new Set(this.configs.map((item) => Number(item.chainId)).filter(Number.isSafeInteger))];
+    for (const chainId of chainIds) {
+      for (const row of await this.store.listAbandonedReleaseContracts({ chainId })) {
+        for (const address of [row.release_contract_address, row.primary_sale_address]) if (address) this.excludedContracts.add(String(address).toLowerCase());
+      }
+    }
+    // Explicit configuration (INDEXER_CONTRACTS_JSON) cannot re-register an excluded release clone or sale. Factories,
+    // marketplaces and every other contract are never touched.
+    const before = this.configs.length;
+    this.configs = this.configs.filter((item) => !(["ERC1155", "PRIMARY_SALE", "PRIMARY_SALE_V2"].includes(item.contractType) && this.excludedContracts.has(String(item.address).toLowerCase())));
+    this.logger.info?.("indexer.release.excluded", { excluded: this.excludedContracts.size, droppedFromConfiguration: before - this.configs.length });
+  }
+
   async loadRegisteredReleases() {
+    await this.loadExcludedReleaseContracts();
     if (!this.store.listFactoryReleases) { this.releasesLoaded = true; return; }
     for (const factory of this.configs.filter((item) => item.contractType === "RELEASE_FACTORY")) {
       const rows = await this.store.listFactoryReleases({ chainId: Number(factory.chainId), factoryAddress: factory.address });

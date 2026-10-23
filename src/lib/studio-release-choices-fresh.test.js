@@ -50,3 +50,32 @@ describe("the Studio catalog API rows drive the picker", () => {
     expect(offered(apiRows(false))).toEqual([]);
   });
 });
+
+describe("the real Forgive & Forget catalog: one active release", () => {
+  const ff = (id, status, extra = {}) => ({ id, artistId: "voidcaller", title: "Forgive & Forget", status, ...extra });
+  const archivedAt = "2026-10-23T00:58:23.711Z";
+  const releases = [
+    ff("release-83611741", "ARCHIVED", { updatedAt: "2026-10-22T00:54:22.855Z" }),
+    ff("release-273f5476", "ARCHIVED", { updatedAt: "2026-10-22T09:42:49.933Z" }),
+    ff("release-cd9c689c", "ARCHIVED", { updatedAt: "2026-10-22T13:52:48.262Z" }),
+    ff("release-84f72628", "ARCHIVED", { updatedAt: "2026-10-22T16:42:32.527Z" }),
+    ff("release-88dbe3b8", "ARCHIVED", { updatedAt: "2026-10-22T19:12:02.404Z" }),
+    ff("release-7bc53df7", "ARCHIVED", { updatedAt: archivedAt }),
+    ff("release-e3743294", "DRAFT", { updatedAt: "2026-10-23T13:36:34.105Z" }),
+    { id: "release-voidcaller-ep", artistId: "voidcaller", title: "VOIDCALLER", status: "PUBLISHED", updatedAt: "2026-09-20T00:00:00.000Z" },
+  ];
+  const bound = [{ release_id: "release-e3743294", status: "DEPLOYED", release_contract_address: "0xf9c48a2bbceba7577ff17a2eed20fcef70ea480d" }];
+
+  it("offers only forgive-forget-6 among the Forgive & Forget records, and leaves other releases alone", () => {
+    expect(ids(releases, bound)).toEqual(["release-e3743294", "release-voidcaller-ep"]);
+  });
+
+  it("still offers forgive-forget-6 before its contract is bound, because it changed after the last retirement", () => {
+    expect(ids(releases)).toEqual(["release-e3743294", "release-voidcaller-ep"]);
+  });
+
+  it("never offers an archived record, even a retired one with a holder", () => {
+    for (const id of ["release-83611741", "release-273f5476", "release-cd9c689c", "release-84f72628", "release-88dbe3b8", "release-7bc53df7"]) expect(ids(releases, bound)).not.toContain(id);
+  });
+});
+
