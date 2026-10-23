@@ -10,8 +10,9 @@
 // storage layout. A deployment matches a candidate when the same normalisation of
 // its deployed code yields the same hash.
 import { readFile } from "node:fs/promises";
-import { JsonRpcProvider, keccak256 } from "ethers";
+import { keccak256 } from "ethers";
 import { LOCKED_OWNABLES } from "./authority-rotation-plan.mjs";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const FUJI_RPC = process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
 
@@ -25,7 +26,7 @@ export function normalizedRuntimeHash(code, immutableRanges) {
 
 async function main() {
   const candidates = JSON.parse(await readFile(new URL("./data/legacy-sale-fingerprints.json", import.meta.url), "utf8"));
-  const provider = new JsonRpcProvider(FUJI_RPC, 43113, { staticNetwork: true });
+  const provider = probeProvider(FUJI_RPC, 43113);
   const chainId = (await provider.send("eth_chainId", [])).toString();
   const out = { chainId: Number(chainId), deployments: [] };
   for (const sale of LOCKED_OWNABLES) {

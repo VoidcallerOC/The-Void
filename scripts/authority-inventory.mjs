@@ -8,7 +8,8 @@
 //
 // NEW_AUTHORITY is optional; when set, the same reads report whether the
 // replacement already holds each authority (post-rotation verification).
-import { Interface, JsonRpcProvider, getAddress, id } from "ethers";
+import { Interface, getAddress, id } from "ethers";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const SUBJECT = getAddress(process.env.SUBJECT || "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
 const NEW_AUTHORITY = process.env.NEW_AUTHORITY ? getAddress(process.env.NEW_AUTHORITY) : null;
@@ -155,8 +156,8 @@ async function inspect(provider, contract, tip, withLogs, logIndex = null) {
   return entry;
 }
 
-const fuji = new JsonRpcProvider(FUJI_RPC, 43113, { staticNetwork: true });
-const mainnet = new JsonRpcProvider(MAINNET_RPC, 43114, { staticNetwork: true });
+const fuji = probeProvider(FUJI_RPC, 43113);
+const mainnet = probeProvider(MAINNET_RPC, 43114);
 const fujiTip = await fuji.getBlockNumber();
 const result = {
   probedAt: new Date().toISOString(),

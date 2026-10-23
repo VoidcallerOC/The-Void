@@ -13,8 +13,9 @@
 // 4. With SAFE_AUTHORITY / BACKUP_ADMIN: proxy master copy, VERSION, owners,
 //    threshold, modules, guard, fallback handler, nonce, independence from the old
 //    key / 0x284C / each other, and current role membership on the P0 release.
-import { Interface, JsonRpcProvider, ZeroAddress, getAddress, keccak256 } from "ethers";
+import { Interface, ZeroAddress, getAddress, keccak256 } from "ethers";
 import { ARTIST_WALLET_0x284C, OLD_AUTHORITY, RELEASES, ROLES, releaseIface, safeTxHash, validateAuthorities } from "./authority-rotation-plan.mjs";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const FUJI_RPC = process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
 const MAINNET_RPC = process.env.MAINNET_RPC_URL || "https://api.avax.network/ext/bc/C/rpc";
@@ -49,8 +50,8 @@ const safeIface = new Interface([
   "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) view returns (bytes32)",
 ]);
 
-const fuji = new JsonRpcProvider(FUJI_RPC, 43113, { staticNetwork: true });
-const mainnet = new JsonRpcProvider(MAINNET_RPC, 43114, { staticNetwork: true });
+const fuji = probeProvider(FUJI_RPC, 43113);
+const mainnet = probeProvider(MAINNET_RPC, 43114);
 const call = async (provider, to, fn, args = []) => safeIface.decodeFunctionResult(fn, await provider.call({ to, data: safeIface.encodeFunctionData(fn, args) }));
 const addr = (word) => getAddress(`0x${word.slice(26)}`);
 

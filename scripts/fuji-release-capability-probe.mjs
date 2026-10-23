@@ -6,8 +6,9 @@
 //
 // Optional env: FUJI_RPC_URL (defaults to the public Avalanche Fuji endpoint),
 // EXTRA_MARKETPLACE_TXS (comma-separated deployment tx hashes to account for).
-import { Interface, JsonRpcProvider, getAddress, id } from "ethers";
+import { Interface, getAddress, id } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
+import { describeRpc, probeProvider } from "./lib/probe-rpc.mjs";
 
 const RPC_URL = process.env.FUJI_RPC_URL || fujiV2.rpcUrl;
 const FUJI_CHAIN_ID = 43113n;
@@ -63,7 +64,7 @@ async function tryCall(provider, to, iface, name, args = []) {
 const stringify = (value) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2);
 
 async function main() {
-  const provider = new JsonRpcProvider(RPC_URL, Number(FUJI_CHAIN_ID), { staticNetwork: true });
+  const provider = probeProvider(RPC_URL, Number(FUJI_CHAIN_ID));
   const chainId = BigInt(await provider.send("eth_chainId", []));
   if (chainId !== FUJI_CHAIN_ID) throw new Error(`Unexpected chain ID ${chainId}`);
   const tip = await provider.getBlockNumber();
@@ -120,7 +121,7 @@ async function main() {
   const albumCapable = Object.values(selectors).every(Boolean);
   console.log(stringify({
     probedAt: new Date().toISOString(),
-    rpc: RPC_URL,
+    rpc: describeRpc(RPC_URL),
     chainId,
     tipBlock: tip,
     factory: { address: factory, implementation, implementationMatchesConfig: implementation === getAddress(fujiV2.implementationAddress), releaseCount },

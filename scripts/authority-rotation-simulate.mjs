@@ -16,8 +16,9 @@
 // transactions produce (that rests on the source and on the postcondition reads
 // after each executed step), mempool ordering, or the signers' custody. Without
 // SAFE_AUTHORITY/BACKUP_ADMIN it uses labelled stand-in addresses.
-import { AbiCoder, Interface, JsonRpcProvider, getAddress, id, keccak256, toBeHex, zeroPadValue } from "ethers";
+import { AbiCoder, Interface, getAddress, id, keccak256, toBeHex, zeroPadValue } from "ethers";
 import { OLD_AUTHORITY, ROLES, RELEASES, OWNABLES, LOCKED_OWNABLES, OPEN_OLD_KEY_SALES, LEGACY_SALE_82B26, LEGACY_RELEASE_82B26, buildRotationPlan, buildSaleCloseSteps, releaseIface, ownableIface, validateAuthorities } from "./authority-rotation-plan.mjs";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const FUJI_RPC = process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
 // Simulation-only stand-ins. None is a proposed authority.
@@ -63,7 +64,7 @@ const editionIface = new Interface([
 const PRIVILEGED = ["pause()", "unpause()", "mint(address,uint256,uint256,bytes)", "mintBatch(address,uint256[],uint256[],bytes)", "createEdition(bytes32,bytes32,uint256,string)", "createEdition(bytes32,bytes32,uint256,string,address,uint96)", "grantRole(bytes32,address)", "revokeRole(bytes32,address)", "renounceRole(bytes32)", "multicall(bytes[])", "multicall(uint256,bytes[])", "beginDefaultAdminTransfer(address)", "acceptDefaultAdminTransfer()", "execute(address,uint256,bytes)"];
 const ERRORS = Object.fromEntries(["AccessDenied(bytes32,address)", "AccessDenied(address)", "NotOwner()", "NotEditionArtist(uint256,address,address)", "SalePaused(uint256)", "ContractPaused()"].map((s) => [id(s).slice(0, 10), s]));
 
-const provider = new JsonRpcProvider(FUJI_RPC, 43113, { staticNetwork: true });
+const provider = probeProvider(FUJI_RPC, 43113);
 const selectorOf = (sig) => id(sig).slice(0, 10);
 
 async function simulate(from, to, data, { overrides = null, value = 0n, estimate = true } = {}) {
