@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWallet } from "../lib/wallet-context.js";
+import { WalletButton } from "./WalletButton.jsx";
 import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import { X_LINK_MESSAGE, completeXLink, disconnectXLink, fetchXLink, startXLink } from "../lib/x-link-api.js";
 
@@ -87,7 +88,23 @@ export function XAccountLink() {
     } finally { busy.current = false; }
   }
 
-  if (!signedIn) return null;
+  if (!signedIn) {
+    // Never hide silently: say what is needed. Linking needs a signed wallet session, because the wallet
+    // stays the only way in and the link is stored against it.
+    const reason = !wallet?.connected
+      ? "Connect your wallet to link an X account."
+      : wallet.needsNetworkSwitch
+        ? `Switch your wallet to ${wallet.releaseNetworkName || "the release network"}, then sign in to link an X account.`
+        : "Sign in with your wallet to link an X account.";
+    return (
+      <section style={panel} aria-label="X account">
+        <span style={{ ...mono, color: "var(--vc-crimson)" }}>† X account · optional</span>
+        <p style={dim}>Connect X to show a verified link to your X profile. {reason} Linking is optional and does not change your wallet, collection or marketplace access.</p>
+        {wallet?.authenticationError && <p role="alert" style={{ ...dim, color: "var(--vc-crimson)" }}>{wallet.authenticationError}</p>}
+        <div><WalletButton /></div>
+      </section>
+    );
+  }
   const { phase, link, error } = state;
   return (
     <section style={panel} aria-label="X account">
