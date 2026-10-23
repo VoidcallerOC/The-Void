@@ -4,8 +4,9 @@
 // with its marketplace/registry getters. No signing, no broadcast.
 //
 //   DEPLOYER=0x... node scripts/fuji-deployer-audit.mjs
-import { Interface, JsonRpcProvider, getAddress, getCreateAddress, keccak256 } from "ethers";
+import { Interface, getAddress, getCreateAddress, keccak256 } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const RPC_URL = process.env.FUJI_RPC_URL || fujiV2.rpcUrl;
 const DEPLOYER = getAddress(process.env.DEPLOYER || "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
@@ -37,7 +38,7 @@ async function creationBlock(provider, address, tip) {
   return { block: low, timestamp: new Date(block.timestamp * 1000).toISOString() };
 }
 
-const provider = new JsonRpcProvider(RPC_URL, 43113, { staticNetwork: true });
+const provider = probeProvider(RPC_URL, 43113);
 const tip = await provider.getBlockNumber();
 const nonce = await provider.getTransactionCount(DEPLOYER, "latest");
 const contracts = [];

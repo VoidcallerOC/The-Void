@@ -5,9 +5,10 @@
 // it never signs or broadcasts. Output is JSON on stdout.
 //
 //   node scripts/fuji-marketplace-reconciliation-probe.mjs
-import { AbiCoder, Interface, JsonRpcProvider, getAddress, keccak256 } from "ethers";
+import { AbiCoder, Interface, getAddress, keccak256 } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 import fingerprints from "./data/marketplace-fingerprints.json" with { type: "json" };
+import { describeRpc, probeProvider } from "./lib/probe-rpc.mjs";
 
 const RPC_URL = process.env.FUJI_RPC_URL || fujiV2.rpcUrl;
 const EXPLORER_API = process.env.FUJI_EXPLORER_API || "https://api.routescan.io/v2/network/testnet/evm/43113/etherscan/api";
@@ -122,7 +123,7 @@ async function creationTransactions(addresses) {
 const stringify = (value) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2);
 
 async function main() {
-  const provider = new JsonRpcProvider(RPC_URL, 43113, { staticNetwork: true });
+  const provider = probeProvider(RPC_URL, 43113);
   const chainId = BigInt(await provider.send("eth_chainId", []));
   if (chainId !== 43113n) throw new Error(`Unexpected chain ID ${chainId}`);
   const tipBlock = await provider.getBlockNumber();
@@ -193,7 +194,7 @@ async function main() {
     });
   }
 
-  console.log(stringify({ probedAt: new Date().toISOString(), rpc: RPC_URL, chainId, tipBlock, explorerLookupError: explorer.error || null, results }));
+  console.log(stringify({ probedAt: new Date().toISOString(), rpc: describeRpc(RPC_URL), chainId, tipBlock, explorerLookupError: explorer.error || null, results }));
 }
 
 main().catch((error) => {

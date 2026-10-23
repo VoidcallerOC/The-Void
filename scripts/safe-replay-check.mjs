@@ -14,13 +14,14 @@
 // on both chains, simulates the Fuji creation with eth_call, and prints the unsigned
 // Fuji creation transaction.
 import { readFile } from "node:fs/promises";
-import { JsonRpcProvider, ZeroAddress, getAddress, keccak256 } from "ethers";
+import { ZeroAddress, getAddress, keccak256 } from "ethers";
 import { KNOWN_SAFE_CONTRACTS, buildReplayCreation, encodeInitializer, factoryIface, parseSafeSetup, predictSafeAddress, resolveSafeSetup } from "./safe-counterfactual.mjs";
 import { ARTIST_WALLET_0x284C, OLD_AUTHORITY } from "./authority-rotation-plan.mjs";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 const CHAINS = {
-  43113: new JsonRpcProvider(process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc", 43113, { staticNetwork: true }),
-  43114: new JsonRpcProvider(process.env.MAINNET_RPC_URL || "https://api.avax.network/ext/bc/C/rpc", 43114, { staticNetwork: true }),
+  43113: probeProvider(process.env.FUJI_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc", 43113),
+  43114: probeProvider(process.env.MAINNET_RPC_URL || "https://api.avax.network/ext/bc/C/rpc", 43114),
 };
 const codeHash = async (chainId, a) => { const c = await CHAINS[chainId].getCode(a); return c === "0x" ? null : keccak256(c); };
 const proxyCode = async (chainId, factory) => factoryIface.decodeFunctionResult("proxyCreationCode", await CHAINS[chainId].call({ to: factory, data: factoryIface.encodeFunctionData("proxyCreationCode") }))[0];

@@ -9,8 +9,9 @@
 // the Fuji P0 release. On a chain with code it also looks up the creation
 // transaction (public explorer API) and decodes the factory call, which shows
 // whether the identical Safe could exist at the same address on the other chain.
-import { Interface, JsonRpcProvider, getAddress, keccak256 } from "ethers";
+import { Interface, getAddress, keccak256 } from "ethers";
 import { ARTIST_WALLET_0x284C, OLD_AUTHORITY, ROLES, releaseIface } from "./authority-rotation-plan.mjs";
+import { probeProvider } from "./lib/probe-rpc.mjs";
 
 // The address is probed exactly as supplied (same 20 bytes). Its EIP-55 checksum is
 // reported, not silently corrected: a failed checksum can mean a retyped address.
@@ -77,7 +78,7 @@ function decodeCreation(input) {
 }
 
 async function inspect(chain) {
-  const provider = new JsonRpcProvider(chain.rpc, chain.chainId, { staticNetwork: true });
+  const provider = probeProvider(chain.rpc, chain.chainId);
   const out = { network: chain.name, expectedChainId: chain.chainId, rpcChainId: Number(BigInt(await provider.send("eth_chainId", []))), tipBlock: await provider.getBlockNumber() };
   const code = await provider.getCode(SAFE);
   Object.assign(out, { codePresent: code !== "0x", codeBytes: (code.length - 2) / 2, codeHash: code !== "0x" ? keccak256(code) : null, balanceWei: (await provider.getBalance(SAFE)).toString(), txCount: await provider.getTransactionCount(SAFE) });
@@ -111,7 +112,7 @@ async function main() {
   }
   // Role membership on the Fuji P0 release (should be false before P0 step 1).
   try {
-    const fuji = new JsonRpcProvider(CHAINS[0].rpc, 43113, { staticNetwork: true });
+    const fuji = probeProvider(CHAINS[0].rpc, 43113);
     out.fujiP0ReleaseRoles = Object.fromEntries(await Promise.all(Object.entries(ROLES).map(async ([name, hash]) => [name, releaseIface.decodeFunctionResult("hasRole", await fuji.call({ to: P0_RELEASE_FUJI, data: releaseIface.encodeFunctionData("hasRole", [hash, SAFE]) }))[0]])));
   } catch (error) { out.fujiP0ReleaseRolesError = String(error?.message || error).slice(0, 120); }
   console.log(JSON.stringify(out, null, 2));

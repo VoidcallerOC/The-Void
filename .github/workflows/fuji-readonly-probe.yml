@@ -3,7 +3,9 @@ name: Fuji read-only release probe
 # Read-only chain evidence for the release-per-contract deployment: album
 # capability of the deployed implementation, ReleaseMarketplaceV3 parity, and
 # the MusicMarketplace deployments made by the suspended Render cron.
-# Uses the public Fuji RPC; no secrets, no signing, no broadcast.
+# No signing, no broadcast. The probe job uses the public Avalanche RPC endpoints
+# unless the optional FUJI_RPC_URL / MAINNET_RPC_URL repository secrets name a
+# private one (read-only RPC access; no signing key).
 
 on:
   workflow_dispatch:
@@ -25,6 +27,8 @@ on:
       - scripts/safe-replay-check.mjs
       - scripts/safe-counterfactual.mjs
       - scripts/data/legacy-sale-fingerprints.json
+      - scripts/lib/probe-rpc.mjs
+      - scripts/run-probe.sh
       - config/fuji-release-per-contract-v2.json
       - deployments/**
       - .github/workflows/fuji-readonly-probe.yml
@@ -49,9 +53,19 @@ jobs:
           set -o pipefail
           node scripts/fuji-provisioning-preflight.mjs | tee fuji-provisioning-preflight.json
 
+  # Each probe runs through scripts/run-probe.sh: a crash or non-zero exit fails the
+  # job (every probe still runs and the artifact is still uploaded), while an RPC
+  # rate limit or eth_getLogs range limit is reported as UNVERIFIED (a warning,
+  # listed in probe-outcomes.txt and the job summary) instead of a failure.
   probe:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # Empty when the secrets are unset (or on fork PRs): the probes then fall back
+      # to the public endpoints. A private URL is masked in logs and redacted from
+      # probe output.
+      FUJI_RPC_URL: ${{ secrets.FUJI_RPC_URL }}
+      MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,38 +74,42 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Probe Fuji (read-only)
-        run: node scripts/fuji-release-capability-probe.mjs | tee fuji-release-capability-probe.json
+        if: ${{ !cancelled() }}
+        run: bash scripts/run-probe.sh fuji-release-capability-probe.json scripts/fuji-release-capability-probe.mjs
       - name: Probe Fuji marketplaces (read-only)
-        run: node scripts/fuji-marketplace-reconciliation-probe.mjs | tee fuji-marketplace-reconciliation-probe.json
+        if: ${{ !cancelled() }}
+        run: bash scripts/run-probe.sh fuji-marketplace-reconciliation-probe.json scripts/fuji-marketplace-reconciliation-probe.mjs
       - name: Enumerate contracts created by the marketplace deployer (read-only)
+        if: ${{ !cancelled() }}
         env:
           DEPLOYER: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
-        run: node scripts/fuji-deployer-audit.mjs | tee fuji-deployer-audit.json
+        run: bash scripts/run-probe.sh fuji-deployer-audit.json scripts/fuji-deployer-audit.mjs
       - name: Authority inventory for the platform deployer (read-only, Fuji + C-Chain)
+        if: ${{ !cancelled() }}
         env:
           SUBJECT: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174"
-        run: node scripts/authority-inventory.mjs | tee authority-inventory.json
+        run: bash scripts/run-probe.sh authority-inventory.json scripts/authority-inventory.mjs
       - name: Simulate the authority rotation against live state (eth_call only; nothing signed or broadcast)
-        run: node scripts/authority-rotation-simulate.mjs | tee authority-rotation-simulation.json
+        if: ${{ !cancelled() }}
+        run: bash scripts/run-probe.sh authority-rotation-simulation.json scripts/authority-rotation-simulate.mjs
       - name: Safe readiness for the replacement admin (read-only RPC and public GET only)
-        run: node scripts/safe-readiness-probe.mjs | tee safe-readiness.json
+        if: ${{ !cancelled() }}
+        run: bash scripts/run-probe.sh safe-readiness.json scripts/safe-readiness-probe.mjs
       - name: Identify the owner-supplied Safe on Fuji and C-Chain (read-only)
+        if: ${{ !cancelled() }}
         env:
           SAFE_CANDIDATE: "0xec40c3CE983A2F3bB4a241EBAd4e0a8C261aeA10"
-        shell: bash
-        run: |
-          set -o pipefail
-          node scripts/safe-identity-probe.mjs | tee safe-identity.json
+        run: bash scripts/run-probe.sh safe-identity.json scripts/safe-identity-probe.mjs
       - name: Can the owner's counterfactual Safe be replayed on Fuji? (read-only eth_call/getCode)
-        shell: bash
+        if: ${{ !cancelled() }}
         env:
           SAFE_TARGET: "0xec40c3CE983A2F3bB4a241EBAd4e0a8C261aeA10"
-        run: |
-          set -o pipefail
-          node scripts/safe-replay-check.mjs | tee safe-replay-check.json
+        run: bash scripts/run-probe.sh safe-replay-check.json scripts/safe-replay-check.mjs
       - name: Identify legacy sale bytecode (source commit and compiler) for the storage layout
-        run: node scripts/legacy-sale-bytecode-check.mjs | tee legacy-sale-bytecode.json
+        if: ${{ !cancelled() }}
+        run: bash scripts/run-probe.sh legacy-sale-bytecode.json scripts/legacy-sale-bytecode-check.mjs
       - name: Scan the production frontend bundle for contract addresses (read-only GET)
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -107,9 +125,11 @@ jobs:
             if grep -qx "$a" bundle-addresses.txt; then echo "IN_BUNDLE $a"; else echo "ABSENT    $a"; fi
           done
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: fuji-release-capability-probe
           path: |
+            probe-outcomes.txt
             fuji-release-capability-probe.json
             fuji-marketplace-reconciliation-probe.json
             bundle-addresses.txt
