@@ -9,14 +9,15 @@ import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 
 // Real Postgres: after the Forgive & Forget resets, no retired or draft Forgive & Forget release, edition or
 // experience is returned by the public catalog reads, while an unrelated published release still is. Fixtures mirror
-// the production lifecycle states (four ARCHIVED releases plus one abandoned DRAFT). Skipped without TEST_DATABASE_URL.
+// the production lifecycle states (five ARCHIVED releases plus one abandoned DRAFT). Skipped without TEST_DATABASE_URL.
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "";
 const RETIRED = [
   ["release-83611741-c9ee-4487-a438-b6fa844762e6", "forgive-forget", "ARCHIVED"],
   ["release-273f5476-0cdb-45d3-83d3-5908eb42bc6c", "forgive-forget-2", "ARCHIVED"],
   ["release-cd9c689c-8b90-41ee-b4e4-0124a63d6819", "forgive-and-forget", "ARCHIVED"],
   ["release-84f72628-2c74-4a53-96db-fe495f0f9220", "forgive-forget-3", "ARCHIVED"],
-  ["release-88dbe3b8-dce2-4d98-857c-10b7fa8f64ca", "forgive-forget-4", "DRAFT"],
+  ["release-88dbe3b8-dce2-4d98-857c-10b7fa8f64ca", "forgive-forget-4", "ARCHIVED"],
+  ["release-7bc53df7-abc7-4b10-8328-f7aec4c3b601", "forgive-forget-5", "DRAFT"],
 ];
 const UNRELATED = "release-unrelated-published";
 

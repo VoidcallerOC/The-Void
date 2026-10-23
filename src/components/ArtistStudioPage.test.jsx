@@ -664,6 +664,9 @@ describe("Artist Studio album activation lifecycle (D3)", () => {
 });
 
 describe("Artist Studio on-chain tag on an existing draft", () => {
+  // Deployment is switched on only inside this block; production leaves it off by default.
+  beforeEach(() => vi.stubEnv("VITE_STUDIO_ONCHAIN_DEPLOY", "true"));
+  afterEach(() => vi.unstubAllEnvs());
   const DIGEST_A = `0x${"aa".repeat(32)}`;
   const DIGEST_B = `0x${"bb".repeat(32)}`;
   const draftCatalog = (contractSymbol) => ({ artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Forgive & Forget", status: "DRAFT", release_metadata: { releaseType: "SINGLE", ...(contractSymbol ? { contractSymbol } : {}) } }], editions: [], experiences: [] });
@@ -765,6 +768,7 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     mockDraft();
     renderStudio("rel-draft");
     await tagField();
+    await screen.findByDisplayValue("Forgive & Forget");
     fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
     await waitFor(() => expect(calls("PATCH", "/studio/releases/rel-draft")).toHaveLength(1));
     await waitFor(() => expect(screen.getAllByText(/No contract was created and no gas was spent/i).length).toBeGreaterThan(0));
@@ -809,6 +813,36 @@ describe("Artist Studio on-chain tag on an existing draft", () => {
     const field = await screen.findByLabelText(/On-chain tag \(fixed/);
     await waitFor(() => expect(field.value).toBe("FORGIVEFORG"));
     expect(field.readOnly).toBe(true);
+  });
+});
+
+describe("Artist Studio with on-chain deployment switched off (the default)", () => {
+  const draftCatalog = () => ({ artists, releases: [{ id: "rel-draft", artist_id: "artist-a", title: "Forgive & Forget", status: "DRAFT", release_metadata: { releaseType: "SINGLE" } }], editions: [], experiences: [] });
+  const calls = () => studioFetch.mock.calls.map(([path, options]) => `${options?.method || "GET"} ${path}`);
+  const mockApi = () => studioFetch.mockImplementation(async (path, options = {}) => {
+    if (path === "/studio/catalog") return draftCatalog();
+    if (path === "/studio/releases/rel-draft" && options.method === "PATCH") return { id: "rel-draft" };
+    if (path.endsWith("/provisioning/status")) return { state: "NOT_STARTED" };
+    throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+  });
+
+  it("offers no way to prepare or deploy a contract, and says so", async () => {
+    mockApi();
+    renderStudio("rel-draft");
+    expect(await screen.findByText(/On-chain deployment is switched off/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Prepare deployment|Refresh deployment/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Deploy release contract/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /permanent contract/i })).toBeNull();
+  });
+
+  it("still saves the draft, with no provisioning call and no wallet request", async () => {
+    mockApi();
+    renderStudio("rel-draft");
+    await screen.findByDisplayValue("Forgive & Forget");
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
+    await waitFor(() => expect(calls()).toContain("PATCH /studio/releases/rel-draft"));
+    expect(calls().filter((call) => call.includes("provisioning/prepare") || call.includes("provisioning/submit"))).toEqual([]);
+    expect(walletProvider.request).not.toHaveBeenCalled();
   });
 });
 
