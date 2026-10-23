@@ -10,10 +10,12 @@ import { MAINNET_DEPLOYER, SigningRequestError, assertDefinedDeployer, assertNoP
 import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError, LEGACY_FUJI_SINGLETON, ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT, PUBLIC_WINDOW_SECONDS, claimSchedule } from "../server/genesis-claim.js";
 
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
-// C-Chain mainnet (production 24 hours / 7 days at 0.25 AVAX only, enforced here, by the API and
-// by the contract). The token's VoidPrimarySale must already be
-// configured as the public phase (open at claimStart together with the claims, close 7 days after
-// claimStart, at the public price; claims close 24 h in while the sale continues),
+// C-Chain mainnet (production 24-hour claim at 0.25 AVAX with a public window of whole hours between
+// 7 and 14 days only, enforced here, by the API and by the contract). On mainnet the plan names the
+// sale's inclusive end explicitly (GENESIS_PUBLIC_SALE_END) and the window is derived from it. The
+// token's VoidPrimarySale must already be configured, unpaused, as the public phase (open at
+// claimStart together with the claims, close at GENESIS_PUBLIC_SALE_END, at the public price; claims
+// close 24 h in while the sale continues),
 // and the edition must have no mints other than sale purchases. Everything is read-only until a
 // broadcast is explicitly confirmed; the default path is a dry run that simulates the constructor.
 // The script never grants roles, edits config/ or touches the API: those follow-ups are printed.
@@ -119,12 +121,30 @@ export function validateClaimDeploymentEnv(env = process.env) {
   if (openText !== "yes" && openText !== "no") throw new DeploymentError("GENESIS_EXPECT_OPEN_EDITION must be yes or no.");
   const claimStart = whole(env.GENESIS_CLAIM_START, "GENESIS_CLAIM_START", { positive: true });
   const publicPriceWei = whole(env.GENESIS_PUBLIC_PRICE_WEI, "GENESIS_PUBLIC_PRICE_WEI", { positive: true });
+  // The inclusive last second of the public sale (the sale's endTime). Mainnet requires it, so the plan names
+  // the launch end explicitly; the window follows from it (publicSaleEnd = claimStart + publicWindow - 1).
+  const saleEndText = String(env.GENESIS_PUBLIC_SALE_END ?? "").trim();
+  if (network === "mainnet" && !saleEndText) throw new DeploymentError("GENESIS_PUBLIC_SALE_END is required on mainnet: the public sale's inclusive end (its endTime), in Unix seconds.");
+  const windowText = String(env.GENESIS_PUBLIC_WINDOW_SECONDS ?? "").trim();
+  let publicWindow = whole(windowText || undefined, "GENESIS_PUBLIC_WINDOW_SECONDS", { positive: true, fallback: PUBLIC_WINDOW_SECONDS.toString() });
+  if (saleEndText) {
+    const saleEnd = whole(saleEndText, "GENESIS_PUBLIC_SALE_END", { positive: true });
+    if (saleEnd <= claimStart) throw new DeploymentError(`GENESIS_PUBLIC_SALE_END ${saleEnd} must be after GENESIS_CLAIM_START ${claimStart}.`);
+    const derived = saleEnd - claimStart + 1n;
+    if (windowText && publicWindow !== derived) throw new DeploymentError(`GENESIS_PUBLIC_WINDOW_SECONDS ${publicWindow} does not match GENESIS_PUBLIC_SALE_END ${saleEnd}, which gives a ${derived}-second window from GENESIS_CLAIM_START.`);
+    publicWindow = derived;
+  }
+  // The sale's paid per-wallet limit the plan must find on chain (free claims never count against it). Mainnet
+  // requires it, so a sale configured with another limit cannot pass unnoticed.
+  const perWalletText = String(env.GENESIS_EXPECT_PER_WALLET_LIMIT ?? "").trim();
+  if (network === "mainnet" && !perWalletText) throw new DeploymentError("GENESIS_EXPECT_PER_WALLET_LIMIT is required on mainnet: the sale's paid per-wallet limit the plan must find on chain.");
+  const expectedPerWalletLimit = perWalletText ? whole(perWalletText, "GENESIS_EXPECT_PER_WALLET_LIMIT") : null;
   let schedule;
   try {
     schedule = claimSchedule({
       destinationChainId: target.chainId,
       claimWindow: whole(env.GENESIS_CLAIM_WINDOW_SECONDS, "GENESIS_CLAIM_WINDOW_SECONDS", { positive: true, fallback: CLAIM_WINDOW_SECONDS.toString() }),
-      publicWindow: whole(env.GENESIS_PUBLIC_WINDOW_SECONDS, "GENESIS_PUBLIC_WINDOW_SECONDS", { positive: true, fallback: PUBLIC_WINDOW_SECONDS.toString() }),
+      publicWindow,
       publicPriceWei,
     });
   } catch (error) {
@@ -167,6 +187,7 @@ export function validateClaimDeploymentEnv(env = process.env) {
     publicSaleEnd: claimStart + schedule.publicWindow - 1n,
     publicPriceWei,
     expectOpenEdition: openText === "yes",
+    expectedPerWalletLimit,
     admin,
     signer,
     broadcast,
@@ -220,6 +241,11 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
   if (!sale.configured) throw new DeploymentError("The token's primary sale is not configured. Configure the public phase before deploying the claim.");
   for (const field of ["priceWei", "maxSupply", "startTime", "endTime"]) {
     if (BigInt(sale[field]) !== expected[field]) throw new DeploymentError(`Sale ${field} is ${sale[field]}, expected ${expected[field]} (public phase: opens at claimStart together with the claims, lasts ${config.publicWindow}s, at the public price).`);
+  }
+  // The paid sale must open together with the claims, so it may not be paused when the claim is planned.
+  if (sale.paused) throw new DeploymentError("The token's primary sale is paused; the paid sale must open together with the claims. Unpause it before deploying the claim.");
+  if (config.expectedPerWalletLimit !== null && config.expectedPerWalletLimit !== undefined && BigInt(sale.perWalletLimit) !== config.expectedPerWalletLimit) {
+    throw new DeploymentError(`Sale perWalletLimit is ${sale.perWalletLimit}, expected ${config.expectedPerWalletLimit} (GENESIS_EXPECT_PER_WALLET_LIMIT). Free claims never count against it.`);
   }
   if (BigInt(edition.mintedSupply) !== BigInt(sale.sold)) throw new DeploymentError(`The edition has ${edition.mintedSupply} minted but the sale sold ${sale.sold}: another mint path exists, so claim accounting would fail.`);
 
@@ -290,6 +316,8 @@ export function claimPlanInputs(config) {
     GENESIS_CLAIM_START: config.claimStart.toString(),
     GENESIS_CLAIM_WINDOW_SECONDS: config.claimWindow.toString(),
     GENESIS_PUBLIC_WINDOW_SECONDS: config.publicWindow.toString(),
+    GENESIS_PUBLIC_SALE_END: config.publicSaleEnd.toString(),
+    ...(config.expectedPerWalletLimit === null || config.expectedPerWalletLimit === undefined ? {} : { GENESIS_EXPECT_PER_WALLET_LIMIT: config.expectedPerWalletLimit.toString() }),
     GENESIS_PUBLIC_PRICE_WEI: config.publicPriceWei.toString(),
     GENESIS_CLAIM_ALLOCATION: config.allocation.toString(),
     GENESIS_PUBLIC_MINT_ALLOCATION: config.publicAllocation.toString(),

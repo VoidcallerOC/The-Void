@@ -8,24 +8,35 @@ export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_CHAIN_ID = 43114;
 export const GENESIS_TOKEN_IDS = Object.freeze([0n, 1n, 2n, 3n]);
 export const LEGACY_FUJI_SINGLETON = "0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6";
-// Production schedule. C-Chain (43114) must use exactly these and the production price; only Fuji
-// may configure shorter test windows (never below one minute), as the claim contract also enforces.
+// Production schedule. C-Chain (43114) must use exactly the 24-hour claim window and the production
+// price, and a public window within the production policy below; only Fuji may configure shorter test
+// windows (never below one minute), as the claim contract also enforces.
 // The free claim and the paid public sale run CONCURRENTLY: both open at claimStart, free claims stop
 // at claimEnd = claimStart + claimWindow while paid minting continues until publicSaleEnd =
 // claimStart + publicWindow - 1 (inclusive), when both close. claimWindow must be shorter than publicWindow.
 export const CLAIM_WINDOW_SECONDS = 86_400n;
+// The default public window when none is configured (the shortest production window).
 export const PUBLIC_WINDOW_SECONDS = 7n * 86_400n;
+// Production public-window policy, mirrored from GenesisHolderClaim: whole hours, 7 to 14 days. A sale
+// opening on the hour then ends at :59:59, and a window one second short or long is refused.
+export const MAINNET_MIN_PUBLIC_WINDOW_SECONDS = 7n * 86_400n;
+export const MAINNET_MAX_PUBLIC_WINDOW_SECONDS = 14n * 86_400n;
+export const MAINNET_PUBLIC_WINDOW_STEP_SECONDS = 3_600n;
 export const MINIMUM_TEST_WINDOW_SECONDS = 60n;
 export const MAINNET_PUBLIC_PRICE_WEI = 250_000_000_000_000_000n; // 0.25 AVAX
 
 /**
  * Validates the schedule and price for the destination chain. Mainnet always gets the production
- * 24 hours / 7 days at 0.25 AVAX; anything else fails closed. Fuji windows default to production.
- * On every chain the claim window must be shorter than the public window, as the contract requires.
+ * 24-hour claim at 0.25 AVAX and a public window of whole hours between 7 and 14 days; anything else
+ * fails closed. Fuji windows default to production. On every chain the claim window must be shorter
+ * than the public window, as the contract requires.
  */
 export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_SECONDS, publicWindow = PUBLIC_WINDOW_SECONDS, publicPriceWei }) {
   if (destinationChainId === GENESIS_CHAIN_ID) {
-    if (claimWindow !== CLAIM_WINDOW_SECONDS || publicWindow !== PUBLIC_WINDOW_SECONDS) throw new GenesisClaimConfigurationError("Mainnet requires a 24-hour Genesis claim window and a 7-day public window.");
+    if (claimWindow !== CLAIM_WINDOW_SECONDS) throw new GenesisClaimConfigurationError("Mainnet requires a 24-hour Genesis claim window.");
+    if (publicWindow < MAINNET_MIN_PUBLIC_WINDOW_SECONDS || publicWindow > MAINNET_MAX_PUBLIC_WINDOW_SECONDS || publicWindow % MAINNET_PUBLIC_WINDOW_STEP_SECONDS !== 0n) {
+      throw new GenesisClaimConfigurationError(`Mainnet requires a public window of whole hours between 7 and 14 days (${MAINNET_MIN_PUBLIC_WINDOW_SECONDS}-${MAINNET_MAX_PUBLIC_WINDOW_SECONDS} seconds, a multiple of ${MAINNET_PUBLIC_WINDOW_STEP_SECONDS}); got ${publicWindow}.`);
+    }
     if (publicPriceWei !== MAINNET_PUBLIC_PRICE_WEI) throw new GenesisClaimConfigurationError("Mainnet requires a public price of exactly 0.25 AVAX (250000000000000000 wei).");
   } else if (claimWindow < MINIMUM_TEST_WINDOW_SECONDS || publicWindow < MINIMUM_TEST_WINDOW_SECONDS) {
     throw new GenesisClaimConfigurationError("Claim and public windows must each be at least 60 seconds.");

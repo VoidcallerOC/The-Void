@@ -203,12 +203,19 @@ contract GenesisHolderClaimTest {
     }
 
     function testQuantityMutationInvalidatesEip712Signature() public {
+        // Every claim is exactly one unit: a quantity edited after signing, or a voucher the signer itself
+        // issued for 0 or 2, is refused before any signature or mint.
         GenesisHolderClaim.ClaimVoucher memory voucher = _voucher(CLAIMANT, 21, 1, block.timestamp + 300);
         bytes memory signature = _sign(claimContract, voucher, signerKey);
         voucher.quantity = 2;
         vm.prank(CLAIMANT);
-        vm.expectPartialRevert(GenesisHolderClaim.InvalidSignature.selector);
+        vm.expectPartialRevert(GenesisHolderClaim.InvalidVoucher.selector);
         claimContract.claim(voucher, signature);
+        for (uint256 quantity; quantity <= 2; quantity += 2) {
+            GenesisHolderClaim.ClaimVoucher memory signed = _voucher(CLAIMANT, 40 + quantity, quantity, block.timestamp + 300);
+            _expectClaimRevert(CLAIMANT, signed, _sign(claimContract, signed, signerKey), GenesisHolderClaim.InvalidVoucher.selector);
+        }
+        require(claimContract.claimedSupply() == 0 && !claimContract.hasClaimed(CLAIMANT), "nothing claimed");
     }
 
     function testAllocationMismatchRejected() public {
@@ -260,10 +267,15 @@ contract GenesisHolderClaimTest {
     }
 
     function testAllocationExhaustionRejected() public {
-        GenesisHolderClaim.ClaimVoucher memory first = _voucher(CLAIMANT, 28, GENESIS_ALLOCATION, block.timestamp + 300);
-        bytes memory firstSignature = _sign(claimContract, first, signerKey);
-        vm.prank(CLAIMANT);
-        claimContract.claim(first, firstSignature);
+        // GENESIS_ALLOCATION one-unit claims from distinct wallets exhaust the reserved allocation.
+        for (uint256 i; i < GENESIS_ALLOCATION; ++i) {
+            address holder = address(uint160(0xC1A0 + i));
+            GenesisHolderClaim.ClaimVoucher memory each = _voucher(holder, 28 + 100 * (i + 1), 1, block.timestamp + 300);
+            bytes memory eachSignature = _sign(claimContract, each, signerKey);
+            vm.prank(holder);
+            claimContract.claim(each, eachSignature);
+        }
+        require(claimContract.claimedSupply() == GENESIS_ALLOCATION, "allocation used");
         GenesisHolderClaim.ClaimVoucher memory second = _voucher(CLAIMANT_TWO, 29, 1, block.timestamp + 300);
         _expectClaimRevert(
             CLAIMANT_TWO,

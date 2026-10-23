@@ -6,6 +6,7 @@ import {VoidReleaseFactoryV2RoyaltySettled} from "../contracts/VoidReleaseFactor
 import {VoidRelease1155V4Royalty} from "../contracts/VoidRelease1155V4Royalty.sol";
 import {VoidPrimarySaleSettled} from "../contracts/VoidPrimarySaleSettled.sol";
 import {ReleaseMarketplaceV4} from "../contracts/ReleaseMarketplaceV4.sol";
+import {installGenesisStandIn} from "./helpers/MockGenesisCollection.sol";
 
 interface VmClaimSettled {
     function chainId(uint256) external;
@@ -46,6 +47,8 @@ contract GenesisHolderClaimSettledReleaseTest {
 
     function setUp() public {
         vm.chainId(43114);
+        // GenesisHolderClaim reads Genesis balances on chain id 43114; this suite does not test eligibility.
+        installGenesisStandIn(true);
         vm.warp(T0);
         factory = new VoidReleaseFactoryV2RoyaltySettled(NANO);
         market = new ReleaseMarketplaceV4(NANO, 250, address(factory));

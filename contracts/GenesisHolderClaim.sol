@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {ReentrancyGuard} from "./VoidPrimarySale.sol";
+
+/// @notice The Genesis collection (ERC-1155 on C-Chain); only its balances are read, never moved.
+interface IGenesisCollection {
+    function balanceOfBatch(address[] calldata accounts, uint256[] calldata ids) external view returns (uint256[] memory);
+}
+
 interface IGenesisClaimRelease {
     struct EditionData {
         bytes32 releaseId;
@@ -17,6 +24,7 @@ interface IGenesisClaimRelease {
 }
 
 interface IGenesisClaimSale {
+    function releases() external view returns (address);
     function sales(uint256 tokenId)
         external
         view
@@ -39,20 +47,33 @@ interface IGenesisClaimSale {
 /// open for exactly publicWindow at publicPriceWei; free Genesis claims run concurrently for the first
 /// claimWindow of that sale (claimStart <= t < claimEnd) and then close while paid minting continues
 /// until publicSaleEnd, when both paths close. claimWindow must be shorter than publicWindow.
-/// On C-Chain (43114) the windows must be the production 24 hours and 7 days at the production
-/// 0.25 AVAX price; only Fuji may use shorter test windows (never below MINIMUM_TEST_WINDOW) and
-/// another price.
-/// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
-/// claim and fails closed if it drifts. Eligibility is live Genesis ownership: the server reads the
-/// claimant's current C-Chain balances of Genesis token IDs 0-3 when it signs a voucher and subtracts
-/// units already used by earlier claims, under the rule ELIGIBILITY_RULE names. Genesis tokens are never moved; the claim mints only the release
-/// token, directly to the claimant.
-contract GenesisHolderClaim {
+/// On C-Chain (43114) the claim window must be the production 24 hours at the production 0.25 AVAX
+/// price, and the public window must follow the production policy: whole hours, at least
+/// PRODUCTION_MIN_PUBLIC_WINDOW (7 days) and at most PRODUCTION_MAX_PUBLIC_WINDOW (14 days). Only Fuji
+/// may use shorter test windows (never below MINIMUM_TEST_WINDOW) and another price.
+/// The sale is the artist's VoidPrimarySale for this release (its releases() must be the release); this
+/// contract re-checks its configuration on every claim and fails closed if it drifts. Eligibility is live
+/// Genesis ownership: the server reads the claimant's current C-Chain balances of Genesis token IDs 0-3
+/// when it signs a voucher and subtracts units already used by earlier claims, under the rule
+/// ELIGIBILITY_RULE names. On C-Chain the contract also requires, at claim time, that the claimant still
+/// holds at least one Genesis unit (a necessary, not sufficient, condition: the used-unit ledger is the
+/// server's), so a leaked voucher key cannot mint to wallets that hold no Genesis token. Genesis tokens are
+/// never moved; the claim mints exactly one release token per wallet, directly to the claimant, through
+/// the release's ISSUER_ROLE, which the artist grants to this contract separately.
+contract GenesisHolderClaim is ReentrancyGuard {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     uint256 public constant GENESIS_CHAIN_ID = 43114;
+    /// @notice Genesis token IDs 0..GENESIS_MAX_TOKEN_ID count towards eligibility.
+    uint256 public constant GENESIS_MAX_TOKEN_ID = 3;
+    /// @notice Every claim mints exactly this many release tokens (one Genesis unit per claim).
+    uint256 public constant CLAIM_QUANTITY = 1;
     address public constant LEGACY_FUJI_SINGLETON = 0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6;
     uint256 public constant PRODUCTION_CLAIM_WINDOW = 1 days;
-    uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
+    /// @notice Production public-window policy: a sale that opens on the hour and runs whole hours ends at
+    /// :59:59 (publicSaleEnd = claimStart + publicWindow - 1), so a window one second short or long is refused.
+    uint256 public constant PRODUCTION_MIN_PUBLIC_WINDOW = 7 days;
+    uint256 public constant PRODUCTION_MAX_PUBLIC_WINDOW = 14 days;
+    uint256 public constant PRODUCTION_PUBLIC_WINDOW_STEP = 1 hours;
     uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
     /// @notice The rule every voucher must name: when the voucher is signed, the claimant holds at least
@@ -130,6 +151,7 @@ contract GenesisHolderClaim {
     error PublicPriceChanged(uint256 expected, uint256 actual);
     error ClaimNotOpen(uint256 claimStart, uint256 currentTime);
     error ClaimWindowClosed(uint256 claimEnd, uint256 currentTime);
+    error NotGenesisHolder(address account);
 
     event SignerUpdated(address indexed previousSigner, address indexed newSigner);
     event AdminTransferred(address indexed previousAdmin, address indexed newAdmin);
@@ -168,10 +190,22 @@ contract GenesisHolderClaim {
                 || publicPriceWei_ == 0 || claimStart_ < block.timestamp
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
+        // Distinct real contracts, never the Genesis collection itself, and the voucher signer is not the admin.
+        if (
+            releaseContract_.code.length == 0 || primarySale_.code.length == 0 || releaseContract_ == primarySale_
+                || releaseContract_ == GENESIS_CONTRACT || primarySale_ == GENESIS_CONTRACT || signer_ == admin_
+        ) revert InvalidConfiguration();
+        // The sale must sell this release, so its schedule and counters describe this token and no other.
+        if (IGenesisClaimSale(primarySale_).releases() != releaseContract_) revert InvalidConfiguration();
+        // On C-Chain the claim reads Genesis balances; the collection must exist there.
+        if (block.chainid == GENESIS_CHAIN_ID && GENESIS_CONTRACT.code.length == 0) revert InvalidConfiguration();
+        if (!IGenesisClaimRelease(releaseContract_).edition(tokenId_).exists) revert InvalidConfiguration();
         if (block.chainid == GENESIS_CHAIN_ID) {
-            // Production: a 7-day public sale at 0.25 AVAX, with free Genesis claims during its first 24 hours.
+            // Production: a public sale of 7 to 14 days in whole hours at 0.25 AVAX, with free Genesis claims
+            // during its first 24 hours.
             if (
-                claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW
+                claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ < PRODUCTION_MIN_PUBLIC_WINDOW
+                    || publicWindow_ > PRODUCTION_MAX_PUBLIC_WINDOW || publicWindow_ % PRODUCTION_PUBLIC_WINDOW_STEP != 0
                     || publicPriceWei_ != PRODUCTION_PUBLIC_PRICE_WEI
             ) revert InvalidConfiguration();
         } else if (claimWindow_ < MINIMUM_TEST_WINDOW || publicWindow_ < MINIMUM_TEST_WINDOW) {
@@ -215,14 +249,14 @@ contract GenesisHolderClaim {
     }
 
     function setSigner(address newSigner) external onlyAdmin {
-        if (newSigner == address(0)) revert InvalidAddress();
+        if (newSigner == address(0) || newSigner == admin) revert InvalidAddress();
         address previous = signer;
         signer = newSigner;
         emit SignerUpdated(previous, newSigner);
     }
 
     function transferAdmin(address newAdmin) external onlyAdmin {
-        if (newAdmin == address(0)) revert InvalidAddress();
+        if (newAdmin == address(0) || newAdmin == signer) revert InvalidAddress();
         address previous = admin;
         admin = newAdmin;
         emit AdminTransferred(previous, newAdmin);
@@ -238,7 +272,7 @@ contract GenesisHolderClaim {
         emit ClaimUnpaused(msg.sender);
     }
 
-    function claim(ClaimVoucher calldata voucher, bytes calldata signature) external {
+    function claim(ClaimVoucher calldata voucher, bytes calldata signature) external nonReentrant {
         if (paused) revert Paused();
         if (block.chainid != destinationChainId) revert WrongDestinationChain(destinationChainId, block.chainid);
         if (block.timestamp < claimStart) revert ClaimNotOpen(claimStart, block.timestamp);
@@ -249,7 +283,7 @@ contract GenesisHolderClaim {
             voucher.genesisContract != GENESIS_CONTRACT || voucher.genesisChainId != GENESIS_CHAIN_ID
                 || voucher.eligibilityRule != ELIGIBILITY_RULE || voucher.destinationChainId != destinationChainId
                 || voucher.releaseContract != releaseContract || voucher.tokenId != tokenId
-                || voucher.allocation != allocation || voucher.quantity == 0
+                || voucher.allocation != allocation || voucher.quantity != CLAIM_QUANTITY
         ) revert InvalidVoucher();
         if (hasClaimed[voucher.claimant]) revert AlreadyClaimed();
         if (usedNonces[voucher.nonce]) revert Replay();
@@ -260,8 +294,11 @@ contract GenesisHolderClaim {
         _assertPublicAllocation();
         address recovered = _recover(_digest(voucher), signature);
         if (recovered == address(0) || recovered != signer) revert InvalidSignature();
+        _assertGenesisHolder(voucher.claimant);
 
-        // Effects before the issuer call prevent callback reentrancy. A failed mint reverts all state.
+        // Effects before the issuer call; nonReentrant also blocks re-entry from the ERC-1155 receiver hook.
+        // A failed mint (no ISSUER_ROLE, paused release, refusing receiver) reverts all state, so the wallet and
+        // the nonce stay unused.
         hasClaimed[voucher.claimant] = true;
         usedNonces[voucher.nonce] = true;
         claimedSupply += voucher.quantity;
@@ -289,6 +326,27 @@ contract GenesisHolderClaim {
         if (releaseMinted != saleSold + claimedSupply) {
             revert SupplyAccountingMismatch(releaseMinted, saleSold, claimedSupply);
         }
+    }
+
+    /// @dev On C-Chain the claimant must hold at least one Genesis unit (IDs 0..GENESIS_MAX_TOKEN_ID) at claim
+    /// time. A view call to the immutable Genesis collection (STATICCALL); any failure reverts the claim. Fuji has
+    /// no Genesis collection, so there the signed voucher alone gates claims (test network only).
+    function _assertGenesisHolder(address account) private view {
+        if (block.chainid != GENESIS_CHAIN_ID) return;
+        uint256 count = GENESIS_MAX_TOKEN_ID + 1;
+        address[] memory accounts = new address[](count);
+        uint256[] memory ids = new uint256[](count);
+        for (uint256 i; i < count; ++i) {
+            accounts[i] = account;
+            ids[i] = i;
+        }
+        uint256[] memory balances = IGenesisCollection(GENESIS_CONTRACT).balanceOfBatch(accounts, ids);
+        if (balances.length == count) {
+            for (uint256 i; i < count; ++i) {
+                if (balances[i] != 0) return;
+            }
+        }
+        revert NotGenesisHolder(account);
     }
 
     function _digest(ClaimVoucher calldata voucher) private view returns (bytes32) {

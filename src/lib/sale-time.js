@@ -20,13 +20,14 @@ function invalidTime(received) {
 }
 
 // Parse a bare 12- or 24-hour clock time: "6:00am", "6am", "12:00pm",
-// "18:30", "6:00 AM". Returns { hour, minute } in 24-hour form, or null.
+// "18:30", "6:00 AM", "11:59:59 PM". Returns { hour, minute, second } in 24-hour form, or null.
 function parseClockTime(raw) {
-  const match = raw.match(/^(\d{1,2})(?::([0-5]\d))?\s*([ap]\.?m\.?)?$/i);
+  const match = raw.match(/^(\d{1,2})(?::([0-5]\d)(?::([0-5]\d))?)?\s*([ap]\.?m\.?)?$/i);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = match[2] ? Number(match[2]) : 0;
-  const meridiem = match[3] ? match[3].replace(/\./g, "").toLowerCase() : null;
+  const second = match[3] ? Number(match[3]) : 0;
+  const meridiem = match[4] ? match[4].replace(/\./g, "").toLowerCase() : null;
   if (meridiem) {
     if (hour < 1 || hour > 12) return null;
     // 12am → 00:00, 12pm → 12:00, otherwise add 12 for pm.
@@ -35,14 +36,22 @@ function parseClockTime(raw) {
   } else if (hour > 23) {
     return null;
   }
-  return { hour, minute };
+  return { hour, minute, second };
 }
 
-// Combine a local calendar day with an hour/minute into Unix seconds. Uses
+// Combine a local calendar day with an hour/minute/second into Unix seconds. Uses
 // local time so a Studio user's "6:00am" means 6am in their own timezone.
-function secondsFromLocalComponents(dayDate, hour, minute) {
-  const local = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), hour, minute, 0, 0);
+function secondsFromLocalComponents(dayDate, hour, minute, second = 0) {
+  const local = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), hour, minute, second, 0);
   return Math.floor(local.getTime() / 1000);
+}
+
+// A calendar day in local time. A bare "YYYY-MM-DD" is read as that local day: Date would parse it as
+// UTC midnight, which is the previous evening anywhere west of UTC (a one-day error).
+function localDay(text) {
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  return new Date(text);
 }
 
 /**
@@ -72,15 +81,15 @@ export function normalizeSaleTimeToUnixSeconds(value, { now = Date.now() } = {})
 
   // Bare clock time → that time today, in local time.
   const clock = parseClockTime(raw);
-  if (clock) return secondsFromLocalComponents(new Date(now), clock.hour, clock.minute);
+  if (clock) return secondsFromLocalComponents(new Date(now), clock.hour, clock.minute, clock.second);
 
-  // A calendar date plus a 12-hour clock time, e.g. "2026-09-27 6:00am".
-  const dated = raw.match(/^(.*\S)\s+(\d{1,2}(?::[0-5]\d)?\s*[ap]\.?m\.?)$/i);
+  // A calendar date plus a 12-hour clock time, e.g. "2026-09-27 6:00am" or "2026-10-31 11:59:59 PM".
+  const dated = raw.match(/^(.*\S)\s+(\d{1,2}(?::[0-5]\d(?::[0-5]\d)?)?\s*[ap]\.?m\.?)$/i);
   if (dated) {
     const clockPart = parseClockTime(dated[2]);
-    const day = new Date(dated[1]);
+    const day = localDay(dated[1]);
     if (clockPart && !Number.isNaN(day.getTime())) {
-      return secondsFromLocalComponents(day, clockPart.hour, clockPart.minute);
+      return secondsFromLocalComponents(day, clockPart.hour, clockPart.minute, clockPart.second);
     }
   }
 

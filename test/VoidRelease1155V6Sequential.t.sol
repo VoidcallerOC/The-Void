@@ -9,6 +9,7 @@ import {VoidPrimarySaleSettled} from "../contracts/VoidPrimarySaleSettled.sol";
 import {VoidProvenanceAnchor} from "../contracts/VoidProvenanceAnchor.sol";
 import {VoidUnifiedMarketplace} from "../contracts/VoidUnifiedMarketplace.sol";
 import {GenesisHolderClaim} from "../contracts/GenesisHolderClaim.sol";
+import {installGenesisStandIn} from "./helpers/MockGenesisCollection.sol";
 
 interface VmSequential {
     function chainId(uint256) external;
@@ -370,6 +371,8 @@ contract VoidRelease1155V6SequentialTest {
     // ------------------------------------------------------------------ 10. Genesis holder claim
 
     function testGenesisHolderClaimBindsAndMintsTokenOne() public {
+        // The claim reads Genesis balances on chain id 43114: give the claimant one Genesis unit.
+        installGenesisStandIn(false).setBalance(CLAIMANT, 0, 1);
         uint256 claimStart = T0 + 1 hours;
         uint256 publicEnd = claimStart + 7 days - 1;
         vm.prank(ARTIST);

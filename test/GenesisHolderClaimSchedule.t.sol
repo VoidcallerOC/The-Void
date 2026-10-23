@@ -5,6 +5,7 @@ import {GenesisHolderClaim} from "../contracts/GenesisHolderClaim.sol";
 import {VoidReleaseFactory} from "../contracts/VoidReleaseFactory.sol";
 import {VoidRelease1155V4} from "../contracts/VoidRelease1155V4.sol";
 import {VoidPrimarySale} from "../contracts/VoidPrimarySale.sol";
+import {installGenesisStandIn} from "./helpers/MockGenesisCollection.sol";
 
 interface VmSchedule {
     function chainId(uint256) external;
@@ -162,6 +163,8 @@ contract GenesisHolderClaimScheduleTest {
 
     function testMainnetAcceptsOnlyTheProductionSchedule() public {
         _setUpChain(43114);
+        // GenesisHolderClaim reads Genesis balances on chain id 43114; this suite does not test eligibility.
+        installGenesisStandIn(true);
         _configure(0.25 ether, 1 days, 7 days);
         GenesisHolderClaim claim = _deploy(0.25 ether, 1 days, 7 days);
         require(claim.claimWindow() == 1 days && claim.publicWindow() == 7 days, "windows");

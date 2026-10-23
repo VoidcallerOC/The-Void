@@ -281,14 +281,14 @@ Each step needs the owner's explicit approval of its exact calldata, prepared as
 | | Fuji (accelerated test, release ‑28) | Mainnet (production) |
 |---|---|---|
 | Genesis claim | `claimWindow` configurable, minimum 60 s; test plan 300 s (5 min) | exactly 86,400 s (24 h) |
-| Public mint | `publicWindow` configurable, minimum 60 s; test plan 600 s (10 min) | exactly 604,800 s (7 days) |
+| Public mint | `publicWindow` configurable, minimum 60 s; test plan 600 s (10 min) | whole hours from 604,800 s (7 days) to 1,209,600 s (14 days); the Halloween launch uses 705,600 s (8 days 4 hours) |
 | Price | 0.01 AVAX, ‑28's existing price, unchanged | exactly 0.25 AVAX |
 | Supply | uncapped (`maxSupply 0`, allocations 0) | uncapped |
 
 **Where each rule is enforced:**
-- **Contract** (`GenesisHolderClaim` constructor): on chain 43114 it reverts unless the windows are exactly 1 day and 7 days and the price is exactly 0.25 AVAX (`PRODUCTION_PUBLIC_PRICE_WEI`). On Fuji each window must be at least 60 seconds. On every claim the sale must still match the claim's price and schedule.
-- **API** (`claimSchedule` in `server/genesis-claim.js`): with `RELEASE_NETWORK=mainnet` it refuses to load unless the windows are 86,400 s and 604,800 s and the price is 0.25 AVAX. It also checks the deployed claim's `claimWindow` and `publicWindow`.
-- **Deploy script** (`DEPLOY_NETWORK=fuji|mainnet`): applies the same rules. A mainnet broadcast needs `CONFIRM_MAINNET_DEPLOY`.
+- **Contract** (`GenesisHolderClaim` constructor): on chain 43114 it reverts unless the claim window is exactly 1 day, the public window is whole hours between `PRODUCTION_MIN_PUBLIC_WINDOW` (7 days) and `PRODUCTION_MAX_PUBLIC_WINDOW` (14 days), and the price is exactly 0.25 AVAX (`PRODUCTION_PUBLIC_PRICE_WEI`). On Fuji each window must be at least 60 seconds. On every claim the sale must still match the claim's price and schedule, and on chain 43114 the claimant must currently hold a Genesis unit (IDs 0-3, read from the real collection); each claim is exactly one token (details: `deploy/mainnet/GENESIS-CLAIM-PUBLISHED-RELEASE.md`).
+- **API** (`claimSchedule` in `server/genesis-claim.js`): with `RELEASE_NETWORK=mainnet` it refuses to load unless the claim window is 86,400 s, the public window follows the same 7-14 day whole-hour policy, and the price is 0.25 AVAX. It also checks the deployed claim's `claimWindow` and `publicWindow`.
+- **Deploy script** (`DEPLOY_NETWORK=fuji|mainnet`): applies the same rules; on mainnet the plan must name the sale's inclusive end (`GENESIS_PUBLIC_SALE_END`) and the window is derived from it (see `deploy/mainnet/GENESIS-CLAIM-PUBLISHED-RELEASE.md`). A mainnet broadcast needs `CONFIRM_MAINNET_DEPLOY`.
 
 None of these rules disables a timing, price, signature, eligibility, role or replay check.
 
