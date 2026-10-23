@@ -393,6 +393,9 @@ export function ArtistStudioPage() {
   const [provisioningState, setProvisioningState] = useState("NOT_STARTED");
   // Deploying a release contract is permanent and costs gas, so it needs its own explicit acknowledgement each time.
   const [deployAcknowledged, setDeployAcknowledged] = useState(false);
+  // Studio never deploys a release contract unless the environment explicitly allows it. Off by default, so no
+  // clone can be created from Studio until the owner switches it on (VITE_STUDIO_ONCHAIN_DEPLOY=true).
+  const onChainDeployEnabled = import.meta.env?.VITE_STUDIO_ONCHAIN_DEPLOY === "true";
   // The symbol read from the deployed contract once creation is confirmed; the draft value is never shown then.
   const [onChainSymbol, setOnChainSymbol] = useState("");
   // Album state is read from the release clone, never assumed locally: clones of the
@@ -617,6 +620,7 @@ export function ArtistStudioPage() {
     setBusy("release"); setNotice(""); setReleaseStatus(null); setDeployAcknowledged(false);
     let draftSaved = false;
     try {
+      if (!onChainDeployEnabled) throw new Error("On-chain deployment is switched off in Studio. Nothing was prepared.");
       if (!canUseStudio) throw new Error("Connect and authenticate an artist wallet first.");
       const ids = await ensureArtistAndRelease();
       draftSaved = true;
@@ -655,6 +659,7 @@ export function ArtistStudioPage() {
   const createReleaseOnChain = async () => {
     setBusy("provision"); setNotice(""); setTxEvidence(null);
     try {
+      if (!onChainDeployEnabled) throw new Error("On-chain deployment is switched off in Studio. No transaction was sent.");
       if (!canUseStudio || !wallet.account) throw new Error("Connect and authenticate the canonical artist OWNER wallet first.");
       if (!releaseId) throw new Error("Save the release draft before provisioning it.");
       if (!deployAcknowledged) throw new Error("Confirm that you understand this creates a permanent contract and costs gas before deploying.");
@@ -1240,7 +1245,11 @@ export function ArtistStudioPage() {
           </label>
           <TextField title="Description" value={form.releaseDescription} onChange={(value) => set("releaseDescription", value)} multiline />
           <ArtworkField title="Release artwork" value={form.releaseArtwork} onChange={(value) => set("releaseArtwork", value)} onUpload={(file) => uploadArtwork("releaseArtwork", file)} uploading={busy === "artwork:releaseArtwork"} disabled={busy !== "" || !canUseStudio} status={uploads["artwork:releaseArtwork"]} signedIn={canUseStudio} />
-          {releaseId && <div style={{ ...card, marginTop: 18 }}>
+          {releaseId && !onChainDeployEnabled && provisioningState === "NOT_STARTED" && !albumReleaseContract && <div style={{ ...card, marginTop: 18 }}>
+            <Eyebrow>On-chain deployment is switched off</Eyebrow>
+            <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Studio will not create a contract or ask your wallet to sign anything. Your release draft stays saved without a contract.</p>
+          </div>}
+          {releaseId && (onChainDeployEnabled || provisioningState !== "NOT_STARTED" || albumReleaseContract) && <div style={{ ...card, marginTop: 18 }}>
             <Eyebrow red>Deploy the release contract on-chain (separate step)</Eyebrow>
             <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>Saving a draft never creates a contract. Deploying creates a permanent release contract on {FUJI_RELEASE_CONFIG.network} that can never be removed, and your connected wallet pays the gas. Nothing is published until this step succeeds.</p>
             {provisioning ? (
@@ -1256,15 +1265,15 @@ export function ArtistStudioPage() {
             {form.releaseType === "ALBUM" && albumState.status === "ready" && !albumState.supported && <p role="alert" style={{ color: "var(--vc-crimson)" }}>{ALBUM_UNSUPPORTED_MESSAGE}</p>}
             {form.releaseType === "ALBUM" && albumState.status === "error" && <p role="alert" style={{ color: "var(--vc-crimson)" }}>Album state could not be verified on {FUJI_RELEASE_CONFIG.network}: {albumState.message}</p>}
             {albumActivated && <p role="status">Album on-chain: {String(albumState.trackCount)} tracks · {String(albumState.singleCount)} singles{albumState.closed ? " · closed" : ""}</p>}
-            {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && (
+            {onChainDeployEnabled && provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && (
               <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: "var(--vc-bone-dim)", margin: "12px 0" }}>
                 <input type="checkbox" checked={deployAcknowledged} onChange={(event) => setDeployAcknowledged(event.target.checked)} />
                 <span>I understand this creates a permanent contract that cannot be removed, and my wallet will pay gas.</span>
               </label>
             )}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={prepareDeployment}>{provisioning ? "Refresh deployment" : "Prepare deployment"}</button>
-              {provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !deployAcknowledged} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Deploy release contract (permanent, costs gas)"}</button>}
+              {onChainDeployEnabled && <button type="button" style={ghostBtn} disabled={busy !== "" || !canUseStudio} onClick={prepareDeployment}>{provisioning ? "Refresh deployment" : "Prepare deployment"}</button>}
+              {onChainDeployEnabled && provisioning && provisioningState !== "CONFIRMED" && !provisioningSubmitted && !symbolState.stale && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !deployAcknowledged} onClick={createReleaseOnChain}>{busy === "provision" ? "Waiting for receipt…" : "Deploy release contract (permanent, costs gas)"}</button>}
               {form.releaseType === "ALBUM" && provisioningState === "CONFIRMED" && <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio || !albumSupported || albumActivated} onClick={activateAlbumOnChain}>{albumActivated ? "Album Contract active" : albumState.status === "checking" ? "Checking album support…" : busy === "album" ? "Activating album…" : "Activate Album Contract"}</button>}
               {provisioningState === "SUBMITTED" || provisioningState === "RECONCILING" ? <button type="button" style={ghostBtn} disabled={busy !== ""} onClick={() => refreshProvisioningStatus().catch((error) => setNotice(error.message))}>Check status</button> : null}
             </div>
