@@ -1,0 +1,47 @@
+{
+  "network": "mainnet",
+  "chainId": 43114,
+  "architecture": "release-per-contract",
+  "signedBy": {
+    "deployer": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+    "method": "owner-signed in Rabby; no private key left the wallet"
+  },
+  "plan": {
+    "sourceCommit": "7d8485848cf408ad7506d0784d1d0c9e192b35f3",
+    "digest": "c025c2364f5146edf768d9b668da97ee61f89537059a1d9311caffd676e7b1fe"
+  },
+  "factory": {
+    "address": "0xEa0c345cE84025b4e8462d145100dce1848254B4",
+    "deploymentTransaction": "0xac4b33067500783a6d0b23fb934f1187a57ee17caea279b91d60af1fbaa1aeb3",
+    "deploymentBlock": 98367434,
+    "implementationAddress": "0x4409913aC043E1772b1b7Ff2D5F8CE31868F9ddA",
+    "implementation": "VoidRelease1155V6Sequential",
+    "implementationVersion": 4,
+    "tokenIdScheme": "sequential",
+    "implementationSourceVersion": 6,
+    "implementationAlbumCapable": true,
+    "requiredRoyaltyBps": 250,
+    "contract": "VoidReleaseFactoryV4Sequential",
+    "artifact": "out/VoidReleaseFactoryV4Sequential.sol/VoidReleaseFactoryV4Sequential.json",
+    "primarySale": "VoidPrimarySaleSettled",
+    "sourceCommit": "7d8485848cf408ad7506d0784d1d0c9e192b35f3",
+    "platformRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "platformFeeBps": 250
+  },
+  "marketplace": {
+    "address": "0x0F5930113Ec750d867741E05F302053472115eb2",
+    "deploymentTransaction": "0x84b9d080361b925a8d7fc02510c2cb8de0c165f7d1e6e61c025cb10b762aae44",
+    "deploymentBlock": 98367443,
+    "chainId": 43114,
+    "factoryAddress": "0xEa0c345cE84025b4e8462d145100dce1848254B4",
+    "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
+    "feeBps": 250,
+    "requiredRoyaltyBps": 250,
+    "legacyReleaseFactory": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
+    "genesisCollection": "0xD1B4367dd9f235f9ee61878019d66E31511E98eE",
+    "genesisMaxTokenId": 3,
+    "genesisRoyaltyReceiver": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
+    "contract": "VoidUnifiedMarketplace",
+    "artifact": "out/VoidUnifiedMarketplace.sol/VoidUnifiedMarketplace.json"
+  }
+}
