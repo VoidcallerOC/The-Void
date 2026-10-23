@@ -567,26 +567,32 @@ export function ArtistStudioPage() {
     // start from a clean slate so the title below creates a new release.
     const staleArchived = Boolean(releaseId) && String((ownedStudioCatalog?.releases || []).find((item) => item.id === releaseId)?.status || "").toLowerCase() === "archived";
     if (staleArchived) { setReleaseId(""); setSelectedReleaseId(""); }
-    const activeReleaseId = staleArchived ? "" : releaseId;
+    let activeReleaseId = staleArchived ? "" : releaseId;
     let nextReleaseId = activeReleaseId;
-    // No draft id in memory (reload, second tab) but a draft with this title already exists:
-    // never POST a second one. Load the single match, or ask for an explicit pick.
+    // No draft id in memory (reload, second tab) but one draft with this title already exists: saving replaces
+    // that draft, it never POSTs a second one. Fields left empty keep the saved values, so retyping only the
+    // title cannot blank its description or artwork, and its release type is kept. Several matches are
+    // ambiguous, so the artist must pick one.
+    let adopted = null;
     if (!activeReleaseId) {
       const drafts = existingDraftsForTitle(ownedStudioCatalog?.releases, { artistId: nextArtistId, title: form.releaseTitle });
       if (drafts.length === 1) {
-        const [draft] = drafts;
-        setSelectedReleaseId(draft.id);
-        setReleaseId(draft.id);
-        setForm((prior) => ({ ...prior, releaseTitle: draft.title || prior.releaseTitle, releaseType: draft.releaseType || prior.releaseType, releaseDescription: draft.description || "", releaseArtwork: draft.artwork || "", releaseSymbol: normalizeContractSymbol(draft.contractSymbol) || prior.releaseSymbol }));
-        throw Object.assign(new Error(`A draft named "${draft.title}" already exists (${draft.id}). It is loaded; review it, then continue editing it. No new draft was created.`), { code: "DRAFT_ALREADY_EXISTS" });
-      }
-      if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Open the one you want at /studio?release=<id> so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
+        adopted = drafts[0];
+        activeReleaseId = adopted.id;
+        nextReleaseId = adopted.id;
+        setSelectedReleaseId(adopted.id);
+        setReleaseId(adopted.id);
+      } else if (drafts.length > 1) throw Object.assign(new Error(`${drafts.length} drafts named "${form.releaseTitle}" already exist (${drafts.map((draft) => draft.id).join(", ")}). Pick the one you want in the release list above so no new draft is created.`), { code: "DRAFT_ALREADY_EXISTS" });
     }
+    const description = form.releaseDescription || adopted?.description || "";
+    const artwork = form.releaseArtwork || adopted?.artwork || "";
+    const typeToSave = adopted?.releaseType || form.releaseType;
     const release = await studioFetch(activeReleaseId ? `/studio/releases/${encodeURIComponent(activeReleaseId)}` : `/studio/artists/${encodeURIComponent(nextArtistId)}/releases`, {
       method: activeReleaseId ? "PATCH" : "POST",
-      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: form.releaseType, description: form.releaseDescription, artwork: form.releaseArtwork, ...(!normalizeContractSymbol(form.releaseSymbol) || symbolState.locked ? {} : { symbol: normalizeContractSymbol(form.releaseSymbol) }) },
+      payload: { id: nextReleaseId || undefined, title: form.releaseTitle, releaseType: typeToSave, description, artwork, ...(!normalizeContractSymbol(form.releaseSymbol) || symbolState.locked ? {} : { symbol: normalizeContractSymbol(form.releaseSymbol) }) },
       headers,
     });
+    if (adopted) setForm((prior) => ({ ...prior, releaseType: typeToSave, releaseDescription: description, releaseArtwork: artwork, releaseSymbol: prior.releaseSymbol || normalizeContractSymbol(adopted.contractSymbol) }));
     nextReleaseId = release.id;
     setReleaseId(release.id);
     return { artistId: nextArtistId, releaseId: nextReleaseId };

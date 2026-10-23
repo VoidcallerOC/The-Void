@@ -878,6 +878,43 @@ describe("Artist Studio with on-chain deployment switched off (the default)", ()
   });
 });
 
+describe("Artist Studio Save release draft replaces the existing same-title draft", () => {
+  const draft = { id: "rel-draft", artist_id: "artist-a", title: "Forgive & Forget", description: "Saved description", status: "DRAFT", release_metadata: { releaseType: "SINGLE", artwork: "ipfs://saved-art" } };
+  const calls = () => studioFetch.mock.calls.map(([path, options]) => `${options?.method || "GET"} ${path}`);
+  const mockApi = (releases) => studioFetch.mockImplementation(async (path, options = {}) => {
+    if (path === "/studio/catalog") return { artists, releases, editions: [], experiences: [] };
+    if (path.startsWith("/studio/releases/") && options.method === "PATCH") return { id: path.split("/").pop() };
+    if (path.endsWith("/provisioning/status")) return { state: "NOT_STARTED" };
+    throw new Error(`unexpected ${options.method || "GET"} ${path}`);
+  });
+
+  it("updates the one existing draft in place instead of refusing, keeps its saved fields when the form is blank, and creates nothing", async () => {
+    mockApi([draft]);
+    renderStudio("");
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
+    await waitFor(() => expect(calls()).toContain("PATCH /studio/releases/rel-draft"));
+    expect(calls().filter((call) => call.startsWith("POST"))).toEqual([]);
+    const patch = studioFetch.mock.calls.find(([path, options]) => path === "/studio/releases/rel-draft" && options?.method === "PATCH")[1];
+    expect(patch.payload).toMatchObject({ id: "rel-draft", title: "Forgive & Forget", releaseType: "SINGLE", description: "Saved description" });
+    expect(screen.queryByText(/already exists/i)).toBeNull();
+    expect((await screen.findAllByText(/Release draft saved\./)).length).toBeGreaterThan(0);
+    expect(calls().filter((call) => call.includes("provisioning/prepare") || call.includes("provisioning/submit"))).toEqual([]);
+    expect(walletProvider.request).not.toHaveBeenCalled();
+  });
+
+  it("still refuses to guess when several drafts share the title, and writes nothing", async () => {
+    mockApi([draft, { ...draft, id: "rel-draft-2" }]);
+    renderStudio("");
+    await waitFor(() => expect(studioFetch).toHaveBeenCalledWith("/studio/catalog", expect.anything()));
+    fireEvent.change(await screen.findByLabelText(/^Release title/), { target: { value: "Forgive & Forget" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save release draft" }));
+    expect((await screen.findAllByText(/2 drafts named/)).length).toBeGreaterThan(0);
+    expect(calls().filter((call) => call.startsWith("POST") || call.startsWith("PATCH"))).toEqual([]);
+  });
+});
+
 // Production incident (2026-10-22): after the broken Forgive & Forget single was archived, Create release did
 // nothing visible. A stale ?release=<archived id> in the URL put the archived release into releaseId, so each click
 // PATCHed that archived release (six STUDIO_RELEASE_UPDATED events) instead of creating a new one.
