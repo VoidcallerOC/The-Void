@@ -1,7 +1,7 @@
 # Forgive & Forget sequential-ID launch: irreversible steps for owner approval
 
-Prerequisites 0.1–0.3 and steps 1–2 are **COMPLETE**; step 3 is **PARTIAL** (the record PR is open, not merged);
-steps 4–10 are **NOT STARTED**. Nothing has been switched or migrated. Each step needs the owner's explicit approval; the
+Prerequisites 0.1–0.3 and steps 1–3 are **COMPLETE**; step 4 is **PARTIAL** (the switch PR is open, not merged);
+steps 5–10 are **NOT STARTED**. Nothing has been switched or migrated. Each step needs the owner's explicit approval; the
 deployer only ever created the two contracts, and every release action is signed by the artist wallet.
 
 | Role | Address |
@@ -56,18 +56,73 @@ UNSUPPORTED (0) read back on-chain.
 `npm run verify:mainnet -- --write-record` (or the workflow) writes `deployments/release-per-contract-mainnet-<factory>.json`;
 the record PR also adds the executed plan under `deploy/mainnet/executed-plans/`. Merge = record accepted.
 
-**PARTIAL:** `node scripts/mainnet-owner-signing.mjs verify --write-record` returned `VERIFIED` for both transactions and
+**COMPLETE:** `node scripts/mainnet-owner-signing.mjs verify --write-record` returned `VERIFIED` for both transactions and
 wrote `deployments/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json`; the executed plan is
-`deploy/mainnet/executed-plans/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json`. The
-record PR is open, not merged. The on-chain fee recipient is `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`; that this
-address is the owner's Nano S Plus rests on the owner's device confirmation during signing.
+`deploy/mainnet/executed-plans/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json`. PR #280
+merged by the owner on 2026-10-23 at 21:19:55Z as `558338dde255f1267eca43c6907e469d686072f7`. The on-chain fee
+recipient is `0xb65C575CaE01574296Fab6E620B9A15cC0121ce4`; that this address is the owner's Nano S Plus rests on the
+owner's device confirmation during signing.
 
-## 4. Switch production to the new pair — PR + Render env, then redeploy API/indexer, then web
+## 4. Switch production to the new pair — config PR, then manual Render redeploys
 
-- `config/mainnet-release-per-contract.json`: `factoryAddress`, `implementationAddress`, `marketplaceAddress`, deployment blocks = the new pair; `releaseVersion: 4`, `tokenIdScheme: "sequential"`, `record`; move `0xE744D58fA8138042f5f00a28d39f89081539C19B` into `historicalDeployments` with provisioning disabled (`provisioningEnabled: false`).
-- `config/unified-marketplace.json`: the new marketplace for new listings, `releaseFactoryAddress` = new factory, `legacyReleaseFactoryAddress` = `0x262B774cf9a1949170B58E2d57F6189980FE757b`; keep `0x75964C44cA586b13e98e7c30E74d2B4114f65b06` reachable for its existing listings (buy/cancel) only.
-- Render (mainnet API and indexer) `INDEXER_CONTRACTS_JSON`: add `{"address":"<factory>","contractType":"RELEASE_FACTORY","startBlock":<block>}` and `{"address":"<marketplace>","contractType":"MARKETPLACE","startBlock":<block>,"platformFeeBps":250}`.
-- **Verify:** `curl https://the-void-api-mainnet.onrender.com/api/health/ready` lists both new contracts as RUNNING/IDLE; the web bundle carries the new addresses.
+**PARTIAL:** the switch PR is open as a draft, not merged. Production still serves `0xE744D58fA8138042f5f00a28d39f89081539C19B` /
+`0x75964C44cA586b13e98e7c30E74d2B4114f65b06`.
+
+**What the PR changes (configuration only, no contract or code change):**
+- `config/mainnet-release-per-contract.json`: active factory `0xEa0c345cE84025b4e8462d145100dce1848254B4`, implementation
+  `0x4409913aC043E1772b1b7Ff2D5F8CE31868F9ddA`, marketplace `0x0F5930113Ec750d867741E05F302053472115eb2`, deployment blocks
+  98367434 / 98367443, `source: "VoidReleaseFactoryV4Sequential"`, `releaseVersion: 4`, `tokenIdScheme: "sequential"`,
+  `record`. The `0xE744D58fA8138042f5f00a28d39f89081539C19B` pair moves verbatim to `historicalDeployments[0]` (ahead of
+  `0x262B774cf9a1949170B58E2d57F6189980FE757b`). Only the top-level factory provisions new releases
+  (`provisioningFactoryConfig` in `server/studio-service.js`, `assertReleaseFactoryV2Configured` in `src/lib/fuji-release.js`);
+  historical entries carry no provisioning flag and stay readable, routable and indexed for the releases they hold.
+- `config/unified-marketplace.json`: new listings go to `0x0F5930113Ec750d867741E05F302053472115eb2` (release factory
+  `0xEa0c345cE84025b4e8462d145100dce1848254B4`, legacy factory `0x262B774cf9a1949170B58E2d57F6189980FE757b`, Genesis
+  unchanged). `retainedMarketplaces` keeps `0x75964C44cA586b13e98e7c30E74d2B4114f65b06` (its own factories
+  `0xE744D58fA8138042f5f00a28d39f89081539C19B` + `0x262B774cf9a1949170B58E2d57F6189980FE757b`, block 98161532) readable,
+  buyable, cancellable and indexed; no new listing is ever created on it. Genesis listing 1 (token 0) stays reachable there.
+- `deploy/vercel-mainnet/vercel.json` and `package.json` `build:mainnet`: `VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2`.
+
+**Indexer coverage after the switch.** With `INDEXER_INCLUDE_RELEASE_MANIFEST` unset or `true` (the default), the worker and
+the API add, on top of `INDEXER_CONTRACTS_JSON`: `withManifestReleaseDeployments` → every recorded factory and its marketplace
+(`0xEa0c345cE84025b4e8462d145100dce1848254B4` from 98367434, `0xE744D58fA8138042f5f00a28d39f89081539C19B` from 98161422,
+`0x262B774cf9a1949170B58E2d57F6189980FE757b` from 97619965, `0x0e77116142844478a55EEd2Ab79de9F93770F8f5` from 97619978);
+then `withUnifiedMarketplace` → `0x0F5930113Ec750d867741E05F302053472115eb2` from 98367443 and the retained
+`0x75964C44cA586b13e98e7c30E74d2B4114f65b06` from 98161532, both with the per-asset fee policy (0 bps Genesis, 250 bps
+releases). No Render change is needed in that case. **The production value of `INDEXER_INCLUDE_RELEASE_MANIFEST` is
+UNVERIFIED.** If it is `false`, neither helper runs and `INDEXER_CONTRACTS_JSON` alone decides; the proposed additions are then:
+```json
+{"address":"0xEa0c345cE84025b4e8462d145100dce1848254B4","contractType":"RELEASE_FACTORY","startBlock":98367434},
+{"address":"0x0F5930113Ec750d867741E05F302053472115eb2","contractType":"MARKETPLACE","startBlock":98367443}
+```
+Omit `platformFeeBps` on the marketplace entry: a flat 250 would reject Genesis resales (0 bps) on the unified marketplace,
+and the per-asset check exists only with the manifest included. Render `MARKETPLACE_ADDRESS` is not read by server code.
+
+**Sequence (each step is an owner action; Claude verifies read-only between them):**
+1. Merge the switch PR. The Vercel mainnet project rebuilds the website from `main` (auto-deploy on `main`: UNVERIFIED, check
+   the Vercel project). Render does not redeploy: both mainnet services use `autoDeployTrigger: "off"`.
+2. Render → *Manual Deploy* of the merge commit: `the-void-indexer-mainnet`, then `the-void-api-mainnet`. No env change unless
+   `INDEXER_INCLUDE_RELEASE_MANIFEST` is `false` (above).
+3. **Gate before step 6** (read-only):
+   - the live website bundle contains `0x0F5930113Ec750d867741E05F302053472115eb2` and `0xEa0c345cE84025b4e8462d145100dce1848254B4`;
+   - `curl https://the-void-api-mainnet.onrender.com/api/health/ready` lists `0xea0c345ce84025b4e8462d145100dce1848254b4`
+     (RELEASE_FACTORY) and `0x0f5930113ec750d867741e05f302053472115eb2` (MARKETPLACE), and still lists
+     `0x75964c44ca586b13e98e7c30e74d2b4114f65b06`;
+   - Genesis listing 1 on `0x75964C44cA586b13e98e7c30E74d2B4114f65b06` still shows buy/cancel on the site;
+   - Studio prepares a **new** release on `0xEa0c345cE84025b4e8462d145100dce1848254B4` (no transaction sent). A release that
+     already has a provisioning request stays on the factory recorded there, so step 6 starts from a new Studio release, never
+     from `forgive-forget-6`.
+
+**Rollback.** Before step 6 the new factory holds no releases: revert the merge (the website rebuilds the old pair) and
+manually redeploy both Render services. After step 6 a plain revert would drop `0xEa0c345cE84025b4e8462d145100dce1848254B4`
+from the manifests and hide its release; roll back instead by moving it into `historicalDeployments` (and the new marketplace
+into `retainedMarketplaces`). Nothing on-chain changes either way.
+
+**Known gaps:** the six `0xE744D58fA8138042f5f00a28d39f89081539C19B` clones (no holders) lose the listing surface, since the new
+marketplace does not accept them and the retained one only settles existing listings. The indexer's aggregate checkpoint is
+held back by the old Forgive & Forget clone `0xf9c48a2bbceba7577ff17a2eed20fcef70ea480d` (stalled since 17:44Z on 2026-10-23);
+both factories were within about 2,000 blocks of head at 21:23Z. Primary-sale fee settlement is not live-verified: no
+settled-sale purchase has happened.
 
 ## 5. Retire the old Forgive & Forget in the app — reviewed migration, applied on API start
 

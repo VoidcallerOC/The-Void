@@ -111,8 +111,10 @@ describe("release-per-contract mainnet plan: no key, no broadcast", () => {
   it("plans the corrected factory, whose releases pay the platform fee during the purchase", async () => {
     // Nonce 0 of the defined deployer created the deployed factory 0x262B…; the next factory comes from a later nonce.
     const plan = await buildDryRunPlan(validateDeploymentEnv({ ...READY, EXPECTED_DEPLOYER_NONCE: "2" }), fakeChain({ nonce: 2 }), { load: artifacts });
-    expect(getCreateAddress({ from: DEPLOYER, nonce: 0 })).toBe(getAddress(mainnetManifest.historicalDeployments[0].factoryAddress));
-    expect(getCreateAddress({ from: DEPLOYER, nonce: 3 })).toBe(getAddress(mainnetManifest.factoryAddress));
+    // Nonces 0, 3 and 6 created the three recorded factories: 0x262B… and 0xE744… (historical), then the active sequential one.
+    expect(getCreateAddress({ from: DEPLOYER, nonce: 0 })).toBe(getAddress(mainnetManifest.historicalDeployments[1].factoryAddress));
+    expect(getCreateAddress({ from: DEPLOYER, nonce: 3 })).toBe(getAddress(mainnetManifest.historicalDeployments[0].factoryAddress));
+    expect(getCreateAddress({ from: DEPLOYER, nonce: 6 })).toBe(getAddress(mainnetManifest.factoryAddress));
     expect(plan.readyToBroadcast).toBe(true);
     expect(FACTORY_CONTRACT).toBe("VoidReleaseFactoryV2RoyaltySettled");
     expect(plan.artifacts.factory).toMatchObject({ contract: FACTORY_CONTRACT, path: FACTORY_ARTIFACT_PATH, primarySale: "VoidPrimarySaleSettled", initCodeHash: keccak256(FACTORY_INIT) });

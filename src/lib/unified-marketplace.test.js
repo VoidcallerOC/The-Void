@@ -6,19 +6,22 @@ import { readUnifiedListingContext } from "./secondary-listing.js";
 import { withUnifiedMarketplace } from "../../server/config.js";
 import { decodeMarketplaceLog } from "../../server/marketplace-events.js";
 
-// Hypothetical recorded deployment; the UNIFIED/CORRECTED addresses are placeholders. Nothing here is deployed.
+// Hypothetical recorded deployment with no retained marketplace; the UNIFIED/CORRECTED addresses are placeholders.
+// Nothing here is deployed.
 const UNIFIED = "0x000000000000000000000000000000000000fa11";
 const CORRECTED_FACTORY = "0x00000000000000000000000000000000000c0ffe";
 const PRODUCTION_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
 const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 const CREATOR = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 const SELLER = "0x00000000000000000000000000000000000b0b01";
-const active = Object.freeze({ ...UNIFIED_MARKETPLACE, deployed: true, marketplaceAddress: UNIFIED, deploymentBlock: 99000000, releaseFactoryAddress: CORRECTED_FACTORY });
+const active = Object.freeze({ ...UNIFIED_MARKETPLACE, retainedMarketplaces: [], deployed: true, marketplaceAddress: UNIFIED, deploymentBlock: 99000000, releaseFactoryAddress: CORRECTED_FACTORY });
 const base = Object.freeze({ address: UNIFIED, chainId: 43114, enabled: true });
 
 describe("unified marketplace manifest", () => {
   it("is active at the verified mainnet deployment", () => {
-    expect(UNIFIED_MARKETPLACE).toMatchObject({ deployed: true, chainId: 43114, marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", deploymentBlock: 98161532, releaseFactoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", feeRecipient: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", record: "deployments/release-per-contract-mainnet-0xE744D58fA8138042f5f00a28d39f89081539C19B.json" });
+    expect(UNIFIED_MARKETPLACE).toMatchObject({ deployed: true, chainId: 43114, marketplaceAddress: "0x0F5930113Ec750d867741E05F302053472115eb2", deploymentBlock: 98367443, releaseFactoryAddress: "0xEa0c345cE84025b4e8462d145100dce1848254B4", feeRecipient: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", record: "deployments/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json" });
+    // The corrected factory's marketplace stays retained for the listings it already holds (Genesis listing 1).
+    expect(UNIFIED_MARKETPLACE.retainedMarketplaces).toEqual([{ marketplaceAddress: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06", deploymentBlock: 98161532, releaseFactoryAddress: "0xE744D58fA8138042f5f00a28d39f89081539C19B", legacyReleaseFactoryAddress: PRODUCTION_FACTORY, record: "deployments/release-per-contract-mainnet-0xE744D58fA8138042f5f00a28d39f89081539C19B.json" }]);
     expect(unifiedMarketplaceActive()).toBe(true);
     expect(UNIFIED_MARKETPLACE.genesis).toMatchObject({ address: GENESIS, platformFeeBps: 0, royaltyBps: 500, royaltyReceiver: CREATOR, minTokenId: 0, maxTokenId: 3 });
     expect(UNIFIED_MARKETPLACE.legacyReleaseFactoryAddress).toBe(PRODUCTION_FACTORY);

@@ -4,14 +4,23 @@
   "chainId": 43114,
   "deployed": true,
   "source": "VoidUnifiedMarketplace",
-  "marketplaceAddress": "0x75964C44cA586b13e98e7c30E74d2B4114f65b06",
-  "deploymentBlock": 98161532,
-  "record": "deployments/release-per-contract-mainnet-0xE744D58fA8138042f5f00a28d39f89081539C19B.json",
+  "marketplaceAddress": "0x0F5930113Ec750d867741E05F302053472115eb2",
+  "deploymentBlock": 98367443,
+  "record": "deployments/release-per-contract-mainnet-0xEa0c345cE84025b4e8462d145100dce1848254B4.json",
   "feeRecipient": "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
-  "releaseFactoryAddress": "0xE744D58fA8138042f5f00a28d39f89081539C19B",
+  "releaseFactoryAddress": "0xEa0c345cE84025b4e8462d145100dce1848254B4",
   "legacyReleaseFactoryAddress": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
   "factoryPlatformFeeBps": 250,
   "factoryRoyaltyBps": 250,
+  "retainedMarketplaces": [
+    {
+      "marketplaceAddress": "0x75964C44cA586b13e98e7c30E74d2B4114f65b06",
+      "deploymentBlock": 98161532,
+      "releaseFactoryAddress": "0xE744D58fA8138042f5f00a28d39f89081539C19B",
+      "legacyReleaseFactoryAddress": "0x262B774cf9a1949170B58E2d57F6189980FE757b",
+      "record": "deployments/release-per-contract-mainnet-0xE744D58fA8138042f5f00a28d39f89081539C19B.json"
+    }
+  ],
   "genesis": {
     "name": "Voidcaller Genesis",
     "address": "0xD1B4367dd9f235f9ee61878019d66E31511E98eE",

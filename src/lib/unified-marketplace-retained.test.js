@@ -12,8 +12,9 @@ import { marketplaceConfigForEdition } from "./marketplace.js";
 import { readUnifiedListingContext } from "./secondary-listing.js";
 import { withUnifiedMarketplace } from "../../server/config.js";
 
-// The launch switch: new listings move to a new VoidUnifiedMarketplace (sequential factory + 0x262B), while the existing
-// marketplace 0x75964 (0xE744 + 0x262B) is retained for the listings it already holds. NEW_* are placeholders.
+// The launch switch: new listings move to the VoidUnifiedMarketplace 0x0F59 (sequential factory + 0x262B), while the
+// earlier marketplace 0x75964 (0xE744 + 0x262B) is retained for the listings it already holds. `switched` is a fixture
+// of that shape with its own block; the committed manifest is checked separately below.
 const OLD_MARKET = "0x75964C44cA586b13e98e7c30E74d2B4114f65b06";
 const NEW_MARKET = "0x0F5930113Ec750d867741E05F302053472115eb2";
 const SEQUENTIAL_FACTORY = "0xEa0c345cE84025b4e8462d145100dce1848254B4";
@@ -32,13 +33,17 @@ const switched = Object.freeze({
 });
 
 describe("retained unified marketplaces", () => {
-  it("today's manifest has none and keeps recognising exactly its one marketplace", () => {
-    expect(UNIFIED_MARKETPLACE).not.toHaveProperty("retainedMarketplaces");
-    expect(retainedUnifiedMarketplaces()).toEqual([]);
+  it("the committed manifest lists on 0x0F59 and retains exactly 0x75964 for its existing listings", () => {
+    expect(retainedUnifiedMarketplaces().map((entry) => entry.marketplaceAddress)).toEqual([OLD_MARKET]);
+    expect(isActiveUnifiedMarketplace(NEW_MARKET)).toBe(true);
+    expect(isActiveUnifiedMarketplace(OLD_MARKET)).toBe(false);
     expect(isUnifiedMarketplace(OLD_MARKET)).toBe(true);
-    expect(isActiveUnifiedMarketplace(OLD_MARKET)).toBe(true);
-    expect(isUnifiedMarketplace(NEW_MARKET)).toBe(false);
-    expect(unifiedMarketplaceFor(OLD_MARKET)).toBe(UNIFIED_MARKETPLACE);
+    expect(unifiedMarketplaceFor(NEW_MARKET)).toBe(UNIFIED_MARKETPLACE);
+    expect(unifiedMarketplaceFor(OLD_MARKET)).toMatchObject({ marketplaceAddress: OLD_MARKET, deploymentBlock: 98161532, releaseFactoryAddress: CURRENT_FACTORY, legacyReleaseFactoryAddress: PRODUCTION_FACTORY, retained: true });
+    // The live Genesis listing (token 0) on 0x75964 stays reachable; new sequential releases never route there.
+    expect(retainedUnifiedMarketplacesFor({ chainId: 43114, contractAddress: GENESIS, tokenId: "0" }).map((entry) => entry.marketplaceAddress)).toEqual([OLD_MARKET]);
+    expect(unifiedAssetClass({ chainId: 43114, contractAddress: CLONE, tokenId: "1", factoryAddress: SEQUENTIAL_FACTORY })).toBe("FACTORY_RELEASE");
+    expect(retainedUnifiedMarketplacesFor({ chainId: 43114, contractAddress: CLONE, tokenId: "1", factoryAddress: SEQUENTIAL_FACTORY })).toEqual([]);
   });
 
   it("recognises a retained marketplace without making it the active one", () => {
@@ -87,8 +92,16 @@ describe("retained unified marketplaces", () => {
     ]);
   });
 
-  it("indexes exactly today's one marketplace when nothing is retained", () => {
+  it("indexes the committed active marketplace and the retained one, each from its own deployment block", () => {
     const contracts = withUnifiedMarketplace([], { chainId: 43114, manifest: UNIFIED_MARKETPLACE });
-    expect(contracts).toEqual([expect.objectContaining({ address: OLD_MARKET.toLowerCase(), startBlock: 98161532, feePolicy: "unified" })]);
+    expect(contracts).toEqual([
+      expect.objectContaining({ address: NEW_MARKET.toLowerCase(), startBlock: 98367443, feePolicy: "unified" }),
+      expect.objectContaining({ address: OLD_MARKET.toLowerCase(), startBlock: 98161532, feePolicy: "unified" }),
+    ]);
+  });
+
+  it("indexes exactly one marketplace when nothing is retained", () => {
+    const contracts = withUnifiedMarketplace([], { chainId: 43114, manifest: { ...UNIFIED_MARKETPLACE, retainedMarketplaces: [] } });
+    expect(contracts).toEqual([expect.objectContaining({ address: NEW_MARKET.toLowerCase(), startBlock: 98367443, feePolicy: "unified" })]);
   });
 });
