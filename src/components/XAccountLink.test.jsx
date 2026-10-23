@@ -28,11 +28,40 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const renderCard = (wallet = signedIn) => render(<WalletCtx.Provider value={wallet}><XAccountLink /></WalletCtx.Provider>);
 
 describe("XAccountLink", () => {
-  it("renders nothing and makes no request for visitors who are not signed in", async () => {
-    renderCard({ connected: true, authenticated: false, authHeaders: {} });
+  it("explains the wallet prerequisite instead of hiding, and makes no API request, when the wallet is not connected", async () => {
+    renderCard({ connected: false, authenticated: false, authHeaders: {} });
     await act(async () => {});
-    expect(screen.queryByText(/X account/)).toBeNull();
+    expect(screen.getByLabelText("X account")).toBeTruthy();
+    expect(screen.getByText(/Connect your wallet to link an X account/)).toBeTruthy();
+    expect(screen.getByText(/Linking is optional/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect wallet" })).toBeTruthy();
+    expect(screen.queryByText("Connect X account")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks a connected but unsigned wallet to sign in, shows the sign-in error, and makes no API request", async () => {
+    renderCard({ connected: true, authenticated: false, authHeaders: {}, authenticationError: "Wallet signature was rejected." });
+    await act(async () => {});
+    expect(screen.getByText(/Sign in with your wallet to link an X account/)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe("Wallet signature was rejected.");
+    expect(screen.getByRole("button", { name: "Authenticate wallet" })).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks for the right network when the wallet is on the wrong chain", async () => {
+    renderCard({ connected: true, authenticated: false, needsNetworkSwitch: true, releaseNetworkName: "Avalanche C-Chain", authHeaders: {} });
+    await act(async () => {});
+    expect(screen.getByText(/Switch your wallet to Avalanche C-Chain/)).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("swaps the prerequisite for the connect control once the wallet is signed in", async () => {
+    routes["GET /x-link"] = () => ok({ available: true, connected: false });
+    const view = render(<WalletCtx.Provider value={{ connected: true, authenticated: false, authHeaders: {} }}><XAccountLink /></WalletCtx.Provider>);
+    expect(screen.getByText(/Sign in with your wallet/)).toBeTruthy();
+    view.rerender(<WalletCtx.Provider value={signedIn}><XAccountLink /></WalletCtx.Provider>);
+    expect(await screen.findByText("Connect X account")).toBeTruthy();
+    expect(screen.queryByText(/Sign in with your wallet to link/)).toBeNull();
   });
 
   it("shows the optional disconnected state with what will be associated", async () => {
