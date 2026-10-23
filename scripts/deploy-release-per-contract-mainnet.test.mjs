@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AbiCoder, getAddress, getCreateAddress, id, keccak256 } from "ethers";
 import { ALBUM_SIGNATURES } from "./deploy-release-per-contract-fuji.mjs";
-import { FACTORY_ARTIFACT_PATH, FACTORY_CONTRACT, FEE_RECIPIENT, MAINNET_CHAIN_ID, MARKETPLACE_ARTIFACT_PATH, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, run, settledSaleProblems, validateDeploymentEnv, verifyReleaseStep } from "./deploy-release-per-contract-mainnet.mjs";
-import { ARTIST, DEPLOYER, FACTORY_INIT, LEGACY_SALE_INIT, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
+import { RELEASE_FACTORY_PROFILES, factoryProfile, missingSelectors, profileOfPlan, FACTORY_ARTIFACT_PATH, FACTORY_CONTRACT, FEE_RECIPIENT, MAINNET_CHAIN_ID, MARKETPLACE_ARTIFACT_PATH, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, run, settledSaleProblems, validateDeploymentEnv, verifyReleaseStep } from "./deploy-release-per-contract-mainnet.mjs";
+import { ARTIST, DEPLOYER, FACTORY_INIT, LEGACY_SALE_INIT, RECIPIENT, artifacts, fakeChain, sequentialArtifacts, sequentialRuntime } from "../test/helpers/mainnet-fake-chain.mjs";
+import { validateApprovedPlan } from "./approved-plan.mjs";
+import { bindPlan } from "./plan-binding-core.mjs";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { SETTLED_SALE_RUNTIME_CODE_HASH } from "../src/lib/sale-authorization.js";
 
@@ -246,4 +248,106 @@ describe("release-per-contract mainnet: verifying owner-signed transactions from
 it("keeps the mainnet chain constant", () => {
   expect(MAINNET_CHAIN_ID).toBe(43114);
   expect(getAddress(RECIPIENT)).toBe(FEE_RECIPIENT);
+});
+
+describe("release-per-contract mainnet: the sequential token-ID factory (RELEASE_FACTORY_PROFILE=sequential)", () => {
+  const SEQ = { ...READY, RELEASE_FACTORY_PROFILE: "sequential" };
+  const sequentialPlan = (chain = fakeChain()) => buildDryRunPlan(validateDeploymentEnv(SEQ), chain, { load: sequentialArtifacts });
+  const minedSequentialFactory = async (chain, plan, options = {}) => {
+    const [factory] = plan.transactions;
+    const hash = chain.mine(plan.signingRequests[0]);
+    chain.factoryViews(factory.predictedAddress, { implementation: factory.predictedImplementation, version: 4n, implementationCode: sequentialRuntime, sequential: {}, ...options });
+    return hash;
+  };
+
+  it("plans VoidReleaseFactoryV4Sequential with the V6 implementation, version 4, the settled sale and the same marketplace bindings", async () => {
+    const plan = await sequentialPlan();
+    expect(plan.readyToBroadcast).toBe(true);
+    expect(plan).toMatchObject({ factoryProfile: "sequential", tokenIdScheme: "sequential" });
+    expect(plan.artifacts.factory).toMatchObject({ contract: "VoidReleaseFactoryV4Sequential", path: "out/VoidReleaseFactoryV4Sequential.sol/VoidReleaseFactoryV4Sequential.json", primarySale: "VoidPrimarySaleSettled" });
+    expect(plan.artifacts.implementation).toMatchObject({ contract: "VoidRelease1155V6Sequential", path: "out/VoidRelease1155V6Sequential.sol/VoidRelease1155V6Sequential.json", runtimeCodeHash: keccak256(sequentialRuntime), albumCapable: true });
+    expect(plan.transactions[0]).toMatchObject({ contract: "VoidReleaseFactoryV4Sequential", constructor: { platformRecipient: RECIPIENT }, sealedInBytecode: { PLATFORM_FEE_BPS: 250, RELEASE_VERSION: 4, REQUIRED_ROYALTY_BPS: 250 } });
+    expect(plan.transactions[0].implementation).toMatch(/^VoidRelease1155V6Sequential \(token IDs 1, 2, 3/);
+    expect(plan.signingRequests[0].contract).toBe("VoidReleaseFactoryV4Sequential");
+    // Same marketplace as the settled plan: bound to this plan's factory, the production factory 0x262B… and Genesis 0-3.
+    expect(plan.transactions[1].constructor).toEqual({ feeRecipient: RECIPIENT, releaseFactory: plan.transactions[0].predictedAddress, legacyReleaseFactory: "0x262B774cf9a1949170B58E2d57F6189980FE757b", genesisCollection: "0xD1B4367dd9f235f9ee61878019d66E31511E98eE", genesisMaxTokenId: 3, genesisRoyaltyReceiver: ARTIST });
+    expect(plan.checks.find((item) => item.check === "implementation assigns sequential token IDs per release")).toMatchObject({ status: "PASS", value: [] });
+    expect(plan.checks.find((item) => item.check === "factory gives every release the settled primary sale")).toMatchObject({ status: "PASS" });
+  });
+
+  it("records the profile in planInputs so the signing tool re-plans the same factory, and leaves the default plan unchanged", async () => {
+    const plan = await sequentialPlan();
+    expect(plan.planInputs.RELEASE_FACTORY_PROFILE).toBe("sequential");
+    expect(validateDeploymentEnv(plan.planInputs).factoryProfile).toBe("sequential");
+    const settled = await readyPlan();
+    expect(settled.planInputs).not.toHaveProperty("RELEASE_FACTORY_PROFILE");
+    expect(settled).not.toHaveProperty("factoryProfile");
+    expect(settled.transactions[0]).toMatchObject({ contract: FACTORY_CONTRACT, sealedInBytecode: { RELEASE_VERSION: 2 } });
+    expect(profileOfPlan(settled)).toBe(RELEASE_FACTORY_PROFILES.settled);
+    expect(profileOfPlan(plan)).toBe(RELEASE_FACTORY_PROFILES.sequential);
+    expect(() => validateDeploymentEnv({ ...READY, RELEASE_FACTORY_PROFILE: "v5" })).toThrow(/settled" or "sequential/);
+    expect(factoryProfile("")).toBe(RELEASE_FACTORY_PROFILES.settled);
+  });
+
+  it("is not ready when the implementation artifact does not number its tokens", async () => {
+    const plan = await buildDryRunPlan(validateDeploymentEnv(SEQ), fakeChain(), { load: artifacts });
+    expect(plan.checks.find((item) => item.check === "implementation assigns sequential token IDs per release")).toMatchObject({ status: "FAIL", value: ["nextTokenId()", "lastTokenId()", "IMPLEMENTATION_VERSION()"] });
+    expect(plan.readyToBroadcast).toBe(false);
+  });
+
+  it("verifies a mined sequential factory and builds the record naming V6 and the sequential scheme", async () => {
+    const chain = fakeChain();
+    const plan = await sequentialPlan(chain);
+    const [factory, marketplace] = plan.transactions;
+    const first = await verifyReleaseStep(chain, plan, 1, await minedSequentialFactory(chain, plan), { load: sequentialArtifacts });
+    expect(first).toMatchObject({ address: factory.predictedAddress, implementationAddress: factory.predictedImplementation, releaseVersion: 4 });
+    const hash = chain.mine(plan.signingRequests[1]);
+    chain.marketplaceViews(marketplace.predictedAddress, { registry: factory.predictedAddress });
+    const second = await verifyReleaseStep(chain, plan, 2, hash, { load: sequentialArtifacts });
+    const record = buildDeploymentRecord(plan, [first, second], { sourceCommit: "a".repeat(40), planDigest: "b".repeat(64) });
+    expect(record.factory).toMatchObject({ contract: "VoidReleaseFactoryV4Sequential", artifact: "out/VoidReleaseFactoryV4Sequential.sol/VoidReleaseFactoryV4Sequential.json", implementation: "VoidRelease1155V6Sequential", implementationVersion: 4, implementationSourceVersion: 6, tokenIdScheme: "sequential", requiredRoyaltyBps: 250 });
+    expect(record.marketplace).toMatchObject({ factoryAddress: factory.predictedAddress, legacyReleaseFactory: "0x262B774cf9a1949170B58E2d57F6189980FE757b" });
+  });
+
+  it("refuses a mined factory reporting version 2, an implementation without sequential IDs, or one already numbering", async () => {
+    for (const [options, message] of [
+      [{ version: 2n }, /RELEASE_VERSION 2/],
+      [{ sequential: null }, /does not expose sequential token IDs/],
+      [{ sequential: { version: 5n } }, /IMPLEMENTATION_VERSION 5/],
+      [{ sequential: { next: 2n } }, /sequential token IDs \(nextTokenId 2/],
+      [{ sequential: { idOfOne: 7n } }, /tokenIdFor\(1\) 7/],
+      [{ implementationCode: "0x6000" }, /runtime code differs/],
+    ]) {
+      const chain = fakeChain();
+      const plan = await sequentialPlan(chain);
+      await expect(verifyReleaseStep(chain, plan, 1, await minedSequentialFactory(chain, plan, options), { load: sequentialArtifacts })).rejects.toThrow(message);
+    }
+  });
+
+  it("is a valid approved release-infrastructure plan once bound; a mismatched factory or implementation is refused", async () => {
+    // Nonce 0 is the executed 0x262B… factory, which the validator deliberately exempts; the next deployment uses a later nonce.
+    const plan = await buildDryRunPlan(validateDeploymentEnv({ ...SEQ, EXPECTED_DEPLOYER_NONCE: "5" }), fakeChain({ nonce: 5 }), { load: sequentialArtifacts });
+    const entry = { kind: "release-per-contract-mainnet", plan, binding: bindPlan("release-per-contract-mainnet", plan, "c".repeat(40)) };
+    expect(() => validateApprovedPlan(entry)).not.toThrow();
+    for (const mutate of [
+      (copy) => { copy.artifacts.implementation.path = "out/VoidRelease1155V4Royalty.sol/VoidRelease1155V4Royalty.json"; },
+      (copy) => { copy.transactions[0].contract = "VoidReleaseFactoryV2Royalty"; copy.signingRequests[0].contract = "VoidReleaseFactoryV2Royalty"; },
+    ]) {
+      const copy = JSON.parse(JSON.stringify(plan));
+      mutate(copy);
+      expect(() => validateApprovedPlan({ kind: entry.kind, plan: copy, binding: bindPlan(entry.kind, copy, "c".repeat(40)) })).toThrow(/must deploy VoidReleaseFactoryV2RoyaltySettled or VoidReleaseFactoryV4Sequential/);
+    }
+  });
+
+  it.skipIf(!existsSync(new URL("../out/VoidReleaseFactoryV4Sequential.sol/VoidReleaseFactoryV4Sequential.json", import.meta.url)))("the compiled sequential factory embeds the reviewed settled sale and creates the V6 implementation", () => {
+    const compiled = (name) => JSON.parse(readFileSync(new URL(`../out/${name}.sol/${name}.json`, import.meta.url), "utf8"));
+    const factory = compiled("VoidReleaseFactoryV4Sequential");
+    const [sale, legacySale, v6, v4Royalty] = [compiled("VoidPrimarySaleSettled"), compiled("VoidPrimarySale"), compiled("VoidRelease1155V6Sequential"), compiled("VoidRelease1155V4Royalty")];
+    expect(settledSaleProblems(factory.bytecode.object, sale, legacySale)).toEqual([]);
+    const code = factory.bytecode.object.toLowerCase();
+    expect(code.includes(v6.bytecode.object.slice(2).toLowerCase())).toBe(true);
+    expect(code.includes(v4Royalty.bytecode.object.slice(2).toLowerCase())).toBe(false);
+    expect(missingSelectors(v6.deployedBytecode.object, RELEASE_FACTORY_PROFILES.sequential.sequentialSignatures)).toEqual([]);
+    expect(factory.abi.find((item) => item.type === "constructor").inputs.map((input) => input.type)).toEqual(["address"]);
+  });
 });

@@ -13,6 +13,16 @@ const FACTORY = new Interface([
   "function PLATFORM_FEE_BPS() view returns (uint96)", "function RELEASE_VERSION() view returns (uint8)", "function REQUIRED_ROYALTY_BPS() view returns (uint96)",
 ]);
 const IMPLEMENTATION = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
+// VoidRelease1155V6Sequential (RELEASE_VERSION 4 factories): token IDs 1, 2, 3, ... per release contract.
+const SEQUENTIAL_IMPLEMENTATION = new Interface([
+  "function IMPLEMENTATION_VERSION() view returns (uint16)", "function nextTokenId() view returns (uint256)", "function tokenIdFor(bytes32,bytes32) view returns (uint256)",
+]);
+export const SEQUENTIAL_RELEASE_VERSION = 4;
+export const SEQUENTIAL_IMPLEMENTATION_VERSION = 6;
+/** The RELEASE_VERSION the plan's factory seals in bytecode (2 for plans made before it was recorded per profile). */
+export function plannedReleaseVersion(plan) {
+  return Number(plan?.transactions?.[0]?.sealedInBytecode?.RELEASE_VERSION ?? 2);
+}
 const MARKETPLACE = new Interface([
   "function releaseFactory() view returns (address)", "function legacyReleaseFactory() view returns (address)", "function feeRecipient() view returns (address)",
   "function genesisCollection() view returns (address)", "function genesisMaxTokenId() view returns (uint256)", "function genesisRoyaltyReceiver() view returns (address)",
@@ -29,13 +39,25 @@ export async function checkFactoryState(provider, plan, factoryAddress) {
   const implementation = new Contract(implementationAddress, IMPLEMENTATION, provider);
   const [implementationRoyalty, implementationForbidden] = await Promise.all([implementation.REQUIRED_ROYALTY_BPS(), implementation.platformFeeRecipient()]);
   const problems = [];
+  const expectedVersion = plannedReleaseVersion(plan);
   if (implementationAddress !== getAddress(plan.transactions[0].predictedImplementation)) problems.push(`implementation ${implementationAddress}`);
   if (getAddress(onChainRecipient) !== recipient) problems.push(`platformRecipient ${onChainRecipient}`);
   if (Number(onChainFee) !== FEE_BPS) problems.push(`PLATFORM_FEE_BPS ${onChainFee}`);
-  if (Number(onChainVersion) !== 2) problems.push(`RELEASE_VERSION ${onChainVersion}`);
+  if (Number(onChainVersion) !== expectedVersion) problems.push(`RELEASE_VERSION ${onChainVersion}`);
+  if (expectedVersion === SEQUENTIAL_RELEASE_VERSION) {
+    // The implementation must be the sequential one: version 6, nothing created yet, and an edition ID read as its token ID.
+    const sequential = new Contract(implementationAddress, SEQUENTIAL_IMPLEMENTATION, provider);
+    try {
+      const [version, next, idOfOne] = await Promise.all([sequential.IMPLEMENTATION_VERSION(), sequential.nextTokenId(), sequential.tokenIdFor(`0x${"00".repeat(32)}`, `0x${"00".repeat(31)}01`)]);
+      if (Number(version) !== SEQUENTIAL_IMPLEMENTATION_VERSION) problems.push(`implementation IMPLEMENTATION_VERSION ${version}`);
+      if (BigInt(next) !== 1n || BigInt(idOfOne) !== 1n) problems.push(`sequential token IDs (nextTokenId ${next}, tokenIdFor(1) ${idOfOne})`);
+    } catch {
+      problems.push("implementation does not expose sequential token IDs");
+    }
+  }
   if (Number(factoryRoyalty) !== ROYALTY_BPS || Number(implementationRoyalty) !== ROYALTY_BPS) problems.push("royalty lock");
   if (getAddress(implementationForbidden) !== recipient) problems.push(`implementation platformFeeRecipient ${implementationForbidden}`);
-  return { problems, facts: { implementationAddress, platformRecipient: recipient, platformFeeBps: FEE_BPS, releaseVersion: 2, requiredRoyaltyBps: ROYALTY_BPS } };
+  return { problems, facts: { implementationAddress, platformRecipient: recipient, platformFeeBps: FEE_BPS, releaseVersion: expectedVersion, requiredRoyaltyBps: ROYALTY_BPS } };
 }
 
 /** The mined VoidUnifiedMarketplace, against the plan's step 2 (bound to the step-1 factory, the production factory and Genesis). */

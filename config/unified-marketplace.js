@@ -16,8 +16,54 @@ export function unifiedMarketplaceActive(config = UNIFIED_MARKETPLACE) {
     && ADDRESS.test(String(config.genesis?.address || ""));
 }
 
-export function isUnifiedMarketplace(address, config = UNIFIED_MARKETPLACE) {
+/** True only for the manifest's active marketplace: the one every new listing is created on. */
+export function isActiveUnifiedMarketplace(address, config = UNIFIED_MARKETPLACE) {
   return unifiedMarketplaceActive(config) && same(config.marketplaceAddress, address);
+}
+
+// An earlier VoidUnifiedMarketplace stays recorded under `retainedMarketplaces` after the manifest moves new listings to a
+// new instance (for example when a new factory needs its own marketplace). Its existing listings stay readable, buyable,
+// cancellable and indexed; no new listing is ever created on it. Each entry carries its own deployment block and its own
+// two factories (its immutables); the chain, fee recipient, fee policy and Genesis collection are the manifest's.
+function validRetainedEntry(entry, config) {
+  return ADDRESS.test(String(entry?.marketplaceAddress || ""))
+    && !same(entry.marketplaceAddress, config.marketplaceAddress)
+    && ADDRESS.test(String(entry.releaseFactoryAddress || ""))
+    && (entry.legacyReleaseFactoryAddress == null || entry.legacyReleaseFactoryAddress === "" || ADDRESS.test(String(entry.legacyReleaseFactoryAddress)))
+    && Number.isSafeInteger(entry.deploymentBlock) && entry.deploymentBlock >= 0;
+}
+
+/** Every retained marketplace as a manifest of its own (same shape as the active one), or [] when there are none. */
+export function retainedUnifiedMarketplaces(config = UNIFIED_MARKETPLACE) {
+  if (!unifiedMarketplaceActive(config) || !Array.isArray(config.retainedMarketplaces)) return [];
+  return config.retainedMarketplaces.filter((entry) => validRetainedEntry(entry, config)).map((entry) => {
+    const shared = { ...config };
+    delete shared.retainedMarketplaces;
+    return Object.freeze({
+      ...shared,
+      marketplaceAddress: entry.marketplaceAddress,
+      deploymentBlock: entry.deploymentBlock,
+      releaseFactoryAddress: entry.releaseFactoryAddress,
+      legacyReleaseFactoryAddress: entry.legacyReleaseFactoryAddress || "",
+      retained: true,
+    });
+  });
+}
+
+/** The manifest view (factories, block) of one unified marketplace, active or retained; null for any other address. */
+export function unifiedMarketplaceFor(address, config = UNIFIED_MARKETPLACE) {
+  if (isActiveUnifiedMarketplace(address, config)) return config;
+  return retainedUnifiedMarketplaces(config).find((entry) => same(entry.marketplaceAddress, address)) || null;
+}
+
+/** True for the active unified marketplace or a retained one. New listings must still use `isActiveUnifiedMarketplace`. */
+export function isUnifiedMarketplace(address, config = UNIFIED_MARKETPLACE) {
+  return Boolean(unifiedMarketplaceFor(address, config));
+}
+
+/** The retained marketplaces that accept this asset under their own factories: where its existing listings may be. */
+export function retainedUnifiedMarketplacesFor({ chainId, contractAddress, tokenId, factoryAddress }, config = UNIFIED_MARKETPLACE) {
+  return retainedUnifiedMarketplaces(config).filter((entry) => unifiedAssetClass({ chainId, contractAddress, tokenId, factoryAddress }, entry));
 }
 
 /** True when `tokenId` of `contractAddress` is the approved Genesis collection range. Does not depend on deployment. */

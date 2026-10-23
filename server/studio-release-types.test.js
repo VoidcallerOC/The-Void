@@ -4,11 +4,11 @@ import { ethers } from "ethers";
 import { verifiedArtistDb } from "./test-helpers/verified-artist-db.js";
 
 // Recorded test factories, as a manifest would list them: Factory V3 (version 3, V5 clones) and a
-// future version 4 whose lifecycle interface has not been reviewed.
+// future version 5 whose lifecycle interface has not been reviewed.
 const { V3_FACTORY, FUTURE_FACTORY } = vi.hoisted(() => ({ V3_FACTORY: "0x00000000000000000000000000000000000000f3", FUTURE_FACTORY: "0x00000000000000000000000000000000000000f4" }));
 vi.mock("../config/release-network.js", async (importOriginal) => {
   const original = await importOriginal();
-  const extra = { [V3_FACTORY]: { releaseVersion: 3, albumCapable: true, chainId: 43113 }, [FUTURE_FACTORY]: { releaseVersion: 4, albumCapable: true, chainId: 43113 } };
+  const extra = { [V3_FACTORY]: { releaseVersion: 3, albumCapable: true, chainId: 43113 }, [FUTURE_FACTORY]: { releaseVersion: 5, albumCapable: true, chainId: 43113 } };
   return { ...original, releaseDeploymentForFactory: (address) => { const entry = extra[String(address).toLowerCase()]; return entry ? { factoryAddress: String(address).toLowerCase(), ...entry } : original.releaseDeploymentForFactory(address); } };
 });
 import { ArtistStudioService } from "./studio-service.js";
@@ -265,7 +265,7 @@ describe("standalone single on an album", () => {
     it("refuses a recorded factory with an unreviewed future version before any chain read or save", async () => {
       for (const [stored, target] of [["EP", "ALBUM"], ["ALBUM", "EP"], ["SINGLE", "EP"]]) {
         const chain = clonedChain({ albumCreated: true, standaloneFlag: true });
-        const { instance, repo } = service(routed(stored, { binding: { ...v4Binding, implementation_version: 4, factory_address: FUTURE_FACTORY } }), { publicationChain: chain });
+        const { instance, repo } = service(routed(stored, { binding: { ...v4Binding, implementation_version: 5, factory_address: FUTURE_FACTORY } }), { publicationChain: chain });
         await expect(instance.updateRelease({ request, releaseId: "release-1", input: { releaseType: target } })).rejects.toMatchObject({ status: 503, code: "RELEASE_CHAIN_STATE_UNAVAILABLE" });
         expect(repo.saveRelease).not.toHaveBeenCalled();
         expect(chain.request).not.toHaveBeenCalled();

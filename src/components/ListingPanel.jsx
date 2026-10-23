@@ -26,6 +26,7 @@ import {
 import { MARKETPLACE_STATE, formatWeiAsAvax, parseAvaxToWei, resolveInfrastructureStatus } from "../lib/marketplace-surface.js";
 import { RELEASE_DEPLOYMENT, RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isLegacyMarketplace } from "../../config/legacy-collection-marketplace.js";
+import { isActiveUnifiedMarketplace, retainedUnifiedMarketplacesFor } from "../../config/unified-marketplace.js";
 import { readReleaseListingContext, isReleasePerContractCandidate, calculateListingEconomics, sellerFloorTerms, genesisTokenChoices, readOwnedTokenIds } from "../lib/secondary-listing.js";
 import { ensureReleaseChain, releaseChainDescriptor, releaseNetworkRequiredMessage, releaseNetworkSwitchAllowed, releaseNetworkSwitchLabel } from "../lib/release-chain.js";
 
@@ -47,6 +48,13 @@ function errorState(error) {
   if (error?.code === "UNSUPPORTED_RELEASE") return "unsupported";
   if (["MARKETPLACE_UNAVAILABLE", "MARKETPLACE_REQUEST_FAILED", "OWNERSHIP_READ_FAILED", "INVALID_ECONOMICS"].includes(error?.code)) return "unavailable";
   return "error";
+}
+
+// A retained unified marketplace keeps settling the listings it already holds, so this asset's existing listing may be
+// there; new listings are only ever created on the active marketplace. Empty unless one is recorded.
+function retainedListingMarketplaces(edition, marketplaceAddress, tokenId) {
+  if (!isActiveUnifiedMarketplace(marketplaceAddress)) return [];
+  return retainedUnifiedMarketplacesFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId, factoryAddress: edition?.factoryAddress }).map((entry) => entry.marketplaceAddress);
 }
 
 function eventListingMatchesAsset(listing, { chainId, marketplaceAddress, contract, tokenId, seller }) {
@@ -197,23 +205,24 @@ export function ListingPanel({ edition }) {
           seller: wallet.account,
         });
         if (!active) return;
-        const listings = await fetchIndexedListings({
+        const searched = [canonicalMarketplace, ...retainedListingMarketplaces(edition, marketplace.address, tokenId)];
+        const listings = (await Promise.all(searched.map((marketplaceAddress) => fetchIndexedListings({
           chainId: canonicalChainId,
-          marketplaceAddress: canonicalMarketplace,
+          marketplaceAddress,
           tokenContractAddress: contract,
           tokenId,
           sellerWallet: wallet.account,
           status: "ACTIVE",
           signal: controller.signal,
-        });
+        })))).flat();
         if (!active) return;
-        const existing = listings.find((item) => eventListingMatchesAsset(item, {
+        const existing = listings.find((item) => searched.some((marketplaceAddress) => eventListingMatchesAsset(item, {
           chainId: canonicalChainId,
-          marketplaceAddress: canonicalMarketplace,
+          marketplaceAddress,
           contract,
           tokenId,
           seller: wallet.account,
-        }));
+        })));
         if (existing) {
           setSession({ key: verificationKey, stage: "listed", context: verified, listing: existing, message: statusCopy("listed") });
           return;
@@ -230,7 +239,7 @@ export function ListingPanel({ edition }) {
       }
     });
     return () => { active = false; controller.abort(); };
-  }, [candidate, marketplaceConfigured, verificationKey, wallet.connected, wallet.account, wrongNetwork, contract, tokenId, retry, canonicalChainId, canonicalMarketplace, marketplace.address, marketplace.chainId, provider]);
+  }, [candidate, marketplaceConfigured, verificationKey, wallet.connected, wallet.account, wrongNetwork, contract, tokenId, retry, canonicalChainId, canonicalMarketplace, marketplace.address, marketplace.chainId, provider, edition]);
 
   useEffect(() => {
     if (!pending) return undefined;
@@ -448,26 +457,28 @@ export function ListingPanel({ edition }) {
   const cancel = async () => {
     if (!currentListing || !wallet.authenticated || !wallet.account) return;
     const listingId = String(currentListing.listingId);
+    // An existing listing on a retained unified marketplace is cancelled there; everything else on the canonical one.
+    const cancelMarketplace = retainedListingMarketplaces(edition, marketplace.address, tokenId).find((address) => sameAddress(address, currentListing.marketplace)) || canonicalMarketplace;
     let receiptObserved = false;
     let observedTransactionHash = "";
     try {
       setSession({ key: verificationKey, stage: "cancelling", context, listing: currentListing, message: "Rechecking the exact indexed listing before cancellation…" });
-      const authoritative = await fetchAuthoritativeListing({ chainId: canonicalChainId, marketplaceAddress: canonicalMarketplace, listingId });
+      const authoritative = await fetchAuthoritativeListing({ chainId: canonicalChainId, marketplaceAddress: cancelMarketplace, listingId });
       if (!activeStatus(authoritative.status) || !sameAddress(authoritative.seller, wallet.account)
         || !sameAddress(authoritative.tokenContract, contract) || String(authoritative.tokenId) !== tokenId) {
         throw new Error("The authoritative listing is not active or is not the exact listing owned by this wallet.");
       }
-      const receipt = await submitCancel({ provider: wallet.getProvider(), owner: wallet.account, marketplace: canonicalMarketplace, listingId });
+      const receipt = await submitCancel({ provider: wallet.getProvider(), owner: wallet.account, marketplace: cancelMarketplace, listingId });
       receiptObserved = Boolean(receipt);
       observedTransactionHash = String(receipt?.transactionHash || "");
-      verifyCancelReceipt(receipt, { marketplace: canonicalMarketplace, seller: wallet.account, listingId });
+      verifyCancelReceipt(receipt, { marketplace: cancelMarketplace, seller: wallet.account, listingId });
       const transactionHash = String(receipt.transactionHash || "");
       if (!/^0x[0-9a-f]{64}$/i.test(transactionHash)) throw Object.assign(new Error("Verified cancellation receipt did not include a usable transaction hash."), { code: "TRANSACTION_HASH_MISSING" });
       const expected = {
         chainId: canonicalChainId,
         transactionHash,
         transactionType: "LISTING_CANCEL",
-        marketplaceAddress: canonicalMarketplace,
+        marketplaceAddress: cancelMarketplace,
         seller: wallet.account,
         listingId,
         contract,
@@ -480,7 +491,7 @@ export function ListingPanel({ edition }) {
       setPending({ kind: "cancel", transactionHash, expected, assetKey, verificationKey, context, listing: authoritative, message: "Cancellation receipt verified. Waiting for the authoritative index." });
       setSession({ key: verificationKey, stage: "pending", context, listing: authoritative, message: "Cancellation receipt verified. The offer remains visible until the index confirms cancellation." });
       try {
-        await recordAuthoritativeTransactionSubmission({ transactionHash, chainId: canonicalChainId, wallet: wallet.account, marketplaceAddress: canonicalMarketplace, type: "LISTING_CANCEL", authHeaders: wallet.authHeaders });
+        await recordAuthoritativeTransactionSubmission({ transactionHash, chainId: canonicalChainId, wallet: wallet.account, marketplaceAddress: cancelMarketplace, type: "LISTING_CANCEL", authHeaders: wallet.authHeaders });
       } catch {
         setPending((prior) => prior?.transactionHash === transactionHash ? { ...prior, message: "Cancellation receipt verified, but transaction registration was unavailable. Do not submit again; waiting for index reconciliation." } : prior);
         setSession({ key: verificationKey, stage: "reconciliation-required", context, listing: authoritative, message: "Cancellation receipt verified, but transaction registration was unavailable. Do not submit again; waiting for index reconciliation." });

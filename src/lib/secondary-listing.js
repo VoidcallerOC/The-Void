@@ -2,7 +2,7 @@ import { Interface, getAddress, isAddress } from "ethers";
 import { RELEASE_PER_CONTRACT, releaseDeploymentForMarketplace } from "../../config/release-network.js";
 import { isCertifiedFujiEdition } from "./fuji-release.js";
 import { LEGACY_COLLECTION_MARKETPLACE, isLegacyMarketplace, legacyCollectionFor } from "../../config/legacy-collection-marketplace.js";
-import { UNIFIED_MARKETPLACE, isUnifiedMarketplace, isGenesisAsset, unifiedMarketplaceActive } from "../../config/unified-marketplace.js";
+import { UNIFIED_MARKETPLACE, isActiveUnifiedMarketplace, isUnifiedMarketplace, isGenesisAsset, unifiedMarketplaceActive } from "../../config/unified-marketplace.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MARKETPLACE_VIEW = new Interface([
@@ -282,7 +282,9 @@ const UNIFIED_ASSET_CLASS = Object.freeze({ 1: "FACTORY_RELEASE", 2: "GENESIS" }
 export async function readUnifiedListingContext({ provider, marketplaceAddress, marketplaceChainId, tokenContractAddress, tokenId, seller }, config = UNIFIED_MARKETPLACE) {
   const expectedChainId = Number(config.chainId);
   if (!provider?.request) fail("Connect a browser wallet to verify this asset on chain.", "WALLET_REQUIRED");
-  if (!isUnifiedMarketplace(marketplaceAddress, config) || Number(marketplaceChainId) !== expectedChainId) fail("The configured marketplace is not the recorded unified marketplace.", "MARKETPLACE_UNAVAILABLE");
+  // A retained marketplace only settles the listings it already has; every new listing goes to the active one.
+  if (isUnifiedMarketplace(marketplaceAddress, config) && !isActiveUnifiedMarketplace(marketplaceAddress, config)) fail(`This marketplace only settles its existing listings. New listings are created on ${config.marketplaceAddress}.`, "MARKETPLACE_UNAVAILABLE");
+  if (!isActiveUnifiedMarketplace(marketplaceAddress, config) || Number(marketplaceChainId) !== expectedChainId) fail("The configured marketplace is not the recorded unified marketplace.", "MARKETPLACE_UNAVAILABLE");
   if (!validContractAddress(tokenContractAddress) || !validContractAddress(seller) || !/^\d+$/.test(String(tokenId))) fail("The asset or connected wallet address is invalid.", "UNSUPPORTED_RELEASE");
   let connectedChainId;
   try { connectedChainId = Number(BigInt(await provider.request({ method: "eth_chainId" }))); } catch { fail("The wallet network could not be verified. No listing action was taken.", "OWNERSHIP_READ_FAILED"); }

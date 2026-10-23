@@ -313,8 +313,8 @@ describe("Studio earnings", () => {
       expect(screen.getByTestId(`royalty-${CLONE_NEW}-${TOKEN_A}`)).toBeTruthy();
       expect(screen.queryByTestId(`royalty-${CLONE_NEW}-${TOKEN_B}`)).toBeNull();
       expect(screen.getByTestId("royalty-note").textContent).toMatch(/nothing to claim or withdraw/);
-      // Primary figures are untouched by royalties.
-      expect(screen.getByTestId("earnings-total").textContent).toBe("0.00975 AVAX");
+      // Primary figures are untouched by royalties. They come from a separate live balance read, so wait for them.
+      await waitFor(() => expect(screen.getByTestId("earnings-total").textContent).toBe("0.00975 AVAX"));
       expect(screen.getByTestId("earnings-withdrawable").textContent).toBe("0.00975 AVAX");
     });
 
