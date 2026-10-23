@@ -605,6 +605,17 @@ describe("Studio catalog wallet ownership", () => {
     expect(catalog.experiences).toEqual([]);
   });
 
+  it("listCatalog returns each release's updated_at so Studio can tell a new same-title draft from a retired leftover", async () => {
+    const { instance, db } = service({ authenticatedWallet: "0x284c09a7cc187e096cbbdc88d99defe6df32180a" });
+    let releaseSql = "";
+    db.query.mockImplementation(async (sql) => {
+      if (sql.includes("FROM releases r JOIN artist_owners")) { releaseSql = sql; return { rows: [] }; }
+      return { rows: [] };
+    });
+    await instance.listCatalog({ request });
+    expect(releaseSql).toMatch(/\br\.updated_at\b/);
+  });
+
   it("listCatalog keeps Voidcaller Forgive & Forget for the platform artist wallet", async () => {
     const artistWallet = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
     const { instance, db } = service({ authenticatedWallet: artistWallet });

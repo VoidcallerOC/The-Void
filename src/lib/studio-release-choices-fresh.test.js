@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { existingDraftsForTitle, studioReleaseChoices } from "./studio-release-choices.js";
+import { mapPublishedCatalog } from "./catalog-source.js";
 
 const artists = [{ id: "voidcaller", name: "Voidcaller" }];
 const retired = { id: "release-cd9c689c-8b90-41ee-b4e4-0124a63d6819", artistId: "voidcaller", title: "Forgive & Forget", status: "ARCHIVED" };
@@ -31,5 +32,21 @@ describe("the retired broken release and a completely new release", () => {
     expect(ids([archived, leftover, created])).toEqual(["release-created-after"]);
     // Without timestamps the previous behaviour holds: an unpublished same-title release is a leftover.
     expect(ids([retired, fresh])).toEqual([]);
+  });
+});
+
+describe("the Studio catalog API rows drive the picker", () => {
+  const apiRows = (withUpdatedAt) => [
+    { id: "release-old", artist_id: "voidcaller", slug: "forgive-forget-5", title: "Forgive & Forget", description: null, status: "ARCHIVED", release_metadata: {}, ...(withUpdatedAt ? { updated_at: "2026-10-23T00:58:23.711Z" } : {}) },
+    { id: "release-new", artist_id: "voidcaller", slug: "forgive-forget-6", title: "Forgive & Forget", description: null, status: "DRAFT", release_metadata: {}, ...(withUpdatedAt ? { updated_at: "2026-10-23T12:10:23.738Z" } : {}) },
+  ];
+  const offered = (rows) => studioReleaseChoices({ ...mapPublishedCatalog({ artists: [{ id: "voidcaller", display_name: "Voidcaller", slug: "voidcaller" }], releases: rows }), releaseBindings: [] }).map(({ release }) => release.id);
+
+  it("offers the new draft when the API returns updated_at, so it can be reopened after a reload", () => {
+    expect(offered(apiRows(true))).toEqual(["release-new"]);
+  });
+
+  it("without updated_at a same-title draft is treated as a leftover (why the API must send it)", () => {
+    expect(offered(apiRows(false))).toEqual([]);
   });
 });
