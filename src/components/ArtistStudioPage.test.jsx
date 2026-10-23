@@ -852,7 +852,8 @@ describe("Artist Studio with on-chain deployment switched off (the default)", ()
     const save = await screen.findByRole("button", { name: "Save release draft" });
     fireEvent.click(save);
     const panel = await screen.findByLabelText("Release draft status");
-    expect(within(panel).getByText(/Release draft saved\. No contract was created and no gas was spent/)).toBeTruthy();
+    // The status panel is on the page before the save resolves; wait for the saved message itself.
+    expect(await within(panel).findByText(/Release draft saved\. No contract was created and no gas was spent/)).toBeTruthy();
     expect(within(panel).getByText(/Contract deployment is switched off in Studio/)).toBeTruthy();
     expect(within(panel).getByText(/no next step available until deployment is switched on/)).toBeTruthy();
     // The panel follows the Save button in the page, and has no button that would lead into a server refusal.
