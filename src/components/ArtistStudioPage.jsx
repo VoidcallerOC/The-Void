@@ -426,6 +426,7 @@ export function ArtistStudioPage() {
   const [catalogStatus, setCatalogStatus] = useState(null);
   // Outcome of "Create release", shown beside the button for the same reason.
   const [releaseStatus, setReleaseStatus] = useState(null);
+  const postSaveRef = useRef(null);
   const [uploads, setUploads] = useState({});
   // Private files and previews this artist already registered, offered instead of uploading them again.
   const [registered, setRegistered] = useState({ protected: [], previews: [] });
@@ -601,9 +602,13 @@ export function ArtistStudioPage() {
       const ids = await ensureArtistAndRelease();
       draftSaved = true;
       setSelectedReleaseId(ids.releaseId);
-      const saved = "Release draft saved. No contract was created and no gas was spent. Deploying on-chain is a separate step below.";
+      const saved = onChainDeployEnabled
+        ? "Release draft saved. No contract was created and no gas was spent. Deploying on-chain is a separate step below."
+        : "Release draft saved. No contract was created and no gas was spent. Contract deployment is switched off, so the next step is your track details.";
       setNotice(saved);
       setReleaseStatus({ ok: true, message: saved });
+      // The form is long; bring the saved state and its next step into view instead of leaving the page at the footer.
+      setTimeout(() => postSaveRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 0);
     } catch (error) {
       // Only claim the draft was saved when it was. The message is also shown beside the button, because the page
       // notice sits at the top of a long form and a failure there looks like the button did nothing.
@@ -1301,9 +1306,25 @@ export function ArtistStudioPage() {
             <button type="button" style={primaryBtn} disabled={busy !== "" || !canUseStudio} onClick={createReleaseRecord}>
               {busy === "release" ? "Saving…" : "Save release draft"}
             </button>
-            {releaseStatus && <p role="alert" style={{ margin: 0, alignSelf: "center", color: releaseStatus.ok ? "var(--vc-bone-dim)" : "var(--vc-crimson)" }}>{releaseStatus.message}</p>}
+            {busy === "release" && <p role="status" style={{ margin: 0, alignSelf: "center", color: "var(--vc-bone-dim)" }}>Saving your release draft…</p>}
+            {releaseStatus && !releaseStatus.ok && <p role="alert" style={{ margin: 0, alignSelf: "center", color: "var(--vc-crimson)" }}>{releaseStatus.message}</p>}
             {releaseId && provisioningState === "CONFIRMED" && <button type="button" style={ghostBtn} onClick={() => setStep("track")}>Add tracks</button>}
           </div>
+          {releaseId && provisioningState !== "CONFIRMED" && (
+            <div ref={postSaveRef} style={{ ...card, marginTop: 18 }} aria-label="Release draft status">
+              <Eyebrow red>{releaseStatus?.ok ? "Draft saved" : "Draft"}</Eyebrow>
+              {releaseStatus?.ok && <p role="status" style={{ color: "var(--vc-bone)", lineHeight: 1.6 }}>{releaseStatus.message}</p>}
+              <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>
+                <strong style={{ color: "var(--vc-bone)" }}>{form.releaseTitle || "This release"}</strong> is a draft with no contract.{" "}
+                {onChainDeployEnabled
+                  ? "Prepare and deploy its release contract above when you are ready, or keep working on its tracks."
+                  : "Contract deployment is switched off in Studio, so it cannot be deployed or published on-chain yet. You can keep working on its tracks."}
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" style={primaryBtn} onClick={() => setStep("track")}>Continue to track details</button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
