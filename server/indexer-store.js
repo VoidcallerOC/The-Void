@@ -317,7 +317,19 @@ export class IndexerStore {
   }
 
   async listFactoryReleases({ chainId, factoryAddress }) {
-    const { rows } = await this.db.query("SELECT release_contract_address, primary_sale_address, deployment_block_number FROM factory_releases WHERE chain_id=$1 AND factory_address=$2 ORDER BY deployment_block_number ASC, release_contract_address ASC", [chainId, address(factoryAddress, "factoryAddress")]);
+    // A release the artist abandoned is not tracked, so its empty clone and sale do not each cost a catch-up pass
+    // through the single sequential worker. "Abandoned" is strict: the release is ARCHIVED and its contract has
+    // no recorded transfer, purchase or owner. A retired release that still has a holder stays tracked, because
+    // the holder's protected media is gated on the ownership this worker records. The factory event stays recorded.
+    const { rows } = await this.db.query(`SELECT fr.release_contract_address, fr.primary_sale_address, fr.deployment_block_number FROM factory_releases fr
+      WHERE fr.chain_id=$1 AND fr.factory_address=$2
+        AND NOT (
+          EXISTS (SELECT 1 FROM releases r WHERE r.status='ARCHIVED' AND lower(r.release_metadata->>'releaseKey')=lower(fr.release_key))
+          AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.chain_id=fr.chain_id AND lower(t.contract_address)=lower(fr.release_contract_address))
+          AND NOT EXISTS (SELECT 1 FROM primary_purchases p WHERE p.chain_id=fr.chain_id AND lower(p.token_contract_address)=lower(fr.release_contract_address))
+          AND NOT EXISTS (SELECT 1 FROM ownership_snapshots o WHERE o.chain_id=fr.chain_id AND lower(o.contract_address)=lower(fr.release_contract_address))
+        )
+      ORDER BY fr.deployment_block_number ASC, fr.release_contract_address ASC`, [chainId, address(factoryAddress, "factoryAddress")]);
     return rows;
   }
 
