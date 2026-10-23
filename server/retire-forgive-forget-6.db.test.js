@@ -3,7 +3,6 @@ import { copyFile, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ApiService } from "./api-service.js";
@@ -19,13 +18,13 @@ import { studioReleaseChoices } from "../src/lib/studio-release-choices.js";
 import { resumeOwnedRelease } from "../src/lib/studio-selection.js";
 import { planCatalogExperiences } from "../src/lib/studio-experiences.js";
 
-// Real Postgres (every migration on main, then the PENDING forgive-forget-6 retirement): the published mainnet
-// Forgive & Forget is retired in the application so the sequential-ID replacement can be the only active one.
-// Fixture rows mirror the production IDs and shapes read on 2026-10-23 (public API and chain, read-only); nothing
-// here reads or writes production. Skipped without TEST_DATABASE_URL.
+// Real Postgres (every migration before 049, then the forgive-forget-6 retirement): the published mainnet Forgive &
+// Forget is retired in the application so the sequential-ID replacement can be the only active one. Fixture rows
+// mirror the production IDs and shapes read on 2026-10-23 (public API and chain, read-only); nothing here reads or
+// writes production. Skipped without TEST_DATABASE_URL.
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "";
 const MIGRATION = "049_retire_forgive_forget_6_replaced_by_sequential.sql";
-const PENDING = fileURLToPath(new URL(`../deploy/mainnet/pending-migrations/${MIGRATION}`, import.meta.url));
+const MIGRATION_PATH = join(migrationsDirectory, MIGRATION);
 const CHAIN = 43114;
 const OWNER = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
 const FACTORY = "0xe744d58fa8138042f5f00a28d39f89081539c19b";
@@ -58,7 +57,7 @@ const TARGET_IDS = [TARGET, TARGET_EDITION, EXP_DEMO, EXP_FULL].sort();
 const FORM = { productType: "DEMO", experienceTitle: "Stranger Things - Demo", experienceDescription: "", trackTitle: "Forgive & Forget", releaseTitle: "Forgive & Forget" };
 const request = { requestId: "request-1", headers: {} };
 
-describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID replacement (Postgres, pending migration)", () => {
+describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID replacement (Postgres, migration 049)", () => {
   let adminPool;
   let pool;
   let dbName;
@@ -89,11 +88,11 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
     digest(`SELECT id, release_id, contract_id, title, supply, tier, application_metadata - 'abandoned' FROM editions WHERE release_id='${TARGET}'`),
     digest(`SELECT id, artist_id, release_id, edition_id, title, experience_type, requirements, media_config, version FROM experiences WHERE release_id='${TARGET}'`),
   ]);
-  const applyPending = async () => {
+  const applyMigration = async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(migrationBody(await readFile(PENDING, "utf8"), MIGRATION));
+      await client.query(migrationBody(await readFile(MIGRATION_PATH, "utf8"), MIGRATION));
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   };
@@ -116,7 +115,10 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
     url.pathname = `/${dbName}`;
     pool = new pg.Pool({ connectionString: url.toString(), ssl: false, max: 4 });
     config = loadServerConfig({ DATABASE_URL: url.toString(), DATABASE_SSL: "false" });
-    await migrate({ pool, config });
+    // Production before activation: every migration up to 048, so 049 is still unapplied when the fixtures exist.
+    const before = await mkdtemp(join(tmpdir(), "void-migrations-"));
+    for (const name of (await readdir(migrationsDirectory)).filter((file) => file < MIGRATION)) await copyFile(join(migrationsDirectory, name), join(before, name));
+    await migrate({ pool, config, directory: before });
 
     await pool.query("INSERT INTO artists (id, slug, display_name) VALUES ('voidcaller','voidcaller','Voidcaller'), ('other-artist','other-artist','Other Artist') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO artist_owners (artist_id, owner_wallet) VALUES ('voidcaller',$1) ON CONFLICT DO NOTHING", [OWNER]);
@@ -187,7 +189,7 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
   });
 
   it("archives exactly the release, its edition and its two experiences, by ID, with the abandoned marker, and nothing else", async () => {
-    await applyPending();
+    await applyMigration();
     const now = await statuses();
     const changed = Object.keys(now).filter((id) => now[id] !== statusBefore[id]).sort();
     expect(changed).toEqual(TARGET_IDS);
@@ -215,16 +217,16 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
     expect(await q("SELECT token_id::text AS token_id FROM tokens WHERE edition_id=$1", [TARGET_EDITION])).toEqual([{ token_id: TOKEN }]);
   });
 
-  it("re-running is a no-op, and once activated in server/migrations the runner applies and records it once", async () => {
+  it("re-running is a no-op, and the real runner over server/migrations applies and records it once", async () => {
     const snapshot = JSON.stringify(await q("SELECT id, status, updated_at FROM releases UNION ALL SELECT id, status, updated_at FROM editions UNION ALL SELECT id, status, updated_at FROM experiences ORDER BY 1"));
-    await applyPending();
+    await applyMigration();
     expect(JSON.stringify(await q("SELECT id, status, updated_at FROM releases UNION ALL SELECT id, status, updated_at FROM editions UNION ALL SELECT id, status, updated_at FROM experiences ORDER BY 1"))).toBe(snapshot);
-    // Simulate activation: today's migrations plus this file under its name, run by the real runner twice.
-    const activated = await mkdtemp(join(tmpdir(), "void-migrations-activated-"));
-    for (const name of await readdir(migrationsDirectory)) await copyFile(join(migrationsDirectory, name), join(activated, name));
-    await copyFile(PENDING, join(activated, MIGRATION));
-    expect((await migrate({ pool, config, directory: activated })).applied).toContain(MIGRATION);
-    await migrate({ pool, config, directory: activated });
+    // What the next API start does: db:migrate over server/migrations, then again on the following start. The runner
+    // reports every recorded migration; exactly 049 is new.
+    const recorded = (await q("SELECT name FROM schema_migrations ORDER BY name")).map((row) => row.name);
+    expect(recorded).not.toContain(MIGRATION);
+    expect((await migrate({ pool, config })).applied).toEqual([...recorded, MIGRATION]);
+    await migrate({ pool, config });
     expect(await q("SELECT count(*)::int AS n FROM schema_migrations WHERE name=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     expect(JSON.stringify(await q("SELECT id, status, updated_at FROM releases UNION ALL SELECT id, status, updated_at FROM editions UNION ALL SELECT id, status, updated_at FROM experiences ORDER BY 1"))).toBe(snapshot);
@@ -246,7 +248,10 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
   it("Studio no longer offers or opens the old release as a published sale target, and the indexer stops tracking its clone and sale", async () => {
     const catalog = await studioCatalog();
     expect(resumeOwnedRelease(catalog, TARGET)?.published).toBeFalsy();
-    expect(studioReleaseChoices(catalog).map(({ release }) => release.id)).not.toContain(TARGET);
+    const choices = studioReleaseChoices(catalog).map(({ release }) => release.id);
+    expect(choices).not.toContain(TARGET);
+    // The replacement draft on the sequential factory is what Studio offers for the new Forgive & Forget launch.
+    expect(choices).toContain(REPLACEMENT);
     expect(await trackedClones()).not.toContain(CLONE);
     const abandoned = await createIndexerStore(pool).listAbandonedReleaseContracts({ chainId: CHAIN });
     expect(abandoned).toEqual(expect.arrayContaining([{ release_contract_address: CLONE, primary_sale_address: SALE }]));

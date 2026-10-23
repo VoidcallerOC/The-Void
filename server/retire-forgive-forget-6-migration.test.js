@@ -2,10 +2,10 @@ import { readFile, readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { listMigrations, migrationBody, migrationsDirectory } from "./migrate.js";
 
-// The forgive-forget-6 retirement is reviewed but NOT active: it lives outside server/migrations, so the runner
-// (applied on every API start) cannot pick it up until an owner-approved PR moves it.
+// The forgive-forget-6 retirement, reviewed while staged in deploy/mainnet/pending-migrations/ and activated in
+// server/migrations by its own PR (runbook step 5): the runner applies it on the next API start.
 const name = "049_retire_forgive_forget_6_replaced_by_sequential.sql";
-const pendingPath = new URL(`../deploy/mainnet/pending-migrations/${name}`, import.meta.url);
+const migrationPath = new URL(`./migrations/${name}`, import.meta.url);
 const release = "release-e3743294-2ea3-46ae-b006-f0402606af65";
 const edition = "edition-8f5f690e-47c4-46d5-baf6-1ab969ed259d";
 const experiences = [
@@ -23,15 +23,18 @@ const others = [
   "voidcaller-legacy-genesis",
 ];
 
-describe("forgive-forget-6 retirement migration (pending, static)", () => {
-  it("is not in server/migrations, so the runner applied on every API start cannot apply it", async () => {
-    expect(await readdir(migrationsDirectory)).not.toContain(name);
-    expect((await listMigrations()).some((file) => file.includes("forgive_forget_6"))).toBe(false);
-    expect(decodeURIComponent(pendingPath.pathname)).not.toContain("/server/migrations/");
+describe("forgive-forget-6 retirement migration (static)", () => {
+  it("is active as the next migration after 048, exactly once, and no longer staged", async () => {
+    const migrations = await listMigrations();
+    expect(migrations.filter((file) => file.includes("forgive_forget_6"))).toEqual([name]);
+    expect(migrations.indexOf(name)).toBe(migrations.indexOf("048_retire_forgive_forget_5_no_clones.sql") + 1);
+    expect(migrations.filter((file) => file.startsWith("049_"))).toEqual([name]);
+    expect(await readdir(new URL("../deploy/mainnet/pending-migrations/", import.meta.url))).not.toContain(name);
+    expect(await readdir(migrationsDirectory)).toContain(name);
   });
 
   it("is runner-compatible (one outer transaction) and targets only forgive-forget-6, by ID, lifecycle status only", async () => {
-    const sql = await readFile(pendingPath, "utf8");
+    const sql = await readFile(migrationPath, "utf8");
     expect(() => migrationBody(sql, name)).not.toThrow();
     expect(sql.match(/^\s*BEGIN\s*;/gim)).toHaveLength(1);
     expect(sql.match(/^\s*COMMIT\s*;/gim)).toHaveLength(1);
@@ -62,7 +65,7 @@ describe("forgive-forget-6 retirement migration (pending, static)", () => {
   });
 
   it("never deletes, alters or updates a record outside the three lifecycle tables", async () => {
-    const sql = await readFile(pendingPath, "utf8");
+    const sql = await readFile(migrationPath, "utf8");
     const code = sql.replace(/--.*$/gm, "");
     expect(code).not.toMatch(/\bDELETE\s+FROM\b|\bTRUNCATE\b|\bDROP\b|\bALTER\b|\bCREATE\b|\bGRANT\b/i);
     expect(code).not.toMatch(/UPDATE\s+(?:media_assets|tokens|contracts|release_contracts|factory_releases|release_provisioning_requests|provenance_proofs|primary_purchases|purchases|primary_sales|sales|ownership_snapshots|transfers|listings|transactions|artist_owners|artists|audit_events)\b/i);
