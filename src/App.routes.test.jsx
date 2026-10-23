@@ -72,7 +72,7 @@ const PRIMARY_PAGES = [
   ["/marketplace", /^Marketplace$/i, "Marketplace · The Void"],
   ["/claim", /Genesis claim/i, "Genesis claim · The Void"],
   ["/artists", /^Artists$/i, "Artists · The Void"],
-  ["/collection", /^The Void$/i, "Catalog · The Void"],
+  ["/my-collection", /^My collection$/i, "My collection · The Void"],
   ["/verify", /Become verified/i, "Become verified · The Void"],
   ["/studio", /Create the relic/i, "Artist studio · The Void"],
 ];
@@ -91,6 +91,13 @@ describe("route table · primary destinations", () => {
     mount("/");
     const header = [...document.querySelectorAll(".vc-nav-links a")].map((a) => a.getAttribute("href"));
     expect(header).toEqual(PRIMARY_PAGES.map(([path]) => path));
+  });
+
+  it("still renders the catalog at /collection, which the header no longer links to directly", async () => {
+    mount("/collection");
+    await waitFor(() => expect(heading()).toMatch(/^The Void$/i));
+    expect(location()).toBe("/collection");
+    await waitFor(() => expect(document.title).toBe("Catalog · The Void"));
   });
 
   for (const [path, h1, title] of PRIMARY_PAGES) {
@@ -167,7 +174,7 @@ describe("route table · client-side navigation, history, mobile menu", () => {
     fireEvent.click(headerLink("ARTISTS"));
     await waitFor(() => expect(location()).toBe("/artists"));
     fireEvent.click(headerLink("COLLECTION"));
-    await waitFor(() => expect(location()).toBe("/collection"));
+    await waitFor(() => expect(location()).toBe("/my-collection"));
     await act(async () => { await router.navigate(-1); });
     await waitFor(() => expect(location()).toBe("/artists"));
     expect(heading()).toMatch(/^Artists$/i);
@@ -183,8 +190,8 @@ describe("route table · client-side navigation, history, mobile menu", () => {
     mountRouter("/");
     fireEvent.click(document.querySelector("button[aria-label='Open menu']"));
     fireEvent.click(within(document.querySelector(".vc-nav-menu")).getByText("COLLECTION"));
-    await waitFor(() => expect(heading()).toMatch(/^The Void$/i));
-    expect(location()).toBe("/collection");
+    await waitFor(() => expect(heading()).toMatch(/^My collection$/i));
+    expect(location()).toBe("/my-collection");
     expect(document.querySelector(".vc-nav-menu")).toBeNull();
   });
 

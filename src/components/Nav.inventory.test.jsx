@@ -14,7 +14,7 @@ const PRIMARY_NAV = [
   ["MARKETPLACE", "/marketplace"],
   ["CLAIM", "/claim"],
   ["ARTISTS", "/artists"],
-  ["COLLECTION", "/collection"],
+  ["COLLECTION", "/my-collection"],
   ["VERIFY", "/verify"],
   ["ARTIST STUDIO", "/studio"],
 ];
@@ -82,6 +82,12 @@ describe("site header · navigation inventory", () => {
     renderHeader({ path: "/collection/voidcaller-collection" });
     const active = [...document.querySelectorAll(".vc-nav-links a.active")].map((a) => a.textContent.trim());
     expect(active).toEqual(["COLLECTION"]);
+  });
+
+  it("keeps COLLECTION active on My collection too, and COLLECTION opens My collection", () => {
+    renderHeader({ path: "/my-collection" });
+    expect([...document.querySelectorAll(".vc-nav-links a.active")].map((a) => a.textContent.trim())).toEqual(["COLLECTION"]);
+    expect([...document.querySelectorAll(".vc-nav-links a")].find((a) => a.textContent.trim() === "COLLECTION").getAttribute("href")).toBe("/my-collection");
   });
 
   it("marks nothing active on the home page", () => {

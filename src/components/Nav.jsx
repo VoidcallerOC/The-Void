@@ -11,9 +11,12 @@ const LINKS = [
   ["CLAIM", "/claim"],
   ["ARTISTS", "/artists"],
   ["VERIFY", "/verify"],
-  ["COLLECTION", "/collection"],
+  ["COLLECTION", "/my-collection"],
   ["ARTIST STUDIO", "/studio"],
 ];
+
+// COLLECTION opens the collector's own collection; the catalog pages under /collection stay part of that section.
+const inCollectionSection = (linkPath, pathname) => linkPath === "/my-collection" && /^\/collection(\/|$)/.test(pathname);
 
 export const REVIEWER_NAV_LABEL = "REVIEW APPLICATIONS";
 export const REVIEWER_NAV_PATH = "/verify/review";
@@ -94,7 +97,7 @@ export function Nav() {
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
           {primaryLinks.map(([label, path]) => (
-            <NavLink key={label} to={path} end={path === "/"} className="vc-navlink">
+            <NavLink key={label} to={path} end={path === "/"} className={({ isActive }) => `vc-navlink${isActive || inCollectionSection(path, location.pathname) ? " active" : ""}`}>
               {label}
               {badge(path)}
             </NavLink>
@@ -158,7 +161,7 @@ export function Nav() {
               key={label}
               to={path}
               end={path === "/"}
-              className="vc-navlink vc-navlink-mobile"
+              className={({ isActive }) => `vc-navlink vc-navlink-mobile${isActive || inCollectionSection(path, location.pathname) ? " active" : ""}`}
               onClick={() => setMenuOpen(false)}
               style={{ padding: "14px 0", minHeight: 48, borderBottom: "1px solid var(--vc-ash)", fontSize: 18 }}
             >
