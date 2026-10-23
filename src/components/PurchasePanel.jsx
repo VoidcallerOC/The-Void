@@ -11,6 +11,7 @@ import {
   recordAuthoritativeTransactionSubmission,
 } from "../lib/marketplace-api.js";
 import { MARKETPLACE_STATE, formatWeiAsAvax, listingsForEdition, resolveEditionChain, resolveInfrastructureStatus, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { isActiveUnifiedMarketplace, retainedUnifiedMarketplacesFor } from "../../config/unified-marketplace.js";
 
 const states = [PURCHASE_STATE.READY, PURCHASE_STATE.WALLET_CONFIRMATION, PURCHASE_STATE.SUBMITTED, PURCHASE_STATE.PENDING, PURCHASE_STATE.CONFIRMED];
 const failureStates = new Set([
@@ -23,6 +24,20 @@ const failureStates = new Set([
   PURCHASE_STATE.RECONCILIATION_REQUIRED,
 ]);
 const nextPollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
+const sameAddress = (left, right) => typeof left === "string" && typeof right === "string" && left.toLowerCase() === right.toLowerCase();
+
+// Retained unified marketplaces that accept this edition under their own factories. Their existing listings stay
+// buyable; each is bought on its own marketplace. Empty unless the manifest records one.
+function retainedMarketplacesForEdition(edition, marketplace, tokenId) {
+  if (!isActiveUnifiedMarketplace(marketplace?.address)) return [];
+  return retainedUnifiedMarketplacesFor({ chainId: edition?.chainId, contractAddress: edition?.contractAddress, tokenId: tokenId ?? edition?.tokenIds?.[0], factoryAddress: edition?.factoryAddress }).map((entry) => entry.marketplaceAddress);
+}
+
+/** The verified target for buying `listing`: its retained marketplace when it is one for this edition, else the edition's. */
+function purchaseMarketplaceConfig(listing, edition, marketplace) {
+  const retained = retainedMarketplacesForEdition(edition, marketplace, listing?.tokenId).find((address) => sameAddress(address, listing?.marketplace));
+  return retained ? Object.freeze({ ...marketplace, address: retained }) : marketplace;
+}
 
 // With `tokenId`, only offers for that exact token are shown and bought (the token page).
 export function PurchasePanel({ edition, tokenId = null }) {
@@ -46,13 +61,15 @@ export function PurchasePanel({ edition, tokenId = null }) {
   useEffect(() => {
     if (!live || !chain) return undefined;
     const controller = new AbortController();
-    fetchIndexedListings({
+    const marketplaces = [marketplace.address, ...retainedMarketplacesForEdition(edition, marketplace, tokenId)];
+    Promise.all(marketplaces.map((marketplaceAddress) => fetchIndexedListings({
       chainId: chain.id,
-      marketplaceAddress: marketplace.address,
+      marketplaceAddress,
       tokenContractAddress: edition.contractAddress,
       status: "ACTIVE",
       signal: controller.signal,
-    })
+    })))
+      .then((results) => results.flat())
       .then((rows) => {
         const matches = listingsForEdition(rows, edition).filter((item) => tokenId === null || String(item.tokenId) === String(tokenId));
         setListings(matches);
@@ -76,8 +93,10 @@ export function PurchasePanel({ edition, tokenId = null }) {
     if (!listing || listing.status !== LISTING_STATUS.ACTIVE) { setMessage("No active indexed listing is available for this edition."); return; }
     const selectedListing = { ...listing };
     let marketplaceTarget;
+    let buyConfig;
     try {
-      marketplaceTarget = assertCanonicalMarketplaceTarget({ marketplace: selectedListing.marketplace || marketplace.address, chainId: chain?.id, config: marketplace });
+      buyConfig = purchaseMarketplaceConfig(selectedListing, edition, marketplace);
+      marketplaceTarget = assertCanonicalMarketplaceTarget({ marketplace: selectedListing.marketplace || marketplace.address, chainId: chain?.id, config: buyConfig });
     } catch (error) {
       setState(PURCHASE_STATE.FAILED);
       setMessage(error.message);
@@ -98,7 +117,7 @@ export function PurchasePanel({ edition, tokenId = null }) {
         quantity: selectedQuantity,
         chain,
         chainId: wallet.chainId,
-        canonical: marketplace,
+        canonical: buyConfig,
         onState: (nextState) => {
           // A wallet receipt is only observed locally. Only the authoritative
           // marketplace transaction endpoint may move PENDING to CONFIRMED.
