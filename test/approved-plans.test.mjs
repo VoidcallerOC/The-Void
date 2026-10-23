@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { AbiCoder, getCreateAddress, keccak256 } from "ethers";
 import { describe, expect, it } from "vitest";
 import { ApprovedPlanError, EXECUTED_RELEASE_FACTORY, validateApprovedPlan } from "../scripts/approved-plan.mjs";
-import { FACTORY_ARTIFACT_PATH } from "../scripts/deploy-release-per-contract-mainnet.mjs";
+import { RELEASE_FACTORY_PROFILES } from "../scripts/deploy-release-per-contract-mainnet.mjs";
 import { verifyBinding } from "../scripts/deployment-plan-binding.mjs";
 import { bindPlan } from "../scripts/plan-binding-core.mjs";
 import { assertReadyToSign } from "../scripts/mainnet-signing-requests.mjs";
@@ -51,8 +51,9 @@ describe("approved mainnet plans", () => {
     expect(plan.artifacts.marketplace.initCodeHash).toBe(keccak256(marketplace.bytecode.object));
     expect(plan.artifacts.implementation.runtimeCodeHash).toBe(keccak256(implementation.deployedBytecode.object));
     expect(factoryTx.predictedImplementation).toBe(getCreateAddress({ from: factoryTx.predictedAddress, nonce: 1 }));
-    // Only the executed plan for 0x262B… may name another factory artifact; every new plan names the settled one.
-    if (factoryTx.predictedAddress !== EXECUTED_RELEASE_FACTORY) expect(plan.artifacts.factory.path).toBe(FACTORY_ARTIFACT_PATH);
+    // The approved plan deploys the sequential factory and the V6 clone implementation it creates.
+    expect(plan.artifacts.factory.path).toBe(RELEASE_FACTORY_PROFILES.sequential.factoryArtifactPath);
+    expect(plan.artifacts.implementation.path).toBe(RELEASE_FACTORY_PROFILES.sequential.implementationArtifactPath);
   });
 
   it("the executed release plan can never authorize a new deployment", async () => {
@@ -111,7 +112,7 @@ describe("approved mainnet plans", () => {
     it.runIf(hasHistory)("the source commit is an ancestor of HEAD and carries the planned contracts", () => {
       const { plan, binding } = entry();
       expect(() => git("merge-base", "--is-ancestor", binding.sourceCommit, "HEAD")).not.toThrow();
-      for (const path of ["contracts/VoidUnifiedMarketplace.sol", "contracts/VoidReleaseFactoryV2RoyaltySettled.sol", "scripts/deploy-release-per-contract-mainnet.mjs"]) {
+      for (const path of ["contracts/VoidUnifiedMarketplace.sol", "contracts/VoidReleaseFactoryV4Sequential.sol", "contracts/VoidRelease1155V6Sequential.sol", "scripts/deploy-release-per-contract-mainnet.mjs"]) {
         expect(git("show", `${binding.sourceCommit}:${path}`).length).toBeGreaterThan(0);
       }
       expect(plan.artifacts.marketplace.path).toBe("out/VoidUnifiedMarketplace.sol/VoidUnifiedMarketplace.json");
@@ -120,8 +121,14 @@ describe("approved mainnet plans", () => {
     it("binds the intended release: factory -> unified marketplace, production factory, Genesis 0-3 at its royalty receiver, one fee recipient", () => {
       const { plan } = entry();
       const [factory, market] = plan.transactions;
-      expect(plan.deployer).toMatchObject({ address: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", nonce: 3 });
-      expect([factory.nonce, market.nonce]).toEqual([3, 4]);
+      expect(plan.deployer).toMatchObject({ address: "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", nonce: 6 });
+      expect([factory.nonce, market.nonce]).toEqual([6, 7]);
+      expect([factory.contract, factory.predictedAddress, factory.predictedImplementation, market.predictedAddress]).toEqual([
+        "VoidReleaseFactoryV4Sequential",
+        "0xEa0c345cE84025b4e8462d145100dce1848254B4",
+        "0x4409913aC043E1772b1b7Ff2D5F8CE31868F9ddA",
+        "0x0F5930113Ec750d867741E05F302053472115eb2",
+      ]);
       expect(factory.constructor.platformRecipient).toBe("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
       expect(market.constructor).toEqual({
         feeRecipient: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4",
@@ -177,7 +184,7 @@ describe("approved mainnet plans", () => {
       await expect(createSigningSession({ ...base, recipientVerifiedOnDevice: "" })).rejects.toThrow(/Nano S Plus/);
       // A stale fresh plan (nonce moved) cannot match the approval, so no session reaches the signing phase.
       const stale = JSON.parse(JSON.stringify(plan));
-      stale.deployer.nonce = 4;
+      stale.deployer.nonce = 7;
       await expect(createSigningSession({ ...base, recipientVerifiedOnDevice: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", replan: async () => stale })).rejects.toThrow(/differs from the approved plan/);
       // Signing from any other checkout than the bound commit is refused.
       await expect(createSigningSession({ ...base, commit: "2".repeat(40), recipientVerifiedOnDevice: "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4", replan: async () => plan })).rejects.toThrow(/was made on/);
