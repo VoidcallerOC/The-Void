@@ -6,6 +6,7 @@ import {VoidReleaseFactoryV4Sequential} from "../contracts/VoidReleaseFactoryV4S
 import {VoidRelease1155V6Sequential} from "../contracts/VoidRelease1155V6Sequential.sol";
 import {VoidCollection1155} from "../contracts/VoidCollection1155.sol";
 import {VoidPrimarySaleSettled} from "../contracts/VoidPrimarySaleSettled.sol";
+import {MockGenesisCollection, installGenesisStandIn} from "./helpers/MockGenesisCollection.sol";
 
 interface VmHalloween {
     function chainId(uint256) external;
@@ -55,6 +56,11 @@ contract GenesisHolderClaimHalloweenScheduleTest {
     function setUp() public {
         vm.chainId(43114);
         vm.warp(START - 1 hours);
+        // The claim reads Genesis balances on 43114: the wallets that claim here each hold Genesis units.
+        MockGenesisCollection genesis = installGenesisStandIn(false);
+        genesis.setBalance(CLAIMANT, 0, 1);
+        genesis.setBalance(CLAIMANT_TWO, 3, 2);
+        genesis.setBalance(BUYER, 1, 1);
         factory = new VoidReleaseFactoryV4Sequential(NANO);
         releaseKey = keccak256(abi.encode("the-void:studio-release:v2", block.chainid, address(factory), APP, ARTIST));
         vm.prank(ARTIST);

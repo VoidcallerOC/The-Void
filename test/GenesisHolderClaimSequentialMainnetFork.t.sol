@@ -11,6 +11,12 @@ import {VoidCollection1155} from "../contracts/VoidCollection1155.sol";
 /// MAINNET_FORK_RPC (or MAINNET_FORK_URL) is set.
 /// If the live sale for token 1 is not configured yet, the artist's configureSale is replayed on the fork with
 /// the only schedule the claim accepts; if it is configured, the live values are used and must already match.
+/// The real Genesis collection (an EIP-1167 proxy on C-Chain): its transfers and balances are used as they are.
+interface IGenesisForkCollection {
+    function balanceOf(address account, uint256 id) external view returns (uint256);
+    function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
+}
+
 interface VmSeqClaimFork {
     function createSelectFork(string calldata) external returns (uint256);
     function envOr(string calldata, string calldata) external returns (string memory);
@@ -42,6 +48,11 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
     address internal constant CLAIMANT = address(0xC1A1);
     address internal constant CLAIMANT_TWO = address(0xC1A2);
     address internal constant BUYER = address(0xB0B);
+    address internal constant NON_HOLDER = address(0xBAD0);
+    // The claim reads the REAL Genesis collection on the fork. This existing holder (Genesis IDs 0, 1 and 3 at
+    // the time of writing) moves one unit of ID 3 to each test claimant, on the fork only.
+    IGenesisForkCollection internal constant GENESIS = IGenesisForkCollection(0xD1B4367dd9f235f9ee61878019d66E31511E98eE);
+    address internal constant GENESIS_HOLDER = 0x6a86EfA012fEDA64b70112022487fEE22E67d2fb;
 
     VoidRelease1155V6Sequential internal release = VoidRelease1155V6Sequential(CLONE);
     VoidPrimarySaleSettled internal sale = VoidPrimarySaleSettled(SALE);
@@ -59,6 +70,12 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         if (bytes(rpc).length == 0) { vm.skip(true); return; }
         vm.createSelectFork(rpc);
         require(block.chainid == 43114, "not C-Chain");
+        if (GENESIS.balanceOf(GENESIS_HOLDER, 3) < 3) { vm.skip(true); return; }
+        address[3] memory claimants = [CLAIMANT, CLAIMANT_TWO, BUYER];
+        for (uint256 i; i < claimants.length; ++i) {
+            vm.prank(GENESIS_HOLDER);
+            GENESIS.safeTransferFrom(GENESIS_HOLDER, claimants[i], 3, 1, "");
+        }
 
         (uint256 price, uint256 cap, uint256 sold,, uint64 start, uint64 end, bool paused, bool configured) = sale.sales(TOKEN_ID);
         soldAtFork = sold;
@@ -244,6 +261,25 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         vm.prank(CLAIMANT_TWO);
         claimContract.claim(voucher, signature);
         require(!claimContract.hasClaimed(CLAIMANT_TWO) && claimContract.claimedSupply() == 1, "reverted claim left state");
+    }
+
+    function testRealGenesisHoldersClaimAndNonHoldersAreRefused() public {
+        vm.warp(T);
+        // The real holder claims for itself; a wallet with no Genesis unit is refused even with a valid voucher.
+        _claim(GENESIS_HOLDER, 40);
+        require(release.balanceOf(GENESIS_HOLDER, TOKEN_ID) == 1, "real holder claimed token 1");
+        require(GENESIS.balanceOf(NON_HOLDER, 0) + GENESIS.balanceOf(NON_HOLDER, 1) + GENESIS.balanceOf(NON_HOLDER, 2) + GENESIS.balanceOf(NON_HOLDER, 3) == 0, "non-holder");
+        _expectClaimRevert(NON_HOLDER, _voucher(NON_HOLDER, 41, block.timestamp + 300), SIGNER_KEY, GenesisHolderClaim.NotGenesisHolder.selector);
+        // A claimant who moves its Genesis unit away before redeeming is refused.
+        GenesisHolderClaim.ClaimVoucher memory v = _voucher(CLAIMANT_TWO, 42, block.timestamp + 300);
+        bytes memory signature = _sign(SIGNER_KEY, v);
+        vm.prank(CLAIMANT_TWO);
+        GENESIS.safeTransferFrom(CLAIMANT_TWO, NON_HOLDER, 3, 1, "");
+        vm.expectPartialRevert(GenesisHolderClaim.NotGenesisHolder.selector);
+        vm.prank(CLAIMANT_TWO);
+        claimContract.claim(v, signature);
+        require(!claimContract.hasClaimed(CLAIMANT_TWO) && claimContract.claimedSupply() == 1, "refusal recorded nothing");
+        _assertAccounting(1, 0);
     }
 
     function testExactHalloweenScheduleOnTheLiveContracts() public {

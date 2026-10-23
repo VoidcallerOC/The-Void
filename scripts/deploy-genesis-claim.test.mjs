@@ -122,7 +122,7 @@ describe("Genesis claim deployment: environment schedule", () => {
   const FUJI_TEST = { ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" };
   const RABBY_DEPLOYER = "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174";
   const { DEPLOYER_PRIVATE_KEY: _fujiKey, ...KEYLESS } = ENV;
-  const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END) };
+  const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END), GENESIS_EXPECT_PER_WALLET_LIMIT: "0" };
   // 2026-10-23 8:00:00 PM to 2026-10-31 11:59:59 PM America/New_York (EDT, UTC-4).
   const HALLOWEEN = { ...MAINNET, GENESIS_CLAIM_START: "1792800000", GENESIS_PUBLIC_SALE_END: "1793505599", GENESIS_EXPECT_PER_WALLET_LIMIT: "3" };
 
@@ -153,6 +153,7 @@ describe("Genesis claim deployment: environment schedule", () => {
     ["an end a year out", { GENESIS_PUBLIC_SALE_END: String(1_792_800_000 + 365 * 86_400 - 1) }, /whole hours between 7 and 14 days/],
     ["a window that disagrees with the end", { GENESIS_PUBLIC_WINDOW_SECONDS: "604800" }, /does not match GENESIS_PUBLIC_SALE_END/],
     ["a malformed per-wallet limit", { GENESIS_EXPECT_PER_WALLET_LIMIT: "three" }, /GENESIS_EXPECT_PER_WALLET_LIMIT must be/],
+    ["no per-wallet limit", { GENESIS_EXPECT_PER_WALLET_LIMIT: "" }, /GENESIS_EXPECT_PER_WALLET_LIMIT is required on mainnet/],
   ])("refuses the Halloween mainnet plan with %s", (_label, override, message) => {
     expect(() => validateClaimDeploymentEnv({ ...HALLOWEEN, ...override })).toThrow(message);
   });
@@ -281,7 +282,7 @@ describe("compiled GenesisHolderClaim artifact", () => {
     const constructor = artifact.abi.find((item) => item.type === "constructor");
     expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
-    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_MIN_PUBLIC_WINDOW", "PRODUCTION_MAX_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_WINDOW_STEP", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
+    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_MIN_PUBLIC_WINDOW", "PRODUCTION_MAX_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_WINDOW_STEP", "PRODUCTION_PUBLIC_PRICE_WEI", "GENESIS_MAX_TOKEN_ID", "CLAIM_QUANTITY", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });
 });
 
@@ -289,7 +290,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const RABBY_DEPLOYER = getAddress("0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
   const NANO = getAddress("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
   const { DEPLOYER_PRIVATE_KEY: _unused, ...KEYLESS_ENV } = ENV;
-  const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END) };
+  const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END), GENESIS_EXPECT_PER_WALLET_LIMIT: "0" };
   const roles = new Interface(["function owner() view returns (address)", "function hasRole(bytes32 role,address account) view returns (bool)"]);
   const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 

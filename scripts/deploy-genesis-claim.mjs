@@ -134,7 +134,10 @@ export function validateClaimDeploymentEnv(env = process.env) {
     if (windowText && publicWindow !== derived) throw new DeploymentError(`GENESIS_PUBLIC_WINDOW_SECONDS ${publicWindow} does not match GENESIS_PUBLIC_SALE_END ${saleEnd}, which gives a ${derived}-second window from GENESIS_CLAIM_START.`);
     publicWindow = derived;
   }
+  // The sale's paid per-wallet limit the plan must find on chain (free claims never count against it). Mainnet
+  // requires it, so a sale configured with another limit cannot pass unnoticed.
   const perWalletText = String(env.GENESIS_EXPECT_PER_WALLET_LIMIT ?? "").trim();
+  if (network === "mainnet" && !perWalletText) throw new DeploymentError("GENESIS_EXPECT_PER_WALLET_LIMIT is required on mainnet: the sale's paid per-wallet limit the plan must find on chain.");
   const expectedPerWalletLimit = perWalletText ? whole(perWalletText, "GENESIS_EXPECT_PER_WALLET_LIMIT") : null;
   let schedule;
   try {
