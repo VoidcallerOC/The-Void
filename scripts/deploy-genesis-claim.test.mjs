@@ -122,17 +122,39 @@ describe("Genesis claim deployment: environment schedule", () => {
   const FUJI_TEST = { ...ENV, GENESIS_CLAIM_WINDOW_SECONDS: "300", GENESIS_PUBLIC_WINDOW_SECONDS: "600", GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" };
   const RABBY_DEPLOYER = "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174";
   const { DEPLOYER_PRIVATE_KEY: _fujiKey, ...KEYLESS } = ENV;
-  const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER };
+  const MAINNET = { ...KEYLESS, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END) };
+  // 2026-10-23 8:00:00 PM to 2026-10-31 11:59:59 PM America/New_York (EDT, UTC-4).
+  const HALLOWEEN = { ...MAINNET, GENESIS_CLAIM_START: "1792800000", GENESIS_PUBLIC_SALE_END: "1793505599", GENESIS_EXPECT_PER_WALLET_LIMIT: "3" };
 
   it("accepts an accelerated Fuji schedule at the Fuji price", () => {
     expect(validateClaimDeploymentEnv(FUJI_TEST)).toMatchObject({ network: "fuji", chainId: 43113, claimWindow: 300n, publicWindow: 600n, claimEnd: BigInt(CLAIM_START + 300), publicSaleStart: BigInt(CLAIM_START), publicSaleEnd: BigInt(CLAIM_START + 599), publicPriceWei: 10_000_000_000_000_000n });
   });
 
-  it("accepts mainnet only with 24 hours, 7 days and 0.25 AVAX", () => {
-    expect(validateClaimDeploymentEnv(MAINNET)).toMatchObject({ network: "mainnet", chainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicPriceWei: PRICE });
+  it("accepts mainnet only with 24 hours, a policy public window and 0.25 AVAX", () => {
+    expect(validateClaimDeploymentEnv(MAINNET)).toMatchObject({ network: "mainnet", chainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicSaleEnd: BigInt(PUBLIC_END), publicPriceWei: PRICE });
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_WINDOW_SECONDS: "300" })).toThrow(/24-hour/);
-    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_WINDOW_SECONDS: "600" })).toThrow(/7-day/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_SALE_END: String(CLAIM_START + 599) })).toThrow(/whole hours between 7 and 14 days/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" })).toThrow(/0.25 AVAX/);
+  });
+
+  it("plans the Halloween schedule from its explicit end: 24-hour claim, sale through Oct 31 11:59:59 PM ET", () => {
+    expect(validateClaimDeploymentEnv(HALLOWEEN)).toMatchObject({
+      claimStart: 1_792_800_000n, claimWindow: 86_400n, claimEnd: 1_792_886_400n,
+      publicSaleStart: 1_792_800_000n, publicWindow: 705_600n, publicSaleEnd: 1_793_505_599n, expectedPerWalletLimit: 3n,
+    });
+    expect(validateClaimDeploymentEnv({ ...HALLOWEEN, GENESIS_PUBLIC_WINDOW_SECONDS: "705600" })).toMatchObject({ publicWindow: 705_600n });
+  });
+
+  it.each([
+    ["no explicit sale end", { GENESIS_PUBLIC_SALE_END: "" }, /GENESIS_PUBLIC_SALE_END is required on mainnet/],
+    ["an end one second early", { GENESIS_PUBLIC_SALE_END: "1793505598" }, /whole hours between 7 and 14 days/],
+    ["an end one second late", { GENESIS_PUBLIC_SALE_END: "1793505600" }, /whole hours between 7 and 14 days/],
+    ["an end before the start", { GENESIS_PUBLIC_SALE_END: "1792799999" }, /must be after GENESIS_CLAIM_START/],
+    ["an end a year out", { GENESIS_PUBLIC_SALE_END: String(1_792_800_000 + 365 * 86_400 - 1) }, /whole hours between 7 and 14 days/],
+    ["a window that disagrees with the end", { GENESIS_PUBLIC_WINDOW_SECONDS: "604800" }, /does not match GENESIS_PUBLIC_SALE_END/],
+    ["a malformed per-wallet limit", { GENESIS_EXPECT_PER_WALLET_LIMIT: "three" }, /GENESIS_EXPECT_PER_WALLET_LIMIT must be/],
+  ])("refuses the Halloween mainnet plan with %s", (_label, override, message) => {
+    expect(() => validateClaimDeploymentEnv({ ...HALLOWEEN, ...override })).toThrow(message);
   });
 
   it("plans mainnet only for the defined deployer, never with a key and never as a broadcast", () => {
@@ -193,12 +215,20 @@ describe("Genesis claim deployment: read-only preflight", () => {
     ["an invented sale cap", { provider: fuji({ saleState: { maxSupply: 1000n } }) }, /maxSupply/],
     ["a public start after the claims open", { provider: fuji({ saleState: { startTime: BigInt(CLAIM_START + 1) } }) }, /startTime/],
     ["a public start at the old claim-end handover", { provider: fuji({ saleState: { startTime: BigInt(CLAIM_END) } }) }, /startTime/],
-    ["a public end that is not seven days later", { provider: fuji({ saleState: { endTime: BigInt(PUBLIC_END + 1) } }) }, /endTime/],
+    ["a public end one second after the planned end", { provider: fuji({ saleState: { endTime: BigInt(PUBLIC_END + 1) } }) }, /endTime/],
     ["mints outside the sale", { provider: fuji({ edition: { mintedSupply: 2n } }) }, /another mint path/],
     ["a claim start too close to now", { provider: fuji({ now: CLAIM_START - 60 }) }, /choose a later start/],
     ["a reverting constructor simulation", { provider: fuji({ constructorReverts: true }) }, /constructor reverted/],
+    ["a paused sale", { provider: fuji({ saleState: { paused: true } }) }, /paused/],
   ])("refuses %s", async (_label, { provider = fuji(), genesisProvider = cChain() }, message) => {
     await expect(preflight(ENV, provider, genesisProvider)).rejects.toThrow(message);
+  });
+
+  it("checks the sale's paid per-wallet limit when the plan names one", async () => {
+    const limited = { ...ENV, GENESIS_EXPECT_PER_WALLET_LIMIT: "3" };
+    await expect(preflight(limited, fuji({ saleState: { perWalletLimit: 3n } }))).resolves.toMatchObject({ sale: { perWalletLimit: 3n } });
+    await expect(preflight(limited, fuji({ saleState: { perWalletLimit: 0n } }))).rejects.toThrow(/perWalletLimit is 0, expected 3/);
+    await expect(preflight(limited, fuji({ saleState: { perWalletLimit: 4n } }))).rejects.toThrow(/perWalletLimit is 4, expected 3/);
   });
 
   it("prints a plan with the schedule, live eligibility and the follow-ups it does not perform", async () => {
@@ -251,7 +281,7 @@ describe("compiled GenesisHolderClaim artifact", () => {
     const constructor = artifact.abi.find((item) => item.type === "constructor");
     expect(constructor.inputs.map((input) => input.name)).toEqual(["releaseContract_", "primarySale_", "tokenId_", "allocation_", "publicAllocation_", "claimStart_", "claimWindow_", "publicWindow_", "publicPriceWei_", "admin_", "signer_"]);
     const names = new Set(artifact.abi.filter((item) => item.type === "function").map((item) => item.name));
-    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
+    for (const name of ["claimStart", "claimEnd", "claimWindow", "publicWindow", "publicSaleStart", "publicSaleEnd", "publicPriceWei", "ELIGIBILITY_RULE", "PRODUCTION_CLAIM_WINDOW", "PRODUCTION_MIN_PUBLIC_WINDOW", "PRODUCTION_MAX_PUBLIC_WINDOW", "PRODUCTION_PUBLIC_WINDOW_STEP", "PRODUCTION_PUBLIC_PRICE_WEI", "MINIMUM_TEST_WINDOW"]) expect(names.has(name)).toBe(true);
   });
 });
 
@@ -259,7 +289,7 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const RABBY_DEPLOYER = getAddress("0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174");
   const NANO = getAddress("0xb65C575CaE01574296Fab6E620B9A15cC0121ce4");
   const { DEPLOYER_PRIVATE_KEY: _unused, ...KEYLESS_ENV } = ENV;
-  const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST };
+  const MAINNET_ENV = { ...KEYLESS_ENV, DEPLOY_NETWORK: "mainnet", AVALANCHE_MAINNET_RPC_URL: "https://api.avax.network/ext/bc/C/rpc", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_PUBLIC_SALE_END: String(PUBLIC_END) };
   const roles = new Interface(["function owner() view returns (address)", "function hasRole(bytes32 role,address account) view returns (bool)"]);
   const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 

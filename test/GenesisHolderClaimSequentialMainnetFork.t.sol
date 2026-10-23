@@ -34,6 +34,8 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
     string internal constant TOKEN_URI = "ipfs://QmNu8GW9VhW4dCuN1nyAF2HMv4FEoGgBCP72BbAYEgUY5U";
     uint256 internal constant PRICE = 0.25 ether;
     uint256 internal constant PLATFORM_CUT = (PRICE * 250) / 10_000;
+    uint256 internal constant HALLOWEEN_START = 1_792_800_000;
+    uint256 internal constant HALLOWEEN_END = 1_793_505_599;
     // Local cheat-code fixtures; the production admin and voucher signer are chosen separately.
     uint256 internal constant SIGNER_KEY = 0xA11CE;
     address internal constant ADMIN = address(0xAD01);
@@ -45,6 +47,8 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
     VoidPrimarySaleSettled internal sale = VoidPrimarySaleSettled(SALE);
     GenesisHolderClaim internal claimContract;
     uint256 internal T;
+    // The public window: 7 days for the replayed sale, or the live sale's own window once it is configured.
+    uint256 internal W;
     uint256 internal mintedAtFork;
     uint256 internal soldAtFork;
     bool internal liveSaleConfigured;
@@ -67,19 +71,21 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
             // A future live sale must already be the claim's schedule.
             T = start;
             require(price == PRICE && cap == 0 && !paused, "live sale price/cap/pause cannot carry the claim");
-            require(uint256(end) == T + 7 days - 1, "live sale end is not claimStart + 7 days - 1");
+            // The claim constructor below enforces the production window policy on it.
+            W = uint256(end) - T + 1;
         } else {
             T = block.timestamp + 1 hours;
+            W = 7 days;
             // The claim cannot be deployed before the sale exists.
-            try new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, 7 days, PRICE, ADMIN, vm.addr(SIGNER_KEY)) {
+            try new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, W, PRICE, ADMIN, vm.addr(SIGNER_KEY)) {
                 deployBeforeSaleRevert = bytes4(0);
             } catch (bytes memory reason) {
                 deployBeforeSaleRevert = bytes4(reason);
             }
             vm.prank(ARTIST);
-            sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + 7 days - 1), false);
+            sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + W - 1), false);
         }
-        claimContract = new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, 7 days, PRICE, ADMIN, vm.addr(SIGNER_KEY));
+        claimContract = new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, W, PRICE, ADMIN, vm.addr(SIGNER_KEY));
         bytes32 issuerRole = release.ISSUER_ROLE();
         vm.prank(ARTIST);
         release.grantRole(issuerRole, address(claimContract));
@@ -104,29 +110,29 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         require(claimContract.releaseContract() == CLONE && claimContract.primarySale() == SALE, "targets");
         require(claimContract.tokenId() == TOKEN_ID && claimContract.destinationChainId() == 43114, "token/chain");
         require(claimContract.claimStart() == T && claimContract.claimEnd() == T + 1 days, "claim window");
-        require(claimContract.publicSaleStart() == T && claimContract.publicSaleEnd() == T + 7 days - 1, "sale window");
+        require(claimContract.publicSaleStart() == T && claimContract.publicSaleEnd() == T + W - 1, "sale window");
         require(claimContract.publicPriceWei() == PRICE && claimContract.allocation() == 0 && claimContract.publicAllocation() == 0, "economics");
         require(claimContract.admin() == ADMIN && claimContract.signer() == vm.addr(SIGNER_KEY), "roles");
         require(release.hasRole(release.ISSUER_ROLE(), address(claimContract)), "claim issuer role");
     }
 
     function testOnlyTheExactScheduleDeploys() public {
-        // A start in the past, a production window other than 24 h / 7 days, or another price.
-        _expectDeployRevert(block.timestamp - 1, 1 days, 7 days, PRICE, GenesisHolderClaim.InvalidConfiguration.selector);
-        _expectDeployRevert(T, 2 hours, 7 days, PRICE, GenesisHolderClaim.InvalidConfiguration.selector);
-        _expectDeployRevert(T, 1 days, 7 days, 0.2 ether, GenesisHolderClaim.InvalidConfiguration.selector);
+        // A start in the past, a claim window other than 24 h, or another price.
+        _expectDeployRevert(block.timestamp - 1, 1 days, W, PRICE, GenesisHolderClaim.InvalidConfiguration.selector);
+        _expectDeployRevert(T, 2 hours, W, PRICE, GenesisHolderClaim.InvalidConfiguration.selector);
+        _expectDeployRevert(T, 1 days, W, 0.2 ether, GenesisHolderClaim.InvalidConfiguration.selector);
         // The sale itself must match: end one second late, a cap, or a price change each block deployment.
         vm.prank(ARTIST);
-        sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + 7 days), false);
-        _expectDeployRevert(T, 1 days, 7 days, PRICE, GenesisHolderClaim.PublicSaleSchedule.selector);
+        sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + W), false);
+        _expectDeployRevert(T, 1 days, W, PRICE, GenesisHolderClaim.PublicSaleSchedule.selector);
         vm.prank(ARTIST);
-        sale.configureSale(TOKEN_ID, PRICE, 100, 0, uint64(T), uint64(T + 7 days - 1), false);
-        _expectDeployRevert(T, 1 days, 7 days, PRICE, GenesisHolderClaim.PublicAllocationChanged.selector);
+        sale.configureSale(TOKEN_ID, PRICE, 100, 0, uint64(T), uint64(T + W - 1), false);
+        _expectDeployRevert(T, 1 days, W, PRICE, GenesisHolderClaim.PublicAllocationChanged.selector);
         vm.prank(ARTIST);
-        sale.configureSale(TOKEN_ID, 0.3 ether, 0, 0, uint64(T), uint64(T + 7 days - 1), false);
+        sale.configureSale(TOKEN_ID, 0.3 ether, 0, 0, uint64(T), uint64(T + W - 1), false);
         vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
-        new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, 7 days, 0.3 ether, ADMIN, vm.addr(SIGNER_KEY));
-        _expectDeployRevert(T, 1 days, 7 days, PRICE, GenesisHolderClaim.PublicPriceChanged.selector);
+        new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, T, 1 days, W, 0.3 ether, ADMIN, vm.addr(SIGNER_KEY));
+        _expectDeployRevert(T, 1 days, W, PRICE, GenesisHolderClaim.PublicPriceChanged.selector);
     }
 
     function testFreeClaimAndPaidPurchaseMintTheSameTokenAndSettle() public {
@@ -184,7 +190,7 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         _assertAccounting(2, 0);
     }
 
-    function testHour24ClosesClaimsNotSalesAndDay7ClosesBoth() public {
+    function testHour24ClosesClaimsNotSalesAndTheSaleEndClosesBoth() public {
         vm.deal(BUYER, PRICE * 3);
         vm.warp(T + 1 days - 1);
         _claim(CLAIMANT, 8);
@@ -192,10 +198,10 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         _expectClaimRevert(CLAIMANT_TWO, _voucher(CLAIMANT_TWO, 9, block.timestamp + 300), SIGNER_KEY, GenesisHolderClaim.ClaimWindowClosed.selector);
         vm.prank(BUYER);
         sale.purchase{value: PRICE}(TOKEN_ID, 1);
-        vm.warp(T + 7 days - 1);
+        vm.warp(T + W - 1);
         vm.prank(BUYER);
         sale.purchase{value: PRICE}(TOKEN_ID, 1);
-        vm.warp(T + 7 days);
+        vm.warp(T + W);
         vm.expectPartialRevert(VoidPrimarySaleSettled.SaleEnded.selector);
         vm.prank(BUYER);
         sale.purchase{value: PRICE}(TOKEN_ID, 1);
@@ -223,10 +229,10 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
     function testRepricingOrRevokingTheIssuerHaltsClaims() public {
         vm.warp(T);
         vm.prank(ARTIST);
-        sale.configureSale(TOKEN_ID, 0.3 ether, 0, 0, uint64(T), uint64(T + 7 days - 1), false);
+        sale.configureSale(TOKEN_ID, 0.3 ether, 0, 0, uint64(T), uint64(T + W - 1), false);
         _expectClaimRevert(CLAIMANT, _voucher(CLAIMANT, 12, block.timestamp + 300), SIGNER_KEY, GenesisHolderClaim.PublicPriceChanged.selector);
         vm.prank(ARTIST);
-        sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + 7 days - 1), false);
+        sale.configureSale(TOKEN_ID, PRICE, 0, 0, uint64(T), uint64(T + W - 1), false);
         _claim(CLAIMANT, 12);
         // Revoking ISSUER_ROLE is the artist's own off switch; the claim then cannot mint.
         bytes32 issuerRole = release.ISSUER_ROLE();
@@ -238,6 +244,41 @@ contract GenesisHolderClaimSequentialMainnetForkTest {
         vm.prank(CLAIMANT_TWO);
         claimContract.claim(voucher, signature);
         require(!claimContract.hasClaimed(CLAIMANT_TWO) && claimContract.claimedSupply() == 1, "reverted claim left state");
+    }
+
+    function testExactHalloweenScheduleOnTheLiveContracts() public {
+        // 2026-10-23 8:00:00 PM to 2026-10-31 11:59:59 PM America/New_York, 3 paid per wallet. Only while the
+        // start is still ahead of the fork; the live sale is reconfigured on the fork only.
+        if (block.timestamp >= HALLOWEEN_START) { vm.skip(true); return; }
+        vm.prank(ARTIST);
+        sale.configureSale(TOKEN_ID, PRICE, 0, 3, uint64(HALLOWEEN_START), uint64(HALLOWEEN_END), false);
+        claimContract = new GenesisHolderClaim(CLONE, SALE, TOKEN_ID, 0, 0, HALLOWEEN_START, 1 days, HALLOWEEN_END - HALLOWEEN_START + 1, PRICE, ADMIN, vm.addr(SIGNER_KEY));
+        require(claimContract.publicSaleEnd() == HALLOWEEN_END && claimContract.claimEnd() == HALLOWEEN_START + 1 days, "schedule");
+        bytes32 issuerRole = release.ISSUER_ROLE();
+        vm.prank(ARTIST);
+        release.grantRole(issuerRole, address(claimContract));
+        vm.warp(HALLOWEEN_START);
+        _claim(CLAIMANT, 30);
+        vm.deal(CLAIMANT, PRICE * 4);
+        vm.prank(CLAIMANT);
+        sale.purchase{value: PRICE * 3}(TOKEN_ID, 3);
+        vm.expectPartialRevert(VoidPrimarySaleSettled.WalletLimitExceeded.selector);
+        vm.prank(CLAIMANT);
+        sale.purchase{value: PRICE}(TOKEN_ID, 1);
+        vm.warp(HALLOWEEN_START + 1 days);
+        _expectClaimRevert(CLAIMANT_TWO, _voucher(CLAIMANT_TWO, 31, block.timestamp + 300), SIGNER_KEY, GenesisHolderClaim.ClaimWindowClosed.selector);
+        vm.deal(BUYER, PRICE * 3);
+        vm.prank(BUYER);
+        sale.purchase{value: PRICE}(TOKEN_ID, 1);
+        vm.warp(HALLOWEEN_END);
+        vm.prank(BUYER);
+        sale.purchase{value: PRICE}(TOKEN_ID, 1);
+        vm.warp(HALLOWEEN_END + 1);
+        vm.expectPartialRevert(VoidPrimarySaleSettled.SaleEnded.selector);
+        vm.prank(BUYER);
+        sale.purchase{value: PRICE}(TOKEN_ID, 1);
+        require(release.balanceOf(CLAIMANT, TOKEN_ID) == 4 && release.balanceOf(BUYER, TOKEN_ID) == 2, "balances");
+        _assertAccounting(1, 5);
     }
 
     function _assertAccounting(uint256 claimed, uint256 soldSinceFork) internal view {

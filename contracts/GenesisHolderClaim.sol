@@ -39,9 +39,10 @@ interface IGenesisClaimSale {
 /// open for exactly publicWindow at publicPriceWei; free Genesis claims run concurrently for the first
 /// claimWindow of that sale (claimStart <= t < claimEnd) and then close while paid minting continues
 /// until publicSaleEnd, when both paths close. claimWindow must be shorter than publicWindow.
-/// On C-Chain (43114) the windows must be the production 24 hours and 7 days at the production
-/// 0.25 AVAX price; only Fuji may use shorter test windows (never below MINIMUM_TEST_WINDOW) and
-/// another price.
+/// On C-Chain (43114) the claim window must be the production 24 hours at the production 0.25 AVAX
+/// price, and the public window must follow the production policy: whole hours, at least
+/// PRODUCTION_MIN_PUBLIC_WINDOW (7 days) and at most PRODUCTION_MAX_PUBLIC_WINDOW (14 days). Only Fuji
+/// may use shorter test windows (never below MINIMUM_TEST_WINDOW) and another price.
 /// The sale is the artist's VoidPrimarySale; this contract re-checks its configuration on every
 /// claim and fails closed if it drifts. Eligibility is live Genesis ownership: the server reads the
 /// claimant's current C-Chain balances of Genesis token IDs 0-3 when it signs a voucher and subtracts
@@ -52,7 +53,11 @@ contract GenesisHolderClaim {
     uint256 public constant GENESIS_CHAIN_ID = 43114;
     address public constant LEGACY_FUJI_SINGLETON = 0x7Bba0690a43E2FFE9ad553fbDa0451177B7B95B6;
     uint256 public constant PRODUCTION_CLAIM_WINDOW = 1 days;
-    uint256 public constant PRODUCTION_PUBLIC_WINDOW = 7 days;
+    /// @notice Production public-window policy: a sale that opens on the hour and runs whole hours ends at
+    /// :59:59 (publicSaleEnd = claimStart + publicWindow - 1), so a window one second short or long is refused.
+    uint256 public constant PRODUCTION_MIN_PUBLIC_WINDOW = 7 days;
+    uint256 public constant PRODUCTION_MAX_PUBLIC_WINDOW = 14 days;
+    uint256 public constant PRODUCTION_PUBLIC_WINDOW_STEP = 1 hours;
     uint256 public constant PRODUCTION_PUBLIC_PRICE_WEI = 0.25 ether;
     uint256 public constant MINIMUM_TEST_WINDOW = 1 minutes;
     /// @notice The rule every voucher must name: when the voucher is signed, the claimant holds at least
@@ -169,9 +174,11 @@ contract GenesisHolderClaim {
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         if (block.chainid == GENESIS_CHAIN_ID) {
-            // Production: a 7-day public sale at 0.25 AVAX, with free Genesis claims during its first 24 hours.
+            // Production: a public sale of 7 to 14 days in whole hours at 0.25 AVAX, with free Genesis claims
+            // during its first 24 hours.
             if (
-                claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ != PRODUCTION_PUBLIC_WINDOW
+                claimWindow_ != PRODUCTION_CLAIM_WINDOW || publicWindow_ < PRODUCTION_MIN_PUBLIC_WINDOW
+                    || publicWindow_ > PRODUCTION_MAX_PUBLIC_WINDOW || publicWindow_ % PRODUCTION_PUBLIC_WINDOW_STEP != 0
                     || publicPriceWei_ != PRODUCTION_PUBLIC_PRICE_WEI
             ) revert InvalidConfiguration();
         } else if (claimWindow_ < MINIMUM_TEST_WINDOW || publicWindow_ < MINIMUM_TEST_WINDOW) {

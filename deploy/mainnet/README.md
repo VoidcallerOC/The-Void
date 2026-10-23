@@ -155,14 +155,16 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    release is never a mainnet target.
 10. **[APPROVAL] Configure the sale and the claim signer.**
     - Choose `claimStart` (T, Unix seconds) at least 10 minutes after the claim deployment can be mined.
-    - The artist signs `configureSale(tokenId, 250000000000000000, 0, 0, T + 86400, T + 86400 + 604800 - 1, false)`
-      on the release's `VoidPrimarySale`. This makes the public phase open at the claim's end, run
-      7 days, cost 0.25 AVAX and have no cap.
+    - Choose the sale's inclusive end E so that the window `E - T + 1` is whole hours, 7 to 14 days.
+    - The artist signs `configureSale(tokenId, 250000000000000000, 0, perWalletLimit, T, E, false)` on the
+      release's `VoidPrimarySale`. The paid sale opens together with the claims at T, costs 0.25 AVAX, has no
+      cap, and runs through E; free claims close at `T + 86400`. Schedule policy and the Forgive & Forget
+      Halloween timestamps: `deploy/mainnet/GENESIS-CLAIM-PUBLISHED-RELEASE.md`.
     - The owner generates the dedicated signer key offline and provides only its public address.
 11. **[APPROVAL] Deploy the Genesis claim** (a separate plan and a separate Rabby signature).
     - Actions → *Plan the Genesis holder claim for C-Chain mainnet*. Inputs:
       - `release_contract`, `primary_sale`, `token_id` from step 9;
-      - `claim_start=T`;
+      - `claim_start=T`, `public_sale_end=E`, `expected_per_wallet_limit` (the sale's paid limit);
       - `claim_admin` (the approved admin);
       - `claim_signer_address`;
       - `expected_deployer_address=0xaBd3…c174`;

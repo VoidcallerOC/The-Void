@@ -642,9 +642,29 @@ describe("environment schedule and price", () => {
     expect(loadGenesisClaimConfig(MAINNET)).toMatchObject({ destinationChainId: 43114, claimWindow: 86_400n, publicWindow: 604_800n, publicPriceWei: PRICE });
   });
 
+  // 2026-10-23 8:00 PM to 2026-10-31 11:59:59 PM America/New_York: 705,600 s = 8 days 4 hours.
+  const HALLOWEEN = { GENESIS_CLAIM_START: "1792800000", GENESIS_PUBLIC_WINDOW_SECONDS: "705600" };
+
+  it("loads mainnet with the Halloween window: 24-hour claim, sale through 11:59:59 PM ET on Oct 31", () => {
+    expect(loadGenesisClaimConfig({ ...MAINNET, ...HALLOWEEN })).toMatchObject({
+      claimStart: 1_792_800_000n, claimWindow: 86_400n, claimEnd: 1_792_886_400n,
+      publicSaleStart: 1_792_800_000n, publicWindow: 705_600n, publicSaleEnd: 1_793_505_599n, publicPriceWei: PRICE,
+    });
+  });
+
+  it.each([["the 7-day minimum", "604800"], ["the 14-day maximum", "1209600"]])("loads mainnet with %s", (_label, window) => {
+    expect(loadGenesisClaimConfig({ ...MAINNET, GENESIS_PUBLIC_WINDOW_SECONDS: window })).toMatchObject({ publicWindow: BigInt(window) });
+  });
+
   it.each([
     ["an accelerated claim window", { GENESIS_CLAIM_WINDOW_SECONDS: "300" }, /24-hour/],
-    ["an accelerated public window", { GENESIS_PUBLIC_WINDOW_SECONDS: "600" }, /7-day/],
+    ["a 25-hour claim window", { GENESIS_CLAIM_WINDOW_SECONDS: "90000" }, /24-hour/],
+    ["an accelerated public window", { GENESIS_PUBLIC_WINDOW_SECONDS: "600" }, /whole hours between 7 and 14 days/],
+    ["a public window an hour under 7 days", { GENESIS_PUBLIC_WINDOW_SECONDS: "601200" }, /whole hours between 7 and 14 days/],
+    ["a public window an hour over 14 days", { GENESIS_PUBLIC_WINDOW_SECONDS: "1213200" }, /whole hours between 7 and 14 days/],
+    ["a year-long public window", { GENESIS_PUBLIC_WINDOW_SECONDS: "31536000" }, /whole hours between 7 and 14 days/],
+    ["the Halloween window one second short", { ...HALLOWEEN, GENESIS_PUBLIC_WINDOW_SECONDS: "705599" }, /whole hours between 7 and 14 days/],
+    ["the Halloween window one second long", { ...HALLOWEEN, GENESIS_PUBLIC_WINDOW_SECONDS: "705601" }, /whole hours between 7 and 14 days/],
     ["the Fuji test price", { GENESIS_PUBLIC_PRICE_WEI: "10000000000000000" }, /0.25 AVAX/],
   ])("refuses mainnet with %s", (_label, override, message) => {
     expect(() => loadGenesisClaimConfig({ ...MAINNET, ...override })).toThrow(message);
