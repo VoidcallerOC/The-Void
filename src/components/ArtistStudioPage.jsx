@@ -604,7 +604,7 @@ export function ArtistStudioPage() {
       setSelectedReleaseId(ids.releaseId);
       const saved = onChainDeployEnabled
         ? "Release draft saved. No contract was created and no gas was spent. Deploying on-chain is a separate step below."
-        : "Release draft saved. No contract was created and no gas was spent. Contract deployment is switched off, so the next step is your track details.";
+        : "Release draft saved. No contract was created and no gas was spent. Contract deployment is switched off, so nothing more can be done with it yet.";
       setNotice(saved);
       setReleaseStatus({ ok: true, message: saved });
       // The form is long; bring the saved state and its next step into view instead of leaving the page at the footer.
@@ -1317,12 +1317,9 @@ export function ArtistStudioPage() {
               <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6 }}>
                 <strong style={{ color: "var(--vc-bone)" }}>{form.releaseTitle || "This release"}</strong> is a draft with no contract.{" "}
                 {onChainDeployEnabled
-                  ? "Prepare and deploy its release contract above when you are ready, or keep working on its tracks."
-                  : "Contract deployment is switched off in Studio, so it cannot be deployed or published on-chain yet. You can keep working on its tracks."}
+                  ? "Prepare and deploy its release contract above to continue."
+                  : "Contract deployment is switched off in Studio. Tracks and publishing need the release contract (the server refuses to create a track on a release without one), so there is no next step available until deployment is switched on. You can edit and re-save this draft."}
               </p>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button type="button" style={primaryBtn} onClick={() => setStep("track")}>Continue to track details</button>
-              </div>
             </div>
           )}
         </section>

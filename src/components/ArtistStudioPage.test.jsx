@@ -845,7 +845,7 @@ describe("Artist Studio with on-chain deployment switched off (the default)", ()
     expect(walletProvider.request).not.toHaveBeenCalled();
   });
 
-  it("shows a visible saved state below the button with the real next step, and no deploy control", async () => {
+  it("shows a visible saved state below the button that names the blocker and offers no fake next action", async () => {
     mockApi();
     renderStudio("rel-draft");
     await screen.findByDisplayValue("Forgive & Forget");
@@ -853,12 +853,12 @@ describe("Artist Studio with on-chain deployment switched off (the default)", ()
     fireEvent.click(save);
     const panel = await screen.findByLabelText("Release draft status");
     expect(within(panel).getByText(/Release draft saved\. No contract was created and no gas was spent/)).toBeTruthy();
-    expect(within(panel).getByText(/Contract deployment is switched off in Studio, so it cannot be deployed or published on-chain/)).toBeTruthy();
-    // The panel follows the Save button in the page.
+    expect(within(panel).getByText(/Contract deployment is switched off in Studio/)).toBeTruthy();
+    expect(within(panel).getByText(/no next step available until deployment is switched on/)).toBeTruthy();
+    // The panel follows the Save button in the page, and has no button that would lead into a server refusal.
     expect(save.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(panel).queryByRole("button")).toBeNull();
     expect(screen.queryByRole("button", { name: /Prepare deployment|Deploy release contract/ })).toBeNull();
-    fireEvent.click(within(panel).getByRole("button", { name: "Continue to track details" }));
-    expect(await screen.findByRole("heading", { name: /Track details/i })).toBeTruthy();
     expect(walletProvider.request).not.toHaveBeenCalled();
   });
 
