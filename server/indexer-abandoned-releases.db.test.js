@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import process from "node:process";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadServerConfig } from "./config.js";
+import { loadIndexerConfig, loadServerConfig } from "./config.js";
+import { BlockchainIndexer } from "./indexer.js";
 import { createIndexerStore } from "./indexer-store.js";
 import { migrate } from "./migrate.js";
 import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
@@ -14,7 +15,7 @@ import { dropScratchDatabase } from "./test-helpers/scratch-database.js";
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "";
 const CHAIN = 43114;
 const FACTORY = "0xe744d58fa8138042f5f00a28d39f89081539c19b";
-const hex = (n) => `0x${n.toString(16).padStart(40, "0")}`;
+const hex = (n) => `0x${"cd".repeat(18)}${n.toString(16).padStart(4, "0")}`;
 const key = (n) => `0x${n.toString(16).padStart(64, "0")}`;
 
 // [name, release status or null (no release row), activity]
@@ -75,5 +76,80 @@ describe.skipIf(!testDatabaseUrl)("Indexer does not track abandoned releases (Po
     const rows = await createIndexerStore(pool).listFactoryReleases({ chainId: CHAIN, factoryAddress: FACTORY });
     expect(rows.map((row) => Number(row.deployment_block_number))).toEqual([1002, 1003, 1004, 1005, 1006, 1007]);
     expect(rows[0].primary_sale_address).toBe(hex(102));
+  });
+
+  // ---- Startup, restart, explicit configuration, health and integrity ----
+  const MARKETPLACE = hex(700);
+  const UNRELATED_COLLECTION = hex(950);
+  const count = async (table) => Number((await pool.query(`SELECT count(*) AS n FROM ${table}`)).rows[0].n);
+  const TABLES = ["releases", "factory_releases", "contracts", "transfers", "primary_purchases", "ownership_snapshots", "blockchain_events", "indexer_checkpoints"];
+  const snapshot = async () => Object.fromEntries(await Promise.all(TABLES.map(async (table) => [table, await count(table)])));
+  // Explicit INDEXER_CONTRACTS_JSON entries for an abandoned clone and its sale, a kept clone, and an unrelated collection.
+  const explicitConfigs = () => loadIndexerConfig({
+    INDEXER_RPC_URL: "https://rpc.example",
+    INDEXER_CHAIN_ID: String(CHAIN),
+    INDEXER_INCLUDE_RELEASE_MANIFEST: "false",
+    INDEXER_CONTRACTS_JSON: JSON.stringify([
+      { address: FACTORY, contractType: "RELEASE_FACTORY", startBlock: 1 },
+      { address: MARKETPLACE, contractType: "MARKETPLACE", startBlock: 1 },
+      { address: hex(1), contractType: "ERC1155", startBlock: 1 },
+      { address: hex(2), contractType: "ERC1155", startBlock: 1 },
+      { address: UNRELATED_COLLECTION, contractType: "ERC1155", startBlock: 1 },
+    ]),
+  }).contracts;
+  const startIndexer = async () => {
+    const indexer = new BlockchainIndexer({ rpc: {}, store: createIndexerStore(pool), configs: [...explicitConfigs()], logger: { info() {}, warn() {}, error() {} } });
+    await indexer.loadRegisteredReleases();
+    return indexer;
+  };
+  const addresses = (indexer) => indexer.configs.map((item) => item.address.toLowerCase());
+
+  it("registers the live release's clone and sale at startup (forgive-forget-6 stays indexed)", async () => {
+    const indexer = await startIndexer();
+    expect(addresses(indexer)).toContain(hex(5));
+    expect(addresses(indexer)).toContain(hex(105));
+  });
+
+  it("never registers an abandoned release, from factory discovery or explicit configuration, and not after a restart", async () => {
+    for (let restart = 0; restart < 3; restart += 1) {
+      const indexer = await startIndexer();
+      expect(addresses(indexer)).not.toContain(hex(1));
+      expect(addresses(indexer)).not.toContain(hex(101));
+      expect(indexer.addRelease({ chainId: CHAIN, address: hex(1), startBlock: 1, factoryAddress: FACTORY })).toBe(false);
+      expect(indexer.addPrimarySale({ chainId: CHAIN, address: hex(101), startBlock: 1, tokenAddress: hex(1) })).toBe(false);
+    }
+  });
+
+  it("does not touch factories, marketplaces, retired releases with holders, or unrelated collections", async () => {
+    const tracked = addresses(await startIndexer());
+    for (const kept of [FACTORY, MARKETPLACE, UNRELATED_COLLECTION, hex(2), hex(3), hex(4), hex(6), hex(7)]) expect(tracked).toContain(kept.toLowerCase());
+  });
+
+  it("is idempotent and read-only: nothing is deleted or changed, so history and foreign keys stay intact", async () => {
+    const before = await snapshot();
+    await startIndexer();
+    await startIndexer();
+    expect(await snapshot()).toEqual(before);
+    const orphans = (await pool.query("SELECT count(*) AS n FROM release_contracts rc LEFT JOIN releases r ON r.id=rc.release_id WHERE r.id IS NULL")).rows[0].n;
+    expect(Number(orphans)).toBe(0);
+  });
+
+  it("leaves ownership records of existing holders exactly as they were", async () => {
+    const owners = async () => (await pool.query("SELECT lower(contract_address) AS c, wallet_address, amount::text FROM ownership_snapshots ORDER BY 1,2")).rows;
+    const before = await owners();
+    await startIndexer();
+    expect(await owners()).toEqual(before);
+    expect(before.map((row) => row.c)).toContain(hex(4));
+  });
+
+  it("keeps the frozen checkpoints of abandoned contracts out of the health lag", async () => {
+    const store = createIndexerStore(pool);
+    const checkpoint = (address, contractType, last) => store.setCheckpoint({ chainId: CHAIN, address, contractType, nextBlock: last + 1, lastProcessedBlock: last, finalizedBlock: last, latestKnownBlock: 5000, status: "IDLE" });
+    await checkpoint(hex(1), "ERC1155", 100);
+    await checkpoint(hex(101), "PRIMARY_SALE", 100);
+    await checkpoint(hex(5), "ERC1155", 4990);
+    const [health] = await store.getIndexerHealth({ chainId: CHAIN });
+    expect(Number(health.indexer_lag)).toBe(10);
+    expect(health.contracts.map((item) => item.address)).not.toContain(hex(1));
   });
 });

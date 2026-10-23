@@ -16,6 +16,19 @@ function numeric(value, label, { positive = false } = {}) {
   } catch { throw new Error(`${label} is invalid.`); }
 }
 
+// A release the artist abandoned: its application record is ARCHIVED and its contract has no recorded transfer,
+// purchase or owner. Such a contract (and its sale) is not worth indexing: it only adds a catch-up pass to the
+// single sequential worker. A retired release that still has a holder is NOT abandoned, because that holder's
+// ownership record and any protected-media entitlement depend on this worker. `alias` is a factory_releases alias.
+export function abandonedReleaseSql(alias = "fr") {
+  return `(
+    EXISTS (SELECT 1 FROM releases r WHERE r.status='ARCHIVED' AND lower(r.release_metadata->>'releaseKey')=lower(${alias}.release_key))
+    AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.chain_id=${alias}.chain_id AND lower(t.contract_address)=lower(${alias}.release_contract_address))
+    AND NOT EXISTS (SELECT 1 FROM primary_purchases p WHERE p.chain_id=${alias}.chain_id AND lower(p.token_contract_address)=lower(${alias}.release_contract_address))
+    AND NOT EXISTS (SELECT 1 FROM ownership_snapshots o WHERE o.chain_id=${alias}.chain_id AND lower(o.contract_address)=lower(${alias}.release_contract_address))
+  )`;
+}
+
 export class CheckpointRegressionError extends Error {
   constructor({ chainId, contractAddress, nextBlock }) {
     super(`Refused to move indexer checkpoint ${chainId}:${contractAddress} backward to block ${nextBlock} without a verified reorg.`);
@@ -42,7 +55,7 @@ export class IndexerStore {
 
   async getIndexerHealth({ chainId = null, addresses = null } = {}) {
     const normalizedAddresses = addresses?.map((value) => lower(value)) || null;
-    const { rows } = await this.db.query(`SELECT chain_id, MIN(last_processed_block) AS current_indexed_block, MAX(latest_known_block) AS latest_known_block, MIN(finalized_block) AS finalized_block, CASE WHEN MIN(last_processed_block) IS NULL OR MAX(latest_known_block) IS NULL THEN NULL ELSE GREATEST(MAX(latest_known_block) - MIN(last_processed_block), 0) END AS indexer_lag, MAX(last_successful_run_at) AS last_successful_run_at, MAX(last_run_started_at) AS last_run_started_at, MAX(last_completed_run_at) AS last_completed_run_at, SUM(rpc_failures) AS rpc_failures, SUM(database_failures) AS database_failures, (array_agg(last_error ORDER BY updated_at DESC) FILTER (WHERE last_error IS NOT NULL))[1] AS last_error, array_agg(jsonb_build_object('address', contract_address, 'type', contract_type, 'status', status, 'nextBlock', next_block, 'currentIndexedBlock', last_processed_block, 'latestKnownBlock', latest_known_block, 'finalizedBlock', finalized_block, 'updatedAt', updated_at) ORDER BY contract_address) AS contracts FROM indexer_checkpoints WHERE ($1::bigint IS NULL OR chain_id=$1) AND ($2::text[] IS NULL OR contract_address = ANY($2::text[])) GROUP BY chain_id ORDER BY chain_id`, [chainId, normalizedAddresses]);
+    const { rows } = await this.db.query(`SELECT chain_id, MIN(last_processed_block) AS current_indexed_block, MAX(latest_known_block) AS latest_known_block, MIN(finalized_block) AS finalized_block, CASE WHEN MIN(last_processed_block) IS NULL OR MAX(latest_known_block) IS NULL THEN NULL ELSE GREATEST(MAX(latest_known_block) - MIN(last_processed_block), 0) END AS indexer_lag, MAX(last_successful_run_at) AS last_successful_run_at, MAX(last_run_started_at) AS last_run_started_at, MAX(last_completed_run_at) AS last_completed_run_at, SUM(rpc_failures) AS rpc_failures, SUM(database_failures) AS database_failures, (array_agg(last_error ORDER BY updated_at DESC) FILTER (WHERE last_error IS NOT NULL))[1] AS last_error, array_agg(jsonb_build_object('address', contract_address, 'type', contract_type, 'status', status, 'nextBlock', next_block, 'currentIndexedBlock', last_processed_block, 'latestKnownBlock', latest_known_block, 'finalizedBlock', finalized_block, 'updatedAt', updated_at) ORDER BY contract_address) AS contracts FROM indexer_checkpoints WHERE ($1::bigint IS NULL OR chain_id=$1) AND ($2::text[] IS NULL OR contract_address = ANY($2::text[])) AND NOT EXISTS (SELECT 1 FROM factory_releases fr WHERE fr.chain_id=indexer_checkpoints.chain_id AND (lower(fr.release_contract_address)=lower(indexer_checkpoints.contract_address) OR lower(fr.primary_sale_address)=lower(indexer_checkpoints.contract_address)) AND ${abandonedReleaseSql("fr")}) GROUP BY chain_id ORDER BY chain_id`, [chainId, normalizedAddresses]);
     return rows;
   }
 
@@ -317,19 +330,18 @@ export class IndexerStore {
   }
 
   async listFactoryReleases({ chainId, factoryAddress }) {
-    // A release the artist abandoned is not tracked, so its empty clone and sale do not each cost a catch-up pass
-    // through the single sequential worker. "Abandoned" is strict: the release is ARCHIVED and its contract has
-    // no recorded transfer, purchase or owner. A retired release that still has a holder stays tracked, because
-    // the holder's protected media is gated on the ownership this worker records. The factory event stays recorded.
+    // Abandoned releases are not tracked (see abandonedReleaseSql). The factory event itself stays recorded.
     const { rows } = await this.db.query(`SELECT fr.release_contract_address, fr.primary_sale_address, fr.deployment_block_number FROM factory_releases fr
-      WHERE fr.chain_id=$1 AND fr.factory_address=$2
-        AND NOT (
-          EXISTS (SELECT 1 FROM releases r WHERE r.status='ARCHIVED' AND lower(r.release_metadata->>'releaseKey')=lower(fr.release_key))
-          AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.chain_id=fr.chain_id AND lower(t.contract_address)=lower(fr.release_contract_address))
-          AND NOT EXISTS (SELECT 1 FROM primary_purchases p WHERE p.chain_id=fr.chain_id AND lower(p.token_contract_address)=lower(fr.release_contract_address))
-          AND NOT EXISTS (SELECT 1 FROM ownership_snapshots o WHERE o.chain_id=fr.chain_id AND lower(o.contract_address)=lower(fr.release_contract_address))
-        )
+      WHERE fr.chain_id=$1 AND fr.factory_address=$2 AND NOT ${abandonedReleaseSql("fr")}
       ORDER BY fr.deployment_block_number ASC, fr.release_contract_address ASC`, [chainId, address(factoryAddress, "factoryAddress")]);
+    return rows;
+  }
+
+  // Lower-cased release clone and sale addresses of every abandoned release on a chain, from any factory. The indexer
+  // uses this to drop them from its configuration however they got there (factory discovery or explicit env).
+  async listAbandonedReleaseContracts({ chainId }) {
+    const { rows } = await this.db.query(`SELECT lower(fr.release_contract_address) AS release_contract_address, lower(fr.primary_sale_address) AS primary_sale_address FROM factory_releases fr
+      WHERE fr.chain_id=$1 AND ${abandonedReleaseSql("fr")}`, [chainId]);
     return rows;
   }
 
