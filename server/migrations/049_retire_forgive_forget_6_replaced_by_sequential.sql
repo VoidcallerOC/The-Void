@@ -1,8 +1,10 @@
 BEGIN;
 
--- PENDING. NOT APPLIED. This file is deliberately outside server/migrations: the API runs `db:migrate` on every
--- start (npm run start:api), so a file in server/migrations is applied to production on the next deploy. It is
--- activated only by a separate owner-approved PR that moves it into server/migrations (see README.md here).
+-- WARNING: the API runs `db:migrate` on every start (npm run start:api), so once this file is merged it is applied
+-- to production on the next API deploy (the mainnet API deploys manually). Do not merge until the owner has reviewed
+-- the target IDs below. Reviewed while staged in deploy/mainnet/pending-migrations/ (PR #278) and activated by its
+-- own PR (runbook step 5). Activation precondition re-checked read-only at block 98371603 (2026-10-23 21:58Z):
+-- edition(token).mintedSupply == 0 on the clone and sales(token).configured == false on the sale.
 --
 -- Retire the published mainnet "Forgive & Forget" release forgive-forget-6 in the application so a fresh release
 -- on the sequential-ID factory (token ID 1) becomes the only active Forgive & Forget. Reason:

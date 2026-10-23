@@ -1,7 +1,7 @@
 # Forgive & Forget sequential-ID launch: irreversible steps for owner approval
 
-Prerequisites 0.1–0.3 and steps 1–3 are **COMPLETE**; step 4 is **PARTIAL** (the switch PR is open, not merged);
-steps 5–10 are **NOT STARTED**. Nothing has been switched or migrated. Each step needs the owner's explicit approval; the
+Prerequisites 0.1–0.3 and steps 1–4 are **COMPLETE**; step 5 is **PARTIAL** (the retirement PR is open, not merged);
+steps 6–10 are **NOT STARTED**. Nothing has been migrated. Each step needs the owner's explicit approval; the
 deployer only ever created the two contracts, and every release action is signed by the artist wallet.
 
 | Role | Address |
@@ -65,8 +65,14 @@ owner's device confirmation during signing.
 
 ## 4. Switch production to the new pair — config PR, then manual Render redeploys
 
-**PARTIAL:** the switch PR is open as a draft, not merged. Production still serves `0xE744D58fA8138042f5f00a28d39f89081539C19B` /
-`0x75964C44cA586b13e98e7c30E74d2B4114f65b06`.
+**COMPLETE:** PR #281 merged by the owner on 2026-10-23 at 21:49:05Z as `96565dc`; the owner then manually deployed the
+Render indexer and API. Verified read-only: the live website bundle (21:49:29Z) uses marketplace
+`0x0F5930113Ec750d867741E05F302053472115eb2` and active factory `0xEa0c345cE84025b4e8462d145100dce1848254B4` (Vercel
+auto-deploys on `main`); the API and the worker run the new configuration (`/api/indexer/health`, which is scoped to the
+API's configured contracts, lists `0xea0c345ce84025b4e8462d145100dce1848254b4`, indexed from block 98367434, at 21:55:21Z);
+Genesis listing 1 stays ACTIVE on the retained `0x75964C44cA586b13e98e7c30E74d2B4114f65b06`. Still pending at 21:56Z: the new
+marketplace's first checkpoint (the worker reaches it after the backlog of the other contracts). The production values of
+`INDEXER_INCLUDE_RELEASE_MANIFEST` and `INDEXER_CONTRACTS_JSON` remain UNVERIFIED.
 
 **What the PR changes (configuration only, no contract or code change):**
 - `config/mainnet-release-per-contract.json`: active factory `0xEa0c345cE84025b4e8462d145100dce1848254B4`, implementation
@@ -126,9 +132,43 @@ settled-sale purchase has happened.
 
 ## 5. Retire the old Forgive & Forget in the app — reviewed migration, applied on API start
 
-Move the reviewed file from `deploy/mainnet/pending-migrations/` into `server/migrations/` in its own PR (prepared by
-the migration workstream). Merge + API deploy applies it. Chain records are untouched.
-**Verify:** `/api/releases` and `/api/editions` no longer list `release-e3743294-2ea3-46ae-b006-f0402606af65` / `edition-8f5f690e-47c4-46d5-baf6-1ab969ed259d`; Studio does not offer them.
+**PARTIAL:** the retirement PR is open as a draft, not merged. It moves the reviewed
+`049_retire_forgive_forget_6_replaced_by_sequential.sql` from `deploy/mainnet/pending-migrations/` into `server/migrations/`
+(still the next number after 048; only the header comment changed) and points its static and Postgres tests at the active
+path. Precondition re-checked read-only at block 98371603 (2026-10-23 21:58Z): on clone
+`0xf9c48a2bbceba7577ff17a2eed20fcef70ea480d`, `edition(25679935302133066722236771263728427871936411831072189551573738559199048803312).mintedSupply == 0`;
+on sale `0xa0000f9489c940e2b99d654700bd425ca36f6921`, `sales(...).configured == false` and balance 0.
+
+**What it changes (application rows only, by exact ID):** release `release-e3743294-2ea3-46ae-b006-f0402606af65`
+(`forgive-forget-6`), its edition(s) (`edition-8f5f690e-47c4-46d5-baf6-1ab969ed259d`) and their experiences go to
+`ARCHIVED` with an `abandoned` marker (reason `REPLACED_BY_SEQUENTIAL_RELEASE`); one `STUDIO_RELEASE_ARCHIVED_BY_MIGRATION`
+audit row. Already-archived rows are skipped; re-running is a no-op. Never changed: tokens, contracts, release bindings,
+factory records, provisioning requests, provenance, media assets, sales, purchases, ownership, listings, every other
+release (Genesis included) and every on-chain record.
+
+**Effects through existing code:** the public catalog (`/api/releases`, `/api/editions`) stops serving the release; Studio
+stops offering it as a release choice and the replacement draft is offered instead; its private full track and demo are
+released for the replacement edition; abandoned releases are excluded from `/api/health` immediately and from the indexer
+worker's loop once the worker restarts (it loads the exclusion list at start), which also removes the stalled clone
+`0xf9c48a2bbceba7577ff17a2eed20fcef70ea480d` from the aggregate indexer lag.
+
+**Sequence (owner actions):**
+1. Merge the PR. Nothing applies yet: the mainnet API deploys manually (`autoDeployTrigger: "off"`). The website rebuild
+   carries no change for this step.
+2. Render → *Manual Deploy* `the-void-api-mainnet`: its container runs `npm run start:api` = `db:migrate` then the server,
+   which applies 049 once.
+3. Render → *Manual Deploy* (or restart) `the-void-indexer-mainnet` so the worker drops the retired clone and sale.
+4. **Verify (read-only):** `/api/releases` and `/api/editions` no longer list `forgive-forget-6` /
+   `edition-8f5f690e-47c4-46d5-baf6-1ab969ed259d`; `/api/indexer/health` no longer lists
+   `0xf9c48a2bbceba7577ff17a2eed20fcef70ea480d` or `0xa0000f9489c940e2b99d654700bd425ca36f6921`; Genesis listing 1 is unchanged.
+   Database check (owner, read-only):
+   `SELECT id, status FROM releases WHERE id='release-e3743294-2ea3-46ae-b006-f0402606af65';` → `ARCHIVED`, and exactly one
+   `audit_events` row with `payload->>'migration'='049_retire_forgive_forget_6_replaced_by_sequential.sql'`.
+
+Do this **before** step 6 saves the replacement edition's catalog structure, so the private files are no longer reserved.
+
+**Reversal (owner decision only):** the SQL in the migration's header comment restores the rows to PUBLISHED and removes
+the marker. It needs database access; the migration itself stays recorded in `schema_migrations`.
 
 ## 6. Create the release — signer: artist wallet, in Studio
 
