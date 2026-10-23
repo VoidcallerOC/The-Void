@@ -113,8 +113,16 @@ export const VC_AUDIO = {
   holdsChapterI() {
     return RELIC_TOKEN_IDS.some((id) => this.owned.has(id));
   },
+  // `owned` holds only Genesis-range token IDs (RELIC_TOKEN_IDS) of the Genesis collections. A factory release
+  // token numbered like one of them is a different asset (release token 1 is not Genesis token 1), so its
+  // number alone never makes the wallet its holder.
+  ownsTrackToken(track) {
+    if (track?.tokenId == null) return false;
+    if (track.releaseToken && RELIC_TOKEN_IDS.some((id) => String(id) === String(track.tokenId))) return false;
+    return this.owned.has(String(track.tokenId));
+  },
   isProtectedHolder(track) {
-    return Boolean(track?.protectedMedia && (this.holdsChapterI() || (track.tokenId != null && this.owned.has(String(track.tokenId)))));
+    return Boolean(track?.protectedMedia && (this.holdsChapterI() || this.ownsTrackToken(track)));
   },
 
   setMediaAuthorization({ wallet = null, authHeaders = {} } = {}) {
@@ -143,8 +151,8 @@ export const VC_AUDIO = {
   isGated(track) {
     if (!track) return false;
     if (track.protectedMedia) return !this.hasAuthorizedSource(track);
-    if (track.tokenId != null && RELIC_TOKEN_IDS.includes(track.tokenId)) return !!(track.previewSrc && !this.holdsChapterI());
-    return !!(track.previewSrc && track.tokenId != null && !this.owned.has(String(track.tokenId)));
+    if (!track.releaseToken && track.tokenId != null && RELIC_TOKEN_IDS.includes(track.tokenId)) return !!(track.previewSrc && !this.holdsChapterI());
+    return !!(track.previewSrc && track.tokenId != null && !this.ownsTrackToken(track));
   },
 
   srcFor(track) {

@@ -33,6 +33,11 @@ export const PRODUCTION_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
 export const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_RECEIVER = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
 const IMPLEMENTATION_VIEWS = new Interface(["function REQUIRED_ROYALTY_BPS() view returns (uint96)", "function platformFeeRecipient() view returns (address)"]);
+// VoidRelease1155V6Sequential views (sequential-profile tests only).
+const SEQUENTIAL_VIEWS = new Interface(["function IMPLEMENTATION_VERSION() view returns (uint16)", "function nextTokenId() view returns (uint256)", "function tokenIdFor(bytes32,bytes32) view returns (uint256)"]);
+export const sequentialRuntime = `${albumRuntime}${selectors(["nextTokenId()", "lastTokenId()", "IMPLEMENTATION_VERSION()"])}`;
+/** Artifact loader for the sequential profile: the V6 implementation carries the sequential selectors. */
+export const sequentialArtifacts = async (path) => (path.includes("VoidRelease1155V6Sequential") ? { abi: [], bytecode: { object: "0x6006" }, deployedBytecode: { object: sequentialRuntime } } : artifacts(path));
 
 // Stand-ins for the two sale artifacts. The settled sale's runtime is the real reviewed runtime when the
 // contracts are built, so its masked hash matches SETTLED_SALE_RUNTIME_CODE_HASH; without a build the
@@ -88,12 +93,14 @@ export function fakeChain({ chainId = 43114n, nonce = 0, pendingNonce, balance =
       return hash;
     },
     /** Read-only views of a mined factory and its implementation. */
-    factoryViews(factory, { implementation, recipient = RECIPIENT, fee = 250n, version = 2n, royalty = 250n, forbidden = recipient, implementationCode = albumRuntime } = {}) {
+    factoryViews(factory, { implementation, recipient = RECIPIENT, fee = 250n, version = 2n, royalty = 250n, forbidden = recipient, implementationCode = albumRuntime, sequential = null } = {}) {
       const iface = new Interface(FACTORY_ABI);
       const values = { implementation: [implementation], platformRecipient: [recipient], PLATFORM_FEE_BPS: [fee], RELEASE_VERSION: [version], REQUIRED_ROYALTY_BPS: [royalty] };
       state.views[getAddress(factory)] = (data) => { const fn = iface.parseTransaction({ data }).name; return iface.encodeFunctionResult(fn, values[fn]); };
       state.code[getAddress(implementation)] = implementationCode;
       state.views[getAddress(implementation)] = (data) => {
+        const sequentialCall = sequential && SEQUENTIAL_VIEWS.parseTransaction({ data });
+        if (sequentialCall) return SEQUENTIAL_VIEWS.encodeFunctionResult(sequentialCall.name, [{ IMPLEMENTATION_VERSION: sequential.version ?? 6n, nextTokenId: sequential.next ?? 1n, tokenIdFor: sequential.idOfOne ?? 1n }[sequentialCall.name]]);
         const fn = IMPLEMENTATION_VIEWS.parseTransaction({ data }).name;
         return IMPLEMENTATION_VIEWS.encodeFunctionResult(fn, [fn === "REQUIRED_ROYALTY_BPS" ? 250n : forbidden]);
       };

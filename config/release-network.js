@@ -21,11 +21,35 @@ export const FUJI_RELEASE_PER_CONTRACT_V2 = Object.freeze(fujiPerContractV2);
 
 // Factory V3 (ReleaseCreated version 3) clones VoidRelease1155V5, which records the provenance
 // root inside the edition-creating transaction and is its own provenance anchor. Releases from
-// version 2 factories keep the separate VoidProvenanceAnchor transaction.
+// version 2 and 4 factories keep the separate VoidProvenanceAnchor transaction. Each capability is
+// an exact version, never "this version or higher": a later factory gains one only when listed here.
 export const PROVENANCE_AT_CREATION_RELEASE_VERSION = 3;
 export function anchorsProvenanceAtCreation(releaseVersion) {
   const version = Number(releaseVersion);
-  return Number.isSafeInteger(version) && version >= PROVENANCE_AT_CREATION_RELEASE_VERSION;
+  return Number.isSafeInteger(version) && version === PROVENANCE_AT_CREATION_RELEASE_VERSION;
+}
+
+// Factory V4 (ReleaseCreated version 4) clones VoidRelease1155V6Sequential: token IDs are 1, 2, 3, ...
+// in creation order within each release contract, and an edition's on-chain edition ID is its token
+// ID as bytes32. Earlier factories derive the token ID from a hash of the edition (title) slug.
+export const SEQUENTIAL_TOKEN_ID_RELEASE_VERSION = 4;
+export function usesSequentialTokenIds(releaseVersion) {
+  const version = Number(releaseVersion);
+  return Number.isSafeInteger(version) && version === SEQUENTIAL_TOKEN_ID_RELEASE_VERSION;
+}
+
+/** The release-clone and factory contract names a ReleaseCreated version stands for. */
+export function releaseContractNames(releaseVersion) {
+  if (anchorsProvenanceAtCreation(releaseVersion)) return { release: "VoidRelease1155V5", factory: "VoidReleaseFactoryV3" };
+  if (usesSequentialTokenIds(releaseVersion)) return { release: "VoidRelease1155V6Sequential", factory: "VoidReleaseFactoryV4Sequential" };
+  return { release: "VoidRelease1155V4", factory: "VoidReleaseFactoryV2" };
+}
+
+/** The on-chain edition ID of a sequential-ID edition: its token ID as a 32-byte big-endian word. */
+export function sequentialEditionId(tokenId) {
+  const value = BigInt(tokenId);
+  if (value < 1n || value >= 1n << 256n) throw new Error("A sequential token ID must be a positive uint256.");
+  return `0x${value.toString(16).padStart(64, "0")}`;
 }
 
 // Every release-per-contract deployment of one manifest: the active (album-capable) factory first,

@@ -857,9 +857,12 @@ export function ArtistStudioPage() {
       // one artist signature publishes the edition and anchors its provenance.
       if (metadata.provenanceAtCreation === true && !metadata.provenanceRootBytes32) throw new Error("This release records provenance at publication, but the server did not return the provenance root. Nothing was sent.");
       const provenanceRoot = metadata.provenanceAtCreation === true ? metadata.provenanceRootBytes32 : null;
+      // A sequential release contract creates the token number the server reserved for this track (1, 2, 3, ...).
+      const sequentialTokenId = metadata.tokenIdScheme === "sequential" ? metadata.tokenId : null;
       const encoded = form.releaseType === "ALBUM"
-        ? encodeCreateReleaseAlbumTrack({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, single: form.albumSingle, mintEnd, provenanceRoot })
-        : encodeCreateReleaseEdition({ releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, provenanceRoot });
+        ? encodeCreateReleaseAlbumTrack({ sequentialTokenId, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, single: form.albumSingle, mintEnd, provenanceRoot })
+        : encodeCreateReleaseEdition({ sequentialTokenId, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, maxSupply: checked.supply, metadataUri: metadata.metadataUri, payout: wallet.account, royaltyBps: ARTIST_ROYALTY_POLICY ? ARTIST_ROYALTY_POLICY.royaltyBps : form.royaltyBps || 0, provenanceRoot });
+      if (String(encoded.tokenId) !== String(metadata.tokenId)) throw new Error(`Studio and the server disagree on this track's token ID (#${encoded.tokenId} vs #${metadata.tokenId}). Nothing was sent.`);
       // Simulate the exact createEdition call from this wallet first, so a revert
       // (edition already exists, contract paused, role revoked) surfaces its real
       // reason before a transaction is ever broadcast.
@@ -868,7 +871,7 @@ export function ArtistStudioPage() {
       // Record the transaction (and with it the frozen metadata URI) before anything else can change; if this call
       // fails the hash is still passed to confirmation below.
       await studioFetch(studioPublicationPath(saved.releaseId, "publication/submitted"), { method: "POST", payload: { transactionHash: transaction.hash }, headers }).catch(() => null);
-      await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, tokenId: metadata.tokenId, provenanceRoot });
+      await verifyReleaseEditionCreation(provider, { transactionHash: transaction.hash, releaseContractAddress: metadata.releaseContractAddress, releaseKey: metadata.releaseKey, editionId: metadata.editionSlug, onChainEditionId: encoded.editionId, tokenId: metadata.tokenId, provenanceRoot });
       const confirmed = await studioFetch(studioPublicationPath(saved.releaseId, "publication/confirm"), { method: "POST", payload: { transactionHash: transaction.hash }, headers });
       const result = publicationResultMessage({ title: form.releaseTitle, provenanceStatus: confirmed.provenanceStatus, fullyPublished: confirmed.fullyPublished === true });
       setNotice(result.message);

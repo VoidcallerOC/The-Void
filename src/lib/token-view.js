@@ -61,7 +61,8 @@ export function playableTrackFor(token, { artwork = "", protectedExperience = nu
   const protectedMedia = protectedExperience?.media?.protected
     ? { experienceId: protectedExperience.id, mediaType: protectedExperience.media.type || "AUDIO" }
     : null;
-  return { n: String(token.tokenId), tokenId: token.tokenId, title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, ...(protectedMedia ? { protectedMedia } : {}), art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
+  // releaseToken: a factory release token, never matched against Genesis ownership by its number alone.
+  return { n: String(token.tokenId), tokenId: token.tokenId, releaseToken: true, title: token.metadata?.name || token.name || "Track", previewSrc: preview, src: preview, preview: true, ...(protectedMedia ? { protectedMedia } : {}), art: artwork || ipfsToHttp(token.metadata?.image || "") || token.media?.art || "" };
 }
 
 /**

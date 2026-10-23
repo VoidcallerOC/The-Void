@@ -29,11 +29,11 @@ vi.mock("../lib/fuji-release.js", async (importOriginal) => {
   sendReleaseTransaction: (...args) => sendReleaseTransaction(...args),
   };
 });
-// A recorded factory with a future version 4 whose lifecycle interface has not been reviewed.
+// A recorded factory with a future version 5 whose lifecycle interface has not been reviewed.
 const { FUTURE_FACTORY } = vi.hoisted(() => ({ FUTURE_FACTORY: "0x00000000000000000000000000000000000000f4" }));
 vi.mock("../../config/release-network.js", async (importOriginal) => {
   const original = await importOriginal();
-  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === FUTURE_FACTORY ? { factoryAddress: FUTURE_FACTORY, releaseVersion: 4, albumCapable: true, chainId: 43113 } : original.releaseDeploymentForFactory(address)) };
+  return { ...original, releaseDeploymentForFactory: (address) => (String(address).toLowerCase() === FUTURE_FACTORY ? { factoryAddress: FUTURE_FACTORY, releaseVersion: 5, albumCapable: true, chainId: 43113 } : original.releaseDeploymentForFactory(address)) };
 });
 vi.mock("../lib/release-lifecycle.js", async (importOriginal) => ({ ...(await importOriginal()), readReleaseLifecycle: (...args) => readReleaseLifecycle(...args) }));
 vi.mock("../lib/primary-sale.js", async (importOriginal) => ({

@@ -45,6 +45,36 @@ export const GENESIS_MAX_TOKEN_ID = Number(unifiedManifest.genesis.maxTokenId);
 export const GENESIS_ROYALTY_RECEIVER = getAddress(unifiedManifest.genesis.royaltyReceiver);
 export const IMPLEMENTATION_ARTIFACT_PATH = "out/VoidRelease1155V4Royalty.sol/VoidRelease1155V4Royalty.json";
 export const ROYALTY_BPS = 250;
+// The release-infrastructure pair this script plans. "settled" is the deployed corrected factory 0xE744… (hash-derived
+// token IDs); "sequential" is VoidReleaseFactoryV4Sequential, whose VoidRelease1155V6Sequential clones number their
+// tokens 1, 2, 3, ... per release contract. Both give every release the reviewed VoidPrimarySaleSettled and are
+// paired with a new VoidUnifiedMarketplace bound to that factory, the production factory 0x262B… and Genesis.
+export const RELEASE_FACTORY_PROFILES = Object.freeze({
+  settled: Object.freeze({
+    name: "settled", factoryContract: FACTORY_CONTRACT, factoryArtifactPath: FACTORY_ARTIFACT_PATH,
+    implementationContract: "VoidRelease1155V4Royalty", implementationArtifactPath: IMPLEMENTATION_ARTIFACT_PATH,
+    releaseVersion: 2, implementationVersion: null, tokenIdScheme: "edition-hash", sequentialSignatures: Object.freeze([]),
+  }),
+  sequential: Object.freeze({
+    name: "sequential", factoryContract: "VoidReleaseFactoryV4Sequential", factoryArtifactPath: "out/VoidReleaseFactoryV4Sequential.sol/VoidReleaseFactoryV4Sequential.json",
+    implementationContract: "VoidRelease1155V6Sequential", implementationArtifactPath: "out/VoidRelease1155V6Sequential.sol/VoidRelease1155V6Sequential.json",
+    releaseVersion: 4, implementationVersion: 6, tokenIdScheme: "sequential", sequentialSignatures: Object.freeze(["nextTokenId()", "lastTokenId()", "IMPLEMENTATION_VERSION()"]),
+  }),
+});
+export function factoryProfile(name) {
+  const key = text(name).toLowerCase() || "settled";
+  const profile = RELEASE_FACTORY_PROFILES[key];
+  if (!profile) throw new DeploymentError(`RELEASE_FACTORY_PROFILE must be "settled" or "sequential", not "${name}".`);
+  return profile;
+}
+/** The profile a plan was built with; an unknown factory or artifact never resolves to one. */
+export function profileOfPlan(plan) {
+  const profile = Object.values(RELEASE_FACTORY_PROFILES).find((item) => item.factoryArtifactPath === plan?.artifacts?.factory?.path);
+  if (!profile || plan.artifacts?.implementation?.path !== profile.implementationArtifactPath || plan.transactions?.[0]?.contract !== profile.factoryContract) {
+    throw new DeploymentError("The plan names an unknown factory or implementation artifact.");
+  }
+  return profile;
+}
 // Runtime-bytecode markers of the royalty lock (Solidity dispatch PUSH4 of each selector).
 const IMPLEMENTATION_ROYALTY_SIGNATURES = Object.freeze(["REQUIRED_ROYALTY_BPS()", "platformFeeRecipient()"]);
 const MARKETPLACE_ROYALTY_SIGNATURES = Object.freeze(["FACTORY_ROYALTY_BPS()", "FACTORY_PLATFORM_FEE_BPS()", "GENESIS_ROYALTY_BPS()", "assetClassOf(address,uint256)"]);
@@ -143,12 +173,18 @@ export function validateDeploymentEnv(env = process.env) {
   const platformFeeBps = feeBps(env.RELEASE_PLATFORM_FEE_BPS, "RELEASE_PLATFORM_FEE_BPS");
   const marketplaceFeeBps = feeBps(env.RELEASE_MARKETPLACE_FEE_BPS, "RELEASE_MARKETPLACE_FEE_BPS");
 
+  let profile;
+  try {
+    profile = factoryProfile(env.RELEASE_FACTORY_PROFILE);
+  } catch (error) {
+    throw new DeploymentError(error.message);
+  }
   const nonceText = text(env.EXPECTED_DEPLOYER_NONCE);
   if (nonceText && !/^\d+$/.test(nonceText)) throw new DeploymentError("EXPECTED_DEPLOYER_NONCE must be a non-negative integer.");
   return Object.freeze({
     network: "mainnet", rpcUrl, deployerAddress,
     expectedNonce: nonceText ? Number(nonceText) : null, platformRecipient, marketplaceFeeRecipient,
-    platformFeeBps, marketplaceFeeBps,
+    platformFeeBps, marketplaceFeeBps, factoryProfile: profile.name,
   });
 }
 
@@ -162,6 +198,8 @@ export function planInputs(config) {
     RELEASE_MARKETPLACE_FEE_RECIPIENT: config.marketplaceFeeRecipient || "",
     RELEASE_PLATFORM_FEE_BPS: String(config.platformFeeBps),
     RELEASE_MARKETPLACE_FEE_BPS: String(config.marketplaceFeeBps),
+    // Recorded only for a non-default factory, so plans of the deployed pair keep their exact shape.
+    ...(config.factoryProfile && config.factoryProfile !== "settled" ? { RELEASE_FACTORY_PROFILE: config.factoryProfile } : {}),
   };
 }
 
@@ -177,13 +215,15 @@ const PENDING = "<physically verified Nano S Plus address>";
 export async function buildDryRunPlan(config, provider, { load = loadArtifact } = {}) {
   const network = await provider.getNetwork();
   if (network.chainId !== BigInt(MAINNET_CHAIN_ID)) throw new DeploymentError(`Refusing chain ${network.chainId}. Expected Avalanche C-Chain ${MAINNET_CHAIN_ID}.`);
-  const [factoryArtifact, marketplaceArtifact, implementationArtifact, saleArtifact, legacySaleArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(MARKETPLACE_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH), load(PRIMARY_SALE_ARTIFACT_PATH), load(LEGACY_SALE_ARTIFACT_PATH)]);
+  const profile = factoryProfile(config.factoryProfile);
+  const [factoryArtifact, marketplaceArtifact, implementationArtifact, saleArtifact, legacySaleArtifact] = await Promise.all([load(profile.factoryArtifactPath), load(MARKETPLACE_ARTIFACT_PATH), load(profile.implementationArtifactPath), load(PRIMARY_SALE_ARTIFACT_PATH), load(LEGACY_SALE_ARTIFACT_PATH)]);
   const missingAlbum = missingAlbumSelectors(implementationArtifact.deployedBytecode?.object);
   const saleProblems = settledSaleProblems(factoryArtifact.bytecode.object, saleArtifact, legacySaleArtifact);
   const missingRoyaltyLock = [
     ...missingSelectors(implementationArtifact.deployedBytecode?.object, IMPLEMENTATION_ROYALTY_SIGNATURES).map((signature) => `implementation ${signature}`),
     ...missingSelectors(marketplaceArtifact.deployedBytecode?.object, MARKETPLACE_ROYALTY_SIGNATURES).map((signature) => `marketplace ${signature}`),
   ];
+  const missingSequential = missingSelectors(implementationArtifact.deployedBytecode?.object, profile.sequentialSignatures);
   const deployer = config.deployerAddress;
   const [nonce, pendingNonce, balance, deployerCode, feeData] = await Promise.all([
     provider.getTransactionCount(deployer, "latest"), provider.getTransactionCount(deployer, "pending"),
@@ -232,6 +272,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     { check: "implementation artifact is album-capable", status: missingAlbum.length ? "FAIL" : "PASS", value: missingAlbum },
     { check: "artifacts enforce the 2.5% artist royalty on chain", status: missingRoyaltyLock.length ? "FAIL" : "PASS", value: missingRoyaltyLock },
     { check: "factory gives every release the settled primary sale", status: saleProblems.length ? "FAIL" : "PASS", value: saleProblems },
+    ...(profile.tokenIdScheme === "sequential" ? [{ check: "implementation assigns sequential token IDs per release", status: missingSequential.length ? "FAIL" : "PASS", value: missingSequential }] : []),
     { check: "deployer funded with 50% headroom", status: balance >= requiredBalance ? "PASS" : "FAIL", value: { balanceAvax: formatEther(balance), requiredAvax: formatEther(requiredBalance) } },
     ...recipientChecks.map((item) => ({ check: `${item.name} verified`, status: item.status, value: item.address || null, reason: item.reason })),
   ];
@@ -240,15 +281,16 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     mode: "DRY_RUN",
     network: "mainnet",
     chainId: MAINNET_CHAIN_ID,
+    ...(profile.name !== "settled" ? { factoryProfile: profile.name, tokenIdScheme: profile.tokenIdScheme } : {}),
     deployer: { address: deployer, nonce, pendingNonce, balanceWei: balance.toString(), balanceAvax: formatEther(balance) },
     artifacts: {
-      factory: { contract: FACTORY_CONTRACT, path: FACTORY_ARTIFACT_PATH, initCodeHash: keccak256(factoryArtifact.bytecode.object), primarySale: PRIMARY_SALE_CONTRACT },
+      factory: { contract: profile.factoryContract, path: profile.factoryArtifactPath, initCodeHash: keccak256(factoryArtifact.bytecode.object), primarySale: PRIMARY_SALE_CONTRACT },
       primarySale: { contract: PRIMARY_SALE_CONTRACT, path: PRIMARY_SALE_ARTIFACT_PATH, initCodeHash: keccak256(saleArtifact.bytecode.object), reviewedRuntimeHash: SETTLED_SALE_RUNTIME_CODE_HASH },
-      implementation: { path: IMPLEMENTATION_ARTIFACT_PATH, runtimeCodeHash: keccak256(implementationArtifact.deployedBytecode.object), albumCapable: missingAlbum.length === 0 },
+      implementation: { ...(profile.name !== "settled" ? { contract: profile.implementationContract } : {}), path: profile.implementationArtifactPath, runtimeCodeHash: keccak256(implementationArtifact.deployedBytecode.object), albumCapable: missingAlbum.length === 0 },
       marketplace: { path: MARKETPLACE_ARTIFACT_PATH, initCodeHash: keccak256(marketplaceArtifact.bytecode.object) },
     },
     transactions: [
-      { step: 1, nonce, contract: FACTORY_CONTRACT, constructor: { platformRecipient: config.platformRecipient || PENDING }, sealedInBytecode: { PLATFORM_FEE_BPS: FEE_BPS, RELEASE_VERSION: 2, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, implementation: "VoidRelease1155V4Royalty (royalty locked to 250 bps to an artist wallet of the release; platformFeeRecipient forbidden)", primarySale: `${PRIMARY_SALE_CONTRACT} (2.5% paid to platformRecipient during each purchase; the purchase reverts if that transfer fails; 97.5% withdrawable by the artist)`, predictedAddress: factoryAddress, predictedImplementation: implementationAddress, estimatedGas: factoryGas.toString() },
+      { step: 1, nonce, contract: profile.factoryContract, constructor: { platformRecipient: config.platformRecipient || PENDING }, sealedInBytecode: { PLATFORM_FEE_BPS: FEE_BPS, RELEASE_VERSION: profile.releaseVersion, REQUIRED_ROYALTY_BPS: ROYALTY_BPS }, implementation: profile.tokenIdScheme === "sequential" ? "VoidRelease1155V6Sequential (token IDs 1, 2, 3, ... per release contract; royalty locked to 250 bps to an artist wallet of the release; platformFeeRecipient forbidden)" : "VoidRelease1155V4Royalty (royalty locked to 250 bps to an artist wallet of the release; platformFeeRecipient forbidden)", primarySale: `${PRIMARY_SALE_CONTRACT} (2.5% paid to platformRecipient during each purchase; the purchase reverts if that transfer fails; 97.5% withdrawable by the artist)`, predictedAddress: factoryAddress, predictedImplementation: implementationAddress, estimatedGas: factoryGas.toString() },
       { step: 2, nonce: nonce + 1, contract: MARKETPLACE_CONTRACT, sealedInBytecode: { FACTORY_PLATFORM_FEE_BPS: FEE_BPS, FACTORY_ROYALTY_BPS: ROYALTY_BPS, GENESIS_PLATFORM_FEE_BPS: 0, GENESIS_ROYALTY_BPS: 500 }, constructor: { feeRecipient: config.marketplaceFeeRecipient || PENDING, releaseFactory: factoryAddress, legacyReleaseFactory: PRODUCTION_FACTORY, genesisCollection: GENESIS_COLLECTION, genesisMaxTokenId: GENESIS_MAX_TOKEN_ID, genesisRoyaltyReceiver: GENESIS_ROYALTY_RECEIVER }, predictedAddress: marketplaceAddress, estimatedGas: marketplaceGas.toString() },
     ],
     constructorArgsEncoded: config.platformRecipient ? {
@@ -260,7 +302,7 @@ export async function buildDryRunPlan(config, provider, { load = loadArtifact } 
     // The exact unsigned transactions the owner signs in Rabby, in order. Present only once the
     // recipient is named, because the recipient is part of the creation data.
     signingRequests: config.platformRecipient ? [
-      creationRequest({ step: 1, contract: FACTORY_CONTRACT, from: deployer, nonce, data: factoryCreation, estimatedGas: factoryGas, predictedAddress: factoryAddress }),
+      creationRequest({ step: 1, contract: profile.factoryContract, from: deployer, nonce, data: factoryCreation, estimatedGas: factoryGas, predictedAddress: factoryAddress }),
       creationRequest({ step: 2, contract: MARKETPLACE_CONTRACT, from: deployer, nonce: nonce + 1, data: marketplaceCreation, estimatedGas: marketplaceGas, predictedAddress: marketplaceAddress }),
     ] : null,
     planInputs: planInputs(config),
@@ -284,7 +326,8 @@ export async function verifyReleaseStep(provider, plan, stepNumber, hash, { load
   if (!request) throw new DeploymentError(`The plan has no signing request for step ${stepNumber}.`);
   const mined = await verifyCreationTransaction(provider, request, hash, { timeoutMs });
   if (stepNumber === 1) {
-    const [factoryArtifact, implementationArtifact] = await Promise.all([load(FACTORY_ARTIFACT_PATH), load(IMPLEMENTATION_ARTIFACT_PATH)]);
+    const profile = profileOfPlan(plan);
+    const [factoryArtifact, implementationArtifact] = await Promise.all([load(profile.factoryArtifactPath), load(profile.implementationArtifactPath)]);
     // State checks shared with the browser deployment page, then the runtime code against the artifacts.
     const { problems, facts } = await checkFactoryState(provider, plan, mined.address);
     const implementationCode = await provider.getCode(facts.implementationAddress);
@@ -308,13 +351,14 @@ export async function verifyReleaseStep(provider, plan, stepNumber, hash, { load
 
 /** The committed deployment record, built only from two verified steps. */
 export function buildDeploymentRecord(plan, [factory, marketplace], { sourceCommit = null, planDigest = null } = {}) {
+  const profile = profileOfPlan(plan);
   return {
     network: "mainnet",
     chainId: MAINNET_CHAIN_ID,
     architecture: "release-per-contract",
     signedBy: { deployer: plan.deployer.address, method: "owner-signed in Rabby; no private key left the wallet" },
     plan: { sourceCommit, digest: planDigest },
-    factory: { address: factory.address, deploymentTransaction: factory.transaction, deploymentBlock: factory.block, implementationAddress: factory.implementationAddress, implementation: "VoidRelease1155V4Royalty", implementationVersion: 2, implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: FACTORY_CONTRACT, artifact: FACTORY_ARTIFACT_PATH, primarySale: PRIMARY_SALE_CONTRACT, sourceCommit, platformRecipient: factory.platformRecipient, platformFeeBps: FEE_BPS },
+    factory: { address: factory.address, deploymentTransaction: factory.transaction, deploymentBlock: factory.block, implementationAddress: factory.implementationAddress, implementation: profile.implementationContract, implementationVersion: profile.releaseVersion, ...(profile.name !== "settled" ? { tokenIdScheme: profile.tokenIdScheme, implementationSourceVersion: profile.implementationVersion } : {}), implementationAlbumCapable: true, requiredRoyaltyBps: ROYALTY_BPS, contract: profile.factoryContract, artifact: profile.factoryArtifactPath, primarySale: PRIMARY_SALE_CONTRACT, sourceCommit, platformRecipient: factory.platformRecipient, platformFeeBps: FEE_BPS },
     marketplace: { address: marketplace.address, deploymentTransaction: marketplace.transaction, deploymentBlock: marketplace.block, chainId: MAINNET_CHAIN_ID, factoryAddress: marketplace.factoryAddress, feeRecipient: marketplace.feeRecipient, feeBps: marketplace.feeBps, requiredRoyaltyBps: ROYALTY_BPS, legacyReleaseFactory: marketplace.legacyReleaseFactory, genesisCollection: marketplace.genesisCollection, genesisMaxTokenId: marketplace.genesisMaxTokenId, genesisRoyaltyReceiver: marketplace.genesisRoyaltyReceiver, contract: MARKETPLACE_CONTRACT, artifact: MARKETPLACE_ARTIFACT_PATH },
   };
 }

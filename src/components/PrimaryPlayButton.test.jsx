@@ -59,6 +59,15 @@ describe("resolved primary", () => {
     await waitFor(() => expect(requestProtectedMediaGrant).toHaveBeenCalledWith(expect.objectContaining({ experienceId: "full", mediaType: "AUDIO" })));
   });
 
+  it("never treats a Genesis holder as the holder of a release token with the same number", async () => {
+    // Sequential release contracts number tokens 1, 2, 3, ...; Genesis token 1 is a different asset.
+    VC_AUDIO.setOwnership(["1"]);
+    render(<WalletCtx.Provider value={holder}><PrimaryPlayButton token={{ ...token, tokenId: "1" }} playback={primaryPlayback([demo, full])} queueId="token:tok" /></WalletCtx.Provider>);
+    fireEvent.click(screen.getByRole("button", { name: /^▶ Play Forgive|^Play Forgive/ }));
+    await waitFor(() => expect(VC_AUDIO.el?.getAttribute("src")).toBe("https://example.test/preview.mp3"));
+    expect(requestProtectedMediaGrant).not.toHaveBeenCalled();
+  });
+
   it("keeps the legacy first-listed experience when nothing is designated", () => {
     show([{ id: "a", media: gated }, { id: "b", media: gated }]);
     expect(screen.queryByText("Full track unavailable")).toBeNull();

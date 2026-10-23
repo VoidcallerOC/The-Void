@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { RELEASE_DEPLOYMENT as deployment } from "../../config/release-network.js";
-import { ARTIST_ROYALTY_POLICY, FUJI_RELEASE_PER_CONTRACT, RELEASE_PER_CONTRACT, releaseDeploymentForFactory, releaseRoyaltyPolicyViolation } from "../../config/release-network.js";
+import { ARTIST_ROYALTY_POLICY, FUJI_RELEASE_PER_CONTRACT, RELEASE_PER_CONTRACT, releaseDeploymentForFactory, releaseRoyaltyPolicyViolation, sequentialEditionId } from "../../config/release-network.js";
 import { waitForReceipt } from "./web3.js";
 import { STANDALONE_EDITIONS_EXIST_MESSAGE } from "./release-lifecycle.js";
 
@@ -400,8 +400,20 @@ export function releaseProvenanceRoot(value) {
   return `0x${hash}`;
 }
 
+/** The on-chain edition ID and token ID of a release-clone edition. A sequential release contract (Factory V4)
+ * takes the token number the server reserved for the track as its edition ID; earlier clones hash the edition slug. */
+export function releaseEditionIdentity({ editionId, sequentialTokenId = null }) {
+  if (sequentialTokenId != null && sequentialTokenId !== "") {
+    const tokenId = BigInt(sequentialTokenId);
+    return { edition: sequentialEditionId(tokenId), tokenId };
+  }
+  const edition = bytes32(editionId, "editionId");
+  const tokenId = BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition])));
+  return { edition, tokenId: tokenId === 0n ? 1n : tokenId };
+}
+
 // On mainnet the artist resale royalty is fixed (ARTIST_ROYALTY_POLICY: 2.5% to the artist's own wallet).
-export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
+export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY, sequentialTokenId = null }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for this release.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
@@ -409,12 +421,10 @@ export function encodeCreateReleaseEdition({ releaseKey, editionId, maxSupply, m
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
   const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
   if (policyViolation) throw new Error(policyViolation);
-  const edition = bytes32(editionId, "editionId");
-  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
-  const tokenId = BigInt(digest);
+  const { edition, tokenId } = releaseEditionIdentity({ editionId, sequentialTokenId });
   const root = releaseProvenanceRoot(provenanceRoot);
   const args = [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps];
-  return { tokenId: tokenId === 0n ? 1n : tokenId, provenanceRoot: root, data: root ? v5CreateIface.encodeFunctionData("createEdition", [...args, root]) : v4CreateIface.encodeFunctionData("createEdition", args) };
+  return { tokenId, editionId: edition, provenanceRoot: root, data: root ? v5CreateIface.encodeFunctionData("createEdition", [...args, root]) : v4CreateIface.encodeFunctionData("createEdition", args) };
 }
 
 // Dry-run a release-contract call from this wallet so a revert surfaces its
@@ -425,7 +435,7 @@ export function encodeCreateReleaseAlbum({ releaseKey }) {
   return { data: v4AlbumIface.encodeFunctionData("createAlbum", [releaseKey]) };
 }
 
-export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY }) {
+export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply, metadataUri, payout, royaltyBps = 0, single = false, mintEnd = 0, provenanceRoot = null, royaltyPolicy = ARTIST_ROYALTY_POLICY, sequentialTokenId = null }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("A factory release key is required for album tracks.");
   if (!metadataUri || !String(metadataUri).trim()) throw new Error("Metadata URI is required.");
   if (!ethers.isAddress(payout) || ethers.getAddress(payout) === ethers.ZeroAddress) throw new Error("Edition payout must be a wallet address.");
@@ -433,12 +443,10 @@ export function encodeCreateReleaseAlbumTrack({ releaseKey, editionId, maxSupply
   if (bps > 1000n) throw new Error("Royalty must be between 0 and 1000 basis points (10%).");
   const policyViolation = releaseRoyaltyPolicyViolation(royaltyPolicy, { receiver: payout, royaltyBps: bps });
   if (policyViolation) throw new Error(policyViolation);
-  const edition = bytes32(editionId, "editionId");
-  const digest = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "bytes32"], ["the-void:release-edition:v1", edition]));
-  const tokenId = BigInt(digest);
+  const { edition, tokenId } = releaseEditionIdentity({ editionId, sequentialTokenId });
   const root = releaseProvenanceRoot(provenanceRoot);
   const args = [releaseKey, edition, editionMaxSupply(maxSupply), metadataUri, ethers.getAddress(payout), bps, Boolean(single), BigInt(mintEnd || 0)];
-  return { tokenId: tokenId === 0n ? 1n : tokenId, provenanceRoot: root, data: root ? v5AlbumTrackIface.encodeFunctionData("createAlbumTrack", [...args, root]) : v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", args) };
+  return { tokenId, editionId: edition, provenanceRoot: root, data: root ? v5AlbumTrackIface.encodeFunctionData("createAlbumTrack", [...args, root]) : v4AlbumTrackIface.encodeFunctionData("createAlbumTrack", args) };
 }
 
 const v4AlbumStateIface = new ethers.Interface([
@@ -759,12 +767,13 @@ export async function verifyFujiEditionCreation(provider, { transactionHash, rel
   return { receipt, event, edition };
 }
 
-export async function verifyReleaseEditionCreation(provider, { transactionHash, releaseContractAddress, releaseKey, editionId, tokenId, provenanceRoot = null }) {
+export async function verifyReleaseEditionCreation(provider, { transactionHash, releaseContractAddress, releaseKey, editionId, tokenId, provenanceRoot = null, onChainEditionId = null }) {
   await assertFujiProvider(provider);
   if (!ethers.isAddress(releaseContractAddress) || !/^0x[0-9a-fA-F]{64}$/.test(String(releaseKey || ""))) throw new Error("The indexed release identity is incomplete.");
   const receipt = await provider.request({ method: "eth_getTransactionReceipt", params: [transactionHash] });
   if (!receipt || receipt.status !== "0x1") throw new Error("Create Edition did not receive a successful Fuji receipt.");
-  const expectedEditionId = bytes32(editionId, "editionId");
+  // A sequential release contract records the token number itself as the edition ID.
+  const expectedEditionId = onChainEditionId && /^0x[0-9a-fA-F]{64}$/.test(onChainEditionId) ? onChainEditionId.toLowerCase() : bytes32(editionId, "editionId");
   const event = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === releaseContractAddress.toLowerCase()).map((log) => {
     try { return editionIface.parseLog(log); } catch { return null; }
   }).find((parsed) => parsed?.name === "EditionCreated" && parsed.args.tokenId === BigInt(tokenId) && parsed.args.releaseId.toLowerCase() === String(releaseKey).toLowerCase() && parsed.args.editionId === expectedEditionId);

@@ -50,6 +50,7 @@ function revertDataOf(error) {
 //   2, album-capable factory -> VoidRelease1155V4: albumCreated(), no hasStandaloneEditions()
 //   2, pre-album factory     -> pre-album implementation: no album getters
 //   3, album-capable factory -> VoidRelease1155V5: albumCreated() and hasStandaloneEditions()
+//   4, album-capable factory -> VoidRelease1155V6Sequential: V4's getters (albumCreated(), no hasStandaloneEditions())
 const LIFECYCLE_GETTERS = Object.freeze({
   V4: Object.freeze({ albumCreated: true, hasStandaloneEditions: false }),
   PRE_ALBUM: Object.freeze({ albumCreated: false, hasStandaloneEditions: false }),
@@ -58,6 +59,7 @@ const LIFECYCLE_GETTERS = Object.freeze({
 const LIFECYCLE_IMPLEMENTATIONS = Object.freeze({
   2: (deployment) => (deployment.albumCapable === true ? LIFECYCLE_GETTERS.V4 : LIFECYCLE_GETTERS.PRE_ALBUM),
   3: (deployment) => (deployment.albumCapable === true ? LIFECYCLE_GETTERS.V5 : null),
+  4: (deployment) => (deployment.albumCapable === true ? LIFECYCLE_GETTERS.V4 : null),
 });
 
 /**

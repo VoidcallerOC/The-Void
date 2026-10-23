@@ -3,7 +3,7 @@ import process from "node:process";
 import { ApiError } from "./api-errors.js";
 import { requireWalletAuth } from "./api-runtime.js";
 import { ConfigurationError } from "./config.js";
-import { anchorsProvenanceAtCreation, releaseDeploymentFor, releasePerContractManifestFor } from "../config/release-network.js";
+import { anchorsProvenanceAtCreation, releaseDeploymentFor, releasePerContractManifestFor, sequentialEditionId, usesSequentialTokenIds } from "../config/release-network.js";
 import { canonicalProvenanceManifest } from "./provenance-manifest.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { publicationView } from "./studio-publication.js";
@@ -51,8 +51,16 @@ export function tokenIdForRelease(releaseKey, editionTitleSlug) {
   return { releaseId, editionId, tokenId: tokenId === 0n ? 1n : tokenId };
 }
 
-export function encodeAnchorCall({ releaseKey = null, releaseSlug, editionTitleSlug, provenanceRoot }) {
-  const ids = releaseKey ? tokenIdForRelease(releaseKey, editionTitleSlug) : tokenIdFor(releaseSlug, editionTitleSlug);
+/** A sequential release contract (Factory V4) names an edition by its token ID: editionId = bytes32(tokenId). */
+export function sequentialIdsForRelease(releaseKey, tokenId) {
+  const releaseId = String(releaseKey || "").trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(releaseId) || /^0x0{64}$/.test(releaseId)) throw new ApiError(400, "ANCHOR_IDENTITY_INVALID", "The bound release key must be a non-zero bytes32 value.");
+  if (tokenId == null || !/^\d+$/.test(String(tokenId)) || BigInt(tokenId) < 1n) throw new ApiError(409, "ANCHOR_EDITION_IDENTITY", "This edition has no sequential token ID to anchor.");
+  return { releaseId, editionId: sequentialEditionId(tokenId), tokenId: BigInt(tokenId) };
+}
+
+export function encodeAnchorCall({ releaseKey = null, releaseSlug, editionTitleSlug, provenanceRoot, sequentialTokenId = null }) {
+  const ids = sequentialTokenId != null ? sequentialIdsForRelease(releaseKey, sequentialTokenId) : releaseKey ? tokenIdForRelease(releaseKey, editionTitleSlug) : tokenIdFor(releaseSlug, editionTitleSlug);
   const root = provenanceRootBytes(provenanceRoot);
   return { ...ids, provenanceRoot: root, data: iface.encodeFunctionData("anchor", [ids.releaseId, ids.editionId, root]) };
 }
@@ -259,13 +267,15 @@ export class ProvenanceAnchorService {
     if (!provenance?.root) throw new ApiError(409, "PROVENANCE_ROOT_REQUIRED", "Publish the canonical provenance manifest before anchoring it.");
     const rebuilt = rebuiltRoot(provenance, row.release_id, row.edition_id);
     const slug = editionSlug(row.title);
-    const ids = tokenIdForRelease(row.release_key, slug);
+    // Sequential contracts number editions; their identity is the stored token ID, not the title.
+    const sequential = usesSequentialTokenIds(row.implementation_version);
+    const ids = sequential ? sequentialIdsForRelease(row.release_key, row.token_id) : tokenIdForRelease(row.release_key, slug);
     if (row.token_id != null && BigInt(row.token_id) !== ids.tokenId) {
       throw new ApiError(409, "ANCHOR_EDITION_IDENTITY", "The edition token id does not match the certified release identity.");
     }
     if (!row.release_contract_address || !row.provenance_anchor_address || Number(row.bound_chain_id) !== Number(this.config.chainId)) throw new ApiError(409, "RELEASE_ANCHOR_BINDING_REQUIRED", "This release has no verified release-specific provenance anchor binding.");
     if (String(row.provenance_anchor_address).toLowerCase() === String(row.release_contract_address).toLowerCase()) throw new ApiError(409, "RELEASE_ANCHOR_BINDING_INVALID", "The provenance anchor must be a distinct contract bound to this release.");
-    return { ...row, editionSlug: slug, releaseKey: String(row.release_key).toLowerCase(), ...ids, root: rebuilt.root, metadataDigest: rebuilt.metadataDigest, provenance };
+    return { ...row, editionSlug: slug, sequentialTokenId: sequential ? ids.tokenId : null, releaseKey: String(row.release_key).toLowerCase(), ...ids, root: rebuilt.root, metadataDigest: rebuilt.metadataDigest, provenance };
   }
 
   anchorConfigForContext(context) {
@@ -302,7 +312,7 @@ export class ProvenanceAnchorService {
     const context = await this.editionContext(String(releaseId || "").trim(), identity.wallet, input?.editionId);
     const anchorConfig = this.anchorConfigForContext(context);
     const proof = await this.ensureProof(context, identity.wallet);
-    const call = encodeAnchorCall({ releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root });
+    const call = encodeAnchorCall({ releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root, sequentialTokenId: context.sequentialTokenId });
     // Publication-verified editions get a one-time anchor offer until the anchor contract records the root.
     const oneTimeAnchor = proof.verification_status === "VERIFIED" && !proofRecordsAnchor(proof);
     if (proofRecordsAnchor(proof) || (oneTimeAnchor && await this.onChainAnchored(anchorConfig, call))) {
@@ -330,7 +340,7 @@ export class ProvenanceAnchorService {
   }
 
   expected(context, wallet, transactionHash) {
-    return { transactionHash, wallet, releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root };
+    return { transactionHash, wallet, releaseKey: context.releaseKey, editionTitleSlug: context.editionSlug, provenanceRoot: context.root, sequentialTokenId: context.sequentialTokenId };
   }
 
   async openForAttempt(proof, wallet) {

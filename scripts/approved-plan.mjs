@@ -23,6 +23,12 @@ const fail = (message) => { throw new ApprovedPlanError(message); };
 // deploy the factory whose releases pay the platform fee during the purchase.
 export const EXECUTED_RELEASE_FACTORY = "0x262B774cf9a1949170B58E2d57F6189980FE757b";
 export const RELEASE_FACTORY_CONTRACT = "VoidReleaseFactoryV2RoyaltySettled";
+// Factories a new release-infrastructure plan may deploy, each with the clone implementation it creates. Both give
+// every release the settled primary sale; the sequential one numbers each release contract's tokens 1, 2, 3, ...
+export const NEW_RELEASE_FACTORIES = Object.freeze({
+  [RELEASE_FACTORY_CONTRACT]: "VoidRelease1155V4Royalty",
+  VoidReleaseFactoryV4Sequential: "VoidRelease1155V6Sequential",
+});
 export const UNIFIED_MARKETPLACE_CONTRACT = "VoidUnifiedMarketplace";
 
 const deployerOf = (kind, plan) => (kind.startsWith("genesis-claim") ? plan.deployer : plan.deployer?.address);
@@ -51,7 +57,12 @@ export function validateApprovedPlan(entry, network = "mainnet") {
     if (getAddress(plan.transactions[0].constructor.platformRecipient) !== MAINNET_FEE_RECIPIENT || getAddress(plan.transactions[1].constructor.feeRecipient) !== MAINNET_FEE_RECIPIENT) fail("The fee recipient is not the recorded Nano S Plus.");
     if (getAddress(plan.transactions[1].constructor.releaseFactory) !== getAddress(requests[0].predictedAddress)) fail("The marketplace is not bound to the factory of step 1.");
     const executed = getAddress(requests[0].predictedAddress) === EXECUTED_RELEASE_FACTORY;
-    if (!executed && (plan.transactions[0].contract !== RELEASE_FACTORY_CONTRACT || requests[0].contract !== RELEASE_FACTORY_CONTRACT || plan.artifacts?.factory?.path !== `out/${RELEASE_FACTORY_CONTRACT}.sol/${RELEASE_FACTORY_CONTRACT}.json`)) fail(`A new release-infrastructure plan must deploy ${RELEASE_FACTORY_CONTRACT}.`);
+    const factoryContract = plan.transactions[0].contract;
+    const implementationContract = NEW_RELEASE_FACTORIES[factoryContract];
+    const implementationPath = plan.artifacts?.implementation?.path;
+    // The settled plan predates naming the implementation path per profile: it is the V4Royalty artifact.
+    if (!executed && (!implementationContract || requests[0].contract !== factoryContract || plan.artifacts?.factory?.path !== `out/${factoryContract}.sol/${factoryContract}.json`
+      || implementationPath !== `out/${implementationContract}.sol/${implementationContract}.json`)) fail(`A new release-infrastructure plan must deploy ${Object.keys(NEW_RELEASE_FACTORIES).join(" or ")} with its own clone implementation.`);
     // Every new release-infrastructure plan deploys the single unified marketplace, bound to that factory, the production
     // factory and the Genesis collection at its existing royalty receiver (config/unified-marketplace.json).
     const market = plan.transactions[1];
