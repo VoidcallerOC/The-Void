@@ -26,11 +26,13 @@ function creationLogs({ tokenId = 1n, editionId = sequentialEditionId(1n), uri =
   return [{ address: releaseContract, topics: created.topics, data: created.data }, { address: releaseContract, topics: royalty.topics, data: royalty.data }];
 }
 
-function harness({ reserved = "1", maxOnContract = "0", nextTokenId = 1n, onChainExists = false, logs = creationLogs(), attempt = null, rowUri = metadataUri } = {}) {
+function harness({ reserved = "1", maxOnContract = "0", nextTokenId = 1n, onChainExists = false, logs = creationLogs(), attempt = null, rowUri = metadataUri, editionRows = null, receiptFor = null, replacementTx = null } = {}) {
   const release = { id: "release-1", artist_id: "artist-1", slug: "forgive-forget-7", title: "Forgive & Forget", description: null, status: "DRAFT", release_metadata: { publicationArchitecture: "release-per-contract" }, published_at: null, display_name: "Voidcaller" };
   const row = { id: "edition-1", release_id: "release-1", contract_id: "contract-release", title: "Forgive & Forget", description: null, tier: null, supply: "0", status: "DRAFT", application_metadata: attempt ? { publicationAttempt: attempt } : {}, metadata_uri: rowUri, metadata: doc, metadata_version: doc._void.digest, token_id: reserved };
   const chain = {
-    getTransactionReceipt: vi.fn().mockResolvedValue({ status: 1, blockNumber: 90, logs }),
+    getTransactionReceipt: vi.fn(async (hash) => (receiptFor ? receiptFor(hash) : { status: 1, blockNumber: 90, logs })),
+    getBlockNumber: vi.fn().mockResolvedValue(100),
+    getLogs: vi.fn().mockResolvedValue(replacementTx ? [{ transactionHash: replacementTx }] : []),
     edition: vi.fn().mockResolvedValue([releaseKey, sequentialEditionId(1n), owner, 0n, 0n, onChainExists ? metadataUri : "", onChainExists]),
     nextTokenId: vi.fn().mockResolvedValue(nextTokenId),
     getBlock: vi.fn().mockResolvedValue({ timestamp: 1_792_000_000 }),
@@ -44,11 +46,12 @@ function harness({ reserved = "1", maxOnContract = "0", nextTokenId = 1n, onChai
     if (text.includes("SELECT token_id::text AS token_id FROM tokens WHERE edition_id=$1")) return { rows: reserved == null ? [] : [{ token_id: reserved }] };
     if (text.includes("COALESCE(MAX(token_id), 0)")) return { rows: [{ last_token_id: maxOnContract }] };
     if (text.includes("FROM tokens t JOIN contracts c")) return { rows: [] };
-    if (text.includes("FROM editions e")) return { rows: [row] };
+    if (text.includes("FROM editions e")) return { rows: editionRows ? editionRows(row) : [row] };
     if (text.startsWith("DELETE")) return { rows: [] };
     return { rows: [release] };
   }) };
   const repo = { saveRelease: vi.fn(async (input) => input), saveEdition: vi.fn(async (input) => input), saveToken: vi.fn(async (input) => input), saveContract: vi.fn(async () => ({ id: "contract-release" })), saveExperience: vi.fn(async (input) => input), appendAuditEvent: vi.fn(async () => ({})) };
+  repo.db = db;
   repo.inTransaction = vi.fn(async (callback) => callback(repo));
   const metadataStorage = { write: vi.fn().mockResolvedValue({ uri: metadataUri }) };
   const instance = new ArtistStudioService({ db: verifiedArtistDb(db), repository: repo, metadataStorage, publicationChain: chain, authenticator: vi.fn().mockResolvedValue({ wallet: owner }), logger: { error: vi.fn(), info: vi.fn() } });
@@ -110,6 +113,40 @@ describe("a sequential release: token 1 is the reserved number, never the title 
       await expect(confirm(instance)).rejects.toMatchObject({ code: "PUBLICATION_NOT_CONFIRMED" });
       expect(repo.saveRelease).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("several open tracks and replaced transactions", () => {
+  it("publishes the lowest-numbered open track first, whatever order the drafts were edited in", async () => {
+    const { instance, queries } = harness();
+    await publish(instance);
+    const selection = queries.find(({ text }) => text.includes("FROM editions e LEFT JOIN tokens t") && text.includes("ORDER BY t.token_id ASC"));
+    expect(selection?.params).toEqual(["release-1", "contract-release"]);
+  });
+
+  it("records and confirms the lowest-numbered open track when a newer draft holds a higher number", async () => {
+    const newer = (row) => [{ ...row, id: "edition-2", title: "Next Track", token_id: "2", created_at: "2026-10-23T20:00:00Z" }, row];
+    const { instance } = harness({ editionRows: newer });
+    await expect(instance.recordPublicationSubmission({ request, releaseId: "release-1", input: { transactionHash: tx } })).resolves.toMatchObject({ tokenId: "1" });
+    const confirming = harness({ editionRows: newer, attempt: attemptFor(), onChainExists: true });
+    await expect(confirm(confirming.instance)).resolves.toMatchObject({ editionId: "edition-1", tokenId: "1" });
+  });
+
+  it("confirms token 1 from a replacement transaction when the recorded one was sped up or re-sent", async () => {
+    const replacementTx = `0x${"ef".repeat(32)}`;
+    const receiptFor = (hash) => (hash === replacementTx ? { status: 1, blockNumber: 91, logs: creationLogs() } : null);
+    const { instance, repo } = harness({ attempt: attemptFor(), onChainExists: true, receiptFor, replacementTx });
+    await expect(confirm(instance)).resolves.toMatchObject({ status: "PUBLISHED", tokenId: "1", transactionHash: replacementTx });
+    const saved = repo.saveEdition.mock.calls.at(-1)[0];
+    expect(saved.metadata.publicationAttempt).toMatchObject({ transactionHash: replacementTx, replacedTransactionHash: tx, emittedTokenId: "1" });
+  });
+
+  it("does not adopt a replacement whose creation carries a different metadata URI", async () => {
+    const replacementTx = `0x${"ef".repeat(32)}`;
+    const receiptFor = (hash) => (hash === replacementTx ? { status: 1, blockNumber: 91, logs: creationLogs({ uri: "ipfs://QmSomethingElse" }) } : null);
+    const { instance, repo } = harness({ attempt: attemptFor(), onChainExists: true, receiptFor, replacementTx });
+    await expect(confirm(instance)).rejects.toMatchObject({ status: 409 });
+    expect(repo.saveRelease).not.toHaveBeenCalled();
   });
 });
 

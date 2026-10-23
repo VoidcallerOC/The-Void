@@ -174,6 +174,12 @@ function bindingAnchorsAtCreation(binding) {
 function bindingUsesSequentialIds(binding) {
   return Boolean(binding) && usesSequentialTokenIds(binding.implementation_version);
 }
+/** On a sequential release contract only the lowest-numbered open track can be created next, so that is the
+ * track to publish or confirm, whatever order the drafts were edited in. */
+function lowestOpenSequentialRow(rows, binding) {
+  const open = (rows || []).filter((row) => ["DRAFT", "REVIEW"].includes(row.status) && String(row.contract_id) === String(binding.release_contract_id) && row.token_id != null);
+  return open.sort((a, b) => (BigInt(a.token_id) < BigInt(b.token_id) ? -1 : BigInt(a.token_id) > BigInt(b.token_id) ? 1 : 0))[0] || null;
+}
 /** The bytes32 edition ID the release contract records for an edition. */
 function onChainEditionIdFor(binding, editionTitle, tokenId) {
   return bindingUsesSequentialIds(binding) ? sequentialEditionId(tokenId) : ethers.encodeBytes32String(generatedSlug(editionTitle, "edition name"));
@@ -215,8 +221,8 @@ function releaseCloneTokenId(editionSlug) {
 /**
  * The token ID of a track on a sequential release contract. A track keeps the number it was given when it
  * was first saved; a new track takes the next number after every token row this release contract has, so
- * two tracks never share one and duplicate titles do not matter. The release row lock serializes
- * reservations; UNIQUE (contract_id, token_id) backs it up. Publication then requires the chain's
+ * two tracks never share one and duplicate titles do not matter. The release row lock, taken in the same
+ * transaction as the token row insert, serializes reservations. Publication then requires the chain's
  * nextTokenId() to equal this number, so tracks are published in the order they were added.
  */
 async function reserveSequentialTokenId(db, { releaseId, editionId, contractId }) {
@@ -746,7 +752,11 @@ export class ArtistStudioService {
     await assertArtistMayPublish(this.db, { artistId: release.artist_id, wallet: identity.wallet });
     if (!this.metadataStorage) throw new ApiError(503, "METADATA_STORAGE_NOT_CONFIGURED", "The release is ready, but metadata publication needs to be completed before blockchain publication.");
     // Published editions keep immutable metadata; a published release may still add new draft editions (tracks).
-    const editionResult = await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY e.created_at DESC LIMIT 1", [release.id]);
+    const binding = await this.releaseContractBinding(release.id);
+    // Sequential release contracts create tracks in number order: publish the lowest-numbered open track.
+    const editionResult = bindingUsesSequentialIds(binding)
+      ? await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version, t.token_id FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id AND t.contract_id=$2 WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY t.token_id ASC NULLS LAST, e.created_at ASC LIMIT 1", [release.id, binding.release_contract_id])
+      : await this.db.query("SELECT e.*, t.metadata_uri, t.metadata, t.metadata_version FROM editions e LEFT JOIN tokens t ON t.edition_id=e.id WHERE e.release_id=$1 AND e.status IN ('DRAFT','REVIEW') ORDER BY e.created_at DESC LIMIT 1", [release.id]);
     const edition = editionResult.rows[0];
     if (!edition && release.status === "PUBLISHED") throw new ApiError(409, "RELEASE_ALREADY_PUBLISHED", "This release has already been published and its metadata is immutable.");
     if (!edition) throw new ApiError(400, "EDITION_REQUIRED", "Create an edition before publishing the release.");
@@ -760,7 +770,6 @@ export class ArtistStudioService {
     const provenance = provenanceForPublication({ release, edition, wallet: identity.wallet, metadataDigest: generated.digest, experiences: experiences.rows, mediaAssets: mediaAssets.rows, input, previous: edition.metadata?.provenance });
     const metadataDocument = { ...generated.metadata, _void: { version: 1, digest: generated.digest }, provenance: provenance.record };
     const previous = edition.metadata_version && edition.metadata_uri && edition.metadata?.["_void"]?.digest === generated.digest && edition.metadata?.provenance?.root === provenance.root ? { uri: edition.metadata_uri } : null;
-    const binding = await this.releaseContractBinding(release.id);
     if (requiresFactoryRelease(release) && !binding) throw new ApiError(409, "RELEASE_CONTRACT_BINDING_REQUIRED", "This Studio release must be bound to a mined VoidReleaseFactory deployment before publication. No legacy shared contract fallback is allowed.");
     if (binding && String(edition.contract_id) !== String(binding.release_contract_id)) throw new ApiError(409, "EDITION_CONTRACT_MISMATCH", "This edition was not created on the release's bound contract.");
     const publishChainId = binding ? Number(binding.chain_id) : CERTIFIED_CHAIN_ID;
@@ -829,7 +838,7 @@ export class ArtistStudioService {
     if (!first || result.rows.length === 1) return first;
     const binding = await this.releaseContractBinding(release.id);
     // A sequential track's token row is its reserved number; titles do not create stale rows.
-    if (bindingUsesSequentialIds(binding)) return result.rows.find((row) => row.id === first.id && String(row.contract_id) === String(binding.release_contract_id)) || first;
+    if (bindingUsesSequentialIds(binding)) return lowestOpenSequentialRow(result.rows, binding) || first;
     const wanted = String(binding ? releaseCloneTokenId(generatedSlug(first.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(first.title, "edition name")));
     return result.rows.find((row) => row.id === first.id && String(row.token_id) === wanted) || first;
   }
@@ -849,6 +858,7 @@ export class ArtistStudioService {
     // the contract derives from the edition's current identity is the one the chain can contain.
     let edition = editionResult.rows[0];
     const earlyBinding = edition ? await this.releaseContractBinding(release.id) : null;
+    if (edition && bindingUsesSequentialIds(earlyBinding)) edition = lowestOpenSequentialRow(editionResult.rows, earlyBinding) || edition;
     if (edition && editionResult.rows.length > 1 && !bindingUsesSequentialIds(earlyBinding)) {
       const wanted = String(earlyBinding ? releaseCloneTokenId(generatedSlug(edition.title, "edition name")) : certifiedTokenId(release.slug, generatedSlug(edition.title, "edition name")));
       edition = editionResult.rows.find((row) => row.id === edition.id && String(row.token_id) === wanted) || edition;
@@ -882,7 +892,17 @@ export class ArtistStudioService {
         transactionHash = await this.findEditionCreationTransaction({ provider, binding, publicationContract, tokenId: expectedTokenId });
         if (!transactionHash) throw new ApiError(409, "EDITION_CREATION_NOT_FOUND", "No edition-creation transaction was found on-chain for this release. Nothing was changed.");
       }
-      const receipt = await provider.getTransactionReceipt(transactionHash);
+      let receipt = await provider.getTransactionReceipt(transactionHash);
+      // The wallet can replace a submitted transaction (speed up, re-send) under a new hash. When the recorded
+      // one has no successful receipt, the chain is searched for this exact token's creation; the event must
+      // still carry the frozen metadata URI (checked below), so a different creation is never adopted.
+      if ((!receipt || receipt.status !== 1) && attempt && binding) {
+        const replacement = await this.findEditionCreationTransaction({ provider, binding, publicationContract, tokenId: expectedTokenId });
+        if (replacement && replacement !== transactionHash) {
+          transactionHash = replacement;
+          receipt = await provider.getTransactionReceipt(replacement);
+        }
+      }
       if (!receipt || receipt.status !== 1) throw new Error("receipt unavailable or unsuccessful");
       const eventInterface = new ethers.Interface([...deployment.abi, "event EditionCreated(uint256 indexed tokenId, bytes32 indexed releaseId, bytes32 indexed editionId, address artist, uint256 maxSupply, string metadataUri)"]);
       const expectedEditionId = binding ? onChainEditionIdFor(binding, edition.title, expectedTokenId) : ethers.encodeBytes32String(generatedSlug(edition.title, "edition name"));
@@ -977,7 +997,7 @@ export class ArtistStudioService {
       }
       // Only token rows with no metadata URI that point elsewhere are stale duplicates (same predicate as the rename fix).
       await this.db.query("DELETE FROM tokens WHERE edition_id=$1 AND (contract_id<>$2 OR token_id<>$3::numeric) AND metadata_uri IS NULL", [edition.id, edition.contract_id, String(expectedTokenId)]);
-      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: { ...(edition.application_metadata || {}), publicationAttempt: { ...(attempt || { transactionHash, metadataUri: edition.metadata_uri, submittedAt: null }), tokenId: expectedTokenId.toString(), emittedTokenId: event.args.tokenId.toString(), confirmedBlock: Number(receipt.blockNumber) }, ...(unattachedDraft ? { unattachedDraftMetadata: { ...unattachedDraft, reason: "EDITION_ALREADY_ON_CHAIN", transactionHash } } : {}) } });
+      await this.repository.saveEdition({ id: edition.id, releaseId: edition.release_id, contractId: edition.contract_id, title: edition.title, tier: edition.tier, description: edition.description, supply: edition.supply, status: "PUBLISHED", metadata: { ...(edition.application_metadata || {}), publicationAttempt: { ...(attempt || { transactionHash, metadataUri: edition.metadata_uri, submittedAt: null }), transactionHash, ...(attempt && attempt.transactionHash !== transactionHash ? { replacedTransactionHash: attempt.transactionHash } : {}), tokenId: expectedTokenId.toString(), emittedTokenId: event.args.tokenId.toString(), confirmedBlock: Number(receipt.blockNumber) }, ...(unattachedDraft ? { unattachedDraftMetadata: { ...unattachedDraft, reason: "EDITION_ALREADY_ON_CHAIN", transactionHash } } : {}) } });
       await this.repository.saveRelease({ id: release.id, artistId: release.artist_id, slug: release.slug, title: release.title, description: release.description, status: "PUBLISHED", metadata: release.release_metadata || {}, publishedAt: release.published_at || new Date() });
       await this.publishReleaseExperiences(release);
       await this.audit({ identity, request, eventType: "STUDIO_PUBLICATION_CONFIRMED", subjectType: "release", subjectId: release.id, payload: { transactionHash, tokenId: expectedTokenId.toString(), chainId: publicationChainId, releaseContractAddress: publicationContract, provenanceRoot: provenance.root, provenanceAnchoredAtCreation: Boolean(onChainProvenance), ...(unattachedDraft ? { adoptedOnChainMetadataUri: edition.metadata_uri, unattachedDraftMetadataUri: unattachedDraft.uri } : {}) } });
@@ -1281,7 +1301,8 @@ export class ArtistStudioService {
         ? { id: binding.release_contract_id }
         : await repository.saveContract({ chainId: selectedChainId, chainKey: input.chainKey || String(selectedChainId), address, contractType: "ERC1155", name: optionalText(input.contractName, "edition.contractName", { max: 256 }), metadata: jsonObject(input.contractMetadata, "edition.contractMetadata") });
       const saved = await repository.saveEdition({ id, releaseId: release.id, contractId: contract.id, title: editionName, tier: optionalText(input.tier, "edition.tier", { max: 128 }), description: optionalText(input.description, "edition.description", { max: 20000 }), supply: editionQuantity(input.quantity, "edition.quantity") ?? "0", status: "DRAFT", metadata: jsonObject({ ...withoutRemovedDraftFlag(input.metadata), ...(input.artwork === undefined ? {} : { artwork: optionalText(input.artwork, "edition.artwork", { max: 2048 }) }), priceWei: input.priceWei === undefined ? null : positiveBigInt(input.priceWei, "edition.priceWei"), marketplace: jsonObject(input.marketplace, "edition.marketplace") }, "edition.metadata") });
-      const tokenId = sequential ? await reserveSequentialTokenId(repository.db?.query ? repository.db : this.db, { releaseId: release.id, editionId: saved.id, contractId: contract.id }) : derivedTokenId;
+      if (sequential && !repository.db?.query) throw new ApiError(500, "SEQUENTIAL_RESERVATION_UNAVAILABLE", "A track number can only be reserved inside the edition transaction.");
+      const tokenId = sequential ? await reserveSequentialTokenId(repository.db, { releaseId: release.id, editionId: saved.id, contractId: contract.id }) : derivedTokenId;
       await repository.saveToken({ editionId: saved.id, contractId: contract.id, tokenId, metadataUri: null, metadata: input.tokenMetadata === undefined ? null : jsonObject(input.tokenMetadata, "edition.tokenMetadata") });
       // The token ID derives from the edition title. Renaming a draft whose metadata was never submitted leaves
       // its earlier row behind, giving the edition two token rows. A row with no metadata URI was never submitted
