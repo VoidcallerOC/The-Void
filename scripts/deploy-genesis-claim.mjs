@@ -12,7 +12,9 @@ import { CLAIM_WINDOW_SECONDS, GENESIS_CHAIN_ID, GenesisClaimConfigurationError,
 // GenesisHolderClaim for one existing release token, on Fuji (accelerated test windows allowed) or
 // C-Chain mainnet (production 24-hour claim at 0.25 AVAX with a public window of whole hours between
 // 7 and 14 days only, enforced here, by the API and by the contract). On mainnet the plan names the
-// sale's inclusive end explicitly (GENESIS_PUBLIC_SALE_END) and the window is derived from it. The
+// sale's inclusive end explicitly (GENESIS_PUBLIC_SALE_END) and the window is derived from it, and the
+// release must be one the active factory in config/mainnet-release-per-contract.json created, with the sale
+// that factory paired with it. The
 // token's VoidPrimarySale must already be configured, unpaused, as the public phase (open at
 // claimStart together with the claims, close at GENESIS_PUBLIC_SALE_END, at the public price; claims
 // close 24 h in while the sale continues),
@@ -43,6 +45,11 @@ const RELEASE = new Interface([
   "function ISSUER_ROLE() view returns (bytes32)",
   "function grantRole(bytes32 role,address account)",
   "function owner() view returns (address)",
+]);
+// The active mainnet release factory (VoidReleaseFactoryV4Sequential): its own registry of the releases it created.
+const RELEASE_FACTORY = new Interface([
+  "function isRelease(address release) view returns (bool)",
+  "function primarySaleOf(address release) view returns (address)",
 ]);
 const SALE = new Interface([
   "function releases() view returns (address)",
@@ -220,6 +227,18 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
     const code = await provider.getCode(target);
     if (!code || code === "0x") throw new DeploymentError(`The ${name} ${target} has no code on chain ${config.chainId}.`);
   }
+  // Mainnet targets only a release the ACTIVE factory (config/mainnet-release-per-contract.json) created, with
+  // the sale that factory paired with it; a historical factory's release or any other contract is refused.
+  let releaseFactory;
+  if (config.network === "mainnet") {
+    releaseFactory = getAddress(mainnetReleaseManifest.factoryAddress);
+    const factoryCode = await provider.getCode(releaseFactory);
+    if (!factoryCode || factoryCode === "0x") throw new DeploymentError(`The active mainnet release factory ${releaseFactory} has no code on chain ${config.chainId}.`);
+    const [created] = await read(provider, RELEASE_FACTORY, releaseFactory, "isRelease", [config.releaseContract]);
+    if (!created) throw new DeploymentError(`The release ${config.releaseContract} was not created by the active mainnet release factory ${releaseFactory} (config/mainnet-release-per-contract.json); only its releases are claim targets.`);
+    const [pairedSale] = await read(provider, RELEASE_FACTORY, releaseFactory, "primarySaleOf", [config.releaseContract]);
+    if (getAddress(pairedSale) !== config.primarySale) throw new DeploymentError(`The active mainnet release factory pairs release ${config.releaseContract} with sale ${getAddress(pairedSale)}, not ${config.primarySale}.`);
+  }
   let maxSupply;
   let edition;
   try {
@@ -271,6 +290,7 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
     predictedClaim,
     issuerRole,
     eligibility,
+    releaseFactory,
     edition: { maxSupply: BigInt(maxSupply), mintedSupply: BigInt(edition.mintedSupply), artist: getAddress(edition.artist), mintEnd: mintEnd === null ? null : BigInt(mintEnd) },
     sale: { priceWei: BigInt(sale.priceWei), maxSupply: BigInt(sale.maxSupply), sold: BigInt(sale.sold), perWalletLimit: BigInt(sale.perWalletLimit), startTime: BigInt(sale.startTime), endTime: BigInt(sale.endTime), paused: Boolean(sale.paused) },
     args,
@@ -286,7 +306,7 @@ export function buildPlan(config, facts) {
     deployer: config.deployerAddress,
     deployerNonce: facts.deployerNonce,
     predictedClaimAddress: facts.predictedClaim,
-    target: { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, edition: facts.edition, sale: facts.sale },
+    target: { releaseContract: config.releaseContract, primarySale: config.primarySale, tokenId: config.tokenId, releaseFactory: facts.releaseFactory, edition: facts.edition, sale: facts.sale },
     schedule: { claimStart: config.claimStart, claimWindowSeconds: config.claimWindow, claimEnd: config.claimEnd, publicSaleStart: config.publicSaleStart, publicSaleOpens: config.publicSaleStart, publicWindowSeconds: config.publicWindow, publicSaleEnd: config.publicSaleEnd, publicPriceWei: config.publicPriceWei, sale: `configureSale(tokenId, ${config.publicPriceWei}, ${config.publicAllocation}, 0, ${config.publicSaleStart}, ${config.publicSaleEnd}, false)` },
     supply: { claimAllocation: config.allocation, publicAllocation: config.publicAllocation, meaning: config.allocation === 0n && config.publicAllocation === 0n ? "uncapped open edition: one claim per eligible wallet, no sale cap" : "finite allocations" },
     eligibility: { chainId: GENESIS_CHAIN_ID, genesisContract: GENESIS_CONTRACT, source: facts.eligibility.source, ruleText: facts.eligibility.text, rule: facts.eligibility.rule },

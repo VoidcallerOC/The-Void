@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { AbiCoder, Interface, Wallet, ZeroHash, getAddress, getCreateAddress, id, keccak256 } from "ethers";
 import { CLAIM_ARTIFACT_PATH, broadcastClaim, buildClaimRecord, buildPlan, mainnetSigningPlan, preflightClaimDeployment, run, validateClaimDeploymentEnv, verifyClaimDeployment } from "./deploy-genesis-claim.mjs";
 import { ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT } from "../server/genesis-claim.js";
+import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 
 const KEY = `0x${"11".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
@@ -45,13 +46,20 @@ const release = new Interface([
   "function mintEndOf(uint256 tokenId) view returns (uint64)",
   "function ISSUER_ROLE() view returns (bytes32)",
 ]);
+// The active mainnet release factory, as the planner reads it from config/mainnet-release-per-contract.json.
+const ACTIVE_FACTORY = getAddress(mainnetReleaseManifest.factoryAddress);
+const factory = new Interface([
+  "function isRelease(address release) view returns (bool)",
+  "function primarySaleOf(address release) view returns (address)",
+]);
 const sale = new Interface([
   "function releases() view returns (address)",
   "function sales(uint256 tokenId) view returns (uint256 priceWei,uint256 maxSupply,uint256 sold,uint256 perWalletLimit,uint64 startTime,uint64 endTime,bool paused,bool configured)",
 ]);
 
-/** A Fuji chain holding an open-edition token whose sale is the scheduled public phase. */
-function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE, mintEnd = BigInt(PUBLIC_END), maxSupply = 0n, missingToken = false, constructorReverts = false, now = NOW, nonce = NONCE, pending = nonce, codeless = [] } = {}) {
+/** A Fuji chain holding an open-edition token whose sale is the scheduled public phase. As a C-Chain stand-in
+ * it also answers for the active mainnet factory, which created RELEASE paired with SALE unless overridden. */
+function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE, mintEnd = BigInt(PUBLIC_END), maxSupply = 0n, missingToken = false, constructorReverts = false, now = NOW, nonce = NONCE, pending = nonce, codeless = [], factoryReleases = [RELEASE], pairedSale = SALE } = {}) {
   const calls = [];
   const state = { priceWei: PRICE, maxSupply: 0n, sold: 0n, perWalletLimit: 0n, startTime: BigInt(CLAIM_START), endTime: BigInt(PUBLIC_END), paused: false, configured: true, ...saleState };
   return {
@@ -74,6 +82,12 @@ function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE,
         if (fn === "ISSUER_ROLE") return release.encodeFunctionResult(fn, [id("ISSUER_ROLE")]);
         const value = { releaseId: id("release"), editionId: id("edition"), artist: ARTIST, maxSupply, mintedSupply: 0n, metadataUri: "ipfs://x", exists: true, ...edition };
         return release.encodeFunctionResult(fn, [Object.values(value)]);
+      }
+      if (getAddress(to) === ACTIVE_FACTORY) {
+        const parsed = factory.parseTransaction({ data });
+        const [asked] = parsed.args;
+        if (parsed.name === "isRelease") return factory.encodeFunctionResult("isRelease", [factoryReleases.map(getAddress).includes(getAddress(asked))]);
+        return factory.encodeFunctionResult("primarySaleOf", [factoryReleases.map(getAddress).includes(getAddress(asked)) ? pairedSale : "0x0000000000000000000000000000000000000000"]);
       }
       if (getAddress(to) === SALE) {
         const fn = sale.parseTransaction({ data }).name;
@@ -232,6 +246,13 @@ describe("Genesis claim deployment: read-only preflight", () => {
     await expect(preflight(limited, fuji({ saleState: { perWalletLimit: 4n } }))).rejects.toThrow(/perWalletLimit is 4, expected 3/);
   });
 
+  it("checks the active mainnet factory only on mainnet, never for a Fuji plan", async () => {
+    const provider = fuji();
+    const facts = await preflight(ENV, provider);
+    expect(facts.releaseFactory).toBeUndefined();
+    expect(provider.calls.filter((call) => call.to && getAddress(call.to) === ACTIVE_FACTORY)).toEqual([]);
+  });
+
   it("prints a plan with the schedule, live eligibility and the follow-ups it does not perform", async () => {
     const config = validateClaimDeploymentEnv(ENV);
     const plan = buildPlan(config, await preflight());
@@ -295,8 +316,8 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 
   /** C-Chain holding the artist's release; owner and DEFAULT_ADMIN_ROLE holders are configurable. */
-  function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [] } = {}) {
-    const base = fuji({ chainId: 43114n, nonce: 2 });
+  function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [], factoryReleases, pairedSale, codeless } = {}) {
+    const base = fuji({ chainId: 43114n, nonce: 2, factoryReleases, pairedSale, codeless });
     const state = { txs: {}, claim: null, claimValues: {} };
     return {
       ...base,
@@ -339,6 +360,17 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
     const facts = await preflightClaimDeployment(config, { provider: chain, genesisProvider: cChain(), artifact: ARTIFACT });
     return mainnetSigningPlan(config, facts, buildPlan(config, facts), { provider: chain, artifact: ARTIFACT });
   }
+
+  it("plans only a release the active mainnet factory created, with the sale it paired", async () => {
+    expect(ACTIVE_FACTORY).toBe(getAddress("0xEa0c345cE84025b4e8462d145100dce1848254B4"));
+    const plan = await mainnetPlan();
+    expect(plan.target).toMatchObject({ releaseContract: RELEASE, primarySale: SALE, releaseFactory: ACTIVE_FACTORY });
+    // A release from a historical factory (or any other contract) is not in the active factory's registry.
+    await expect(mainnetPlan(cchain({ factoryReleases: [] }))).rejects.toThrow(/not created by the active mainnet release factory 0xEa0c345cE84025b4e8462d145100dce1848254B4/);
+    // The sale must be the one the factory paired with the release, even if it claims to sell that release.
+    await expect(mainnetPlan(cchain({ pairedSale: ADMIN }))).rejects.toThrow(/pairs release .* with sale 0x7777777777777777777777777777777777777777, not 0x3333333333333333333333333333333333333333/);
+    await expect(mainnetPlan(cchain({ codeless: [ACTIVE_FACTORY] }))).rejects.toThrow(/active mainnet release factory .* has no code/);
+  });
 
   it("carries the exact unsigned creation transaction from the defined deployer and its re-plan inputs", async () => {
     const plan = await mainnetPlan();

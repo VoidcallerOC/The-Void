@@ -170,7 +170,8 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
       - `expected_deployer_address=0xaBd3…c174`;
       - `expected_deployer_nonce`.
     - The plan verifies the release, the sale schedule and the Genesis collection. It refuses a release
-      that the artist wallet does not own and administer.
+      the active factory (`config/mainnet-release-per-contract.json`) did not create, a sale that factory did not
+      pair with it, and a release that the artist wallet does not own and administer.
     - The owner signs the single step in Rabby:
       `npm run owner:deploy -- --kind genesis-claim-mainnet --input …` (or `sign:mainnet` with a GitHub
       plan). The tool verifies the mined parameters.
