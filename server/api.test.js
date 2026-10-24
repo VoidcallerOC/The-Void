@@ -280,6 +280,50 @@ describe("API service trust boundaries", () => {
     expect(sql).toMatch(/AS "primaryPurchases"/i);
   });
 
+  describe("listing list marketplace scoping", () => {
+    const activeMarketplace = "0x0f5930113ec750d867741e05f302053472115eb2";
+    const retainedMarketplace = "0x75964c44ca586b13e98e7c30e74d2b4114f65b06";
+    const tokenContract = "0xd1b4367dd9f235f9ee61878019d66e31511e98ee";
+    const listing = { id: "3da734ad-b789-417f-8830-ca182e062de3", chain_id: "43114", listing_id: "1", token_id: "0", status: "ACTIVE", marketplace_address: activeMarketplace, token_contract_address: tokenContract };
+    // Applies the marketplace predicate the way the SQL does: $8 IS NULL OR mc.address = $8.
+    const scopedDb = () => ({ query: vi.fn(async (_sql, values) => ({ rows: [listing].filter((row) => values[7] === null || row.marketplace_address === values[7]) })) });
+
+    it("returns an active-marketplace listing once for its own marketplace and not for a retained one", async () => {
+      const db = scopedDb();
+      const service = new ApiService({ db, repository: {} });
+      await expect(service.listListings({ chainId: 43114, marketplaceAddress: activeMarketplace, tokenContractAddress: tokenContract })).resolves.toEqual([listing]);
+      await expect(service.listListings({ chainId: 43114, marketplaceAddress: retainedMarketplace, tokenContractAddress: tokenContract })).resolves.toEqual([]);
+      const sql = db.query.mock.calls[0][0];
+      expect(sql).toMatch(/\(\$8::text IS NULL OR mc\.address=\$8\)/);
+      expect(db.query.mock.calls[0][1][7]).toBe(activeMarketplace);
+      expect(db.query.mock.calls[1][1][7]).toBe(retainedMarketplace);
+    });
+
+    it("normalizes the marketplace address and keeps the unscoped query unchanged when it is omitted", async () => {
+      const db = scopedDb();
+      const service = new ApiService({ db, repository: {} });
+      await service.listListings({ chainId: 43114, marketplaceAddress: "0x0F5930113Ec750d867741E05F302053472115eb2" });
+      expect(db.query.mock.calls[0][1][7]).toBe(activeMarketplace);
+      await expect(service.listListings({ chainId: 43114 })).resolves.toEqual([listing]);
+      expect(db.query.mock.calls[1][1][7]).toBeNull();
+    });
+
+    it("rejects a malformed marketplace address before querying", async () => {
+      const db = scopedDb();
+      const service = new ApiService({ db, repository: {} });
+      await expect(service.listListings({ marketplaceAddress: "not-an-address" })).rejects.toMatchObject({ code: "INVALID_ADDRESS", status: 400 });
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it("forwards the marketplaceAddress query parameter from GET /api/listings to the service", async () => {
+      const service = { listListings: vi.fn().mockResolvedValue([]) };
+      const response = responseDouble();
+      await createApiHandler({ service })(requestDouble({ url: `/api/listings?chainId=43114&marketplaceAddress=${retainedMarketplace}&status=ACTIVE` }), response);
+      expect(response.status).toBe(200);
+      expect(service.listListings).toHaveBeenCalledWith(expect.objectContaining({ marketplaceAddress: retainedMarketplace }));
+    });
+  });
+
   it("aggregates indexed primary and secondary monetary volume while excluding non-public catalog rows", async () => {
     const db = { query: vi.fn().mockResolvedValue({ rows: [{ primary_mint_volume_wei: "100", secondary_market_volume_wei: "250", overall_volume_wei: "350" }] }) };
     const service = new ApiService({ db, repository: {} });

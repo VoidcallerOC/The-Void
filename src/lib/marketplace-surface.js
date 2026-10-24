@@ -262,6 +262,27 @@ export function attachIndexedListings({ catalogs, listings }) {
   });
 }
 
+/** Stable identity of an indexed listing: chain, marketplace contract and on-marketplace listing id. */
+export function indexedListingKey(listing) {
+  if (!listing) return "";
+  const marketplace = String(listing.marketplace || listing.marketplaceAddress || "").toLowerCase();
+  const listingId = String(listing.listingId ?? "");
+  if (!marketplace || !listingId) return listing.id ? `id:${listing.id}` : "";
+  return `${Number(listing.chain ?? listing.chainId)}:${marketplace}:${listingId}`;
+}
+
+/** Drops repeats of the same indexed listing (e.g. one row returned by several marketplace queries); keeps first-seen order. */
+export function dedupeIndexedListings(listings = []) {
+  const seen = new Set();
+  return (Array.isArray(listings) ? listings : []).filter((listing) => {
+    const key = indexedListingKey(listing);
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function listingsForEdition(listings = [], edition) {
   if (!Array.isArray(listings) || !edition) return [];
   return listings.filter((listing) => listingMatchesEdition(listing, edition));

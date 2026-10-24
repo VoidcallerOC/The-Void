@@ -283,9 +283,9 @@ export class ApiService {
     return rows.filter((row) => !isWithdrawnPublicListing(row)).map((row) => toPublicRow(row, EXPERIENCE_PUBLIC_FIELDS));
   }
 
-  async listListings({ chainId: rawChainId = null, tokenContractAddress = null, tokenId = null, sellerWallet = null, status = ACTIVE_LISTING, limit, offset }) {
-    const values = [rawChainId === null ? null : chainId(rawChainId), tokenContractAddress ? requiredText(tokenContractAddress, "tokenContractAddress", { max: 128 }).toLowerCase() : null, tokenId === null ? null : nonNegativeBigInt(tokenId, "tokenId"), sellerWallet ? walletAddress(sellerWallet, "sellerWallet") : null, status, limitValue(limit), offsetValue(offset)];
-    const { rows } = await this.db.query(`SELECT l.*, mc.address AS marketplace_address, tc.address AS token_contract_address FROM listings l JOIN contracts mc ON mc.id=l.marketplace_contract_id JOIN contracts tc ON tc.id=l.token_contract_id WHERE ($1::bigint IS NULL OR l.chain_id=$1) AND ($2::text IS NULL OR tc.address=$2) AND ($3::numeric IS NULL OR l.token_id=$3) AND ($4::text IS NULL OR l.seller_wallet=$4) AND l.status=$5 AND (l.expires_at IS NULL OR l.expires_at > now()) ORDER BY l.created_at DESC LIMIT $6 OFFSET $7`, values);
+  async listListings({ chainId: rawChainId = null, tokenContractAddress = null, tokenId = null, sellerWallet = null, marketplaceAddress = null, status = ACTIVE_LISTING, limit, offset }) {
+    const values = [rawChainId === null ? null : chainId(rawChainId), tokenContractAddress ? requiredText(tokenContractAddress, "tokenContractAddress", { max: 128 }).toLowerCase() : null, tokenId === null ? null : nonNegativeBigInt(tokenId, "tokenId"), sellerWallet ? walletAddress(sellerWallet, "sellerWallet") : null, status, limitValue(limit), offsetValue(offset), marketplaceAddress ? contractAddress(marketplaceAddress, "marketplaceAddress") : null];
+    const { rows } = await this.db.query(`SELECT l.*, mc.address AS marketplace_address, tc.address AS token_contract_address FROM listings l JOIN contracts mc ON mc.id=l.marketplace_contract_id JOIN contracts tc ON tc.id=l.token_contract_id WHERE ($1::bigint IS NULL OR l.chain_id=$1) AND ($2::text IS NULL OR tc.address=$2) AND ($3::numeric IS NULL OR l.token_id=$3) AND ($4::text IS NULL OR l.seller_wallet=$4) AND ($8::text IS NULL OR mc.address=$8) AND l.status=$5 AND (l.expires_at IS NULL OR l.expires_at > now()) ORDER BY l.created_at DESC LIMIT $6 OFFSET $7`, values);
     return rows;
   }
 

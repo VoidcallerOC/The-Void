@@ -13,6 +13,8 @@ import {
   formatWeiAsAvax,
   listingIsDisplayable,
   listingMatchesEdition,
+  dedupeIndexedListings,
+  indexedListingKey,
   listingsForEdition,
   marketplaceSecondaryAvailability,
   marketplaceCatalog,
@@ -195,5 +197,22 @@ describe("native price formatting", () => {
     expect(parseAvaxToWei("5.")).toBe("5000000000000000000");
     expect(parseAvaxToWei(".")).toBeNull();
     expect(parseAvaxToWei("0.0000000000000000001")).toBeNull();
+  });
+});
+
+describe("indexed listing de-duplication", () => {
+  const row = { id: "a", listingId: "1", chain: 43114, marketplace: "0x0F5930113Ec750d867741E05F302053472115eb2", tokenId: "0", seller: "0x1" };
+  it("collapses a repeated row by chain, marketplace and listing id", () => {
+    expect(dedupeIndexedListings([row, { ...row, marketplace: row.marketplace.toLowerCase() }])).toEqual([row]);
+  });
+  it("keeps the same listing number on a different marketplace or chain", () => {
+    const other = { ...row, id: "b", marketplace: "0x75964C44cA586b13e98e7c30E74d2B4114f65b06" };
+    expect(dedupeIndexedListings([row, other])).toEqual([row, other]);
+    expect(dedupeIndexedListings([row, { ...row, chain: 43113 }])).toHaveLength(2);
+  });
+  it("never merges rows by token id or seller alone, and keeps rows it cannot identify", () => {
+    expect(dedupeIndexedListings([row, { ...row, listingId: "2" }])).toHaveLength(2);
+    expect(dedupeIndexedListings([{ tokenId: "0" }, { tokenId: "0" }])).toHaveLength(2);
+    expect(indexedListingKey(row)).toBe("43114:0x0f5930113ec750d867741e05f302053472115eb2:1");
   });
 });

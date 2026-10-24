@@ -10,7 +10,7 @@ import {
   fetchIndexedListings,
   recordAuthoritativeTransactionSubmission,
 } from "../lib/marketplace-api.js";
-import { MARKETPLACE_STATE, formatWeiAsAvax, listingsForEdition, resolveEditionChain, resolveInfrastructureStatus, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { MARKETPLACE_STATE, dedupeIndexedListings, formatWeiAsAvax, indexedListingKey, listingsForEdition, resolveEditionChain, resolveInfrastructureStatus, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { isActiveUnifiedMarketplace, retainedUnifiedMarketplacesFor } from "../../config/unified-marketplace.js";
 
 const states = [PURCHASE_STATE.READY, PURCHASE_STATE.WALLET_CONFIRMATION, PURCHASE_STATE.SUBMITTED, PURCHASE_STATE.PENDING, PURCHASE_STATE.CONFIRMED];
@@ -71,7 +71,7 @@ export function PurchasePanel({ edition, tokenId = null, listingId = null }) {
       status: "ACTIVE",
       signal: controller.signal,
     })))
-      .then((results) => results.flat())
+      .then((results) => dedupeIndexedListings(results.flat()))
       .then((rows) => {
         const matches = listingsForEdition(rows, edition).filter((item) => tokenId === null || String(item.tokenId) === String(tokenId));
         setListings(matches);
@@ -274,7 +274,7 @@ export function PurchasePanel({ edition, tokenId = null, listingId = null }) {
         <div style={{ display: "grid", gap: 10, margin: "16px 0" }}>
           {listings.map((item) => (
             <button
-              key={item.id || item.listingId}
+              key={indexedListingKey(item) || item.id}
               disabled={busy || (state === PURCHASE_STATE.CONFIRMED && pendingPurchase?.listing.id === item.id)}
               onClick={() => { setListing(item); setQuantity("1"); setPendingPurchase(null); setState(PURCHASE_STATE.READY); }}
               style={{
