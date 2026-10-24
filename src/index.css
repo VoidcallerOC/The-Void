@@ -785,6 +785,7 @@ body { padding-bottom: 72px; }
   gap: 28px;
   align-items: start;
 }
+.vc-edition-plate > * { min-width: 0; }
 .vc-edition-plate img {
   width: 100%;
   aspect-ratio: 1;

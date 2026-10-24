@@ -331,6 +331,7 @@ export function EditionPage() {
           </ul>
           {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>No pressings remain. This object cannot be collected.</p>}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
+          {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
             <div style={{ marginTop: 12 }}>
               <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
@@ -354,7 +355,6 @@ export function EditionPage() {
         <p>Secondary market · {marketplaceStatusLabel(secondary)}</p>
         <p>{release.productType || "Collectible release"} · <Link to={`/artist/${artist.id}`} style={{ color: "inherit" }}>{artist.name}</Link></p>
       </details>
-      {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
       <ListingPanel edition={edition} />
     </section>
   );
