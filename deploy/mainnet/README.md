@@ -210,7 +210,7 @@ need no configuration; these keys tune it.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `INDEXER_SETTLEMENT_RECONCILE` | `true` | `false` disables the targeted pass (block scan only). |
-| `INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS` | `10000` | Tick between passes; a pass with nothing submitted makes no RPC call. |
+| `INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS` | `5000` | Tick between passes; a pass with nothing submitted makes no RPC call. A pending receipt is read once and reused while confirmations accrue. |
 | `INDEXER_SETTLEMENT_RECONCILE_MAX_AGE_MS` | `86400000` | Submissions older than this are left to the block scan. |
 | `INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE` | `10` | Submitted rows examined per pass. |
 | `GENESIS_CLAIM_CONTRACT`, `GENESIS_CLAIM_RELEASE_CONTRACT`, `GENESIS_CLAIM_PRIMARY_SALE`, `GENESIS_CLAIM_TOKEN_ID`, `GENESIS_CLAIM_START` | API | From steps 9–11 |

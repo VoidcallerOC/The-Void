@@ -270,7 +270,7 @@ describe("indexer worker configuration", () => {
 
   it("enables transaction-targeted settlement reconciliation by default with bounded cadence, age and batch", () => {
     const env = (overrides = {}) => ({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]), ...overrides });
-    expect(loadIndexerConfig(env())).toMatchObject({ settlementReconcileEnabled: true, settlementReconcileIntervalMs: 10_000, settlementReconcileMaxAgeMs: 86_400_000, settlementReconcileBatchSize: 10 });
+    expect(loadIndexerConfig(env())).toMatchObject({ settlementReconcileEnabled: true, settlementReconcileIntervalMs: 5_000, settlementReconcileMaxAgeMs: 86_400_000, settlementReconcileBatchSize: 10 });
     expect(loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE: "false", INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS: "2000", INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE: "3" }))).toMatchObject({ settlementReconcileEnabled: false, settlementReconcileIntervalMs: 2_000, settlementReconcileBatchSize: 3 });
     expect(() => loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS: "10" }))).toThrow(/INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS/);
     expect(() => loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE: "0" }))).toThrow(/INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE/);
@@ -284,6 +284,17 @@ describe("indexer worker configuration", () => {
     expect(worker.settlement.rpc).toBe(rpc);
     expect(worker.settlement.retryOpts()).toBe(worker.indexer.retryOptions);
     expect(createProductionIndexerWorker({ serverConfig: {}, indexerConfig: { ...indexerConfig, settlementReconcileEnabled: false }, pool: {}, rpc, store: store(), logger }).worker.settlement).toBeNull();
+  });
+
+  it("names the RPC method and Retry-After in the retry log, without any payload", () => {
+    const indexerConfig = loadIndexerConfig({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 1 }]) });
+    const retryLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const { worker } = createProductionIndexerWorker({ serverConfig: {}, indexerConfig, pool: {}, rpc: {}, store: store(), logger: retryLogger });
+    const error = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: 60_000, rpcMethod: "eth_getLogs" });
+    worker.indexer.retryOptions.onRetry({ attempt: 1, delay: 120, error });
+    const line = JSON.parse(retryLogger.warn.mock.calls.at(-1)[0]);
+    expect(line).toMatchObject({ event: "indexer.rpc.retry", chainId: 43113, attempt: 1, method: "eth_getLogs", status: 429, retryAfterMs: 60_000 });
+    expect(Object.keys(line)).not.toContain("params");
   });
 
   it("does not collapse cycle cooldown when Retry-After is absent", () => {

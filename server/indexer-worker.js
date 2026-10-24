@@ -164,7 +164,7 @@ export class ProductionIndexerWorker {
   }
 
   async waitForSettlementTick() {
-    const delay = Math.max(1, Number(this.config.settlementReconcileIntervalMs) || 10_000);
+    const delay = Math.max(1, Number(this.config.settlementReconcileIntervalMs) || 5_000);
     await new Promise((resolve) => {
       const timer = setTimeout(() => { this._wakeSettlement = null; resolve(); }, delay);
       this._wakeSettlement = () => { clearTimeout(timer); this._wakeSettlement = null; resolve(); };
@@ -277,14 +277,18 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
   });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, settlement, logger });
   indexer.onProgress = () => worker.heartbeat();
-  pacerHooks.onWait = ({ waitMs, nextAllowedAt }) => {
-    // delay in indexer.rpc.retry is only the tiny deferred sleep; this is the real gate.
+  pacerHooks.onWait = ({ waitMs, nextAllowedAt, method = null, priority = false, reason = null }) => {
+    // delay in indexer.rpc.retry is only the tiny deferred sleep; this is the real gate. `reason` says which gate
+    // (retry_after, post_rate_limit, spacing) and `method` names the waiting call; no payload is logged.
     if (waitMs >= 1_000) {
       logger.info?.(JSON.stringify({
         event: "indexer.rpc.pacer.wait",
         chainId: indexerConfig.chainId,
         waitMs,
         nextAllowedAt,
+        method,
+        priority,
+        reason,
       }));
     }
     return worker.heartbeat();
@@ -299,6 +303,7 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
         attempt,
         delay,
         delayKind: "deferred_inner_retry",
+        method: error?.rpcMethod ?? null,
         status: error?.status ?? null,
         retryAfterMs: error?.retryAfterMs ?? null,
         error: error?.message,
