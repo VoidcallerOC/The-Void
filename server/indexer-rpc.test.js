@@ -200,6 +200,97 @@ describe("RPC request pacer", () => {
   });
 });
 
+describe("RPC request pacer priority lane", () => {
+  function pacerWithClock({ minIntervalMs = 5_000, maxConsecutivePriority } = {}) {
+    let clock = 0;
+    const sleeps = [];
+    const waits = [];
+    const pacer = createRpcRequestPacer({
+      minIntervalMs,
+      rateLimitCooldownMs: 45_000,
+      maxDelayMs: 60_000,
+      postRateLimitIntervalMs: 10_000,
+      maxConsecutivePriority,
+      now: () => clock,
+      sleep: async (ms) => { sleeps.push(ms); clock += ms; },
+      random: () => 0,
+      onWait: (info) => { waits.push(info); },
+    });
+    return { pacer, sleeps, waits, clock: () => clock };
+  }
+
+  it("serves a priority call in the next free slot, after the in-flight call and ahead of queued normal calls", async () => {
+    const { pacer } = pacerWithClock();
+    const order = [];
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const first = pacer.schedule(async () => { order.push("scan-1"); await firstGate; return 1; }, { method: "eth_getLogs" });
+    const second = pacer.schedule(async () => { order.push("scan-2"); return 2; }, { method: "eth_getLogs" });
+    const third = pacer.schedule(async () => { order.push("scan-3"); return 3; }, { method: "eth_getLogs" });
+    const settlement = pacer.schedule(async () => { order.push("settle"); return "s"; }, { priority: true, method: "eth_getTransactionReceipt" });
+    expect(pacer.getQueueDepth()).toEqual({ priority: 1, normal: 2 });
+    releaseFirst();
+    await expect(Promise.all([first, second, third, settlement])).resolves.toEqual([1, 2, 3, "s"]);
+    expect(order).toEqual(["scan-1", "settle", "scan-2", "scan-3"]);
+  });
+
+  it("keeps the minimum spacing and the Retry-After gate for the priority lane: no call runs before nextAllowedAt", async () => {
+    const { pacer, sleeps, waits } = pacerWithClock();
+    await pacer.schedule(async () => "scan", { method: "eth_getLogs" });
+    await pacer.schedule(async () => "settle", { priority: true, method: "eth_getTransactionReceipt" });
+    // Priority still pays the 5 s success spacing after the scan call.
+    expect(sleeps).toEqual([5_000]);
+    expect(waits.at(-1)).toMatchObject({ waitMs: 5_000, method: "eth_getTransactionReceipt", priority: true, reason: "spacing" });
+    await expect(pacer.schedule(async () => { throw new RpcHttpError(429, { retryAfterMs: 60_000, method: "eth_getLogs" }); }, { method: "eth_getLogs" })).rejects.toMatchObject({ status: 429, rpcMethod: "eth_getLogs" });
+    await pacer.schedule(async () => "settle-after-429", { priority: true, method: "eth_blockNumber" });
+    // The full Retry-After gate applies to the priority lane, then the elevated post-429 spacing.
+    expect(sleeps.slice(-2)).toEqual([5_000, 60_000]);
+    expect(waits.at(-1)).toMatchObject({ waitMs: 60_000, priority: true, reason: "retry_after" });
+    await pacer.schedule(async () => "next", { priority: true, method: "eth_getBlockByNumber" });
+    expect(sleeps.at(-1)).toBe(10_000);
+    expect(waits.at(-1)).toMatchObject({ waitMs: 10_000, reason: "post_rate_limit" });
+  });
+
+  it("cannot starve the scan: a waiting normal call is served after the fairness window of priority calls", async () => {
+    const { pacer } = pacerWithClock({ minIntervalMs: 0, maxConsecutivePriority: 3 });
+    const order = [];
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const jobs = [pacer.schedule(async () => { order.push("hold"); await firstGate; }, {})];
+    jobs.push(pacer.schedule(async () => { order.push("scan"); }, {}));
+    for (let i = 1; i <= 6; i += 1) jobs.push(pacer.schedule(async () => { order.push(`p${i}`); }, { priority: true }));
+    releaseFirst();
+    await Promise.all(jobs);
+    expect(order).toEqual(["hold", "p1", "p2", "p3", "scan", "p4", "p5", "p6"]);
+  });
+
+  it("keeps serving after a rejected priority call and reports both lanes' depth", async () => {
+    const { pacer } = pacerWithClock({ minIntervalMs: 0 });
+    await expect(pacer.schedule(async () => { throw new Error("boom"); }, { priority: true })).rejects.toThrow("boom");
+    await expect(pacer.schedule(async () => "ok")).resolves.toBe("ok");
+    expect(pacer.getQueueDepth()).toEqual({ priority: 0, normal: 0 });
+  });
+
+  it("exposes the priority lane on the JSON-RPC client over the same pacer, with the method on every error", async () => {
+    const headers = { get: vi.fn((name) => (String(name).toLowerCase() === "retry-after" ? "60" : null)) };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, headers })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ result: "0x10" }) });
+    const sleeps = [];
+    let clock = 0;
+    const client = createJsonRpcClient({ url: "https://rpc.example", fetchImpl, minIntervalMs: 0, rateLimitCooldownMs: 1_000, maxDelayMs: 60_000, postRateLimitIntervalMs: 0, now: () => clock, sleep: async (ms) => { sleeps.push(ms); clock += ms; }, random: () => 0 });
+    const lane = client.prioritized();
+    expect(lane.pacer).toBe(client.pacer);
+    expect(lane.priority).toBe(true);
+    expect(lane.prioritized()).toBe(lane);
+    await expect(client.getLogs({ address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", fromBlock: 1, toBlock: 2 })).rejects.toMatchObject({ status: 429, retryAfterMs: 60_000, rpcMethod: "eth_getLogs" });
+    await expect(lane.getBlockNumber()).resolves.toBe(16);
+    // The priority lane waited out the scan's Retry-After gate on the shared pacer.
+    expect(sleeps).toEqual([60_000]);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).method).toBe("eth_blockNumber");
+  });
+});
+
 describe("RPC retry backoff", () => {
   it("applies bounded exponential backoff with jitter for HTTP 429", async () => {
     const sleeps = [];

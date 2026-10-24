@@ -233,7 +233,74 @@ describe("transaction-targeted settlement reconciliation", () => {
     await expect(target.run()).resolves.toMatchObject({ errors: 1 });
     await expect(target.run()).resolves.toMatchObject({ errors: 1 });
     await expect(target.run()).resolves.toMatchObject({ checked: 0, skipped: 1, errors: 0 });
+    // The receipt is read once and reused across the failing passes; each pass still re-ran the projection.
+    expect(rpc.getTransactionReceipt).toHaveBeenCalledTimes(1);
+    expect(store.applyMarketplaceEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads a receipt once, waits for confirmations with one head read per pass, and logs the settlement phases", async () => {
+    const store = storeDouble({ submitted: [{ transaction_hash: tx, id: "row-1", submitted_at: "2026-10-24T16:14:09.600Z" }] });
+    const rpc = rpcDouble({ receipts: { [tx]: receipt({ blockNumber: 100 }) }, latest: 105 });
+    let clock = Date.parse("2026-10-24T16:14:20.000Z");
+    const { reconciler: target } = reconciler({ store, rpc, confirmations: 12, now: () => clock });
+    await expect(target.run()).resolves.toMatchObject({ awaitingConfirmations: 1 });
+    clock += 10_000;
+    await expect(target.run()).resolves.toMatchObject({ awaitingConfirmations: 1 });
+    expect(rpc.getTransactionReceipt).toHaveBeenCalledTimes(1);
+    expect(rpc.getBlockNumber).toHaveBeenCalledTimes(2);
+    expect(rpc.getBlock).not.toHaveBeenCalled();
+    clock += 10_000;
+    rpc.getBlockNumber.mockResolvedValue(112);
+    await expect(target.run()).resolves.toMatchObject({ settled: 1 });
+    expect(rpc.getTransactionReceipt).toHaveBeenCalledTimes(1);
+    expect(rpc.getBlock).toHaveBeenCalledTimes(1);
+    expect(store.transactions.get(tx).status).toBe("CONFIRMED");
+    const [, payload] = logger.info.mock.calls.findLast(([event]) => event === "indexer.settlement.reconciled");
+    expect(payload).toMatchObject({ transactionHash: tx, transactionId: "row-1", state: "settled", events: 1 });
+    expect(payload.phases).toMatchObject({ submittedAt: "2026-10-24T16:14:09.600Z", receiptReadAt: "2026-10-24T16:14:20.000Z", confirmedAt: "2026-10-24T16:14:40.000Z", projectedAt: "2026-10-24T16:14:40.000Z", reconciledAt: "2026-10-24T16:14:40.000Z" });
+    expect(payload.durations).toMatchObject({ submittedToReceiptMs: 10_400, receiptToConfirmedMs: 20_000, confirmedToProjectedMs: 0, submittedToReconciledMs: 30_400 });
+    expect(JSON.stringify(payload)).not.toMatch(/data|topics|authorization/i);
+  });
+
+  it("drops a cached receipt whose block is no longer canonical and re-reads it on the next pass", async () => {
+    const store = storeDouble({ submitted: [{ transaction_hash: tx }] });
+    const rpc = rpcDouble({ receipts: { [tx]: receipt({ blockNumber: 100 }) }, latest: 105 });
+    const { reconciler: target } = reconciler({ store, rpc, confirmations: 12 });
+    await expect(target.run()).resolves.toMatchObject({ awaitingConfirmations: 1 });
+    // Confirmations arrive, but the canonical block at that height now carries a different hash.
+    rpc.getBlockNumber.mockResolvedValue(150);
+    rpc.getBlock.mockResolvedValueOnce({ ...blockFor(100), hash: hash32(9) });
+    await expect(target.run()).resolves.toMatchObject({ skipped: 1, settled: 0 });
+    expect(store.applyMarketplaceEvent).not.toHaveBeenCalled();
+    expect(store.recordBlock).not.toHaveBeenCalled();
+    // Next pass starts from the receipt again (the replacement block may carry a different one).
+    await expect(target.run()).resolves.toMatchObject({ settled: 1 });
     expect(rpc.getTransactionReceipt).toHaveBeenCalledTimes(2);
+  });
+
+  it("never marks a reverted receipt FAILED before it has the configured confirmations", async () => {
+    const store = storeDouble({ submitted: [{ transaction_hash: tx }] });
+    const rpc = rpcDouble({ receipts: { [tx]: receipt({ status: "0x0", logs: [], blockNumber: 100 }) }, latest: 108 });
+    const { reconciler: target } = reconciler({ store, rpc, confirmations: 12 });
+    await expect(target.run()).resolves.toMatchObject({ awaitingConfirmations: 1, failed: 0 });
+    expect(store.reconcileMarketplaceTransaction).not.toHaveBeenCalled();
+    rpc.getBlockNumber.mockResolvedValue(112);
+    await expect(target.run()).resolves.toMatchObject({ failed: 1 });
+    expect(rpc.getTransactionReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the client's priority lane when one is offered, and the plain client otherwise", async () => {
+    const plain = rpcDouble({ receipts: { [tx]: receipt() }, latest: 150 });
+    const lane = rpcDouble({ receipts: { [tx]: receipt() }, latest: 150 });
+    plain.prioritized = vi.fn(() => lane);
+    const store = storeDouble({ submitted: [{ transaction_hash: tx }] });
+    const { reconciler: target } = reconciler({ store, rpc: plain });
+    await expect(target.run()).resolves.toMatchObject({ settled: 1 });
+    expect(plain.prioritized).toHaveBeenCalledTimes(1);
+    expect(lane.getTransactionReceipt).toHaveBeenCalledTimes(1);
+    expect(plain.getTransactionReceipt).not.toHaveBeenCalled();
+    const { reconciler: fallback } = reconciler({ store: storeDouble({ submitted: [{ transaction_hash: tx }] }), rpc: rpcDouble({ receipts: { [tx]: receipt() }, latest: 150 }) });
+    await expect(fallback.run()).resolves.toMatchObject({ settled: 1 });
   });
 
   it("is disabled cleanly when the store or indexer cannot support it", async () => {

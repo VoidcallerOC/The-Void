@@ -161,3 +161,34 @@ backlog shrinks.
 * DO NOT REDO: the ERC-7572 malformed-event investigation; the measurement in §2.
 * NEXT ACTION: review and merge the PR, deploy `the-void-indexer-mainnet`, then time one real purchase end to end
   and watch `indexer_lag` shrink over three cycles.
+
+## 9. Addendum, 2026-10-24 evening: Retry-After gates and the settlement lane
+
+Measured after the 15:27 UTC deploy of §3:
+
+* A real purchase (block 98,440,238, mined 16:14:06) reached CONFIRMED at 16:15:43.9: 9 s before an HTTP 429, a
+  60 s Retry-After gate honoured by the shared pacer (16:14:18.5 → 16:15:18.6), 10 s post-limit spacing, then
+  three paced reads. The gate is the "unexplained" 45 s.
+* The worker received HTTP 429 with Retry-After 60 s every 2 to 3 minutes from 15:29 onward (49 by 18:47), none in
+  the preceding 24 h. Each costs 70 s of pacer time; the marketplace checkpoint lag stopped shrinking at ≈6,300
+  blocks. The worker's own pattern (one call per 5 s, getLogs-dense or alternating) replayed for 7 minutes from
+  another address produced no 429, and the worker makes a varying number of calls between consecutive 429s
+  (14 and 25 in two sampled intervals), so the quota being exhausted is not the worker's alone. The remaining
+  explanation, Render's shared regional egress address, is unproven from logs: the retry log carried no method.
+
+Changes in the follow-up PR (no change to confirmations, canonical checks or idempotency):
+
+* One pacer, two lanes. Settlement reads take the next free slot ahead of queued scan calls; both lanes obey the
+  same `nextAllowedAt`, so minimum spacing, post-429 spacing and Retry-After still bind every call and the provider
+  sees the same request rate. After three consecutive priority calls a waiting scan call is served (no starvation).
+* A receipt is read once per transaction and reused while confirmations accrue; the canonical block at its height
+  is re-read and compared with the receipt's block hash before any write, and a mismatch drops the cached receipt.
+* Settlement tick 10 s → 5 s (a pass with nothing submitted makes no RPC call).
+* Diagnostics: `indexer.rpc.retry` and `indexer.rpc.pacer.wait` carry the RPC method, HTTP status, Retry-After and
+  the wait reason (`retry_after`, `post_rate_limit`, `spacing`); `indexer.settlement.reconciled` carries the
+  transaction id and phase timestamps (submitted, receipt read, confirmations reached, projected, reconciled) with
+  durations. No payloads, keys or signatures are logged.
+
+Estimate, not measured: with no gate active, inclusion to CONFIRMED ≈ 25–35 s (12 confirmations ≈ 13 s, tick ≤ 5 s,
+one head read and one block read on the priority lane ≈ 10 s). During a gate the lane saves nothing; stopping the
+gates needs an RPC source with its own quota.
