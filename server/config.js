@@ -5,6 +5,9 @@ import { RELEASE_PER_CONTRACT_DEPLOYMENTS } from "../config/release-network.js";
 import { LEGACY_COLLECTION_MARKETPLACE, legacyMarketplaceActive } from "../config/legacy-collection-marketplace.js";
 import { UNIFIED_MARKETPLACE, retainedUnifiedMarketplaces, unifiedMarketplaceActive } from "../config/unified-marketplace.js";
 
+// Per-contract getLogs chunk budget per indexer cycle (see loadIndexerConfig / INDEXER_MAX_CHUNKS_PER_CYCLE).
+export const DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE = 20;
+
 const AVALANCHE_AUTH_CHAIN_IDS = new Set([43113, 43114]);
 
 // The one chain production runs on: Fuji by default, C-Chain only with an
@@ -302,6 +305,11 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     confirmations: boundedPositiveInteger(env.INDEXER_CONFIRMATIONS, 12, "INDEXER_CONFIRMATIONS", { min: 1, max: 500 }),
     // Default 100 matches Avalanche public C-Chain eth_getLogs max span; override only for RPCs that allow larger ranges.
     chunkSize: boundedPositiveInteger(env.INDEXER_CHUNK_SIZE, 100, "INDEXER_CHUNK_SIZE", { min: 1, max: 10_000 }),
+    // getLogs chunks one contract may index per cycle before the next contract gets its turn. A contract with a
+    // long backlog catches up over several cycles instead of holding the paced RPC for hours, so a release or
+    // sale discovered later is never starved. A contract that spends its budget stays RUNNING without a
+    // successful run, so ownership freshness keeps failing closed for it until it reaches the target.
+    maxChunksPerCycle: boundedPositiveInteger(env.INDEXER_MAX_CHUNKS_PER_CYCLE, DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, "INDEXER_MAX_CHUNKS_PER_CYCLE", { min: 1, max: 100_000 }),
     pollIntervalMs: boundedPositiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15_000, "INDEXER_POLL_INTERVAL_MS", { min: 1_000, max: 300_000 }),
     rpcTimeoutMs,
     rpcRetries,

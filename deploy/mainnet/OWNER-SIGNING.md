@@ -260,7 +260,7 @@ Only after this check passes, run step 1 for real.
    | `claim_start` | `GENESIS_CLAIM_START` | `T`, the sale's `startTime` |
    | `public_sale_end` | `GENESIS_PUBLIC_SALE_END` | `E`, the sale's `endTime` |
    | `expected_per_wallet_limit` | `GENESIS_EXPECT_PER_WALLET_LIMIT` | the sale's paid per-wallet limit |
-   | `claim_admin` | `GENESIS_CLAIM_ADMIN` | not the fee recipient, not the signer |
+   | `claim_admin` | `GENESIS_CLAIM_ADMIN` | not the fee recipient, not the signer, not the deployer |
    | `claim_signer_address` | `GENESIS_CLAIM_SIGNER_ADDRESS` | the dedicated voucher signer's public address |
    | `expected_deployer_address` | `EXPECTED_DEPLOYER_ADDRESS` | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` |
    | `expected_deployer_nonce` | `EXPECTED_DEPLOYER_NONCE` | the deployer's current nonce (read live by `owner:deploy`) |
@@ -277,8 +277,13 @@ Only after this check passes, run step 1 for real.
    - **Or locally:** the same values as `GENESIS_*` variables, plus `DEPLOY_NETWORK=mainnet`,
      `GENESIS_PUBLIC_PRICE_WEI=250000000000000000`, `AVALANCHE_MAINNET_RPC_URL` and `GENESIS_RPC_URL`, with
      `npm run deploy:genesis-claim -- --dry-run`. A mainnet plan never broadcasts and never reads a key.
-3. Fund the deployer for the creation (its `gasLimit` at the current fee) before signing; planning does not need
-   funds. Type the deployer address from the deployment record, never from wallet history.
+3. Fund the deployer before signing; planning does not need funds. The plan's `checks` row *deployer funded with
+   50% headroom over gasLimit × maxFeePerGas* must read PASS: the deployer must hold at least
+   `signingRequests[0].gasLimit` × the RPC's current `maxFeePerGas` × 1.5 (the plan prints it as
+   `funding.requiredAvax`). Both signing paths (`npm run sign:mainnet` and `npm run owner:deploy`) refuse to offer
+   the transaction while that row fails, and a plan without usable fee data from the RPC is refused as well. Funding
+   is re-checked live from the chain before each signature and is never part of the plan binding. Type the
+   deployer address from the deployment record, never from wallet history.
 4. Sign the single step in Rabby, either way:
    - **With the GitHub plan:** check out the binding's `sourceCommit` with no tracked modifications, then
      `npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding plan-binding.json`.

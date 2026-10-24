@@ -76,7 +76,7 @@ All **20 tracked full-duration audio files** were removed from static serving, i
 | `INDEXER_CHAIN_ID` | Indexer chain | Current Fuji deployment uses `43113`; do not claim C-Chain production without a separate reviewed deployment. |
 | `INDEXER_RPC_URL` | Avalanche JSON-RPC endpoint | Required for the worker; use a vetted, monitored endpoint. |
 | `INDEXER_CONTRACTS_JSON` | Registered ERC-1155/marketplace addresses and start blocks | Required; enter only reviewed, deployed values. |
-| `INDEXER_CONFIRMATIONS`, `INDEXER_CHUNK_SIZE`, `INDEXER_POLL_INTERVAL_MS` | Indexing/finality behavior | Tune and validate against the selected RPC provider. |
+| `INDEXER_CONFIRMATIONS`, `INDEXER_CHUNK_SIZE`, `INDEXER_MAX_CHUNKS_PER_CYCLE`, `INDEXER_POLL_INTERVAL_MS` | Indexing/finality behavior; the per-cycle chunk budget keeps one contract's backlog from starving the others | Tune and validate against the selected RPC provider. |
 | `INDEXER_RPC_TIMEOUT_MS`, `INDEXER_RPC_RETRIES`, `INDEXER_RETRY_BASE_DELAY_MS` | RPC resilience behavior | Tune while retaining lease safety. |
 | `INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS`, `INDEXER_LEASE_TTL_MS` | Reconciliation and worker exclusivity | Required for durable operation. |
 | `MEDIA_STORAGE_DRIVER` | Protected media driver | Must be `pinata` in production. |

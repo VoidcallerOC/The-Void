@@ -45,7 +45,7 @@ on:
         required: true
         type: string
       claim_admin:
-        description: Claim admin (pause, signer rotation). Never the fee recipient or the signer.
+        description: Claim admin (pause, signer rotation). Never the fee recipient, the signer or the deployer.
         required: true
         type: string
       claim_signer_address:

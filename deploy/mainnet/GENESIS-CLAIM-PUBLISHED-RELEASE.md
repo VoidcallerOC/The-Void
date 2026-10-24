@@ -113,8 +113,11 @@ against the paid per-wallet limit, and a claimant can still buy up to the limit.
 - `claimStart` is at least 600 s after the latest block when the plan is made.
 - The constructor is simulated with `eth_call` before the plan is written; the artist wallet must hold
   `DEFAULT_ADMIN_ROLE` on the release for the `grantRole(ISSUER_ROLE, claim)` follow-up.
-- Roles stay separate: the claim admin and voucher signer are not the fee recipient, the deployer, or the
-  artist (signer), and the signer is a dedicated key.
+- Roles stay separate: the claim admin and voucher signer are not the fee recipient or the deployer, the signer
+  is not the artist or the admin, and the signer is a dedicated key (the artist wallet may be the admin).
+- Funding gate: the plan is `readyToSign` only when the deployer has no pending transactions, the predicted claim
+  address is empty, the RPC returned usable fee data, and the deployer holds `gasLimit × maxFeePerGas × 1.5`.
+  These live checks are re-run before each signature and are not part of the plan binding.
 
 ## Checking an already-published release (read-only)
 
@@ -148,8 +151,10 @@ The schedule (start, end, per-wallet limit) is the owner's decision; nothing her
 2. **Owner** chooses the claim admin (not the fee recipient) and generates a dedicated voucher signer key offline
    (not the admin, deployer, artist or fee recipient). Only the signer's address goes into the plan.
 3. **Owner** funds the deployer `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` for one contract creation before
-   signing (planning needs no funds). The creation uses about 1.78M gas; the wallet must cover the plan's
-   `signingRequests[0].gasLimit` (about 2.14M) at the current fee, about 0.0054 AVAX at 2.5 gwei, plus headroom.
+   signing (planning needs no funds). The plan computes the requirement itself: `funding.requiredAvax` =
+   `signingRequests[0].gasLimit` × the RPC's `maxFeePerGas` × 1.5, and its `checks` row *deployer funded with 50%
+   headroom over gasLimit × maxFeePerGas* must read PASS before either signing path offers the transaction. A plan
+   made while the RPC returns no usable fee data is refused rather than guessed.
 4. **Owner** runs *Plan the Genesis holder claim for C-Chain mainnet* (GitHub Actions) on the merged claim source
    with `release_contract`, `primary_sale`, `token_id=1`, `claim_start=<start>`, `public_sale_end=<end>`,
    `expected_per_wallet_limit=<limit>`, `claim_admin`, `claim_signer_address`, `expected_deployer_address`,

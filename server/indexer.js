@@ -1,5 +1,5 @@
 import { zeroAddress, retry } from "./indexer-utils.js";
-import { collectionIndexerConfig, primarySaleIndexerConfig, releaseIndexerConfig } from "./config.js";
+import { DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, collectionIndexerConfig, primarySaleIndexerConfig, releaseIndexerConfig } from "./config.js";
 import { decodeMarketplaceLog } from "./marketplace-events.js";
 import { unifiedPlatformFeeBps } from "../config/unified-marketplace.js";
 import { reconcileMarketplaceListing } from "./marketplace-reconcile.js";
@@ -250,15 +250,20 @@ export function classifyMarketplaceLog(log, topics = {}) {
 export const DEFAULT_INDEXER_CHUNK_SIZE = 100;
 
 export class BlockchainIndexer {
-  constructor({ rpc, store, configs, confirmations = 12, chunkSize = DEFAULT_INDEXER_CHUNK_SIZE, retryOptions = {}, logger = console, onProgress = null } = {}) {
+  constructor({ rpc, store, configs, confirmations = 12, chunkSize = DEFAULT_INDEXER_CHUNK_SIZE, maxChunksPerCycle = DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, retryOptions = {}, logger = console, onProgress = null } = {}) {
     if (!rpc || !store || !Array.isArray(configs) || configs.length === 0) throw new TypeError("Indexer requires rpc, store, and at least one contract config.");
     const resolvedChunkSize = Number(chunkSize);
     if (!Number.isSafeInteger(resolvedChunkSize) || resolvedChunkSize < 1) throw new TypeError("Indexer chunkSize must be a positive integer.");
+    const resolvedMaxChunks = maxChunksPerCycle === Infinity ? Infinity : Number(maxChunksPerCycle);
+    if (resolvedMaxChunks !== Infinity && (!Number.isSafeInteger(resolvedMaxChunks) || resolvedMaxChunks < 1)) throw new TypeError("Indexer maxChunksPerCycle must be a positive integer.");
     this.rpc = rpc;
     this.store = store;
     this.configs = configs;
     this.confirmations = confirmations;
     this.chunkSize = resolvedChunkSize;
+    // Fair scheduling: one contract may index at most this many chunks per syncAll before yielding to the
+    // next contract. Progress is checkpointed per chunk, so a capped contract resumes where it stopped.
+    this.maxChunksPerCycle = resolvedMaxChunks;
     this.retryOptions = retryOptions;
     this.logger = logger;
     this.onProgress = onProgress;
@@ -438,8 +443,9 @@ export class BlockchainIndexer {
       throw error;
     }
     let processed = 0;
+    let chunks = 0;
     try {
-      while (nextBlock <= target) {
+      while (nextBlock <= target && chunks < this.maxChunksPerCycle) {
         const endBlock = Math.min(target, nextBlock + this.chunkSize - 1);
         operation = "rpc";
         const logs = await retry(() => this.rpc.getLogs({ chainId, address, fromBlock: nextBlock, toBlock: endBlock }), this.retryOptions);
@@ -468,15 +474,30 @@ export class BlockchainIndexer {
           for (const log of logs.filter((item) => Number(item.blockNumber) === blockNumber)) await this.processLog(config, log, block);
           await this.onProgress?.({ chainId, address, blockNumber, finalizedBlock: target });
         }
-        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: endBlock + 1, lastProcessedBlock: endBlock, finalizedBlock: target, latestKnownBlock: latest, status: "RUNNING", lastError: null });
+        // finalized_block never runs ahead of the data actually indexed: this chunk's last block, not the cycle target.
+        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: endBlock + 1, lastProcessedBlock: endBlock, finalizedBlock: endBlock, latestKnownBlock: latest, status: "RUNNING", lastError: null });
         nextBlock = endBlock + 1;
         processed += endBlock - rangeStart + 1;
+        chunks += 1;
       }
       operation = "database";
+      if (nextBlock <= target) {
+        // The per-cycle chunk budget is spent with blocks still to index. Persist the partial progress as a
+        // RUNNING checkpoint without a successful run (ownership freshness keeps failing closed for this
+        // contract), finalize sale rows only through the indexed block, and yield so the remaining contracts
+        // get their turn this cycle. The next cycle resumes from the persisted next_block.
+        const indexedThrough = nextBlock - 1;
+        const remainingBlocks = target - nextBlock + 1;
+        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: indexedThrough, finalizedBlock: indexedThrough, latestKnownBlock: latest, status: "RUNNING", lastError: null });
+        await this.finalizePrimarySalePurchases(config, indexedThrough);
+        await this.finalizePrimarySaleSettlements(config, indexedThrough);
+        this.logger.info?.("indexer.sync.catching_up", { chainId, address, nextBlock, targetBlock: target, remainingBlocks, chunks });
+        return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: indexedThrough, targetBlock: target, remainingBlocks, state: "CATCHING_UP", partial: true };
+      }
       await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: nextBlock - 1, finalizedBlock: target, latestKnownBlock: latest, status: "IDLE", lastError: null, markRunSucceeded: true, markRunCompleted: true });
       await this.finalizePrimarySalePurchases(config, target);
       await this.finalizePrimarySaleSettlements(config, target);
-      return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, state: "CONFIRMED" };
+      return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, targetBlock: target, remainingBlocks: 0, state: "CONFIRMED", partial: false };
     } catch (error) {
       await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: operation === "rpc", databaseFailure: operation === "database" });
       this.logger.error?.("indexer.sync.failed", { chainId, address, nextBlock, error: error.message });
