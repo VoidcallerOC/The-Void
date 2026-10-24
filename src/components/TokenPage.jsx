@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { getEditionCatalog } from "../domain/models.js";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
@@ -21,6 +21,7 @@ export function TokenPage() {
   const { edition: editionId, tokenId: rawTokenId } = useParams();
   const result = getEditionCatalog(catalog, editionId);
   const [failedImages, setFailedImages] = useState([]);
+  const listingId = new URLSearchParams(useLocation().search).get("listing");
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading token…</p></section>;
   }
@@ -47,9 +48,9 @@ export function TokenPage() {
           <p className="vc-card-meta" style={{ overflowWrap: "anywhere" }}>Chain {edition.chainId} · Contract {edition.contractAddress} · Token {tokenId}</p>
           {track && <div style={{ margin: "18px 0" }}><PlayTokenButton track={track} queueId={`token-page:${edition.id}:${tokenId}`} collection={release?.title || edition.title} label={`Play ${title} preview`} /></div>}
           <div style={{ marginTop: 12 }}><Link to={`/edition/${encodeURIComponent(edition.id)}`} style={ghostBtn}>View edition</Link></div>
+          {secondary === MARKETPLACE_STATE.LIVE && isReleasePerContractCandidate(edition) && <PurchasePanel edition={edition} tokenId={tokenId} listingId={listingId} />}
         </div>
       </div>
-      {secondary === MARKETPLACE_STATE.LIVE && isReleasePerContractCandidate(edition) && <PurchasePanel edition={edition} tokenId={tokenId} />}
     </section>
   );
 }

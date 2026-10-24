@@ -105,6 +105,8 @@ function shortWallet(wallet) {
 }
 
 const tokenHref = (edition, tokenId) => `/edition/${encodeURIComponent(edition.id)}/token/${encodeURIComponent(String(tokenId))}`;
+// When several offers share a token, the token page alone cannot say which one was picked, so the link carries the offer's id.
+const offerHref = (edition, listing) => `${tokenHref(edition, listing.tokenId)}?listing=${encodeURIComponent(String(listing.id || listing.listingId))}`;
 
 export function SecondaryListingCard({ item, listings = [], owned = false, catalog = null }) {
   const { edition, artist, release, primary, chain } = item;
@@ -113,6 +115,7 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
   const active = listings.filter((listing) => listing?.authority === "INDEXED" && String(listing.status).toUpperCase() === "ACTIVE");
   const tokens = [...new Set(active.map((listing) => String(listing.tokenId)))].map((tokenId) => listedTokenView(catalog, edition, release, tokenId));
   const tokenById = new Map(tokens.map((token) => [token.tokenId, token]));
+  const sharedToken = (listing) => active.filter((other) => String(other.tokenId) === String(listing.tokenId)).length > 1;
   // One listed token: the card is about that token, so it leads with that token's own art and name.
   const single = tokens.length === 1 ? tokens[0] : null;
   const heading = single?.name || edition.title;
@@ -144,7 +147,11 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
               <p className="vc-card-meta" style={{ margin: 0 }}>
                 Available · {listing.amount || "—"} · {formatWeiAsAvax(listing.price) || "Price unavailable"}
               </p>
-              {!single && <Link to={tokenHref(edition, listing.tokenId)} style={{ ...ghostBtn, display: "inline-block", marginTop: 8 }}>View token #{String(listing.tokenId)}</Link>}
+              {(!single || active.length > 1) && (
+                <Link to={sharedToken(listing) ? offerHref(edition, listing) : tokenHref(edition, listing.tokenId)} style={{ ...ghostBtn, display: "inline-block", marginTop: 8 }} aria-label={single ? `View this offer, token #${String(listing.tokenId)}` : undefined}>
+                  {single ? "View this offer" : `View token #${String(listing.tokenId)}`}
+                </Link>
+              )}
             </div>
           ))}
         </div>

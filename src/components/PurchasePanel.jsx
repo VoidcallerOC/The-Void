@@ -23,6 +23,7 @@ const failureStates = new Set([
   PURCHASE_STATE.STALE,
   PURCHASE_STATE.RECONCILIATION_REQUIRED,
 ]);
+const shortSeller = (wallet) => { const value = String(wallet || ""); return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value || "unavailable"; };
 const nextPollDelay = (attempt) => Math.min(1500 * (2 ** Math.min(attempt, 4)), 15000);
 const sameAddress = (left, right) => typeof left === "string" && typeof right === "string" && left.toLowerCase() === right.toLowerCase();
 
@@ -40,7 +41,8 @@ function purchaseMarketplaceConfig(listing, edition, marketplace) {
 }
 
 // With `tokenId`, only offers for that exact token are shown and bought (the token page).
-export function PurchasePanel({ edition, tokenId = null }) {
+// `listingId` is the exact offer a visitor chose elsewhere (`?listing=`); it only preselects among the indexed offers.
+export function PurchasePanel({ edition, tokenId = null, listingId = null }) {
   const wallet = useWallet();
   const walletAccount = wallet.account;
   const refreshOwnership = wallet.refreshOwnership;
@@ -73,7 +75,7 @@ export function PurchasePanel({ edition, tokenId = null }) {
       .then((rows) => {
         const matches = listingsForEdition(rows, edition).filter((item) => tokenId === null || String(item.tokenId) === String(tokenId));
         setListings(matches);
-        setListing(matches[0] || null);
+        setListing(matches.find((item) => listingId && String(item.id) === String(listingId)) || matches[0] || null);
         setListingsState("ready");
         setMessage(matches.length ? "Indexed secondary offers for this edition." : "The live index has no active listings for this edition.");
       })
@@ -85,7 +87,7 @@ export function PurchasePanel({ edition, tokenId = null }) {
         setMessage(error?.message || "The marketplace index is unavailable.");
       });
     return () => controller.abort();
-  }, [live, chain, edition, editionKey, marketplace, tokenId]);
+  }, [live, chain, edition, editionKey, marketplace, tokenId, listingId]);
 
   const collect = async () => {
     if (!wallet.connected || !wallet.account) { setMessage("Connect your wallet before collecting."); return; }
@@ -287,6 +289,7 @@ export function PurchasePanel({ edition, tokenId = null }) {
               }}
             >
               Token #{item.tokenId} · {item.amount} remaining · {formatWeiAsAvax(item.price) || "Indexed price"} · {item.status}
+              <span style={{ display: "block", marginTop: 4, opacity: 0.7, fontSize: 11 }}>Listing #{item.listingId} · Seller {shortSeller(item.seller)}</span>
             </button>
           ))}
         </div>
