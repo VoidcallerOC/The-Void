@@ -121,9 +121,12 @@ describe("on-chain publishing role controls", () => {
       </WalletCtx.Provider>,
     );
     fireEvent.change(screen.getByRole("textbox", { name: /artist wallet address/i }), { target: { value: ARTIST } });
-    expect(await screen.findByText(/ARTIST_ROLE/)).toBeTruthy();
+    // Both reads are asynchronous: the admin check (readFujiRole) and the artist's role read (readPublishingRoles).
+    // The intro paragraph always contains the literal "ARTIST_ROLE", so waiting on that alone races both reads
+    // (CI run 40106844449 on main, 2026-10-24: "contract admin …" and "Checking roles on Fuji…" were still rendered).
+    expect(await screen.findByText(/this wallet cannot grant roles/)).toBeTruthy();
+    expect(await screen.findByText(/ARTIST_ROLE ✕/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /grant publishing roles/i })).toBeNull();
-    expect(screen.getByText(/this wallet cannot grant roles/)).toBeTruthy();
   });
 
   it("hides the grant on a verified application for a non-admin and keeps the verification revoke", async () => {
