@@ -614,6 +614,37 @@ describe("per-cycle chunk budget (INDEXER_MAX_CHUNKS_PER_CYCLE): fair catch-up a
     expect(rpc.getBlockNumber).toHaveBeenCalledTimes(3);
   });
 
+  // Mainnet measurement (2026-10-24): every empty 100-block chunk cost two paced RPC calls (eth_getLogs plus the
+  // end-block eth_getBlockByNumber used only as a reorg anchor), so ten contracts × 20 chunks × 2 × 5 s ≈ 33 min
+  // per cycle, about what the chain advanced in the same time. Anchoring only the call's last chunk halves that.
+  it("fetches an end-block anchor only for the call's last chunk, keeping the persisted checkpoint anchored", async () => {
+    const store = storeDouble();
+    const rpc = rpcFor(449);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a)], maxChunksPerCycle: 3 });
+    await expect(indexer.syncAll()).resolves.toMatchObject([{ state: "CATCHING_UP", nextBlock: 300, finalizedBlock: 299 }]);
+    expect(ranges(rpc)).toEqual([[a, 0, 99], [a, 100, 199], [a, 200, 299]]);
+    // Three getLogs, one anchor: the checkpoint's last processed block is recorded and nothing else was fetched.
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([299]);
+    expect(await store.getBlock({ chainId: 43114, blockNumber: 299 })).toMatchObject({ block_hash: "0xblock299" });
+    expect(await store.getCheckpoint({ chainId: 43114, address: a })).toMatchObject({ nextBlock: 300, lastProcessedBlock: 299, finalizedBlock: 299, status: "RUNNING" });
+    // The next cycle completes with the target block anchored (this store double does not expose
+    // last_processed_block, so checkpoint verification, covered below, is not exercised here).
+    await expect(indexer.syncAll()).resolves.toMatchObject([{ state: "CONFIRMED", nextBlock: 450, finalizedBlock: 449 }]);
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([299, 449]);
+    expect(await store.getBlock({ chainId: 43114, blockNumber: 449 })).toMatchObject({ block_hash: "0xblock449" });
+  });
+
+  it("still fetches and records every block that carries a log inside an intermediate chunk", async () => {
+    const store = storeDouble();
+    const rpc = rpcFor(299);
+    rpc.getLogs = vi.fn(async ({ fromBlock }) => (fromBlock === 0 ? [singleLog({ blockNumber: 42, address: a }), singleLog({ blockNumber: 77, address: a, tx: "0xtx77" })] : []));
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a)], maxChunksPerCycle: 3 });
+    await expect(indexer.syncAll()).resolves.toMatchObject([{ state: "CONFIRMED", nextBlock: 300 }]);
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([42, 77, 299]);
+    expect(store.transfers.map((transfer) => transfer.blockNumber)).toEqual([42, 77]);
+    expect(await store.getBlock({ chainId: 43114, blockNumber: 77 })).toMatchObject({ block_hash: "0xblock77" });
+  });
+
   it("never marks a checkpoint's finalized block ahead of the blocks actually indexed", async () => {
     const store = storeDouble();
     const indexer = new BlockchainIndexer({ rpc: rpcFor(249), store, confirmations: 0, configs: [erc1155(a)], maxChunksPerCycle: 2 });

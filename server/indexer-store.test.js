@@ -82,6 +82,26 @@ describe("marketplace event projection storage", () => {
   });
 });
 
+describe("submitted marketplace transaction listing", () => {
+  it("lists only SUBMITTED marketplace rows with real hashes inside the age window, oldest first, bounded", async () => {
+    const pool = { query: vi.fn().mockResolvedValue({ rows: [{ transaction_hash: transactionHash, to_address: marketplace, transaction_type: "PURCHASE", status: "SUBMITTED" }] }) };
+    const rows = await new IndexerStore(pool).listSubmittedMarketplaceTransactions({ chainId: 43114, marketplaceAddresses: [marketplace.toUpperCase(), marketplace], maxAgeMs: 3_600_000, limit: 5 });
+    expect(rows).toHaveLength(1);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain("status='SUBMITTED'");
+    expect(sql).toContain("transaction_type IN ('PURCHASE','LISTING_CREATE','LISTING_CANCEL')");
+    expect(sql).toContain("transaction_hash ~* '^0x[0-9a-f]{64}$'");
+    expect(sql).toContain("ORDER BY submitted_at ASC");
+    expect(params).toEqual([43114, [marketplace], 3_600_000, 5]);
+  });
+
+  it("makes no query without a configured marketplace", async () => {
+    const pool = { query: vi.fn() };
+    await expect(new IndexerStore(pool).listSubmittedMarketplaceTransactions({ chainId: 43114, marketplaceAddresses: [], maxAgeMs: 1 })).resolves.toEqual([]);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+});
+
 describe("indexer checkpoint persistence", () => {
   it("only lets a verified reorg move next_block backward and fails loudly otherwise", async () => {
     const pool = { query: vi.fn().mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ next_block: "90" }] }) };

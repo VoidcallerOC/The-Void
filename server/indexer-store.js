@@ -455,6 +455,28 @@ export class IndexerStore {
     });
   }
 
+  /**
+   * Submitted marketplace transactions the targeted settlement reconciler may settle ahead of the sequential pass:
+   * SUBMITTED rows for a configured marketplace with a real transaction hash (purchase intents carry `intent:` keys
+   * and are never looked up), newest submissions last so the oldest pending one is checked first.
+   */
+  async listSubmittedMarketplaceTransactions({ chainId, marketplaceAddresses, maxAgeMs, limit = 10 }) {
+    const addresses = [...new Set((marketplaceAddresses || []).map((value) => lower(value)))];
+    if (!addresses.length) return [];
+    const { rows } = await this.db.query(
+      `SELECT id, chain_id, transaction_hash, from_wallet, to_address, transaction_type, status, submitted_at
+       FROM transactions
+       WHERE chain_id=$1 AND status='SUBMITTED' AND transaction_type IN ('PURCHASE','LISTING_CREATE','LISTING_CANCEL')
+         AND lower(to_address) = ANY($2::text[])
+         AND transaction_hash ~* '^0x[0-9a-f]{64}$'
+         AND submitted_at >= now() - ($3::bigint * interval '1 millisecond')
+       ORDER BY submitted_at ASC
+       LIMIT $4`,
+      [chainId, addresses, Math.max(1, Math.floor(Number(maxAgeMs) || 86_400_000)), Math.max(1, Math.floor(Number(limit) || 10))],
+    );
+    return rows;
+  }
+
   async reconcileMarketplaceTransaction({ chainId, transactionHash, state, receipt }) {
     return withTransaction(this.db, async (client) => {
       const hash = lower(transactionHash);
