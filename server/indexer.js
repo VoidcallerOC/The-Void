@@ -29,6 +29,10 @@ export function decodeTransferLog(log, { chainId, blockTimestamp, eventTopics = 
     TransferSingle: new Set([eventTopics.TransferSingle].filter(Boolean).map((value) => String(value).toLowerCase())),
     TransferBatch: new Set([eventTopics.TransferBatch].filter(Boolean).map((value) => String(value).toLowerCase())),
   };
+  // Only a transfer carries the indexed operator in topics[1]. Any other event the release emits (for example
+  // ERC-7572 ContractURIUpdated(string), a single-topic event every clone logs at creation) is not a transfer and
+  // is reported as UNKNOWN by the caller, not as MALFORMED.
+  if (!knownTopics.TransferSingle.has(topic) && !knownTopics.TransferBatch.has(topic)) return [];
   const common = { chainId, contractAddress: String(log.address || "").toLowerCase(), transactionHash: String(log.transactionHash || "").toLowerCase(), blockNumber: Number(log.blockNumber), blockHash: String(log.blockHash || "").toLowerCase(), logIndex: Number(log.logIndex), blockTimestamp, operator: topicAddress(log.topics?.[1]) };
   if (knownTopics.TransferSingle.has(topic)) {
     if (log.topics.length < 4) throw new Error("TransferSingle requires from and to topics.");

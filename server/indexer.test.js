@@ -41,6 +41,25 @@ describe("ERC-1155 event decoding", () => {
     expect(decodeTransferLog(singleLog({ from: alice, to: zero }), { chainId: 43114, blockTimestamp: new Date(), eventTopics: { TransferSingle: singleTopic } })[0].eventType).toBe("BURN");
   });
 
+  // Production (C-Chain, 2026-10-19 to 2026-10-24): every release clone logs ERC-7572 ContractURIUpdated(string),
+  // topic 0x905d9812…, with no indexed parameters, at its creation block. The decoder read topics[1] as the
+  // operator before checking the event type, so each of those logs was recorded MALFORMED with an indexer_errors
+  // row (8 rows), although it is simply not a transfer.
+  it("treats an unknown single-topic event as not-a-transfer instead of a malformed one", async () => {
+    const contractUriUpdated = { address: "0xf0c091a159de16cf0f306b2b61d37685ec5a830e", topics: ["0x905d981207a7d0b6c62cc46ab0be2a076d0298e4a86d0ab79882dbd01ac37378"], data: `0x${"00".repeat(128)}`, transactionHash: "0xtxcreate", blockNumber: 1, blockHash: "0xblock1", logIndex: 18 };
+    expect(decodeTransferLog(contractUriUpdated, { chainId: 43114, blockTimestamp: new Date(0), eventTopics: { TransferSingle: singleTopic, TransferBatch: batchTopic } })).toEqual([]);
+    // A real transfer that lacks its indexed addresses is still malformed.
+    expect(() => decodeTransferLog({ ...contractUriUpdated, topics: [singleTopic] }, { chainId: 43114, blockTimestamp: new Date(0), eventTopics: { TransferSingle: singleTopic } })).toThrow(/malformed|requires from and to/);
+    // Through the indexer: recorded as UNKNOWN, no indexer_errors row, no transfer applied, and the chunk still completes.
+    const store = storeDouble();
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(1), getLogs: vi.fn().mockResolvedValue([contractUriUpdated]), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [{ chainId: 43114, address: contractUriUpdated.address, contractType: "ERC1155", startBlock: 0, eventTopics: { TransferSingle: singleTopic, TransferBatch: batchTopic } }] });
+    await expect(indexer.syncAll()).resolves.toMatchObject([{ state: "CONFIRMED", nextBlock: 2 }]);
+    expect([...store.events.values()].map((event) => event.eventType)).toEqual(["UNKNOWN"]);
+    expect(store.calls.errors).toEqual([]);
+    expect(store.transfers).toEqual([]);
+  });
+
   it("supports multiple token IDs from a batch transfer", () => {
     const data = `0x${word(64)}${word(160)}${word(2)}${word(7)}${word(8)}${word(2)}${word(3)}${word(4)}`;
     const result = decodeTransferLog({ ...singleLog({}), topics: [batchTopic, addrTopic(alice), addrTopic(alice), addrTopic(bob)], data }, { chainId: 43114, blockTimestamp: new Date(), eventTopics: { TransferBatch: batchTopic } });
