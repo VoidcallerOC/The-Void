@@ -1,7 +1,9 @@
 name: Plan the Genesis holder claim for C-Chain mainnet
 
-# GenesisHolderClaim for the mainnet Forgive & Forget release token (created by the artist wallet on
-# the recorded mainnet VoidReleaseFactoryV2Royalty; the Fuji -28 release is never a mainnet target).
+# GenesisHolderClaim for the mainnet Forgive & Forget release token: a VoidRelease1155V6Sequential clone the
+# artist wallet created through the active mainnet factory (config/mainnet-release-per-contract.json,
+# factoryAddress). The plan refuses any release that factory did not create, and any sale it did not pair
+# with that release; the Fuji -28 release is never a mainnet target.
 # Production schedule only: the free Genesis claim and the token's own primary sale (already configured
 # by the artist, unpaused, as the public phase) open together at claim_start; claims close after exactly
 # 24 hours and the sale runs at 0.25 AVAX through public_sale_end (inclusive), a whole-hour window of 7 to
@@ -19,11 +21,11 @@ on:
   workflow_dispatch:
     inputs:
       release_contract:
-        description: Mainnet Forgive & Forget release contract (0x...), a V4 clone from the recorded mainnet factory.
+        description: Mainnet Forgive & Forget release contract (0x...), created by the active factory in config/mainnet-release-per-contract.json.
         required: true
         type: string
       primary_sale:
-        description: That release's VoidPrimarySale (0x...).
+        description: The primary sale the active factory paired with that release (0x...).
         required: true
         type: string
       token_id:

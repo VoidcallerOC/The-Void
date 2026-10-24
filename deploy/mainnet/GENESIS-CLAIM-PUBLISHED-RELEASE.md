@@ -98,14 +98,18 @@ against the paid per-wallet limit, and a claimant can still buy up to the limit.
 ## What the deploy script adds (`npm run deploy:genesis-claim`, plan only on mainnet)
 
 - The release and sale are real contracts on the chain, the sale's `releases()` is this release.
+- On mainnet the release was created by the active factory in `config/mainnet-release-per-contract.json`
+  (`isRelease(release)`), and the sale is the one that factory paired with it (`primarySaleOf(release)`). A
+  release from a historical factory, or any other contract, is refused. The plan records the factory as
+  `target.releaseFactory`.
 - Open edition (`GENESIS_EXPECT_OPEN_EDITION=yes`, the default): `maxSupplyOf(token) == 0`.
 - The edition's `mintEndOf(token)` is `0` or exactly `publicSaleEnd`. The mint end is fixed when
   the edition is created and cannot be changed afterwards; a mint end before the sale end would refuse the
   late purchases (`MintingEnded`) whatever the sale says. Live token 1 has `mintEndOf(1) == 0`.
 - On mainnet `GENESIS_PUBLIC_SALE_END` is required and must give a policy window from `claimStart`; if
   `GENESIS_PUBLIC_WINDOW_SECONDS` is also set it must agree.
-- The sale is not paused, and with `GENESIS_EXPECT_PER_WALLET_LIMIT` set (the mainnet workflow requires it)
-  its `perWalletLimit` equals that value.
+- The sale is not paused, and its `perWalletLimit` equals `GENESIS_EXPECT_PER_WALLET_LIMIT` (required on
+  mainnet, optional on Fuji).
 - `claimStart` is at least 600 s after the latest block when the plan is made.
 - The constructor is simulated with `eth_call` before the plan is written; the artist wallet must hold
   `DEFAULT_ADMIN_ROLE` on the release for the `grantRole(ISSUER_ROLE, claim)` follow-up.
@@ -143,15 +147,22 @@ The schedule (start, end, per-wallet limit) is the owner's decision; nothing her
    (whole hours, 7-14 days) and `<start>` far enough ahead for steps 2-6.
 2. **Owner** chooses the claim admin (not the fee recipient) and generates a dedicated voucher signer key offline
    (not the admin, deployer, artist or fee recipient). Only the signer's address goes into the plan.
-3. **Owner** funds the deployer `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` for one contract creation (about
-   1.8M gas, about 0.0045 AVAX at 2.5 gwei; check the plan's `estimatedGas`).
-4. **Repository**: merge the reviewed claim source, run *Plan the Genesis holder claim for C-Chain mainnet* with
-   `release_contract`, `primary_sale`, `token_id=1`, `claim_start=<start>`, `public_sale_end=<end>`,
+3. **Owner** funds the deployer `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` for one contract creation before
+   signing (planning needs no funds). The creation uses about 1.78M gas; the wallet must cover the plan's
+   `signingRequests[0].gasLimit` (about 2.14M) at the current fee, about 0.0054 AVAX at 2.5 gwei, plus headroom.
+4. **Owner** runs *Plan the Genesis holder claim for C-Chain mainnet* (GitHub Actions) on the merged claim source
+   with `release_contract`, `primary_sale`, `token_id=1`, `claim_start=<start>`, `public_sale_end=<end>`,
    `expected_per_wallet_limit=<limit>`, `claim_admin`, `claim_signer_address`, `expected_deployer_address`,
-   `expected_deployer_nonce`, and merge the bound plan (the approval). The plan simulates the constructor and
-   records the exact creation-data hash of the compiled `GenesisHolderClaim`.
-5. **Owner** signs the single creation transaction in Rabby with the deployer (`npm run sign:mainnet`), which
-   verifies the mined transaction against the plan's data hash and every claim parameter on chain.
+   `expected_deployer_nonce`. The run simulates the constructor, records the exact creation data (and its
+   hash), and uploads the artifact `genesis-claim-mainnet-plan-<run id>`: `plan.json`, `plan-output.log` and
+   `plan-binding.json` (the plan bound to that run's commit). Nothing is merged; the binding file is the
+   approval, valid only for that commit and that deployer nonce.
+5. **Owner** checks out the binding's `sourceCommit` cleanly and signs the single creation transaction in Rabby
+   with the deployer: `npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding
+   plan-binding.json`. The tool re-plans from the live chain and refuses any difference from the approved plan;
+   after mining it verifies the transaction against the plan's data hash and every claim parameter on chain.
+   (`npm run owner:deploy -- --kind genesis-claim-mainnet --input …` plans and signs in one local session
+   instead; `deploy/mainnet/OWNER-SIGNING.md` lists every input.)
 6. **Artist wallet** signs `grantRole(ISSUER_ROLE, <claim>)` on the release (the plan's `followUps.issuerGrant`):
    the only permission the claim needs. It must be mined before `<start>`.
 7. **Owner** sets the API (Render) variables below and redeploys the API; `GENESIS_CLAIM_ENABLED=true` only with

@@ -244,26 +244,57 @@ Only after this check passes, run step 1 for real.
 
 ## Procedure: Genesis claim (separate, later)
 
-1. The artist creates the release and edition and configures the sale with the artist wallet
-   (README steps 9–10). The deployer does none of this.
-2. Plan:
-   - **In GitHub:** Actions → *Plan the Genesis holder claim for C-Chain mainnet*, with the release,
-     sale, token, `claim_start`, `claim_admin`, `claim_signer_address` and `expected_deployer_nonce`.
-   - **Or locally:** the same inputs as `GENESIS_*` variables, with `npm run deploy:genesis-claim -- --dry-run`.
+1. The artist creates the release and edition through the active factory
+   (`config/mainnet-release-per-contract.json`, `factoryAddress`) and configures the sale with the artist wallet
+   (README steps 9–10): `configureSale(tokenId, 250000000000000000, 0, <perWalletLimit>, T, E, false)`, opening
+   at `T` together with the claims and ending at `E` (inclusive), where `E - T + 1` is whole hours, 7 to 14 days.
+   The deployer does none of this.
+2. Plan. On mainnet every input below is required; only `expected_deployer_nonce` may be left out of a GitHub
+   dry run, but without it no binding is written and nothing can be signed from that run:
 
-   The plan refuses a release the artist wallet does not own and administer, and a release where the
-   deployer or the fee recipient holds admin.
-3. Start the tool with the claim's inputs, approve the plan on the page, and sign the single step in Rabby:
-   ```
-   npm run owner:deploy -- --kind genesis-claim-mainnet \
-     --input GENESIS_CLAIM_RELEASE_CONTRACT=<release> --input GENESIS_CLAIM_PRIMARY_SALE=<sale> \
-     --input GENESIS_CLAIM_TOKEN_ID=<token> --input GENESIS_CLAIM_START=<T> \
-     --input GENESIS_PUBLIC_PRICE_WEI=250000000000000000 \
-     --input GENESIS_CLAIM_ADMIN=<admin> --input GENESIS_CLAIM_SIGNER_ADDRESS=<signer public address>
-   ```
-   Or, with a plan made in GitHub:
-   `npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding plan-binding.json`.
-4. **Separate artist operation.** The plan's `followUps.issuerGrant` is the `grantRole(ISSUER_ROLE,
+   | Workflow input | `GENESIS_*` variable | Value |
+   |---|---|---|
+   | `release_contract` | `GENESIS_CLAIM_RELEASE_CONTRACT` | a release the active factory created |
+   | `primary_sale` | `GENESIS_CLAIM_PRIMARY_SALE` | the sale that factory paired with it |
+   | `token_id` | `GENESIS_CLAIM_TOKEN_ID` | the open edition's token ID |
+   | `claim_start` | `GENESIS_CLAIM_START` | `T`, the sale's `startTime` |
+   | `public_sale_end` | `GENESIS_PUBLIC_SALE_END` | `E`, the sale's `endTime` |
+   | `expected_per_wallet_limit` | `GENESIS_EXPECT_PER_WALLET_LIMIT` | the sale's paid per-wallet limit |
+   | `claim_admin` | `GENESIS_CLAIM_ADMIN` | not the fee recipient, not the signer |
+   | `claim_signer_address` | `GENESIS_CLAIM_SIGNER_ADDRESS` | the dedicated voucher signer's public address |
+   | `expected_deployer_address` | `EXPECTED_DEPLOYER_ADDRESS` | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` |
+   | `expected_deployer_nonce` | `EXPECTED_DEPLOYER_NONCE` | the deployer's current nonce (read live by `owner:deploy`) |
+
+   The workflow fixes the rest (`GENESIS_CLAIM_WINDOW_SECONDS=86400`, `GENESIS_PUBLIC_PRICE_WEI=250000000000000000`,
+   allocations `0`, open edition). The plan refuses a release the active factory did not create, a sale it did
+   not pair with that release, a sale whose price, cap, start, end or per-wallet limit differ or that is paused,
+   a release the artist wallet does not own and administer, and a release where the deployer or the fee
+   recipient holds admin. It simulates the constructor from the deployer and records the exact creation data.
+   - **In GitHub:** Actions → *Plan the Genesis holder claim for C-Chain mainnet* with the inputs above. The run
+     uploads the artifact `genesis-claim-mainnet-plan-<run id>` with `plan.json`, `plan-output.log` and, when
+     `expected_deployer_nonce` is given, `plan-binding.json`, bound to that run's commit. Nothing is merged: the
+     binding file is the approval, and it is valid only for that commit and that deployer nonce.
+   - **Or locally:** the same values as `GENESIS_*` variables, plus `DEPLOY_NETWORK=mainnet`,
+     `GENESIS_PUBLIC_PRICE_WEI=250000000000000000`, `AVALANCHE_MAINNET_RPC_URL` and `GENESIS_RPC_URL`, with
+     `npm run deploy:genesis-claim -- --dry-run`. A mainnet plan never broadcasts and never reads a key.
+3. Fund the deployer for the creation (its `gasLimit` at the current fee) before signing; planning does not need
+   funds. Type the deployer address from the deployment record, never from wallet history.
+4. Sign the single step in Rabby, either way:
+   - **With the GitHub plan:** check out the binding's `sourceCommit` with no tracked modifications, then
+     `npm run sign:mainnet -- --kind genesis-claim-mainnet --plan plan.json --binding plan-binding.json`.
+     The tool refuses another commit, a plan that does not produce the binding, and a fresh live re-plan (from
+     the plan's own `planInputs`) that differs from it, for example after the deployer nonce moved.
+   - **In one local session:** on a clean checkout,
+     ```
+     npm run owner:deploy -- --kind genesis-claim-mainnet \
+       --input GENESIS_CLAIM_RELEASE_CONTRACT=<release> --input GENESIS_CLAIM_PRIMARY_SALE=<sale> \
+       --input GENESIS_CLAIM_TOKEN_ID=<token> --input GENESIS_CLAIM_START=<T> --input GENESIS_PUBLIC_SALE_END=<E> \
+       --input GENESIS_EXPECT_PER_WALLET_LIMIT=<limit> --input GENESIS_PUBLIC_PRICE_WEI=250000000000000000 \
+       --input GENESIS_CLAIM_ADMIN=<admin> --input GENESIS_CLAIM_SIGNER_ADDRESS=<signer public address>
+     ```
+     It plans at the deployer's live nonce on the checked-out commit and offers the step only after you approve
+     the plan on the page.
+5. **Separate artist operation.** The plan's `followUps.issuerGrant` is the `grantRole(ISSUER_ROLE,
    <claim>)` call, prepared for the account that holds the authority: the release's `DEFAULT_ADMIN_ROLE`
    holder, verified on chain to be the artist wallet. The artist signs it in the artist wallet's own
    session before `claimStart`. Then run:
