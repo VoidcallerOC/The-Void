@@ -263,6 +263,14 @@ describe("secondary listing cards show the exact listed token's metadata", () =>
     expect(within(el).queryByRole("link", { name: "View edition" })).toBeNull();
   });
 
+  it("two offers on one token each link to their own offer on the token page", async () => {
+    fetchListings.mockResolvedValueOnce([genesis(0, { listingId: "1" }), genesis(0, { listingId: "2" })]);
+    renderMarketplace();
+    await waitFor(() => expect(card()).toBeTruthy());
+    const hrefs = within(card()).getAllByRole("link", { name: /^View this offer/ }).map((link) => link.getAttribute("href"));
+    expect(hrefs).toEqual(["/edition/voidcaller-chapter-i/token/0?listing=g-0-1", "/edition/voidcaller-chapter-i/token/0?listing=g-0-2"]);
+  });
+
   it("if the token's IPFS image fails, it falls back to that token's local art, then the edition art", async () => {
     fetchListings.mockResolvedValueOnce([genesis(0)]);
     renderMarketplace();

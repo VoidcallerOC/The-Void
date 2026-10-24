@@ -245,4 +245,17 @@ describe("token page: offers for one exact token", () => {
     expect(screen.queryByRole("button", { name: /Token #43/ })).toBeNull();
     expect(screen.getByText("No active indexed listings for this edition.")).toBeTruthy();
   });
+
+  it("lists same-token offers with listing and seller so they can be told apart, and preselects the requested one", async () => {
+    const twin = { ...activeListing, id: "listing-42b", listingId: "7", seller: "0x1111111111111111111111111111111111111111" };
+    mocks.fetchIndexedListings.mockReset().mockResolvedValue([activeListing, twin]);
+    render(<WalletCtx.Provider value={wallet}><PurchasePanel edition={edition} tokenId="42" listingId="listing-42b" /></WalletCtx.Provider>);
+    await act(async () => { await flushPromises(); });
+    const rows = screen.getAllByRole("button", { name: /Token #42/ });
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).not.toBe(rows[1].textContent);
+    expect(rows[1].textContent).toContain("Listing #7");
+    expect(rows[1].style.border).toContain("var(--vc-crimson)");
+    expect(rows[0].style.border).not.toContain("var(--vc-crimson)");
+  });
 });

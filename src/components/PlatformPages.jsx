@@ -1,6 +1,6 @@
 import { XAccountLink } from "./XAccountLink.jsx";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useHashScroll } from "../lib/use-hash-scroll.js";
 import { ListForSaleLink } from "./AssetActions.jsx";
 import { Eyebrow } from "./Atoms.jsx";
@@ -276,6 +276,7 @@ export function ReleasePage({ children = null } = {}) {
 export function EditionPage() {
   const catalog = useMarketplaceCatalogs();
   const { edition: editionId } = useParams();
+  const requestedListing = new URLSearchParams(useLocation().search).get("listing");
   const result = getEditionCatalog(catalog, editionId);
   // "List for sale" links here with #secondary-listing; scroll there once the edition (and its ListingPanel) renders.
   useHashScroll("secondary-listing", Boolean(result));
@@ -331,6 +332,7 @@ export function EditionPage() {
           </ul>
           {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>No pressings remain. This object cannot be collected.</p>}
           <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
+          {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} listingId={requestedListing} />}
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
             <div style={{ marginTop: 12 }}>
               <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
@@ -354,7 +356,6 @@ export function EditionPage() {
         <p>Secondary market · {marketplaceStatusLabel(secondary)}</p>
         <p>{release.productType || "Collectible release"} · <Link to={`/artist/${artist.id}`} style={{ color: "inherit" }}>{artist.name}</Link></p>
       </details>
-      {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} />}
       <ListingPanel edition={edition} />
     </section>
   );
