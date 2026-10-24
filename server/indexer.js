@@ -455,7 +455,12 @@ export class BlockchainIndexer {
         const logs = await retry(() => this.rpc.getLogs({ chainId, address, fromBlock: nextBlock, toBlock: endBlock }), this.retryOptions);
         const rangeStart = nextBlock;
         const eventBlocks = [...new Set(logs.map((log) => Number(log.blockNumber)))].filter((n) => n >= rangeStart && n <= endBlock);
-        if (!eventBlocks.includes(endBlock)) eventBlocks.push(endBlock);
+        // Every block with a log is fetched and recorded (reorg anchor + timestamp). The chunk's end block is fetched
+        // only for the last chunk of this call, so the persisted checkpoint stays anchored while an empty intermediate
+        // chunk costs one paced RPC call (eth_getLogs) instead of two. A reorg across empty blocks changes no indexed
+        // state; the next anchor above it still detects it.
+        const lastChunkOfCall = endBlock >= target || chunks + 1 >= this.maxChunksPerCycle;
+        if (lastChunkOfCall && !eventBlocks.includes(endBlock)) eventBlocks.push(endBlock);
         eventBlocks.sort((a, b) => a - b);
         for (const blockNumber of eventBlocks) {
           let block;

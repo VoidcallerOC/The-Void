@@ -199,6 +199,20 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
 | `MEDIA_AUDIT_HASH_SECRET` | API | A **new** random secret (≥ 24 characters) |
 | `MARKETPLACE_ADDRESS` | both | Mined marketplace |
 | `INDEXER_CONTRACTS_JSON` | indexer | `[{"address":"<factory>","contractType":"RELEASE_FACTORY","startBlock":<block>},{"address":"<marketplace>","contractType":"MARKETPLACE","startBlock":<block>,"platformFeeBps":250}]` |
+
+### Indexer settlement latency (optional overrides)
+
+The worker settles each SUBMITTED marketplace transaction (purchase, listing, cancellation) from its own receipt as
+soon as it has `INDEXER_CONFIRMATIONS` confirmations, instead of waiting for the marketplace checkpoint to reach its
+block. It uses the same RPC pacer, decoders and projections as the block scan and never moves a checkpoint. Defaults
+need no configuration; these keys tune it.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `INDEXER_SETTLEMENT_RECONCILE` | `true` | `false` disables the targeted pass (block scan only). |
+| `INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS` | `10000` | Tick between passes; a pass with nothing submitted makes no RPC call. |
+| `INDEXER_SETTLEMENT_RECONCILE_MAX_AGE_MS` | `86400000` | Submissions older than this are left to the block scan. |
+| `INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE` | `10` | Submitted rows examined per pass. |
 | `GENESIS_CLAIM_CONTRACT`, `GENESIS_CLAIM_RELEASE_CONTRACT`, `GENESIS_CLAIM_PRIMARY_SALE`, `GENESIS_CLAIM_TOKEN_ID`, `GENESIS_CLAIM_START` | API | From steps 9–11 |
 | `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` | API | The dedicated signer key (entered by the owner only) |
 

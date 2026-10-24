@@ -268,6 +268,24 @@ describe("indexer worker configuration", () => {
     })).toThrow(/INDEXER_LEASE_TTL_MS must be at least/);
   });
 
+  it("enables transaction-targeted settlement reconciliation by default with bounded cadence, age and batch", () => {
+    const env = (overrides = {}) => ({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]), ...overrides });
+    expect(loadIndexerConfig(env())).toMatchObject({ settlementReconcileEnabled: true, settlementReconcileIntervalMs: 10_000, settlementReconcileMaxAgeMs: 86_400_000, settlementReconcileBatchSize: 10 });
+    expect(loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE: "false", INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS: "2000", INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE: "3" }))).toMatchObject({ settlementReconcileEnabled: false, settlementReconcileIntervalMs: 2_000, settlementReconcileBatchSize: 3 });
+    expect(() => loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS: "10" }))).toThrow(/INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS/);
+    expect(() => loadIndexerConfig(env({ INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE: "0" }))).toThrow(/INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE/);
+    // The production worker wires the reconciler to the same indexer, store, RPC pacer and confirmation depth.
+    const marketplace = "0xcccccccccccccccccccccccccccccccccccccccc";
+    const indexerConfig = loadIndexerConfig(env({ INDEXER_CONFIRMATIONS: "7", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: marketplace, contractType: "MARKETPLACE", startBlock: 1 }]) }));
+    const rpc = {};
+    const { worker } = createProductionIndexerWorker({ serverConfig: {}, indexerConfig, pool: {}, rpc, store: store(), logger });
+    expect(worker.settlement).toMatchObject({ chainId: 43113, confirmations: 7, batchSize: 10, maxAgeMs: 86_400_000 });
+    expect(worker.settlement.indexer).toBe(worker.indexer);
+    expect(worker.settlement.rpc).toBe(rpc);
+    expect(worker.settlement.retryOpts()).toBe(worker.indexer.retryOptions);
+    expect(createProductionIndexerWorker({ serverConfig: {}, indexerConfig: { ...indexerConfig, settlementReconcileEnabled: false }, pool: {}, rpc, store: store(), logger }).worker.settlement).toBeNull();
+  });
+
   it("does not collapse cycle cooldown when Retry-After is absent", () => {
     const failure = Object.assign(new Error("RPC HTTP 429"), { status: 429, retryAfterMs: null });
     expect(rateLimitCooldownMs(failure, {

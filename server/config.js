@@ -320,6 +320,13 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     rpcRateLimitCooldownMs,
     ownershipReconciliationIntervalMs: boundedPositiveInteger(env.INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS, 900_000, "INDEXER_OWNERSHIP_RECONCILIATION_INTERVAL_MS", { min: 60_000, max: 86_400_000 }),
     leaseTtlMs,
+    // Transaction-targeted settlement: SUBMITTED marketplace transactions (purchase, listing, cancel) are settled from
+    // their own receipt as soon as they have `confirmations`, instead of waiting for the marketplace checkpoint to
+    // reach their block. Same RPC pacer, same decoders and projections, no checkpoint movement.
+    settlementReconcileEnabled: String(env.INDEXER_SETTLEMENT_RECONCILE ?? "true").trim().toLowerCase() !== "false",
+    settlementReconcileIntervalMs: boundedPositiveInteger(env.INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS, 10_000, "INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS", { min: 1_000, max: 300_000 }),
+    settlementReconcileMaxAgeMs: boundedPositiveInteger(env.INDEXER_SETTLEMENT_RECONCILE_MAX_AGE_MS, 86_400_000, "INDEXER_SETTLEMENT_RECONCILE_MAX_AGE_MS", { min: 60_000, max: 604_800_000 }),
+    settlementReconcileBatchSize: boundedPositiveInteger(env.INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE, 10, "INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE", { min: 1, max: 100 }),
   });
 }
 
