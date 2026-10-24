@@ -82,6 +82,32 @@ describe("production indexer worker", () => {
     expect(rpc.getBalanceOf).toHaveBeenCalledTimes(1);
   });
 
+  it("defers ownership reconciliation while any contract is still catching up, and runs it once all reach the target", async () => {
+    const other = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const durableStore = store({ listOwnershipReconciliationTargets: vi.fn().mockResolvedValue([{ token_id: "7", wallet_address: wallet }]), getOwnership: vi.fn().mockResolvedValue({ amount: "1" }) });
+    const rpc = { getBalanceOf: vi.fn().mockResolvedValue(1n) };
+    const syncAll = vi.fn()
+      .mockResolvedValueOnce([{ address: contract, finalizedBlock: 99, targetBlock: 249, nextBlock: 100, remainingBlocks: 150, state: "CATCHING_UP", partial: true }, { address: other, finalizedBlock: 249, targetBlock: 249, state: "CONFIRMED", partial: false }])
+      .mockResolvedValueOnce([{ address: contract, finalizedBlock: 249, targetBlock: 249, state: "CONFIRMED", partial: false }, { address: other, finalizedBlock: 249, targetBlock: 249, state: "CONFIRMED", partial: false }]);
+    const worker = new ProductionIndexerWorker({ indexer: { syncAll, retryOptions: { retries: 0 } }, store: durableStore, rpc, config: config(), logger });
+    const first = await worker.runOnce();
+    expect(first).toMatchObject({ ownershipChecks: 0, catchingUp: 1, ownershipDeferred: true });
+    expect(rpc.getBalanceOf).not.toHaveBeenCalled();
+    expect(durableStore.listOwnershipReconciliationTargets).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith("indexer.worker.ownership.deferred", expect.objectContaining({ chainId: 43113, catchingUp: [expect.objectContaining({ address: contract, nextBlock: 100, remainingBlocks: 150 })] }));
+    const second = await worker.runOnce();
+    expect(second).toMatchObject({ ownershipChecks: 1, catchingUp: 0, ownershipDeferred: false });
+    expect(rpc.getBalanceOf).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers ownership reconciliation when complete contracts report different finalized blocks", async () => {
+    const durableStore = store({ listOwnershipReconciliationTargets: vi.fn().mockResolvedValue([{ token_id: "7", wallet_address: wallet }]) });
+    const syncAll = vi.fn().mockResolvedValue([{ address: contract, finalizedBlock: 240, state: "CONFIRMED", partial: false }, { address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", finalizedBlock: 249, state: "CONFIRMED", partial: false }]);
+    const worker = new ProductionIndexerWorker({ indexer: { syncAll, retryOptions: { retries: 0 } }, store: durableStore, rpc: { getBalanceOf: vi.fn() }, config: config(), logger });
+    await expect(worker.runOnce()).resolves.toMatchObject({ ownershipChecks: 0, ownershipDeferred: true });
+    expect(durableStore.listOwnershipReconciliationTargets).not.toHaveBeenCalled();
+  });
+
   it("releases its lease after a synchronization/database failure", async () => {
     const failure = new Error("database write failed");
     const durableStore = store();
@@ -199,6 +225,17 @@ describe("indexer worker configuration", () => {
       INDEXER_CHUNK_SIZE: "50",
       INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]),
     }).chunkSize).toBe(50);
+  });
+
+  it("defaults INDEXER_MAX_CHUNKS_PER_CYCLE to 20 chunks per contract per cycle, accepts an override, and refuses zero", () => {
+    const env = (overrides = {}) => ({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 123 }]), ...overrides });
+    expect(loadIndexerConfig(env()).maxChunksPerCycle).toBe(20);
+    expect(loadIndexerConfig(env({ INDEXER_MAX_CHUNKS_PER_CYCLE: "5" })).maxChunksPerCycle).toBe(5);
+    expect(() => loadIndexerConfig(env({ INDEXER_MAX_CHUNKS_PER_CYCLE: "0" }))).toThrow(/INDEXER_MAX_CHUNKS_PER_CYCLE/);
+    expect(() => loadIndexerConfig(env({ INDEXER_MAX_CHUNKS_PER_CYCLE: "lots" }))).toThrow(/INDEXER_MAX_CHUNKS_PER_CYCLE/);
+    // The production worker hands the budget to the indexer it builds.
+    const { worker } = createProductionIndexerWorker({ serverConfig: {}, indexerConfig: { ...loadIndexerConfig(env({ INDEXER_MAX_CHUNKS_PER_CYCLE: "7" })) }, pool: {}, rpc: {}, store: store() });
+    expect(worker.indexer.maxChunksPerCycle).toBe(7);
   });
 
   it("defaults retry max delay, pacing, and rejects leases that cannot cover one capped backoff", () => {

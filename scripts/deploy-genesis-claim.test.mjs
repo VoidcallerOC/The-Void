@@ -5,6 +5,7 @@ import { AbiCoder, Interface, Wallet, ZeroHash, getAddress, getCreateAddress, id
 import { CLAIM_ARTIFACT_PATH, broadcastClaim, buildClaimRecord, buildPlan, mainnetSigningPlan, preflightClaimDeployment, run, validateClaimDeploymentEnv, verifyClaimDeployment } from "./deploy-genesis-claim.mjs";
 import { ELIGIBILITY_RULE, ELIGIBILITY_RULE_TEXT, GENESIS_CONTRACT } from "../server/genesis-claim.js";
 import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
+import { bindPlan } from "./plan-binding-core.mjs";
 
 const KEY = `0x${"11".repeat(32)}`;
 const DEPLOYER = new Wallet(KEY).address;
@@ -65,7 +66,7 @@ function fuji({ chainId = 43113n, edition = {}, saleState = {}, bound = RELEASE,
   return {
     calls,
     send: async (method) => { if (method !== "eth_chainId") throw new Error(`unexpected ${method}`); return `0x${chainId.toString(16)}`; },
-    getCode: async (address) => (codeless.includes(getAddress(address)) ? "0x" : "0x6001"),
+    getCode: async (address) => (codeless.includes(getAddress(address)) || ![RELEASE, SALE, ACTIVE_FACTORY].includes(getAddress(address)) ? "0x" : "0x6001"),
     getBlock: async () => ({ number: 59_400_000, timestamp: now }),
     getTransactionCount: async (_address, tag) => (tag === "pending" ? pending : nonce),
     call: async ({ to, data, from }) => {
@@ -189,6 +190,8 @@ describe("Genesis claim deployment: environment schedule", () => {
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: RABBY_DEPLOYER })).toThrow(/not the deployer/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ARTIST })).toThrow(/not the artist wallet/);
     expect(validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: ARTIST })).toMatchObject({ admin: ARTIST, signer: SIGNER });
+    // The deployer signs the creation and holds no role afterwards: it may be neither the signer nor the admin.
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: RABBY_DEPLOYER })).toThrow(/claim admin may not be the deployer/);
     // Fuji keeps its existing rules.
     expect(validateClaimDeploymentEnv({ ...ENV, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toMatchObject({ network: "fuji" });
   });
@@ -316,13 +319,17 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
   const claimViews = new Interface(["releaseContract", "primarySale", "admin", "signer"].map((name) => `function ${name}() view returns (address)`).concat(["tokenId", "allocation", "publicAllocation", "claimStart", "claimWindow", "publicWindow", "claimEnd", "publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => `function ${name}() view returns (uint256)`), ["function ELIGIBILITY_RULE() view returns (bytes32)", "function paused() view returns (bool)"]));
 
   /** C-Chain holding the artist's release; owner and DEFAULT_ADMIN_ROLE holders are configurable. */
-  function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [], factoryReleases, pairedSale, codeless } = {}) {
-    const base = fuji({ chainId: 43114n, nonce: 2, factoryReleases, pairedSale, codeless });
+  function cchain({ owner = ARTIST, admins = [ARTIST], issuers = [], factoryReleases, pairedSale, codeless, balance = 10n ** 18n, feeData = { maxFeePerGas: 25_000_000_000n }, pending } = {}) {
+    const base = fuji({ chainId: 43114n, nonce: 2, pending, factoryReleases, pairedSale, codeless });
     const state = { txs: {}, claim: null, claimValues: {} };
     return {
       ...base,
       state,
       estimateGas: async () => 2_000_000n,
+      getBalance: async () => balance,
+      getFeeData: async () => feeData,
+      // The predicted address is empty until the claim is mined; afterwards it carries runtime code.
+      getCode: async (address) => (state.claim && getAddress(address) === state.claim ? "0x6001" : base.getCode(address)),
       getTransactionReceipt: async (hash) => state.txs[hash]?.receipt ?? null,
       getTransaction: async (hash) => state.txs[hash]?.tx ?? null,
       call: async (tx) => {
@@ -379,6 +386,73 @@ describe("Genesis claim on mainnet: owner-signed in Rabby, verified from chain",
     expect(plan).toMatchObject({ readyToSign: true, deployer: RABBY_DEPLOYER, predictedClaimAddress: getCreateAddress({ from: RABBY_DEPLOYER, nonce: 2 }) });
     expect(plan.planInputs).toMatchObject({ DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: RABBY_DEPLOYER, EXPECTED_DEPLOYER_NONCE: "2", GENESIS_CLAIM_START: String(CLAIM_START), GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_CLAIM_SIGNER_ADDRESS: SIGNER });
     expect(JSON.stringify(plan)).not.toMatch(/PRIVATE_KEY"\s*:\s*"0x|privateKey|mnemonic/i);
+  });
+
+  it("gates signing on live readiness: pending transactions, the reviewed nonce and an empty predicted address", async () => {
+    const ready = await mainnetPlan();
+    expect(ready.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ check: "no pending deployer transactions", status: "PASS", value: { nonce: 2, pendingNonce: 2 } }),
+      expect.objectContaining({ check: "nonce matches EXPECTED_DEPLOYER_NONCE", status: "PASS", value: 2 }),
+      expect.objectContaining({ check: "predicted claim address is empty", status: "PASS", value: ready.predictedClaimAddress }),
+    ]));
+    const pending = await mainnetPlan(cchain({ pending: 3 }));
+    expect(pending.readyToSign).toBe(false);
+    expect(pending.checks.find((item) => /pending/.test(item.check))).toMatchObject({ status: "FAIL", value: { nonce: 2, pendingNonce: 3 } });
+    const occupied = cchain();
+    const emptyCode = occupied.getCode;
+    occupied.getCode = async (address) => (getAddress(address) === getCreateAddress({ from: RABBY_DEPLOYER, nonce: 2 }) ? "0x6002" : emptyCode(address));
+    const taken = await mainnetPlan(occupied);
+    expect(taken.readyToSign).toBe(false);
+    expect(taken.checks.find((item) => /predicted claim address/.test(item.check))).toMatchObject({ status: "FAIL" });
+    // A plan made without a reviewed nonce is still ready: the binding carries the live nonce it was planned at.
+    const config = validateClaimDeploymentEnv({ ...MAINNET_ENV, EXPECTED_DEPLOYER_NONCE: "" });
+    const chain = cchain();
+    const facts = await preflightClaimDeployment(config, { provider: chain, genesisProvider: cChain(), artifact: ARTIFACT });
+    const unreviewed = await mainnetSigningPlan(config, facts, buildPlan(config, facts), { provider: chain, artifact: ARTIFACT });
+    expect(unreviewed.readyToSign).toBe(true);
+    expect(unreviewed.checks.find((item) => /EXPECTED_DEPLOYER_NONCE/.test(item.check))).toMatchObject({ status: "NOT PROVIDED" });
+  });
+
+  it("gates signing on funding: gasLimit × live maxFeePerGas with 50% headroom, failing closed without fee data", async () => {
+    // gasLimit 2,400,000 × 25 gwei × 1.5 = 0.09 AVAX against a 1 AVAX balance.
+    const funded = await mainnetPlan();
+    expect(funded.readyToSign).toBe(true);
+    expect(funded.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ check: "fee data available for the funding requirement", status: "PASS" }),
+      expect.objectContaining({ check: "deployer funded with 50% headroom over gasLimit × maxFeePerGas", status: "PASS", value: { balanceAvax: "1.0", requiredAvax: "0.09", gasLimit: "2400000", maxFeePerGasWei: "25000000000" } }),
+    ]));
+    expect(funded.funding).toEqual({ balanceWei: "1000000000000000000", balanceAvax: "1.0", gasLimit: "2400000", maxFeePerGasWei: "25000000000", requiredWei: "90000000000000000", requiredAvax: "0.09", headroomPercent: 150, funded: true });
+    // One wei short of the requirement is not funded.
+    const short = await mainnetPlan(cchain({ balance: 90_000_000_000_000_000n - 1n }));
+    expect(short.readyToSign).toBe(false);
+    expect(short.checks.find((item) => /funded/.test(item.check))).toMatchObject({ status: "FAIL", reason: expect.stringMatching(/Fund the deployer 0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174 with at least 0\.09 AVAX \(it holds 0\.089999999999999999\)/) });
+    expect(short.funding.funded).toBe(false);
+    expect(await mainnetPlan(cchain({ balance: 90_000_000_000_000_000n }))).toMatchObject({ readyToSign: true });
+    // Legacy fee data (gasPrice only) is accepted; missing, zero or malformed fee data fails closed.
+    expect(await mainnetPlan(cchain({ feeData: { gasPrice: 25_000_000_000n } }))).toMatchObject({ readyToSign: true, funding: { requiredAvax: "0.09" } });
+    for (const feeData of [null, {}, { maxFeePerGas: 0n }, { maxFeePerGas: null, gasPrice: null }, { maxFeePerGas: "not-a-number" }]) {
+      const blind = await mainnetPlan(cchain({ feeData }));
+      expect(blind.readyToSign).toBe(false);
+      expect(blind.checks.find((item) => /fee data/.test(item.check))).toMatchObject({ status: "FAIL", reason: expect.stringMatching(/no usable maxFeePerGas or gasPrice/) });
+      expect(blind.checks.some((item) => /funded/.test(item.check))).toBe(false);
+      expect(blind.funding).toMatchObject({ requiredWei: null, requiredAvax: null, funded: false });
+    }
+    const failing = cchain(); failing.getFeeData = async () => { throw new Error("rpc down"); };
+    expect(await mainnetPlan(failing)).toMatchObject({ readyToSign: false, funding: { funded: false, requiredAvax: null } });
+    const silent = cchain(); silent.getFeeData = async () => undefined;
+    expect(await mainnetPlan(silent)).toMatchObject({ readyToSign: false, funding: { funded: false, requiredAvax: null } });
+  });
+
+  it("keeps funding and readiness out of the plan binding: funded or not, the same plan binds identically", async () => {
+    const commit = "a".repeat(40);
+    const funded = { mode: "DRY_RUN", ...(await mainnetPlan()) };
+    const short = { mode: "DRY_RUN", ...(await mainnetPlan(cchain({ balance: 0n }))) };
+    const blind = { mode: "DRY_RUN", ...(await mainnetPlan(cchain({ feeData: null }))) };
+    expect(funded.readyToSign).toBe(true);
+    expect(short.readyToSign).toBe(false);
+    expect(bindPlan("genesis-claim-mainnet", short, commit).digest).toBe(bindPlan("genesis-claim-mainnet", funded, commit).digest);
+    expect(bindPlan("genesis-claim-mainnet", blind, commit).digest).toBe(bindPlan("genesis-claim-mainnet", funded, commit).digest);
+    expect(Object.keys(bindPlan("genesis-claim-mainnet", funded, commit).fields)).not.toEqual(expect.arrayContaining(["checks", "funding", "readyToSign"]));
   });
 
   it("prepares the ISSUER_ROLE grant for the release's verified admin, the artist wallet, never the deployer", async () => {

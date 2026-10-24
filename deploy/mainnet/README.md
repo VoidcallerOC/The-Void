@@ -28,7 +28,7 @@ A 1 AVAX resale pays 0.025 to the artist payout, 0.025 to the Nano S Plus and 0.
 | Deployer: Rabby (gas only; deploys contracts only; holds no role afterwards) | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174`, fixed. The owner signs every mainnet deployment in Rabby on their own machine; the key is never in GitHub, CI, a cloud service or a script ([`OWNER-SIGNING.md`](./OWNER-SIGNING.md)). | fee recipient, signer, release creator |
 | Artist (release admin, edition payout) | `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` | fee recipient, signer |
 | Genesis voucher signer | A new dedicated key, generated offline by the owner; only its public address leaves the device | anything else |
-| Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer |
+| Genesis claim admin (pause, signer rotation) | Proposed: the artist wallet (owner approves at step 11) | fee recipient, signer, deployer |
 
 The deploy scripts refuse any overlap: the fee recipient as the artist, deployer or anything other
 than the recorded Nano, and the signer as the fee recipient, admin, artist or deployer. Neither Ledger

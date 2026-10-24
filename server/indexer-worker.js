@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
-import { loadIndexerConfig, loadServerConfig } from "./config.js";
+import { DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, loadIndexerConfig, loadServerConfig } from "./config.js";
 import { closeDatabasePool, createDatabasePool } from "./db.js";
 import { BlockchainIndexer } from "./indexer.js";
 import { reconcileOwnership } from "./indexer-reconcile.js";
@@ -114,11 +114,23 @@ export class ProductionIndexerWorker {
       const rebuiltBefore = await this.runRebuilds();
       const sync = await this.indexer.syncAll();
       const rebuiltAfter = await this.runRebuilds();
+      const catchingUp = sync.filter((result) => result?.partial === true);
       const finalizedBlocks = sync.map((result) => Number(result.finalizedBlock)).filter(Number.isSafeInteger);
-      const ownership = await this.runOwnershipReconciliation({ finalizedBlock: finalizedBlocks.length ? Math.min(...finalizedBlocks) : null });
-      this.lastCycle = { completedAt: new Date(this.now()).toISOString(), sync, rebuilt: [...rebuiltBefore, ...rebuiltAfter], ownershipChecks: ownership.length };
+      // Ownership is compared against one finalized block, so it runs only once every contract has reached the
+      // same target this cycle. While any contract is still catching up (per-cycle chunk budget), or the
+      // contracts report different finalized heights, the comparison is deferred to a later cycle.
+      const deferOwnership = catchingUp.length > 0 || new Set(finalizedBlocks).size > 1;
+      const ownership = deferOwnership ? [] : await this.runOwnershipReconciliation({ finalizedBlock: finalizedBlocks.length ? Math.min(...finalizedBlocks) : null });
+      if (deferOwnership) {
+        this.logger.info?.("indexer.worker.ownership.deferred", {
+          chainId: this.config.chainId,
+          finalizedBlocks: [...new Set(finalizedBlocks)],
+          catchingUp: catchingUp.map((result) => ({ address: result.address, nextBlock: result.nextBlock, targetBlock: result.targetBlock, remainingBlocks: result.remainingBlocks })),
+        });
+      }
+      this.lastCycle = { completedAt: new Date(this.now()).toISOString(), sync, rebuilt: [...rebuiltBefore, ...rebuiltAfter], ownershipChecks: ownership.length, catchingUp: catchingUp.length, ownershipDeferred: deferOwnership };
       this._nextCycleNotBefore = 0;
-      this.logger.info?.("indexer.worker.cycle.completed", { chainId: this.config.chainId, contracts: sync.length, rebuilt: this.lastCycle.rebuilt.length, ownershipChecks: ownership.length });
+      this.logger.info?.("indexer.worker.cycle.completed", { chainId: this.config.chainId, contracts: sync.length, catchingUp: catchingUp.length, rebuilt: this.lastCycle.rebuilt.length, ownershipChecks: ownership.length, ownershipDeferred: deferOwnership });
       return this.lastCycle;
     } catch (error) {
       if (isRateLimitFailure(error)) {
@@ -209,7 +221,7 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
     // RPC pacer owns 429 cooldowns; avoid stacking another full Retry-After sleep here.
     deferRateLimitDelay: true,
   };
-  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, retryOptions, logger });
+  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, maxChunksPerCycle: indexerConfig.maxChunksPerCycle ?? DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, retryOptions, logger });
   const worker = new ProductionIndexerWorker({ indexer, store: resolvedStore, rpc: resolvedRpc, config: indexerConfig, logger });
   indexer.onProgress = () => worker.heartbeat();
   pacerHooks.onWait = ({ waitMs, nextAllowedAt }) => {

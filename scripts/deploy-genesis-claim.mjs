@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroHash, getAddress, getCreateAddress, isAddress } from "ethers";
+import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroHash, formatEther, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
 import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { checkClaimState } from "./claim-onchain-checks.mjs";
@@ -97,6 +97,48 @@ export function assertMainnetClaimRoles({ admin, signer, deployer }) {
   if (signer === admin) throw new DeploymentError("The voucher signer must be a dedicated key, not the claim admin.");
   if (signer === deployer) throw new DeploymentError("The voucher signer must be a dedicated key, not the deployer.");
   if (signer === getAddress(MAINNET_ARTIST_WALLET)) throw new DeploymentError("The voucher signer must be a dedicated key, not the artist wallet.");
+  // The deployer only signs the creation in Rabby and holds no role afterwards; pause and signer rotation
+  // belong to the claim admin, so the two must be different accounts.
+  if (admin === deployer) throw new DeploymentError("The claim admin may not be the deployer; the deployer signs the deployment and holds no role afterwards.");
+}
+
+// Balance the deployer must hold before the owner is asked to sign, as a percentage of
+// gasLimit × maxFeePerGas (the signing request's gas limit already carries its own headroom over the estimate).
+export const FUNDING_HEADROOM_PERCENT = 150n;
+const FUNDED_CHECK = "deployer funded with 50% headroom over gasLimit × maxFeePerGas";
+const FEE_DATA_CHECK = "fee data available for the funding requirement";
+
+/**
+ * Read-only funding gate for one creation request: the deployer's balance against the request's gasLimit at the
+ * RPC's current maxFeePerGas (or legacy gasPrice) with FUNDING_HEADROOM_PERCENT. Missing, zero or malformed fee
+ * data fails closed: no requirement can be computed, so the plan is not ready to sign. Funding is volatile and is
+ * deliberately not part of the plan binding; it is re-planned live before every signature.
+ */
+export async function claimFundingCheck(provider, deployer, request) {
+  const [balance, feeData] = await Promise.all([provider.getBalance(deployer), Promise.resolve().then(() => provider.getFeeData()).catch(() => null)]);
+  const gasLimit = BigInt(request.gasLimit);
+  let maxFeePerGas = null;
+  try {
+    const raw = feeData?.maxFeePerGas ?? feeData?.gasPrice ?? null;
+    if (raw !== null && raw !== undefined) maxFeePerGas = BigInt(raw);
+  } catch { maxFeePerGas = null; }
+  const balanceAvax = formatEther(balance);
+  if (maxFeePerGas === null || maxFeePerGas <= 0n) {
+    return {
+      checks: [{ check: FEE_DATA_CHECK, status: "FAIL", value: { gasLimit: gasLimit.toString(), maxFeePerGasWei: null, balanceAvax }, reason: "The RPC returned no usable maxFeePerGas or gasPrice, so the funding requirement cannot be computed. Nothing is offered for signing until fee data is available." }],
+      funding: { balanceWei: balance.toString(), balanceAvax, gasLimit: gasLimit.toString(), maxFeePerGasWei: null, requiredWei: null, requiredAvax: null, headroomPercent: Number(FUNDING_HEADROOM_PERCENT), funded: false },
+    };
+  }
+  const requiredWei = (gasLimit * maxFeePerGas * FUNDING_HEADROOM_PERCENT) / 100n;
+  const requiredAvax = formatEther(requiredWei);
+  const funded = balance >= requiredWei;
+  return {
+    checks: [
+      { check: FEE_DATA_CHECK, status: "PASS", value: { maxFeePerGasWei: maxFeePerGas.toString() } },
+      { check: FUNDED_CHECK, status: funded ? "PASS" : "FAIL", value: { balanceAvax, requiredAvax, gasLimit: gasLimit.toString(), maxFeePerGasWei: maxFeePerGas.toString() }, ...(funded ? {} : { reason: `Fund the deployer ${deployer} with at least ${requiredAvax} AVAX (it holds ${balanceAvax}), then re-plan.` }) },
+    ],
+    funding: { balanceWei: balance.toString(), balanceAvax, gasLimit: gasLimit.toString(), maxFeePerGasWei: maxFeePerGas.toString(), requiredWei: requiredWei.toString(), requiredAvax, headroomPercent: Number(FUNDING_HEADROOM_PERCENT), funded },
+  };
 }
 
 export function validateClaimDeploymentEnv(env = process.env) {
@@ -352,6 +394,10 @@ export function claimPlanInputs(config) {
  * in Rabby, and the ISSUER_ROLE grant prepared for the account that actually holds the authority to
  * make it (DEFAULT_ADMIN_ROLE on the release, which createRelease gives the calling artist). Refuses a
  * release the artist wallet does not administer, or one the deployer or fee recipient administers.
+ * `checks` lists the live readiness gates (pending transactions, reviewed nonce, empty predicted address, fee
+ * data, funding with headroom); `readyToSign` is true only when none fails. Both signing paths
+ * (`npm run sign:mainnet` and `npm run owner:deploy`) refuse a plan whose `readyToSign` is false. None of these
+ * volatile facts is part of the plan binding.
  */
 export async function claimSigningPlan(config, facts, plan, { provider, artifact }) {
   const [releaseOwner] = await read(provider, RELEASE, config.releaseContract, "owner");
@@ -370,9 +416,19 @@ export async function claimSigningPlan(config, facts, plan, { provider, artifact
     if (error instanceof SigningRequestError) throw new DeploymentError(error.message);
     throw error;
   }
+  const [predictedCode, fundingGate] = await Promise.all([provider.getCode(facts.predictedClaim), claimFundingCheck(provider, config.deployerAddress, request)]);
+  const checks = [
+    { check: "no pending deployer transactions", status: facts.pendingNonce === facts.deployerNonce ? "PASS" : "FAIL", value: { nonce: facts.deployerNonce, pendingNonce: facts.pendingNonce } },
+    { check: "nonce matches EXPECTED_DEPLOYER_NONCE", status: config.expectedDeployerNonce === null ? "NOT PROVIDED" : config.expectedDeployerNonce === facts.deployerNonce ? "PASS" : "FAIL", value: config.expectedDeployerNonce },
+    { check: "predicted claim address is empty", status: predictedCode === "0x" ? "PASS" : "FAIL", value: facts.predictedClaim },
+    ...fundingGate.checks,
+  ];
   return {
     ...plan,
-    readyToSign: facts.pendingNonce === facts.deployerNonce && (config.expectedDeployerNonce === null || config.expectedDeployerNonce === facts.deployerNonce),
+    // A reviewed nonce is optional for a plan (the binding carries the live nonce); every other gate must pass.
+    readyToSign: checks.every((item) => item.status === "PASS" || item.status === "NOT PROVIDED"),
+    checks,
+    funding: fundingGate.funding,
     signingRequests: [request],
     planInputs: claimPlanInputs(config),
     followUps: {

@@ -8,6 +8,8 @@ import { bindPlan } from "./deployment-plan-binding.mjs";
 import { buildDryRunPlan, validateDeploymentEnv } from "./deploy-release-per-contract-mainnet.mjs";
 import { readFileSync } from "node:fs";
 import { KINDS, approvePlan, cancelStep, checkedOutCommit, createPlanningSession, createSigningSession, createSigningServer, nextAction, prepareStep, recheckPlan, sessionView, startInputs, submitStep, verifyCommand } from "./mainnet-owner-signing.mjs";
+import { getCreateAddress } from "ethers";
+import { creationRequest } from "./mainnet-signing-requests.mjs";
 import { ARTIST, DEPLOYER, RECIPIENT, artifacts, fakeChain } from "../test/helpers/mainnet-fake-chain.mjs";
 
 const KIND = "release-per-contract-mainnet";
@@ -381,5 +383,56 @@ describe("owner:deploy entry point: plan, show what blocks, approve on the page"
     expect(page).toMatch(/id="approve"/);
     expect(page).toMatch(/id="recheck"/);
     expect(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).scripts["owner:deploy"]).toBe("node scripts/mainnet-owner-signing.mjs start");
+  });
+});
+
+// The Genesis claim kind: both signing paths refuse an unfunded deployer, while funding never changes the binding.
+describe("owner signing session: Genesis claim kind enforces the planner's funding gate on both paths", () => {
+  const CLAIM_KIND = "genesis-claim-mainnet";
+  const SIGNER = getAddress("0x5555555555555555555555555555555555555555");
+  const PREDICTED = getCreateAddress({ from: DEPLOYER, nonce: 0 });
+  const FUNDED_CHECK = "deployer funded with 50% headroom over gasLimit × maxFeePerGas";
+  const request = creationRequest({ step: 1, contract: "GenesisHolderClaim", from: DEPLOYER, nonce: 0, data: "0x6080", estimatedGas: 2_000_000n, predictedAddress: PREDICTED });
+  const base = {
+    mode: "DRY_RUN", network: "mainnet", chainId: 43114, deployer: DEPLOYER, deployerNonce: 0, predictedClaimAddress: PREDICTED,
+    target: { releaseContract: "0x2222222222222222222222222222222222222222", primarySale: "0x3333333333333333333333333333333333333333", tokenId: "1" },
+    schedule: { claimStart: "1800003600", claimWindowSeconds: "86400", publicWindowSeconds: "604800" }, supply: { claimAllocation: "0", publicAllocation: "0" },
+    roles: { admin: ARTIST, signer: SIGNER }, eligibility: { rule: `0x${"11".repeat(32)}` }, signingRequests: [request],
+    followUps: { issuerGrant: { from: ARTIST, to: "0x2222222222222222222222222222222222222222", data: "0x" } },
+    planInputs: { DEPLOY_NETWORK: "mainnet", EXPECTED_DEPLOYER_ADDRESS: DEPLOYER, EXPECTED_DEPLOYER_NONCE: "0" },
+  };
+  const funded = { ...base, readyToSign: true, checks: [{ check: "no pending deployer transactions", status: "PASS" }, { check: FUNDED_CHECK, status: "PASS", value: { balanceAvax: "1.0", requiredAvax: "0.09" } }], funding: { funded: true } };
+  const unfunded = { ...base, readyToSign: false, checks: [{ check: "no pending deployer transactions", status: "PASS" }, { check: FUNDED_CHECK, status: "FAIL", value: { balanceAvax: "0.0", requiredAvax: "0.09" }, reason: "Fund the deployer." }], funding: { funded: false } };
+  const noFeeData = { ...base, readyToSign: false, checks: [{ check: "no pending deployer transactions", status: "PASS" }, { check: "fee data available for the funding requirement", status: "FAIL", reason: "no usable fee data" }], funding: { funded: false } };
+  const providers = { provider: fakeChain(), genesisProvider: {} };
+  const files = async () => ({ plan: "/x/plan.json", binding: "/x/plan-binding.json" });
+
+  it("owner:deploy (start): an unfunded plan cannot be approved, and the next action names the exact amount", async () => {
+    const session = await createPlanningSession({ kind: CLAIM_KIND, commit: COMMIT, inputs: base.planInputs, env: {}, replan: async () => unfunded });
+    expect(sessionView(session)).toMatchObject({ phase: "planning", readyToApprove: false, checks: expect.arrayContaining([expect.objectContaining({ check: FUNDED_CHECK, status: "FAIL" })]) });
+    expect(nextAction(session)).toBe(`Fund the deployer ${DEPLOYER} on Avalanche C-Chain with at least 0.09 AVAX (it holds 0.0), then press Re-check.`);
+    await expect(approvePlan(session, { providers, replan: async () => unfunded, env: {}, writePlanFiles: files })).rejects.toThrow(/not ready to sign/);
+    expect(session.phase).toBe("planning");
+    // Without fee data the plan is blocked too, with the failing check named.
+    await recheckPlan(session, { replan: async () => noFeeData });
+    expect(nextAction(session)).toMatch(/^Signing is blocked by: fee data available for the funding requirement/);
+    await expect(approvePlan(session, { providers, replan: async () => noFeeData, env: {}, writePlanFiles: files })).rejects.toThrow(/not ready to sign/);
+    // Once funded, the same plan binds and signing opens.
+    await recheckPlan(session, { replan: async () => funded });
+    expect(sessionView(session)).toMatchObject({ readyToApprove: true, nextAction: "Review the plan, then press Approve plan." });
+    await approvePlan(session, { providers, replan: async () => funded, env: {}, writePlanFiles: files });
+    expect(session.phase).toBe("signing");
+    expect(session.binding.digest).toBe(bindPlan(CLAIM_KIND, funded, COMMIT).digest);
+  });
+
+  it("sign:mainnet (serve): a reviewed plan that was funded binds identically to the unfunded re-plan, which is still refused", async () => {
+    const approvedBinding = bindPlan(CLAIM_KIND, funded, COMMIT);
+    // Funding is not a binding field, so the unfunded fresh plan matches the approval and fails only the readiness gate.
+    expect(bindPlan(CLAIM_KIND, unfunded, COMMIT).digest).toBe(approvedBinding.digest);
+    await expect(createSigningSession({ kind: CLAIM_KIND, reviewedPlan: funded, approvedBinding, commit: COMMIT, providers, env: {}, replan: async () => unfunded })).rejects.toThrow(/not ready to sign.*funding/);
+    await expect(createSigningSession({ kind: CLAIM_KIND, reviewedPlan: funded, approvedBinding, commit: COMMIT, providers, env: {}, replan: async () => noFeeData })).rejects.toThrow(/not ready to sign/);
+    const session = await createSigningSession({ kind: CLAIM_KIND, reviewedPlan: funded, approvedBinding, commit: COMMIT, providers, env: {}, replan: async () => funded });
+    expect(session).toMatchObject({ phase: "signing", kind: CLAIM_KIND, digest: approvedBinding.digest });
+    expect(session.steps.map((step) => step.status)).toEqual(["pending"]);
   });
 });
