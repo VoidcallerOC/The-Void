@@ -60,4 +60,22 @@ describe("a listing on a retained unified marketplace", () => {
     expect(purchase.canonical.address).toBe(mocks.oldMarket);
     expect(purchase.listing).toMatchObject({ listingId: "1", tokenId: "0" });
   });
+  it("renders one card when a server that ignores the marketplace filter returns the same listing for both marketplaces", async () => {
+    const activeListing = { ...retainedListing, id: "listing-new-1", marketplace: mocks.newMarket.toLowerCase() };
+    mocks.fetchIndexedListings.mockImplementation(async () => [activeListing]);
+    const wallet = { account: buyer, authenticated: true, authHeaders: {}, chainId: 43114, connected: true, getProvider: () => ({ request: vi.fn() }), refreshOwnership: vi.fn() };
+    render(<WalletCtx.Provider value={wallet}><PurchasePanel edition={genesisEdition} /></WalletCtx.Provider>);
+    await act(flush);
+    expect(mocks.fetchIndexedListings).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText(/Listing #1/)).toHaveLength(1);
+  });
+
+  it("keeps same-numbered listings from different marketplaces as separate cards", async () => {
+    const activeListing = { ...retainedListing, id: "listing-new-1", marketplace: mocks.newMarket.toLowerCase() };
+    mocks.fetchIndexedListings.mockImplementation(async ({ marketplaceAddress }) => [marketplaceAddress.toLowerCase() === mocks.oldMarket.toLowerCase() ? retainedListing : activeListing]);
+    const wallet = { account: buyer, authenticated: true, authHeaders: {}, chainId: 43114, connected: true, getProvider: () => ({ request: vi.fn() }), refreshOwnership: vi.fn() };
+    render(<WalletCtx.Provider value={wallet}><PurchasePanel edition={genesisEdition} /></WalletCtx.Provider>);
+    await act(flush);
+    expect(screen.getAllByText(/Listing #1/)).toHaveLength(2);
+  });
 });
