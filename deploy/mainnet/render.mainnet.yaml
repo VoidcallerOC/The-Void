@@ -65,7 +65,7 @@ services:
       - key: X_ACCESS_TOKEN_SECRET
         sync: false
       - key: X_DM_RECIPIENT_USERNAME
-        value: voidcallerOC
+        value: TheVoidOC
       - key: METADATA_STORAGE_DRIVER
         value: pinata
       - key: PINATA_JWT

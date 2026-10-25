@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 // Reviewer alerts for artist verification submissions.
 //
 // Primary (and only) channel: an X DM to the reviewer account configured on the
-// server (default @voidcallerOC). The alert is an outbox row created server-side
+// server (default @TheVoidOC). The alert is an outbox row created server-side
 // when an application becomes SUBMITTED; delivery happens after the submission
 // has committed, so an X failure can never undo or fail a submission.
 //

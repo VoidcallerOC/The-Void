@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from "node:crypto";
 // permission and an API access tier that includes the DM endpoints.
 
 export const X_DM_ENV = Object.freeze(["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"]);
-const DEFAULT_RECIPIENT = "voidcallerOC";
+const DEFAULT_RECIPIENT = "TheVoidOC";
 const USERNAME = /^[A-Za-z0-9_]{1,15}$/;
 const NUMERIC_ID = /^\d{1,25}$/;
 

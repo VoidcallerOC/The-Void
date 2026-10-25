@@ -41,7 +41,7 @@ services:
       - key: X_ACCESS_TOKEN_SECRET
         sync: false
       - key: X_DM_RECIPIENT_USERNAME
-        value: voidcallerOC
+        value: TheVoidOC
       - key: API_ALLOWED_ORIGINS
         sync: false
       - key: AUTH_DOMAIN
