@@ -288,6 +288,40 @@ describe("X account linking", () => {
   });
 });
 
+describe("X link is independent of the verification-DM credentials", () => {
+  const dmEnv = { X_API_KEY: "dm-consumer-key", X_API_SECRET: "dm-consumer-secret", X_ACCESS_TOKEN: "dm-access-token", X_ACCESS_TOKEN_SECRET: "dm-access-secret", X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "555" };
+  const run = async (config) => {
+    const { service, db, x } = setup({ config, now: () => new Date("2026-10-25T12:00:00Z") });
+    const url = await begin(service);
+    const result = await service.complete({ request: req(tokenA), input: { code: "auth-code", state: url.searchParams.get("state") } });
+    return { url, result, db, x };
+  };
+
+  it("loads identical config and runs the identical flow whether or not X_API_* / X_DM_* are present", async () => {
+    expect(loadXLinkConfig({ ...env, ...dmEnv })).toEqual(loadXLinkConfig(env));
+    const without = await run(loadXLinkConfig(env));
+    const withDm = await run(loadXLinkConfig({ ...env, ...dmEnv }));
+    expect(withDm.result).toEqual(without.result);
+    expect(withDm.url.searchParams.get("client_id")).toBe(env.X_OAUTH_CLIENT_ID);
+    expect(withDm.url.searchParams.get("scope")).toBe("users.read tweet.read");
+    expect(withDm.x.calls.map((c) => c.url)).toEqual(without.x.calls.map((c) => c.url));
+  });
+
+  it("never sends or stores any X_API_* / X_DM_* value, and never signs with OAuth 1.0a", async () => {
+    const { url, x, db } = await run(loadXLinkConfig({ ...env, ...dmEnv }));
+    const seen = JSON.stringify([url.toString(), x.calls, db.query.mock.calls]);
+    for (const value of Object.values(dmEnv)) expect(seen).not.toContain(value);
+    for (const call of x.calls) expect(String(call.options.headers?.authorization || "")).not.toMatch(/^OAuth /);
+    expect(x.calls.map((c) => c.url).some((u) => u.includes("dm_conversations"))).toBe(false);
+  });
+
+  it("reports Connect-X as unconfigured when only the DM credentials are set", () => {
+    const config = loadXLinkConfig(dmEnv);
+    expect(config.configured).toBe(false);
+    expect(config.missing).toEqual(["X_OAUTH_CLIENT_ID", "X_OAUTH_CLIENT_SECRET", "X_OAUTH_REDIRECT_URI"]);
+  });
+});
+
 describe("X link HTTP routes", () => {
   function http(xLink) {
     const handler = createApiHandler({ service: {}, xLink, logger: { error() {} } });

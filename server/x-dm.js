@@ -27,6 +27,10 @@ export function loadXDmConfig(env = {}) {
     invalid: Object.freeze(invalid),
     recipientUsername,
     recipientId: recipientId || null,
+    // What alerts actually go to. A configured numeric id overrides the username,
+    // so logs and status must name the id, not a username that is not being used.
+    recipientLabel: recipientId ? `user id ${recipientId}` : `@${recipientUsername}`,
+    recipientIdOverridesUsername: Boolean(recipientId),
     apiBase: String(env.X_API_BASE_URL || "https://api.x.com/2").replace(/\/$/, ""),
     credentials: Object.freeze({
       consumerKey: String(env.X_API_KEY || "").trim(),

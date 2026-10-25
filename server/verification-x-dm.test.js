@@ -222,6 +222,23 @@ describe("security", () => {
     expect(loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "bad name!" }).configured).toBe(false);
   });
 
+  it("a numeric recipient id overrides the username and the effective recipient is reported as the id", async () => {
+    const byUsername = loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_ID: "" });
+    expect(byUsername).toMatchObject({ recipientLabel: "@TheVoidOC", recipientIdOverridesUsername: false });
+    const byId = loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "1234567890" });
+    expect(byId).toMatchObject({ recipientLabel: "user id 1234567890", recipientIdOverridesUsername: true });
+    // The send goes to the id, with no username lookup, so the id is what must be right.
+    const h = harness({ env: { ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "555" } });
+    const db = verificationDb();
+    await service({ db, notifier: h.notifier, logger: h.logger }).submit({ request: requestFor(APPLICANT), input: input() });
+    await tick(); await tick();
+    expect(h.x.calls).toHaveLength(1);
+    expect(h.x.calls[0].url).toBe("https://api.x.com/2/dm_conversations/with/555/messages");
+    const row = [...h.store.rows.values()][0];
+    expect((await h.notifier.statusFor(row.application_id)).recipient).toBe("user id 555");
+    expect(h.logger.info.mock.calls.find(([event]) => event === "X_DM_SENT")[1].recipient).toBe("user id 555");
+  });
+
   it("the recipient is configurable rather than hard-coded", () => {
     expect(loadXDmConfig({ X_DM_RECIPIENT_USERNAME: "SomeOtherOps" }).recipientUsername).toBe("SomeOtherOps");
   });
