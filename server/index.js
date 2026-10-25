@@ -18,7 +18,7 @@ import { createMarketplacePresentationService } from "./marketplace-presentation
 import { createLocalMarketplaceHeroStore } from "./marketplace-hero-storage.js";
 import { createLocalArtistPortfolioStore } from "./artist-portfolio-storage.js";
 import { createNotificationStore, createVerificationNotifier } from "./verification-notifier.js";
-import { createXDmClient, loadXDmConfig } from "./x-dm.js";
+import { createXDmClient, describeXDmStartup, loadXDmConfig } from "./x-dm.js";
 import { createContractOwnerVerificationService } from "./contract-owner-verification.js";
 import { createPinataMetadataStorage } from "./metadata-storage.js";
 import { createPinataArtworkUploader } from "./artwork-storage.js";
@@ -67,9 +67,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   // Reviewer alerts: X DM to the server-configured reviewer account. Missing
   // X configuration is reported (startup log + per-alert CONFIG_MISSING), never fatal.
   const xDmConfig = loadXDmConfig(process.env);
-  if (!xDmConfig.configured) logger.error?.("X_DM_CONFIG_MISSING", { missing: [...xDmConfig.missing, ...xDmConfig.invalid], recipient: xDmConfig.recipientLabel });
-  // A numeric id wins over the username; flag it so a stale id cannot silently misdirect alerts.
-  if (xDmConfig.recipientIdOverridesUsername) logger.warn?.("X_DM_RECIPIENT_ID_OVERRIDES_USERNAME", { recipientId: xDmConfig.recipientId, ignoredUsername: `@${xDmConfig.recipientUsername}` });
+  for (const { level, event, fields } of describeXDmStartup(xDmConfig)) logger[level]?.(event, fields);
   const verificationNotifier = createVerificationNotifier({ store: createNotificationStore(pool), xClient: createXDmClient({ config: xDmConfig }), xConfig: xDmConfig, publicAppUrl: config.publicAppUrl || process.env.PUBLIC_APP_URL || "", logger });
   const verificationService = createArtistVerificationService({ db: pool, authenticator: resolvedAuthenticator, notifier: verificationNotifier, logger });
   const contractOwnerVerification = createContractOwnerVerificationService({ db: pool, config, logger });

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { setImmediate as tick } from "node:timers/promises";
 import { createArtistVerificationService } from "./verification-service.js";
 import { buildVerificationDm, createVerificationNotifier, reviewUrlFor } from "./verification-notifier.js";
-import { createXDmClient, loadXDmConfig, oauth1Header } from "./x-dm.js";
+import { createXDmClient, describeXDmStartup, loadXDmConfig, oauth1Header } from "./x-dm.js";
 import { createApiHandler } from "./api-http.js";
 
 // Artist submits verification → The Void sends ONE X DM to @TheVoidOC with
@@ -237,6 +237,23 @@ describe("security", () => {
     const row = [...h.store.rows.values()][0];
     expect((await h.notifier.statusFor(row.application_id)).recipient).toBe("user id 555");
     expect(h.logger.info.mock.calls.find(([event]) => event === "X_DM_SENT")[1].recipient).toBe("user id 555");
+  });
+
+  it("startup diagnostics name the effective recipient and credential presence, never a secret value", () => {
+    const secrets = { X_API_KEY: "SECRET-KEY-VALUE", X_API_SECRET: "SECRET-API-VALUE", X_ACCESS_TOKEN: "SECRET-TOKEN-VALUE", X_ACCESS_TOKEN_SECRET: "SECRET-TOKEN-SECRET-VALUE" };
+    const ok = describeXDmStartup(loadXDmConfig({ ...secrets, X_DM_RECIPIENT_USERNAME: "TheVoidOC" }));
+    expect(ok).toEqual([{ level: "info", event: "X_DM_CONFIGURED", fields: { recipient: "@TheVoidOC", senderCredentials: "present", credentialsChecked: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"] } }]);
+    expect(JSON.stringify(ok)).not.toMatch(/SECRET-.*-VALUE/);
+
+    const missing = describeXDmStartup(loadXDmConfig({ X_API_KEY: "SECRET-KEY-VALUE", X_DM_RECIPIENT_USERNAME: "TheVoidOC" }));
+    expect(missing).toEqual([{ level: "error", event: "X_DM_CONFIG_MISSING", fields: { missing: ["X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"], recipient: "@TheVoidOC" } }]);
+    expect(JSON.stringify(missing)).not.toContain("SECRET-KEY-VALUE");
+
+    const override = describeXDmStartup(loadXDmConfig({ ...secrets, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "777" }));
+    expect(override.map((e) => e.event)).toEqual(["X_DM_CONFIGURED", "X_DM_RECIPIENT_ID_OVERRIDES_USERNAME"]);
+    expect(override[0].fields.recipient).toBe("user id 777");
+    expect(override[1]).toMatchObject({ level: "warn", fields: { recipientId: "777", ignoredUsername: "@TheVoidOC" } });
+    expect(JSON.stringify(override)).not.toMatch(/SECRET-.*-VALUE/);
   });
 
   it("the recipient is configurable rather than hard-coded", () => {
