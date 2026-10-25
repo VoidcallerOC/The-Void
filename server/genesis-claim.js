@@ -76,6 +76,11 @@ const CLAIM_ABI = [
   "function GENESIS_CONTRACT() view returns (address)",
   "function GENESIS_CHAIN_ID() view returns (uint256)",
   "function ELIGIBILITY_RULE() view returns (bytes32)",
+  "function earlyAccessWallet() view returns (address)",
+  "function earlyAccessStart() view returns (uint64)",
+  "function earlyAccessEnd() view returns (uint64)",
+  "function earlyAccessEnabled() view returns (bool)",
+  "function earlyAccessClaimed() view returns (bool)",
 ];
 const RELEASE_ABI = [
   "function maxSupplyOf(uint256 tokenId) view returns (uint256)",
@@ -95,6 +100,20 @@ const VOUCHER_TYPES = Object.freeze({
     { name: "tokenId", type: "uint256" },
     { name: "quantity", type: "uint256" },
     { name: "allocation", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+});
+
+const EARLY_ACCESS_VOUCHER_TYPES = Object.freeze({
+  EarlyAccessVoucher: [
+    { name: "claimant", type: "address" },
+    { name: "destinationChainId", type: "uint256" },
+    { name: "releaseContract", type: "address" },
+    { name: "tokenId", type: "uint256" },
+    { name: "quantity", type: "uint256" },
+    { name: "windowStart", type: "uint256" },
+    { name: "windowEnd", type: "uint256" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
   ],
@@ -210,6 +229,7 @@ export function loadGenesisClaimConfig(env = process.env) {
     publicPriceWei,
   });
   const { privateKey, signerAddress } = validateGenesisSignerConfig(env);
+  const earlyAccess = loadEarlyAccessConfig(env, { claimStart, signerAddress, addresses: [releaseContract, primarySale, claimContract, GENESIS_CONTRACT] });
   return Object.freeze({
     destinationChainId,
     genesisRpcUrl: httpUrl(env.GENESIS_RPC_URL, "GENESIS_RPC_URL"),
@@ -231,7 +251,26 @@ export function loadGenesisClaimConfig(env = process.env) {
     eligibilityRule: ELIGIBILITY_RULE,
     signerAddress,
     privateKey,
+    earlyAccess,
   });
+}
+
+/**
+ * Optional one-wallet early access, off unless GENESIS_EARLY_ACCESS_ENABLED=true. When on, the wallet and
+ * window must be explicitly configured and valid, or the whole claim configuration fails closed: one
+ * non-zero wallet that is not the signer or a contract in the binding, and a window
+ * GENESIS_EARLY_ACCESS_START <= t < GENESIS_EARLY_ACCESS_END that ends no later than claimStart.
+ */
+function loadEarlyAccessConfig(env, { claimStart, signerAddress, addresses }) {
+  if (String(env.GENESIS_EARLY_ACCESS_ENABLED || "").toLowerCase() !== "true") return null;
+  const wallet = configuredAddress(env.GENESIS_EARLY_ACCESS_WALLET, "GENESIS_EARLY_ACCESS_WALLET");
+  if ([signerAddress, ...addresses].some((address) => address.toLowerCase() === wallet.toLowerCase())) {
+    throw new GenesisClaimConfigurationError("GENESIS_EARLY_ACCESS_WALLET may not be the voucher signer or a claim, release, sale, or Genesis contract.");
+  }
+  const start = positiveBigInt(env.GENESIS_EARLY_ACCESS_START, "GENESIS_EARLY_ACCESS_START");
+  const end = positiveBigInt(env.GENESIS_EARLY_ACCESS_END, "GENESIS_EARLY_ACCESS_END");
+  if (start >= end || end > claimStart) throw new GenesisClaimConfigurationError("The early-access window must start before it ends and end no later than GENESIS_CLAIM_START.");
+  return Object.freeze({ wallet, start, end });
 }
 
 function toPublicConfig(config) {
@@ -257,6 +296,8 @@ function toPublicConfig(config) {
     publicSaleStart: config.publicSaleStart.toString(),
     publicSaleEnd: config.publicSaleEnd.toString(),
     publicPriceWei: config.publicPriceWei.toString(),
+    // The window only; the approved wallet is never published by the API.
+    earlyAccess: config.earlyAccess ? Object.freeze({ start: config.earlyAccess.start.toString(), end: config.earlyAccess.end.toString() }) : null,
   });
 }
 
@@ -304,6 +345,7 @@ export function createGenesisClaimService({
   transferLogReader = null,
   bindingReader = null,
   claimStateReader = null,
+  earlyAccessStateReader = null,
   destinationClock = null,
   clock = () => Math.floor(Date.now() / 1000),
   // 256 random bits. ethers' randomBytes returns a Uint8Array, so it must be hex-encoded explicitly.
@@ -557,10 +599,60 @@ export function createGenesisClaimService({
     });
   }
 
+  /**
+   * Early access for the one configured wallet: no Genesis holding is read and no used-unit ledger entry
+   * is written. Nothing is stored either; the contract's earlyAccessClaimed flag allows one mint however
+   * many vouchers are issued, and a failed transaction leaves it unset so the wallet can request again.
+   */
+  async function issueEarlyAccessVoucher(walletInput) {
+    const early = config.earlyAccess;
+    if (!early) throw new ApiError(409, "EARLY_ACCESS_UNAVAILABLE", "Early access is not enabled.");
+    const wallet = assertWallet(walletInput);
+    if (wallet !== early.wallet) throw new ApiError(403, "ACCESS_DENIED", "This wallet is not approved for early access.");
+    const now = BigInt(clock());
+    if (now < early.start) throw new ApiError(409, "EARLY_ACCESS_NOT_OPEN", "Early access has not opened yet.");
+    if (now >= early.end) throw new ApiError(409, "EARLY_ACCESS_CLOSED", "Early access has closed.");
+    let onChain;
+    try {
+      if (bindingReader) await bindingReader();
+      else await verifyContractBindings();
+      const [chainWallet, chainStart, chainEnd, enabled, claimed] = earlyAccessStateReader
+        ? await earlyAccessStateReader()
+        : await Promise.all([claim.earlyAccessWallet(), claim.earlyAccessStart(), claim.earlyAccessEnd(), claim.earlyAccessEnabled(), claim.earlyAccessClaimed()]);
+      onChain = { chainWallet, chainStart, chainEnd, enabled, claimed };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
+    }
+    if (!onChain.enabled || getAddress(onChain.chainWallet) !== early.wallet || BigInt(onChain.chainStart) !== early.start || BigInt(onChain.chainEnd) !== early.end) {
+      throw new ApiError(503, "CLAIM_BINDING_MISMATCH", "The on-chain early-access configuration does not match the authorized target.");
+    }
+    if (onChain.claimed) throw new ApiError(409, "ALREADY_CLAIMED", "The early-access mint has already been used.");
+    try {
+      const voucher = Object.freeze({
+        claimant: wallet,
+        destinationChainId: config.destinationChainId,
+        releaseContract: config.releaseContract,
+        tokenId: config.tokenId.toString(),
+        quantity: "1",
+        windowStart: early.start.toString(),
+        windowEnd: early.end.toString(),
+        nonce: nonce().toString(),
+        deadline: String(BigInt(Math.min(clock() + VOUCHER_LIFETIME_SECONDS, Number(early.end) - 1))),
+      });
+      const domain = { name: "The Void Genesis Holder Claim", version: "1", chainId: config.destinationChainId, verifyingContract: config.claimContract };
+      const signature = await claimSigner.signTypedData(domain, EARLY_ACCESS_VOUCHER_TYPES, voucher);
+      return Object.freeze({ voucher, signature, target: toPublicConfig(config) });
+    } catch {
+      throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
+    }
+  }
+
   return Object.freeze({
     config: toPublicConfig(config),
     checkEligibility,
     issueVoucher,
+    issueEarlyAccessVoucher,
     verifyContractBindings,
   });
 }

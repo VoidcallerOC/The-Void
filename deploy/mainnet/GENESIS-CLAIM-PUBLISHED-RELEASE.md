@@ -190,3 +190,36 @@ The schedule (start, end, per-wallet limit) is the owner's decision; nothing her
 | `GENESIS_RPC_URL` / `GENESIS_DESTINATION_RPC_URL` | C-Chain RPC |
 
 The API refuses to load unless the deployed claim's parameters match these values.
+
+## Optional one-wallet early access (prepared, not configured)
+
+Status: code and tests only. No wallet, window, or price has been approved. Nothing below has been run.
+
+Phase order: early access (one wallet, one mint) → Genesis free claim (24 h from `claimStart`) →
+paid sale (0.25 AVAX, 3 per wallet, 7 days from `claimStart`). The free claim and the paid sale still open
+together at `claimStart`; early access must end at or before it.
+
+On-chain (`GenesisHolderClaim`, admin only, after deployment):
+- `configureEarlyAccess(wallet, start, end)` requires `now < start < end <= claimStart`, a non-zero wallet
+  that is not the admin, signer, release, sale, Genesis collection, or the claim contract. It can be
+  corrected only before `start`; once the window opens or the mint happens it is locked.
+- `disableEarlyAccess()` works at any time and touches nothing else. `pause()` also stops early access.
+- `earlyAccessMint(voucher, signature)`: `msg.sender` must be the configured wallet, inside
+  `[start, end)`, with an `EarlyAccessVoucher` (its own EIP-712 type, same signer, same nonce space). One
+  mint ever (`earlyAccessClaimed`). Free (not payable). It re-checks the sale schedule like `claim()`, so it
+  fails closed unless the sale is configured to open at `claimStart`.
+- It counts in `claimedSupply` (keeps `mintedSupply == sold + claimedSupply`). It does **not** set
+  `hasClaimed` and does not touch the sale's per-wallet counter, so it counts toward neither the Genesis
+  free claim nor the three paid mints. No Genesis holding is required for it.
+
+Server (Render), all required together or the whole claim config refuses to load:
+`GENESIS_EARLY_ACCESS_ENABLED=true`, `GENESIS_EARLY_ACCESS_WALLET`, `GENESIS_EARLY_ACCESS_START`,
+`GENESIS_EARLY_ACCESS_END` (unix seconds, `END <= GENESIS_CLAIM_START`). Endpoint:
+`POST /api/claims/early-access/vouchers {wallet}`. It signs only for that wallet, inside the window, after
+the normal binding check and only if the contract's early-access wallet/window match and
+`earlyAccessClaimed` is false. The API never returns the wallet address. No migration.
+
+Before early access can run: claim contract deployed (this revision), ISSUER_ROLE granted to it, sale
+configured to open at `claimStart`, `configureEarlyAccess` sent by the admin, Render variables set. The
+previously generated Fuji plan in `deploy/fuji/approved-plans/genesis-claim-fuji.json` carries the old
+bytecode and must be regenerated; deployment gas rises to about 2.44M.

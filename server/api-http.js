@@ -169,6 +169,11 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
           claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-voucher`);
           data = await genesisClaim.issueVoucher(body.wallet);
         }
+        else if (method === "POST" && base.join("/") === "claims/early-access/vouchers") {
+          if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
+          claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-early-access`);
+          data = await genesisClaim.issueEarlyAccessVoucher(body.wallet);
+        }
         else if (method === "POST" && base[0] === "artists" && base.length === 3 && base[2] === "verify") {
           if (!contractOwnerVerification) throw new ApiError(503, "CONTRACT_OWNER_VERIFY_UNAVAILABLE", "Contract-owner verification is unavailable.");
           rateLimiter?.check(`${apiRequest.rateLimitKey}:artist-verify-submit:${String(base[1] || "").toLowerCase()}`);
