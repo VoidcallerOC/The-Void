@@ -95,9 +95,19 @@ export function XAccountLink({ variant = "panel" } = {}) {
   }
 
   if (variant === "nav") {
-    // The header needs a wallet session to link, and has nothing to say once linked or when X is unavailable.
-    const { phase, error } = state;
-    if (!signedIn || !(phase === "disconnected" || phase === "pending")) return null;
+    // The header shows where the X link stands, so it never looks missing: connect, linked, unavailable or retry.
+    // It needs a wallet session to link, so it renders nothing before sign-in and while the status loads.
+    const { phase, link, error } = state;
+    if (!signedIn || phase === "idle" || phase === "loading") return null;
+    if (phase === "connected" && link) {
+      return <a className="vc-x-chip vc-x-chip--linked" href={link.profileUrl} target="_blank" rel="noopener noreferrer" title="X account connected"><XLogo />@{link.username}</a>;
+    }
+    if (phase === "unavailable") {
+      return <span className="vc-x-chip" title="Connecting an X account is not available right now."><XLogo />X unavailable</span>;
+    }
+    if (phase === "error") {
+      return <button type="button" className="vc-x-chip" onClick={refresh} title={error || "Could not check your X connection."}><XLogo />X retry</button>;
+    }
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
         <button type="button" className="vc-x-connect vc-x-connect--nav" onClick={connect} disabled={phase === "pending"} aria-busy={phase === "pending"} aria-label="Connect X account" title="Connect your X account (optional)">
