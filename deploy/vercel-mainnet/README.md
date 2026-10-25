@@ -16,7 +16,8 @@ to Avalanche Fuji (43113)…”). Mainnet auth requires this separate build with
 1. New Vercel project from `VoidcallerOC/The-Void`.
 2. **Root Directory:** `deploy/vercel-mainnet` (uses this folder’s `vercel.json`).
 3. Do **not** reuse the Fuji project’s production domain until cutover is approved.
-4. Optional dashboard env (also baked into `buildCommand` from the recorded manifest):
+4. Optional dashboard env (also baked into the root `package.json` `build:mainnet` script, which the
+   `buildCommand` runs; Vercel caps `buildCommand` at 256 characters):
    - `VITE_MARKETPLACE_CHAIN_ID=43114`
    - `VITE_MARKETPLACE_ADDRESS=0x0e77116142844478a55EEd2Ab79de9F93770F8f5`
    - `VITE_MARKETPLACE_FEE_BPS=250`
