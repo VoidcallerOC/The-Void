@@ -1,6 +1,8 @@
 {
-  "name": "Voidcaller",
-  "short_name": "Voidcaller",
+  "name": "The Void",
+  "short_name": "The Void",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
