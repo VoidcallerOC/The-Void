@@ -851,3 +851,15 @@ footer, .vc-footer { margin-bottom: 8px; }
   white-space: nowrap; box-shadow: none;
 }
 .vc-x-connect--nav .vc-x-connect__logo { width: 14px; height: 14px; }
+
+/* Header status chip beside the wallet button: X linked, unavailable or retry. */
+.vc-x-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; background: transparent;
+  border: 1px solid var(--vc-ash); color: var(--vc-bone-dim); text-decoration: none; cursor: default; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase;
+}
+button.vc-x-chip, a.vc-x-chip { cursor: pointer; }
+.vc-x-chip .vc-x-connect__logo { width: 14px; height: 14px; }
+.vc-x-chip--linked { color: var(--vc-bone); border-color: var(--vc-bone-dim); }
+.vc-x-chip:is(a, button):hover { border-color: var(--vc-crimson); color: var(--vc-bone); }
+.vc-x-chip:focus-visible { outline: 3px solid var(--vc-crimson); outline-offset: 3px; }

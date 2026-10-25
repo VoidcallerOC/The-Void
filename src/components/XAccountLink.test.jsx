@@ -212,17 +212,22 @@ describe("XLinkCallbackPage", () => {
       expect(screen.getByRole("button", { name: "Connect X account" }).disabled).toBe(true);
     });
 
-    it("hides itself once the X account is connected or when linking is unavailable", async () => {
+    it("shows the linked @username once connected, a quiet notice when linking is unavailable, and a retry on error", async () => {
       routes["GET /x-link"] = () => ok(linked);
-      const view = renderNav();
-      await waitFor(() => expect(fetch).toHaveBeenCalled());
-      await act(async () => {});
-      expect(view.container.innerHTML).toBe("");
+      renderNav();
+      const chip = await screen.findByText("@void_fan");
+      expect(chip.closest("a").getAttribute("href")).toBe("https://x.com/void_fan");
       cleanup();
       routes["GET /x-link"] = () => ok({ available: false, connected: false });
-      const other = renderNav();
-      await act(async () => {});
-      expect(other.container.innerHTML).toBe("");
+      renderNav();
+      expect(await screen.findByText("X unavailable")).toBeTruthy();
+      cleanup();
+      routes["GET /x-link"] = () => fail(500, "SERVER", "boom");
+      renderNav();
+      const retry = await screen.findByText("X retry");
+      routes["GET /x-link"] = () => ok({ available: true, connected: false });
+      fireEvent.click(retry);
+      expect(await screen.findByRole("button", { name: "Connect X account" })).toBeTruthy();
     });
   });
 });
