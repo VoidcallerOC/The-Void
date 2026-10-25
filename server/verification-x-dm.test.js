@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { setImmediate as tick } from "node:timers/promises";
 import { createArtistVerificationService } from "./verification-service.js";
 import { buildVerificationDm, createVerificationNotifier, reviewUrlFor } from "./verification-notifier.js";
-import { createXDmClient, loadXDmConfig, oauth1Header } from "./x-dm.js";
+import { createXDmClient, describeXDmStartup, loadXDmConfig, oauth1Header } from "./x-dm.js";
 import { createApiHandler } from "./api-http.js";
 
-// Artist submits verification → The Void sends ONE X DM to @voidcallerOC with
+// Artist submits verification → The Void sends ONE X DM to @TheVoidOC with
 // the request and a direct review link. The DM is an alert only: the link still
 // needs a signed-in reviewer wallet.
 
@@ -110,7 +110,7 @@ function service({ db, notifier, logger = { info: vi.fn(), warn: vi.fn(), error:
 }
 
 describe("X DM on artist verification submission", () => {
-  it("DRAFT → SUBMITTED sends exactly one DM to the configured @voidcallerOC id with the review link", async () => {
+  it("DRAFT → SUBMITTED sends exactly one DM to the configured @TheVoidOC id with the review link", async () => {
     const h = harness();
     const db = verificationDb();
     const submitted = await service({ db, notifier: h.notifier, logger: h.logger }).submit({ request: requestFor(APPLICANT), input: input() });
@@ -133,10 +133,10 @@ describe("X DM on artist verification submission", () => {
     expect([...h.store.rows.values()][0]).toMatchObject({ status: "SENT", attempts: 1, provider_message_id: "dm-1" });
   });
 
-  it("resolves @voidcallerOC by username when no numeric id is configured", async () => {
+  it("resolves @TheVoidOC by username when no numeric id is configured", async () => {
     const h = harness({ env: { ...CONFIGURED_ENV, X_DM_RECIPIENT_ID: "" }, respond: (n) => (n === 1 ? { status: 200, body: { data: { id: "999" } } } : { status: 201, body: { data: { dm_event_id: "dm-2" } } }) });
     await h.notifier.notifySubmitted(application());
-    expect(h.x.calls[0]).toMatchObject({ method: "GET", url: "https://api.x.com/2/users/by/username/voidcallerOC" });
+    expect(h.x.calls[0]).toMatchObject({ method: "GET", url: "https://api.x.com/2/users/by/username/TheVoidOC" });
     expect(h.x.dms()[0].url).toBe("https://api.x.com/2/dm_conversations/with/999/messages");
   });
 });
@@ -217,9 +217,47 @@ describe("security", () => {
   });
 
   it("the recipient comes only from server config, never from the request", () => {
-    expect(loadXDmConfig({}).recipientUsername).toBe("voidcallerOC");
-    expect(loadXDmConfig({ X_DM_RECIPIENT_USERNAME: "@voidcallerOC" }).recipientUsername).toBe("voidcallerOC");
+    expect(loadXDmConfig({}).recipientUsername).toBe("TheVoidOC");
+    expect(loadXDmConfig({ X_DM_RECIPIENT_USERNAME: "@TheVoidOC" }).recipientUsername).toBe("TheVoidOC");
     expect(loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "bad name!" }).configured).toBe(false);
+  });
+
+  it("a numeric recipient id overrides the username and the effective recipient is reported as the id", async () => {
+    const byUsername = loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_ID: "" });
+    expect(byUsername).toMatchObject({ recipientLabel: "@TheVoidOC", recipientIdOverridesUsername: false });
+    const byId = loadXDmConfig({ ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "1234567890" });
+    expect(byId).toMatchObject({ recipientLabel: "user id 1234567890", recipientIdOverridesUsername: true });
+    // The send goes to the id, with no username lookup, so the id is what must be right.
+    const h = harness({ env: { ...CONFIGURED_ENV, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "555" } });
+    const db = verificationDb();
+    await service({ db, notifier: h.notifier, logger: h.logger }).submit({ request: requestFor(APPLICANT), input: input() });
+    await tick(); await tick();
+    expect(h.x.calls).toHaveLength(1);
+    expect(h.x.calls[0].url).toBe("https://api.x.com/2/dm_conversations/with/555/messages");
+    const row = [...h.store.rows.values()][0];
+    expect((await h.notifier.statusFor(row.application_id)).recipient).toBe("user id 555");
+    expect(h.logger.info.mock.calls.find(([event]) => event === "X_DM_SENT")[1].recipient).toBe("user id 555");
+  });
+
+  it("startup diagnostics name the effective recipient and credential presence, never a secret value", () => {
+    const secrets = { X_API_KEY: "SECRET-KEY-VALUE", X_API_SECRET: "SECRET-API-VALUE", X_ACCESS_TOKEN: "SECRET-TOKEN-VALUE", X_ACCESS_TOKEN_SECRET: "SECRET-TOKEN-SECRET-VALUE" };
+    const ok = describeXDmStartup(loadXDmConfig({ ...secrets, X_DM_RECIPIENT_USERNAME: "TheVoidOC" }));
+    expect(ok).toEqual([{ level: "info", event: "X_DM_CONFIGURED", fields: { recipient: "@TheVoidOC", senderCredentials: "present", credentialsChecked: ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"] } }]);
+    expect(JSON.stringify(ok)).not.toMatch(/SECRET-.*-VALUE/);
+
+    const missing = describeXDmStartup(loadXDmConfig({ X_API_KEY: "SECRET-KEY-VALUE", X_DM_RECIPIENT_USERNAME: "TheVoidOC" }));
+    expect(missing).toEqual([{ level: "error", event: "X_DM_CONFIG_MISSING", fields: { missing: ["X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"], recipient: "@TheVoidOC" } }]);
+    expect(JSON.stringify(missing)).not.toContain("SECRET-KEY-VALUE");
+
+    const override = describeXDmStartup(loadXDmConfig({ ...secrets, X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "777" }));
+    expect(override.map((e) => e.event)).toEqual(["X_DM_CONFIGURED", "X_DM_RECIPIENT_ID_OVERRIDES_USERNAME"]);
+    expect(override[0].fields.recipient).toBe("user id 777");
+    expect(override[1]).toMatchObject({ level: "warn", fields: { recipientId: "777", ignoredUsername: "@TheVoidOC" } });
+    expect(JSON.stringify(override)).not.toMatch(/SECRET-.*-VALUE/);
+  });
+
+  it("the recipient is configurable rather than hard-coded", () => {
+    expect(loadXDmConfig({ X_DM_RECIPIENT_USERNAME: "SomeOtherOps" }).recipientUsername).toBe("SomeOtherOps");
   });
 
   it("there is no public endpoint that triggers a reviewer DM", async () => {

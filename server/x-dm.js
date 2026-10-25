@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from "node:crypto";
 // permission and an API access tier that includes the DM endpoints.
 
 export const X_DM_ENV = Object.freeze(["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"]);
-const DEFAULT_RECIPIENT = "voidcallerOC";
+const DEFAULT_RECIPIENT = "TheVoidOC";
 const USERNAME = /^[A-Za-z0-9_]{1,15}$/;
 const NUMERIC_ID = /^\d{1,25}$/;
 
@@ -27,6 +27,10 @@ export function loadXDmConfig(env = {}) {
     invalid: Object.freeze(invalid),
     recipientUsername,
     recipientId: recipientId || null,
+    // What alerts actually go to. A configured numeric id overrides the username,
+    // so logs and status must name the id, not a username that is not being used.
+    recipientLabel: recipientId ? `user id ${recipientId}` : `@${recipientUsername}`,
+    recipientIdOverridesUsername: Boolean(recipientId),
     apiBase: String(env.X_API_BASE_URL || "https://api.x.com/2").replace(/\/$/, ""),
     credentials: Object.freeze({
       consumerKey: String(env.X_API_KEY || "").trim(),
@@ -35,6 +39,25 @@ export function loadXDmConfig(env = {}) {
       tokenSecret: String(env.X_ACCESS_TOKEN_SECRET || "").trim(),
     }),
   });
+}
+
+/**
+ * Startup diagnostics for the DM alert config: what to log and at which level.
+ * Reports which sender credentials are present (names only, never values) and the
+ * effective recipient, so a deploy can be checked without reading any secret.
+ */
+export function describeXDmStartup(config) {
+  const events = [];
+  const recipient = config.recipientLabel;
+  if (config.configured) {
+    events.push({ level: "info", event: "X_DM_CONFIGURED", fields: { recipient, senderCredentials: "present", credentialsChecked: [...X_DM_ENV] } });
+  } else {
+    events.push({ level: "error", event: "X_DM_CONFIG_MISSING", fields: { missing: [...config.missing, ...config.invalid], recipient } });
+  }
+  if (config.recipientIdOverridesUsername) {
+    events.push({ level: "warn", event: "X_DM_RECIPIENT_ID_OVERRIDES_USERNAME", fields: { recipientId: config.recipientId, ignoredUsername: `@${config.recipientUsername}` } });
+  }
+  return events;
 }
 
 function rfc3986(value) {

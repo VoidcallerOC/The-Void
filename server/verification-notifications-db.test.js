@@ -90,7 +90,7 @@ describe.skipIf(!testDatabaseUrl)("verification notification outbox (Postgres)",
     expect(rows[0].last_error).toContain("X API HTTP 502");
     const appRow = await pool.query("SELECT status FROM artist_verification_applications WHERE id=$1", [app.id]);
     expect(appRow.rows[0].status).toBe("SUBMITTED");
-    expect(await n.statusFor(app.id)).toMatchObject({ status: "RETRY", sentAt: null, recipient: "@voidcallerOC" });
+    expect(await n.statusFor(app.id)).toMatchObject({ status: "RETRY", sentAt: null, recipient: "user id 42" });
   });
 
   it("missing configuration is stored as CONFIG_MISSING without counting an attempt", async () => {

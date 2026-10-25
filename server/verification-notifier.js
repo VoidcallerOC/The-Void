@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 // Reviewer alerts for artist verification submissions.
 //
 // Primary (and only) channel: an X DM to the reviewer account configured on the
-// server (default @voidcallerOC). The alert is an outbox row created server-side
+// server (default @TheVoidOC). The alert is an outbox row created server-side
 // when an application becomes SUBMITTED; delivery happens after the submission
 // has committed, so an X failure can never undo or fail a submission.
 //
@@ -146,7 +146,7 @@ export function createVerificationNotifier({ store, xClient, xConfig, publicAppU
     const row = await store.claim(id);
     if (!row) return { delivered: false, reason: "NOT_CLAIMED" };
     const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload || {};
-    const fields = { notificationId: row.id, publicId: payload.publicId, attempt: row.attempts, channel: "X_DM", recipient: `@${xConfig.recipientUsername}` };
+    const fields = { notificationId: row.id, publicId: payload.publicId, attempt: row.attempts, channel: "X_DM", recipient: xConfig.recipientLabel };
 
     if (!xConfig.configured) {
       // Not counted as an attempt; re-checked until configuration is present.
@@ -204,7 +204,7 @@ export function createVerificationNotifier({ store, xClient, xConfig, publicAppU
     async statusFor(applicationId) {
       const row = await store.forApplication(applicationId);
       if (!row) return null;
-      return { channel: "X_DM", recipient: `@${xConfig.recipientUsername}`, status: row.status, attempts: Number(row.attempts || 0), lastAttemptAt: row.last_attempt_at || null, nextAttemptAt: row.next_attempt_at || null, sentAt: row.sent_at || null, lastError: row.last_error || null };
+      return { channel: "X_DM", recipient: xConfig.recipientLabel, status: row.status, attempts: Number(row.attempts || 0), lastAttemptAt: row.last_attempt_at || null, nextAttemptAt: row.next_attempt_at || null, sentAt: row.sent_at || null, lastError: row.last_error || null };
     },
   };
 }
