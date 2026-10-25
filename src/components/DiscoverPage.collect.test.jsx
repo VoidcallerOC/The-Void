@@ -68,7 +68,8 @@ describe("Discover owns primary collecting", () => {
 
     expect(section.querySelector("[data-edition-id='edition-A']")).toBeTruthy();
     expect(section.querySelector("[data-edition-id='edition-E']")).toBeTruthy();
-    for (const letter of ["B", "C", "D", "F"]) expect(container.querySelector(`[data-edition-id='edition-${letter}']`)).toBeNull();
+    for (const letter of ["B", "C", "D", "F"]) expect(section.querySelector(`[data-edition-id='edition-${letter}']`)).toBeNull();
+    for (const letter of ["B", "C", "F"]) expect(container.querySelector(`[data-edition-id='edition-${letter}']`)).toBeNull();
     for (const letter of ["A", "E"]) expect(container.querySelectorAll(`[data-edition-id='edition-${letter}']`)).toHaveLength(1);
     expect(within(section).getAllByRole("link", { name: "Collect" })).toHaveLength(2);
 
@@ -118,5 +119,49 @@ describe("Discover owns primary collecting", () => {
     expect(screen.getByRole("link", { name: "Browse collections" }).getAttribute("href")).toBe("/collection");
     expect(screen.getByRole("link", { name: "Secondary marketplace" }).getAttribute("href")).toBe("/marketplace");
     expect(screen.queryByRole("region", { name: "The shelf" })).toBeNull();
+  });
+});
+
+const upcoming = () => screen.queryByRole("heading", { name: "Official editions coming soon" })?.closest("section") || null;
+const START = 1_900_000_000;
+// The live on-chain sale tuple the API attaches, as for an open edition with a scheduled sale.
+const scheduled = (extra = {}) => ({ supply: "0", primary_availability: "not-started", primary_sale: { configured: true, paused: false, price_wei: "250000000000000000", max_supply: "0", sold: "0", per_wallet_limit: "3", start_time: String(START), end_time: String(START + 7 * 86_400 - 1), ...extra } });
+
+describe("Discover lists scheduled sales as upcoming", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("shows a published edition whose sale has not started under Upcoming, linked to its edition page, and not as collectable", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime((START - 600) * 1000);
+    catalogState.current = catalogOf([factory("U", "not-started", scheduled())]);
+    renderDiscover();
+    const card = upcoming().querySelector("[data-edition-id='edition-U']");
+    expect(card).toBeTruthy();
+    expect(collect().querySelector("[data-edition-id='edition-U']")).toBeNull();
+    expect(within(upcoming()).queryByRole("link", { name: "Collect" })).toBeNull();
+    expect(within(upcoming()).getAllByRole("link").some((link) => link.getAttribute("href") === "/edition/edition-U")).toBe(true);
+    expect(screen.getByText("Nothing to collect right now")).toBeTruthy();
+  });
+
+  it("moves the same edition to collect once its start time passes", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime((START + 1) * 1000);
+    catalogState.current = catalogOf([factory("U", "not-started", scheduled())]);
+    renderDiscover();
+    expect(collect().querySelector("[data-edition-id='edition-U']")).toBeTruthy();
+    expect(upcoming()).toBeNull();
+  });
+
+  it("does not list paused, ended, unconfigured, draft or unpublished editions as upcoming", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime((START - 600) * 1000);
+    const draft = factory("R", "not-started", scheduled());
+    draft.release.status = "DRAFT";
+    const unpublished = factory("S", "not-started", scheduled());
+    unpublished.edition.status = "DRAFT";
+    catalogState.current = catalogOf([factory("P", "paused", scheduled({ paused: true })), factory("Q", "ended"), factory("T", "unconfigured"), draft, unpublished]);
+    const { container } = renderDiscover();
+    expect(upcoming()).toBeNull();
+    for (const letter of ["P", "Q", "R", "S", "T"]) expect(container.querySelector(`[data-edition-id='edition-${letter}']`)).toBeNull();
   });
 });

@@ -14,7 +14,7 @@ import { useWallet } from "../lib/wallet-context.js";
 import { ArtistProfileEditor } from "./ArtistProfileEditor.jsx";
 import { isCertifiedFujiEdition, readFujiBalance } from "../lib/fuji-release.js";
 import { useAudio } from "../lib/audio.js";
-import { collectableEditionGroups, editionOwnedByWallet, flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionSupplyLabel, editionTypeLabel, primaryCollectForEdition, releaseScopedFirst, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
+import { collectableEditionGroups, upcomingEditionItems, editionOwnedByWallet, flattenMarketplaceEditions, marketplaceCatalog, marketplaceStatusLabel, MARKETPLACE_STATE, editionPriceLabel, editionSupplyLabel, editionTypeLabel, primaryCollectForEdition, releaseScopedFirst, resolveSecondaryStatus } from "../lib/marketplace-surface.js";
 import { CollectionMarketplaceCallout } from "./MarketplaceRails.jsx";
 import { ProtectedExperiencePlayer } from "./ProtectedExperiencePlayer.jsx";
 import { CollectPanel } from "./CollectPanel.jsx";
@@ -72,6 +72,7 @@ export function DiscoverPage() {
   const secondary = resolveSecondaryStatus();
   const wallet = useWallet();
   const collectGroups = useMemo(() => collectableEditionGroups(collapsePublicCatalog(catalog)), [catalog]);
+  const upcomingItems = useMemo(() => upcomingEditionItems(collapsePublicCatalog(catalog)), [catalog]);
   return (
     <section style={shell}>
       <PlatformHeader eyebrow="† Discovery" title="Currently featuring Voidcaller">
@@ -116,6 +117,16 @@ export function DiscoverPage() {
           <EmptyRail title="Nothing to collect right now">No official edition has an open primary sale. Collections are still open to explore above.</EmptyRail>
         )}
       </section>
+      {upcomingItems.length > 0 && (
+        <section aria-labelledby="upcoming-editions-heading" style={{ marginTop: 56 }}>
+          <SectionHead id="upcoming-editions-heading" eyebrow="Upcoming" title="Official editions coming soon">
+            Their primary sale is scheduled but has not opened yet. Each moves up to collect when it opens.
+          </SectionHead>
+          <div className="vc-market-grid">
+            {upcomingItems.map((item) => <EditionCard key={item.edition.id} item={item} owned={editionOwnedByWallet(item, wallet)} />)}
+          </div>
+        </section>
+      )}
     </section>
   );
 }
