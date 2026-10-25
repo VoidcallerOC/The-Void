@@ -73,6 +73,16 @@ describe("XAccountLink", () => {
     expect(screen.getByText(/does not change your wallet, collection or marketplace access/)).toBeTruthy();
   });
 
+  it("renders the connect action as the prominent X button with a logo and disables it while pending", async () => {
+    routes["GET /x-link"] = () => ok({ available: true, connected: false });
+    renderCard();
+    const button = (await screen.findByText("Connect X account")).closest("button");
+    expect(button.className).toBe("vc-x-connect");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    expect(button.disabled).toBe(false);
+  });
+
   it("shows the verified username, a public profile link, status and a disconnect control", async () => {
     routes["GET /x-link"] = () => ok(linked);
     renderCard();

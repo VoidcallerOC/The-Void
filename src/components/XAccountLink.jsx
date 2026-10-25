@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWallet } from "../lib/wallet-context.js";
 import { WalletButton } from "./WalletButton.jsx";
-import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
+import { ghostBtn } from "../lib/marketplace-chrome.js";
 import { X_LINK_MESSAGE, completeXLink, disconnectXLink, fetchXLink, startXLink } from "../lib/x-link-api.js";
 
 const panel = { border: "1px solid var(--vc-bone-dim)", padding: "20px clamp(16px, 3vw, 28px)", display: "grid", gap: 12, maxWidth: 720 };
 const mono = { fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase" };
 const dim = { color: "var(--vc-bone-dim)", lineHeight: 1.7, margin: 0 };
+
+function XLogo() {
+  return <svg className="vc-x-connect__logo" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>;
+}
 
 // Optional X identity link. Signing in with a wallet stays the only way in; this just shows
 // which X account the wallet owner has proven they control. Authorization happens on X's own page.
@@ -114,7 +118,7 @@ export function XAccountLink() {
       {(phase === "disconnected" || phase === "pending") && (
         <>
           <p style={dim}>Connect your X account to show a verified link to your X profile. This is optional. We will store your X user ID, username, display name and profile image link. You sign in on X itself, we never see your password, and connecting does not change your wallet, collection or marketplace access.</p>
-          <div><button type="button" style={primaryBtn} onClick={connect} disabled={phase === "pending"}>{phase === "pending" ? "Waiting for X…" : "Connect X account"}</button></div>
+          <div style={{ marginTop: 4 }}><button type="button" className="vc-x-connect" onClick={connect} disabled={phase === "pending"} aria-busy={phase === "pending"}><XLogo /><span>{phase === "pending" ? "Waiting for X…" : "Connect X account"}</span></button></div>
         </>
       )}
       {phase === "connected" && link && (
