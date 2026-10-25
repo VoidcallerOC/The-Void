@@ -227,8 +227,8 @@ contract GenesisHolderClaimHalloweenScheduleTest {
         _configureSale(PRICE, 0, START, END);
         _expectDeployRevert(START, 23 hours, WINDOW, PRICE, 0, 0, address(release), GenesisHolderClaim.InvalidConfiguration.selector);
         _expectDeployRevert(START, 25 hours, WINDOW, PRICE, 0, 0, address(release), GenesisHolderClaim.InvalidConfiguration.selector);
-        // A start in the past is refused.
-        _expectDeployRevert(block.timestamp - 1, 1 days, WINDOW, PRICE, 0, 0, address(release), GenesisHolderClaim.InvalidConfiguration.selector);
+        // A past start is allowed, but it must still equal the sale's start.
+        _expectDeployRevert(block.timestamp - 1, 1 days, WINDOW, PRICE, 0, 0, address(release), GenesisHolderClaim.PublicSaleSchedule.selector);
     }
 
     function testClaimWindowMustCloseBeforeThePaidSaleEnds() public {

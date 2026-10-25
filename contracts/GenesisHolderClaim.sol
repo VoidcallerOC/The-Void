@@ -225,10 +225,13 @@ contract GenesisHolderClaim is ReentrancyGuard {
         address admin_,
         address signer_
     ) {
+        // claimStart may be in the past: a late deployment binds to an already-open sale.
+        // The schedule stays authoritative (claimEnd = claimStart + claimWindow); runtime
+        // checks reject claims outside [claimStart, claimEnd). The window is never extended.
         if (
             releaseContract_ == address(0) || primarySale_ == address(0) || admin_ == address(0)
                 || signer_ == address(0) || releaseContract_ == LEGACY_FUJI_SINGLETON
-                || publicPriceWei_ == 0 || claimStart_ < block.timestamp
+                || publicPriceWei_ == 0
                 || (block.chainid != 43113 && block.chainid != 43114)
         ) revert InvalidConfiguration();
         // Distinct real contracts, never the Genesis collection itself, and the voucher signer is not the admin.

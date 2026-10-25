@@ -257,8 +257,9 @@ contract GenesisHolderClaimOpenEditionTest {
         _claim(CLAIMANT, 13);
     }
 
-    function testDeploymentRequiresTheExactScheduleAndAFutureStart() public {
-        vm.expectPartialRevert(GenesisHolderClaim.InvalidConfiguration.selector);
+    function testDeploymentRequiresTheExactSchedule() public {
+        // Past claimStart is allowed; it still must equal the sale's start.
+        vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
         _deploy(T0 - 1);
         vm.expectPartialRevert(GenesisHolderClaim.PublicSaleSchedule.selector);
         _deploy(CLAIM_START + 1);

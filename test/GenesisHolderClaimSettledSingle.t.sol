@@ -437,7 +437,7 @@ contract GenesisHolderClaimSettledSingleTest {
         (ok, reason) = tryDeployClaim(tokenId, CLAIM_START, 1 days, 7 days, 0.1 ether);
         require(!ok && selectorOf(reason) == GenesisHolderClaim.InvalidConfiguration.selector, "price other than 0.25 AVAX");
         (ok, reason) = tryDeployClaim(tokenId, T0 - 1, 1 days, 7 days, PRICE);
-        require(!ok && selectorOf(reason) == GenesisHolderClaim.InvalidConfiguration.selector, "claim start in the past");
+        require(!ok && selectorOf(reason) == GenesisHolderClaim.PublicSaleSchedule.selector, "past start must still match the sale");
         vm.chainId(1);
         (ok, reason) = tryDeployClaim(tokenId, CLAIM_START, 1 days, 7 days, PRICE);
         require(!ok && selectorOf(reason) == GenesisHolderClaim.InvalidConfiguration.selector, "another chain");
