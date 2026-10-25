@@ -189,4 +189,40 @@ describe("XLinkCallbackPage", () => {
     render(<MemoryRouter><XLinkCallbackPage /></MemoryRouter>);
     expect(await screen.findByText(/cannot finish the connection/)).toBeTruthy();
   });
+
+  describe("header variant", () => {
+    const renderNav = (wallet = signedIn) => render(<WalletCtx.Provider value={wallet}><XAccountLink variant="nav" /></WalletCtx.Provider>);
+
+    it("renders nothing and makes no request until a wallet session exists", async () => {
+      const { container } = renderNav({ connected: true, authenticated: false, authHeaders: {} });
+      await act(async () => {});
+      expect(container.innerHTML).toBe("");
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("shows a compact Connect X button and starts the same X flow", async () => {
+      routes["GET /x-link"] = () => ok({ available: true, connected: false });
+      routes["POST /x-link/start"] = () => ok({ authorizationUrl: "https://x.com/i/oauth2/authorize?state=s" });
+      vi.spyOn(window, "open").mockReturnValue(popup);
+      renderNav();
+      const button = await screen.findByRole("button", { name: "Connect X account" });
+      expect(button.className).toContain("vc-x-connect--nav");
+      fireEvent.click(button);
+      await waitFor(() => expect(popup.location.href).toContain("https://x.com/i/oauth2/authorize"));
+      expect(screen.getByRole("button", { name: "Connect X account" }).disabled).toBe(true);
+    });
+
+    it("hides itself once the X account is connected or when linking is unavailable", async () => {
+      routes["GET /x-link"] = () => ok(linked);
+      const view = renderNav();
+      await waitFor(() => expect(fetch).toHaveBeenCalled());
+      await act(async () => {});
+      expect(view.container.innerHTML).toBe("");
+      cleanup();
+      routes["GET /x-link"] = () => ok({ available: false, connected: false });
+      const other = renderNav();
+      await act(async () => {});
+      expect(other.container.innerHTML).toBe("");
+    });
+  });
 });

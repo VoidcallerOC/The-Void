@@ -843,3 +843,11 @@ footer, .vc-footer { margin-bottom: 8px; }
 .vc-x-connect:disabled { cursor: progress; background: #9a9a9a; border-color: #9a9a9a; box-shadow: none; }
 .vc-x-connect__logo { flex: none; }
 @media (prefers-reduced-motion: reduce) { .vc-x-connect { transition: none; } }
+
+/* Header variant: sits beside the wallet button, same height and mono caps. */
+.vc-x-connect--nav {
+  width: auto; min-height: 0; padding: 10px 14px; gap: 8px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  white-space: nowrap; box-shadow: none;
+}
+.vc-x-connect--nav .vc-x-connect__logo { width: 14px; height: 14px; }

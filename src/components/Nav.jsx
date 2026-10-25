@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { WalletButton } from "./WalletButton.jsx";
+import { XAccountLink } from "./XAccountLink.jsx";
 import { BrandLogo } from "./BrandLogo.jsx";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
 
@@ -114,6 +115,7 @@ export function Nav() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span className="vc-nav-cta vc-nav-wallet" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <XAccountLink variant="nav" />
           <WalletButton />
         </span>
         <button
@@ -170,6 +172,7 @@ export function Nav() {
             </NavLink>
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
+            <XAccountLink variant="nav" />
             <WalletButton compact />
           </div>
         </div>
