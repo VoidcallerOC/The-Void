@@ -213,6 +213,12 @@ need no configuration; these keys tune it.
 | `INDEXER_SETTLEMENT_RECONCILE_INTERVAL_MS` | `5000` | Tick between passes; a pass with nothing submitted makes no RPC call. A pending receipt is read once and reused while confirmations accrue. |
 | `INDEXER_SETTLEMENT_RECONCILE_MAX_AGE_MS` | `86400000` | Submissions older than this are left to the block scan. |
 | `INDEXER_SETTLEMENT_RECONCILE_BATCH_SIZE` | `10` | Submitted rows examined per pass. |
+
+### Indexer scan batching
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `INDEXER_BATCH_CONTRACTS` | `true` | One `eth_getLogs` per 100-block range carries the addresses of every contract on the chain (the public C-Chain endpoint accepts an address array over the same span). Each contract keeps its own checkpoint and takes only the returned logs above it. `false` restores one request per contract per range; nothing else changes. |
 | `GENESIS_CLAIM_CONTRACT`, `GENESIS_CLAIM_RELEASE_CONTRACT`, `GENESIS_CLAIM_PRIMARY_SALE`, `GENESIS_CLAIM_TOKEN_ID`, `GENESIS_CLAIM_START` | API | From steps 9–11 |
 | `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` | API | The dedicated signer key (entered by the owner only) |
 

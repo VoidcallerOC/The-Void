@@ -310,6 +310,9 @@ export function loadIndexerConfig(env = process.env, { requireConfiguration = tr
     // sale discovered later is never starved. A contract that spends its budget stays RUNNING without a
     // successful run, so ownership freshness keeps failing closed for it until it reaches the target.
     maxChunksPerCycle: boundedPositiveInteger(env.INDEXER_MAX_CHUNKS_PER_CYCLE, DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, "INDEXER_MAX_CHUNKS_PER_CYCLE", { min: 1, max: 100_000 }),
+    // One eth_getLogs per block range for every contract on the chain (address array). `false` restores the
+    // per-contract scan (one eth_getLogs per contract per range) without any other behavioural change.
+    batchContracts: String(env.INDEXER_BATCH_CONTRACTS ?? "true").trim().toLowerCase() !== "false",
     pollIntervalMs: boundedPositiveInteger(env.INDEXER_POLL_INTERVAL_MS, 15_000, "INDEXER_POLL_INTERVAL_MS", { min: 1_000, max: 300_000 }),
     rpcTimeoutMs,
     rpcRetries,

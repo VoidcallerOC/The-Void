@@ -262,7 +262,7 @@ export function createProductionIndexerWorker({ serverConfig = loadServerConfig(
     // RPC pacer owns 429 cooldowns; avoid stacking another full Retry-After sleep here.
     deferRateLimitDelay: true,
   };
-  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, maxChunksPerCycle: indexerConfig.maxChunksPerCycle ?? DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, retryOptions, logger });
+  const indexer = new BlockchainIndexer({ rpc: resolvedRpc, store: resolvedStore, configs: [...indexerConfig.contracts], confirmations: indexerConfig.confirmations, chunkSize: indexerConfig.chunkSize, maxChunksPerCycle: indexerConfig.maxChunksPerCycle ?? DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, batchContracts: indexerConfig.batchContracts !== false, retryOptions, logger });
   const settlement = indexerConfig.settlementReconcileEnabled === false ? null : new SubmittedTransactionReconciler({
     indexer,
     store: resolvedStore,
