@@ -21,6 +21,7 @@ export function XAccountLink({ variant = "panel" } = {}) {
   const headers = wallet?.authHeaders || {};
   const signedIn = Boolean(wallet?.connected && wallet?.authenticated && headers.authorization);
   const [state, setState] = useState({ phase: "idle", link: null, error: "" });
+  const [hint, setHint] = useState("");
   const popup = useRef(null);
   const busy = useRef(false);
   const headersRef = useRef(headers);
@@ -95,10 +96,34 @@ export function XAccountLink({ variant = "panel" } = {}) {
   }
 
   if (variant === "nav") {
-    // The header shows where the X link stands, so it never looks missing: connect, linked, unavailable or retry.
-    // It needs a wallet session to link, so it renders nothing before sign-in and while the status loads.
+    // The header control is always visible, for every visitor, so it never looks missing. Linking needs a signed
+    // wallet session, so before one exists the same button starts the wallet sign-in instead of the X flow.
     const { phase, link, error } = state;
-    if (!signedIn || phase === "idle" || phase === "loading") return null;
+    if (!signedIn) {
+      const startWalletSignIn = async () => {
+        setHint("");
+        try {
+          if (wallet?.needsNetworkSwitch) { await wallet.ensureNetwork?.({ thenAuthenticate: true }); return; }
+          if (wallet?.connected) { await wallet.authenticate?.(); return; }
+          const wallets = wallet?.wallets || [];
+          if (wallets.length === 1) await wallet.connect(wallets[0].provider);
+          else if (wallets.length === 0) await wallet?.connect?.();
+          else setHint("Choose a wallet with the wallet button first.");
+        } catch (err) { setHint(err?.message || "Wallet sign-in did not complete."); }
+      };
+      const why = !wallet?.connected ? "Connect your wallet first, then link your X account." : "Sign in with your wallet, then link your X account.";
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+          <button type="button" className="vc-x-connect vc-x-connect--nav" onClick={startWalletSignIn} aria-label="Connect X account" title={`Connect your X account (optional). ${why}`}>
+            <XLogo /><span aria-hidden="true">Connect X</span>
+          </button>
+          {hint && <span role="alert" style={{ ...mono, fontSize: 10, color: "var(--vc-crimson)", maxWidth: 220, lineHeight: 1.4, textTransform: "none", letterSpacing: ".04em" }}>{hint}</span>}
+        </span>
+      );
+    }
+    if (phase === "idle" || phase === "loading") {
+      return <button type="button" className="vc-x-connect vc-x-connect--nav" disabled aria-busy="true" aria-label="Connect X account" title="Checking your X connection…"><XLogo /><span aria-hidden="true">Connect X</span></button>;
+    }
     if (phase === "connected" && link) {
       return <a className="vc-x-chip vc-x-chip--linked" href={link.profileUrl} target="_blank" rel="noopener noreferrer" title="X account connected"><XLogo />@{link.username}</a>;
     }

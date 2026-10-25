@@ -193,11 +193,32 @@ describe("XLinkCallbackPage", () => {
   describe("header variant", () => {
     const renderNav = (wallet = signedIn) => render(<WalletCtx.Provider value={wallet}><XAccountLink variant="nav" /></WalletCtx.Provider>);
 
-    it("renders nothing and makes no request until a wallet session exists", async () => {
-      const { container } = renderNav({ connected: true, authenticated: false, authHeaders: {} });
+    it("is always visible: before a wallet session it shows Connect X, makes no request, and starts wallet sign-in", async () => {
+      const connect = vi.fn();
+      const authenticate = vi.fn();
+      renderNav({ connected: false, authenticated: false, authHeaders: {}, wallets: [{ provider: "p1" }], connect, authenticate });
       await act(async () => {});
-      expect(container.innerHTML).toBe("");
       expect(fetch).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Connect X account" }));
+      await waitFor(() => expect(connect).toHaveBeenCalledWith("p1"));
+      cleanup();
+      renderNav({ connected: true, authenticated: false, authHeaders: {}, wallets: [], connect, authenticate });
+      fireEvent.click(screen.getByRole("button", { name: "Connect X account" }));
+      await waitFor(() => expect(authenticate).toHaveBeenCalled());
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("asks the visitor to pick a wallet first when several are available", async () => {
+      renderNav({ connected: false, authenticated: false, authHeaders: {}, wallets: [{ provider: "a" }, { provider: "b" }], connect: vi.fn() });
+      fireEvent.click(screen.getByRole("button", { name: "Connect X account" }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Choose a wallet/);
+    });
+
+    it("stays visible, disabled, while the X status loads", async () => {
+      routes["GET /x-link"] = () => new Promise(() => {});
+      renderNav();
+      const button = await screen.findByRole("button", { name: "Connect X account" });
+      expect(button.disabled).toBe(true);
     });
 
     it("shows a compact Connect X button and starts the same X flow", async () => {
@@ -205,7 +226,8 @@ describe("XLinkCallbackPage", () => {
       routes["POST /x-link/start"] = () => ok({ authorizationUrl: "https://x.com/i/oauth2/authorize?state=s" });
       vi.spyOn(window, "open").mockReturnValue(popup);
       renderNav();
-      const button = await screen.findByRole("button", { name: "Connect X account" });
+      await waitFor(() => expect(screen.getByRole("button", { name: "Connect X account" }).disabled).toBe(false));
+      const button = screen.getByRole("button", { name: "Connect X account" });
       expect(button.className).toContain("vc-x-connect--nav");
       fireEvent.click(button);
       await waitFor(() => expect(popup.location.href).toContain("https://x.com/i/oauth2/authorize"));
