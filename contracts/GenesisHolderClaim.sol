@@ -60,6 +60,12 @@ interface IGenesisClaimSale {
 /// server's), so a leaked voucher key cannot mint to wallets that hold no Genesis token. Genesis tokens are
 /// never moved; the claim mints exactly one release token per wallet, directly to the claimant, through
 /// the release's ISSUER_ROLE, which the artist grants to this contract separately.
+/// Optional early access, before everything else: the admin may name exactly one wallet and a window
+/// [earlyAccessStart, earlyAccessEnd) that ends no later than claimStart. That wallet alone may mint
+/// EARLY_ACCESS_QUANTITY once, free, with a separately typed voucher from the same signer. It is not a
+/// Genesis claim (hasClaimed is untouched, no Genesis holding is required) and not a sale purchase (the
+/// sale's per-wallet counter is untouched); it is counted in claimedSupply so supply accounting holds.
+/// The sale must already be configured to open at claimStart, so early access never opens it early.
 contract GenesisHolderClaim is ReentrancyGuard {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     uint256 public constant GENESIS_CHAIN_ID = 43114;
@@ -90,6 +96,11 @@ contract GenesisHolderClaim is ReentrancyGuard {
     bytes32 private constant VOUCHER_TYPEHASH = keccak256(
         "ClaimVoucher(address claimant,address genesisContract,uint256 genesisChainId,bytes32 eligibilityRule,uint256 destinationChainId,address releaseContract,uint256 tokenId,uint256 quantity,uint256 allocation,uint256 nonce,uint256 deadline)"
     );
+    bytes32 private constant EARLY_ACCESS_VOUCHER_TYPEHASH = keccak256(
+        "EarlyAccessVoucher(address claimant,uint256 destinationChainId,address releaseContract,uint256 tokenId,uint256 quantity,uint256 windowStart,uint256 windowEnd,uint256 nonce,uint256 deadline)"
+    );
+    /// @notice The early-access wallet mints exactly this many release tokens, once.
+    uint256 public constant EARLY_ACCESS_QUANTITY = 1;
     // secp256k1n / 2; rejects malleable ECDSA signatures.
     uint256 private constant SECP256K1N_HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
 
@@ -103,6 +114,18 @@ contract GenesisHolderClaim is ReentrancyGuard {
         uint256 tokenId;
         uint256 quantity;
         uint256 allocation;
+        uint256 nonce;
+        uint256 deadline;
+    }
+
+    struct EarlyAccessVoucher {
+        address claimant;
+        uint256 destinationChainId;
+        address releaseContract;
+        uint256 tokenId;
+        uint256 quantity;
+        uint256 windowStart;
+        uint256 windowEnd;
         uint256 nonce;
         uint256 deadline;
     }
@@ -133,6 +156,14 @@ contract GenesisHolderClaim is ReentrancyGuard {
     bool public paused;
     mapping(address => bool) public hasClaimed;
     mapping(uint256 => bool) public usedNonces;
+    /// @notice The single early-access wallet; zero until the admin configures it.
+    address public earlyAccessWallet;
+    /// @notice Early access is accepted while earlyAccessStart <= block.timestamp < earlyAccessEnd <= claimStart.
+    uint64 public earlyAccessStart;
+    uint64 public earlyAccessEnd;
+    bool public earlyAccessEnabled;
+    /// @notice Set by the one successful early-access mint; never cleared.
+    bool public earlyAccessClaimed;
 
     error Unauthorized();
     error InvalidAddress();
@@ -152,11 +183,21 @@ contract GenesisHolderClaim is ReentrancyGuard {
     error ClaimNotOpen(uint256 claimStart, uint256 currentTime);
     error ClaimWindowClosed(uint256 claimEnd, uint256 currentTime);
     error NotGenesisHolder(address account);
+    error EarlyAccessDisabled();
+    error EarlyAccessLocked();
+    error EarlyAccessNotOpen(uint256 earlyAccessStart, uint256 currentTime);
+    error EarlyAccessClosed(uint256 earlyAccessEnd, uint256 currentTime);
+    error NotEarlyAccessWallet(address account);
 
     event SignerUpdated(address indexed previousSigner, address indexed newSigner);
     event AdminTransferred(address indexed previousAdmin, address indexed newAdmin);
     event ClaimPaused(address indexed account);
     event ClaimUnpaused(address indexed account);
+    event EarlyAccessConfigured(address indexed wallet, uint64 start, uint64 end);
+    event EarlyAccessDisabledByAdmin(address indexed account);
+    event EarlyAccessMinted(
+        address indexed claimant, address indexed releaseContract, uint256 indexed tokenId, uint256 nonce, bytes32 voucherHash
+    );
     event GenesisHolderClaimed(
         address indexed claimant,
         address indexed releaseContract,
@@ -248,15 +289,19 @@ contract GenesisHolderClaim is ReentrancyGuard {
         return _digest(voucher);
     }
 
+    function earlyAccessVoucherDigest(EarlyAccessVoucher calldata voucher) external view returns (bytes32) {
+        return _earlyAccessDigest(voucher);
+    }
+
     function setSigner(address newSigner) external onlyAdmin {
-        if (newSigner == address(0) || newSigner == admin) revert InvalidAddress();
+        if (newSigner == address(0) || newSigner == admin || newSigner == earlyAccessWallet) revert InvalidAddress();
         address previous = signer;
         signer = newSigner;
         emit SignerUpdated(previous, newSigner);
     }
 
     function transferAdmin(address newAdmin) external onlyAdmin {
-        if (newAdmin == address(0) || newAdmin == signer) revert InvalidAddress();
+        if (newAdmin == address(0) || newAdmin == signer || newAdmin == earlyAccessWallet) revert InvalidAddress();
         address previous = admin;
         admin = newAdmin;
         emit AdminTransferred(previous, newAdmin);
@@ -270,6 +315,62 @@ contract GenesisHolderClaim is ReentrancyGuard {
     function unpause() external onlyAdmin {
         paused = false;
         emit ClaimUnpaused(msg.sender);
+    }
+
+    /// @notice Names the one early-access wallet and its window, and enables it. The window must start in the
+    /// future and end no later than claimStart. Once an enabled window has opened, or the mint happened, the
+    /// configuration is locked: it can then only be disabled.
+    function configureEarlyAccess(address wallet, uint64 start, uint64 end) external onlyAdmin {
+        if (earlyAccessClaimed || (earlyAccessEnabled && block.timestamp >= earlyAccessStart)) revert EarlyAccessLocked();
+        if (
+            wallet == address(0) || wallet == admin || wallet == signer || wallet == releaseContract
+                || wallet == primarySale || wallet == GENESIS_CONTRACT || wallet == address(this)
+        ) revert InvalidAddress();
+        if (uint256(start) <= block.timestamp || start >= end || uint256(end) > claimStart) revert InvalidConfiguration();
+        earlyAccessWallet = wallet;
+        earlyAccessStart = start;
+        earlyAccessEnd = end;
+        earlyAccessEnabled = true;
+        emit EarlyAccessConfigured(wallet, start, end);
+    }
+
+    /// @notice Turns early access off at any time; it does not affect Genesis claims or the sale.
+    function disableEarlyAccess() external onlyAdmin {
+        earlyAccessEnabled = false;
+        emit EarlyAccessDisabledByAdmin(msg.sender);
+    }
+
+    function earlyAccessMint(EarlyAccessVoucher calldata voucher, bytes calldata signature) external nonReentrant {
+        if (paused) revert Paused();
+        if (block.chainid != destinationChainId) revert WrongDestinationChain(destinationChainId, block.chainid);
+        if (!earlyAccessEnabled || earlyAccessWallet == address(0)) revert EarlyAccessDisabled();
+        if (block.timestamp < earlyAccessStart) revert EarlyAccessNotOpen(earlyAccessStart, block.timestamp);
+        if (block.timestamp >= earlyAccessEnd) revert EarlyAccessClosed(earlyAccessEnd, block.timestamp);
+        if (voucher.deadline < block.timestamp) revert ExpiredVoucher();
+        if (msg.sender != earlyAccessWallet) revert NotEarlyAccessWallet(msg.sender);
+        if (
+            voucher.claimant != msg.sender || voucher.destinationChainId != destinationChainId
+                || voucher.releaseContract != releaseContract || voucher.tokenId != tokenId
+                || voucher.quantity != EARLY_ACCESS_QUANTITY || voucher.windowStart != earlyAccessStart
+                || voucher.windowEnd != earlyAccessEnd
+        ) revert InvalidVoucher();
+        if (earlyAccessClaimed) revert AlreadyClaimed();
+        if (usedNonces[voucher.nonce]) revert Replay();
+        if (allocation != 0) {
+            uint256 remaining = allocation - claimedSupply;
+            if (voucher.quantity > remaining) revert AllocationExhausted(remaining, voucher.quantity);
+        }
+        // The sale must already be configured exactly as scheduled (opening at claimStart, after this window).
+        _assertPublicAllocation();
+        address recovered = _recover(_earlyAccessDigest(voucher), signature);
+        if (recovered == address(0) || recovered != signer) revert InvalidSignature();
+
+        // A failed mint reverts all of this, so the entitlement and the nonce stay unused.
+        earlyAccessClaimed = true;
+        usedNonces[voucher.nonce] = true;
+        claimedSupply += voucher.quantity;
+        IGenesisClaimRelease(releaseContract).mint(voucher.claimant, tokenId, voucher.quantity, "");
+        emit EarlyAccessMinted(voucher.claimant, releaseContract, tokenId, voucher.nonce, _earlyAccessDigest(voucher));
     }
 
     function claim(ClaimVoucher calldata voucher, bytes calldata signature) external nonReentrant {
@@ -362,6 +463,24 @@ contract GenesisHolderClaim is ReentrancyGuard {
                 voucher.tokenId,
                 voucher.quantity,
                 voucher.allocation,
+                voucher.nonce,
+                voucher.deadline
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
+    }
+
+    function _earlyAccessDigest(EarlyAccessVoucher calldata voucher) private view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                EARLY_ACCESS_VOUCHER_TYPEHASH,
+                voucher.claimant,
+                voucher.destinationChainId,
+                voucher.releaseContract,
+                voucher.tokenId,
+                voucher.quantity,
+                voucher.windowStart,
+                voucher.windowEnd,
                 voucher.nonce,
                 voucher.deadline
             )
