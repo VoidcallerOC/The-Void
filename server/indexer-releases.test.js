@@ -59,7 +59,8 @@ function configs() {
 function rpcFor(logsByAddress, latest = 20) {
   return {
     getBlockNumber: vi.fn().mockResolvedValue(latest),
-    getLogs: vi.fn(({ address, fromBlock, toBlock }) => Promise.resolve((logsByAddress[address.toLowerCase()] || []).filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock))),
+    // The filter may carry one address or every address of the chain (batched scan); answer for each of them.
+    getLogs: vi.fn(({ address, fromBlock, toBlock }) => Promise.resolve([].concat(address).flatMap((item) => logsByAddress[String(item).toLowerCase()] || []).filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock))),
     getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
   };
 }
@@ -97,8 +98,11 @@ describe("per-release indexing", () => {
     expect(indexer.configs.find((item) => item.address === RELEASE_B)).toMatchObject({ contractType: "ERC1155", startBlock: 6, releaseFactoryAddress: FACTORY });
     expect(indexer.configs.find((item) => item.address === SALE_A)).toMatchObject({ contractType: "PRIMARY_SALE", startBlock: 5, tokenAddress: RELEASE_A });
     expect(indexer.configs.find((item) => item.address === SALE_B)).toMatchObject({ contractType: "PRIMARY_SALE", startBlock: 6, tokenAddress: RELEASE_B });
-    expect(rpc.getLogs).toHaveBeenCalledWith(expect.objectContaining({ address: RELEASE_A, fromBlock: 5 }));
-    expect(rpc.getLogs).toHaveBeenCalledWith(expect.objectContaining({ address: RELEASE_B, fromBlock: 6 }));
+    // Both releases and both sales were discovered in the first range; the cursor dropped back to the earliest
+    // creation block (5) and one request carried all four. RELEASE_B's own checkpoint (6) keeps block 5 out of it.
+    const discovery = rpc.getLogs.mock.calls.map(([filter]) => filter).find((filter) => filter.fromBlock === 5);
+    expect([].concat(discovery.address)).toEqual(expect.arrayContaining([RELEASE_A, RELEASE_B, SALE_A, SALE_B]));
+    expect(rpc.getLogs.mock.calls.filter(([filter]) => filter.fromBlock === 5)).toHaveLength(1);
   });
 
   it("reloads registered release contracts after a restart", async () => {

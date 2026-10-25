@@ -151,12 +151,16 @@ describe("Fuji worker startup", () => {
 describe("durable index synchronization", () => {
   it("processes multiple contracts and prevents duplicate events", async () => {
     const store = storeDouble();
-    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(2), getLogs: vi.fn(({ address }) => Promise.resolve([singleLog({ blockNumber: 1, address, tx: `0x${address.slice(-4)}1` })])), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    // The filter carries every contract's address; the node answers with each contract's log.
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(2), getLogs: vi.fn(({ address }) => Promise.resolve([].concat(address).map((item) => singleLog({ blockNumber: 1, address: item, tx: `0x${item.slice(-4)}1` })))), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
     const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [{ chainId: 43114, address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }, { chainId: 43114, address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", contractType: "ERC1155", startBlock: 1, eventTopics: { TransferSingle: singleTopic } }] });
     await indexer.syncAll();
     await indexer.syncAll();
     expect(store.transfers).toHaveLength(2);
     expect(store.events.size).toBe(2);
+    // One eth_getLogs for both contracts in the first cycle; nothing to scan in the second.
+    expect(rpc.getLogs).toHaveBeenCalledTimes(1);
+    expect(rpc.getLogs.mock.calls[0][0].address).toEqual(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
   });
 
   it("advances empty ranges without fetching every block and fetches each event block once", async () => {
@@ -220,7 +224,7 @@ describe("durable index synchronization", () => {
     const results = await indexer.syncAll();
     expect(results).toHaveLength(2);
     const ranges = rpc.getLogs.mock.calls.map(([filter]) => ({
-      address: String(filter.address).toLowerCase(),
+      addresses: [].concat(filter.address).map((item) => String(item).toLowerCase()),
       fromBlock: filter.fromBlock,
       toBlock: filter.toBlock,
       span: filter.toBlock - filter.fromBlock + 1,
@@ -228,17 +232,16 @@ describe("durable index synchronization", () => {
     expect(ranges.every((range) => range.span <= 100)).toBe(true);
     expect(ranges.every((range) => range.span >= 1)).toBe(true);
 
-    const factoryRanges = ranges.filter((range) => range.address === factory);
-    const marketplaceRanges = ranges.filter((range) => range.address === marketplace);
-    expect(factoryRanges).toHaveLength(3);
-    expect(factoryRanges.map((range) => [range.fromBlock, range.toBlock])).toEqual([
+    // One request per range for both contracts. The marketplace starts 13 blocks later; it rides the same requests
+    // and its checkpoint, not the cursor, decides which returned logs it takes.
+    expect(ranges).toHaveLength(3);
+    expect(ranges.map((range) => [range.fromBlock, range.toBlock])).toEqual([
       [start, start + 99],
       [start + 100, start + 199],
       [start + 200, tip],
     ]);
-    expect(marketplaceRanges).toHaveLength(3);
-    expect(marketplaceRanges[0]).toMatchObject({ fromBlock: start + 13, toBlock: start + 13 + 99 });
-    expect(marketplaceRanges.at(-1).toBlock).toBe(tip);
+    expect(ranges.every((range) => range.addresses.length === 2 && range.addresses.includes(factory) && range.addresses.includes(marketplace))).toBe(true);
+    expect(results.map((result) => [result.address, result.processedBlocks])).toEqual([[factory, 250], [marketplace, 250 - 13]]);
     expect((await store.getCheckpoint({ chainId: 43114, address: factory })).nextBlock).toBe(tip + 1);
     expect((await store.getCheckpoint({ chainId: 43114, address: marketplace })).nextBlock).toBe(tip + 1);
   });
@@ -580,7 +583,7 @@ describe("per-cycle chunk budget (INDEXER_MAX_CHUNKS_PER_CYCLE): fair catch-up a
   const b = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const rpcFor = (tip) => ({ getBlockNumber: vi.fn().mockResolvedValue(tip), getLogs: vi.fn().mockResolvedValue([]), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) });
   const erc1155 = (address) => ({ chainId: 43114, address, contractType: "ERC1155", startBlock: 0, eventTopics: { TransferSingle: singleTopic } });
-  const ranges = (rpc) => rpc.getLogs.mock.calls.map(([filter]) => [String(filter.address).toLowerCase(), filter.fromBlock, filter.toBlock]);
+  const ranges = (rpc) => rpc.getLogs.mock.calls.map(([filter]) => [[].concat(filter.address).map((item) => String(item).toLowerCase()).join(","), filter.fromBlock, filter.toBlock]);
 
   it("defaults to a finite budget and refuses a non-positive one", () => {
     expect(new BlockchainIndexer({ rpc: rpcFor(0), store: storeDouble(), configs: [erc1155(a)] }).maxChunksPerCycle).toBe(DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE);
@@ -588,12 +591,12 @@ describe("per-cycle chunk budget (INDEXER_MAX_CHUNKS_PER_CYCLE): fair catch-up a
     for (const value of [0, -1, 1.5, "many", null]) expect(() => new BlockchainIndexer({ rpc: rpcFor(0), store: storeDouble(), configs: [erc1155(a)], maxChunksPerCycle: value })).toThrow(/maxChunksPerCycle must be a positive integer/);
   });
 
-  it("gives every contract a turn each cycle: a backlog on the first contract no longer starves the second", async () => {
+  it("scans every contract of the chain in one eth_getLogs per range: a backlog is shared, never serialized", async () => {
     const store = storeDouble();
     const rpc = rpcFor(249);
     const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)], maxChunksPerCycle: 1 });
     const first = await indexer.syncAll();
-    expect(ranges(rpc)).toEqual([[a, 0, 99], [b, 0, 99]]);
+    expect(ranges(rpc)).toEqual([[`${a},${b}`, 0, 99]]);
     expect(first.map(({ address, state, partial, nextBlock, finalizedBlock, targetBlock, remainingBlocks, processedBlocks }) => ({ address, state, partial, nextBlock, finalizedBlock, targetBlock, remainingBlocks, processedBlocks })))
       .toEqual([a, b].map((address) => ({ address, state: "CATCHING_UP", partial: true, nextBlock: 100, finalizedBlock: 99, targetBlock: 249, remainingBlocks: 150, processedBlocks: 100 })));
     for (const address of [a, b]) {
@@ -608,10 +611,23 @@ describe("per-cycle chunk budget (INDEXER_MAX_CHUNKS_PER_CYCLE): fair catch-up a
     expect(second.map((result) => [result.state, result.nextBlock])).toEqual([["CATCHING_UP", 200], ["CATCHING_UP", 200]]);
     const third = await indexer.syncAll();
     expect(third.map((result) => [result.state, result.partial, result.nextBlock, result.finalizedBlock, result.remainingBlocks])).toEqual([["CONFIRMED", false, 250, 249, 0], ["CONFIRMED", false, 250, 249, 0]]);
-    expect(ranges(rpc)).toEqual([[a, 0, 99], [b, 0, 99], [a, 100, 199], [b, 100, 199], [a, 200, 249], [b, 200, 249]]);
+    expect(ranges(rpc)).toEqual([[`${a},${b}`, 0, 99], [`${a},${b}`, 100, 199], [`${a},${b}`, 200, 249]]);
     for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 250, lastProcessedBlock: 249, finalizedBlock: 249, status: "IDLE", markRunSucceeded: true });
     // Still one tip read per cycle.
     expect(rpc.getBlockNumber).toHaveBeenCalledTimes(3);
+  });
+
+  it("INDEXER_BATCH_CONTRACTS=false restores one eth_getLogs per contract per range", async () => {
+    const store = storeDouble();
+    const rpc = rpcFor(249);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)], maxChunksPerCycle: 1, batchContracts: false });
+    expect(indexer.batchContracts).toBe(false);
+    await indexer.syncAll();
+    expect(ranges(rpc)).toEqual([[a, 0, 99], [b, 0, 99]]);
+    await indexer.syncAll();
+    await indexer.syncAll();
+    expect(ranges(rpc)).toEqual([[a, 0, 99], [b, 0, 99], [a, 100, 199], [b, 100, 199], [a, 200, 249], [b, 200, 249]]);
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 250, status: "IDLE", markRunSucceeded: true });
   });
 
   // Mainnet measurement (2026-10-24): every empty 100-block chunk cost two paced RPC calls (eth_getLogs plus the
@@ -673,17 +689,175 @@ describe("per-cycle chunk budget (INDEXER_MAX_CHUNKS_PER_CYCLE): fair catch-up a
     const releaseCreatedTopic = "0xreleasecreated";
     const created = { address: factory, topics: [releaseCreatedTopic, addrTopic(release), `0x${"ab".repeat(32)}`, addrTopic(artist)], data: `0x${word(sale)}${word(zero)}${word(zero)}${word(1)}${word(4)}`, transactionHash: "0xtxfactory", blockNumber: 5, blockHash: "0xblock5", logIndex: 0 };
     const store = { ...storeDouble(), registerRelease: vi.fn().mockResolvedValue() };
-    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(249), getLogs: vi.fn(async ({ address }) => (String(address).toLowerCase() === factory ? [created] : [])), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
+    // The node returns the ReleaseCreated log whenever the factory is in the filter and the range covers block 5.
+    const rpc = { getBlockNumber: vi.fn().mockResolvedValue(249), getLogs: vi.fn(async ({ address, fromBlock, toBlock }) => ([].concat(address).map((item) => String(item).toLowerCase()).includes(factory) && fromBlock <= 5 && toBlock >= 5 ? [created] : [])), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) };
     const indexer = new BlockchainIndexer({
-      rpc, store, confirmations: 0, maxChunksPerCycle: 1,
+      rpc, store, confirmations: 0, maxChunksPerCycle: 2,
       configs: [{ chainId: 43114, address: factory, contractType: "RELEASE_FACTORY", startBlock: 0, eventTopics: { ReleaseCreated: releaseCreatedTopic } }, erc1155(a)],
     });
     const results = await indexer.syncAll();
+    expect(store.registerRelease).toHaveBeenCalledTimes(1);
     expect(store.registerRelease).toHaveBeenCalledWith(expect.objectContaining({ releaseContractAddress: release, primarySaleAddress: sale, blockNumber: 5 }));
-    // The factory and the pre-existing release each took one capped chunk; the new sale and release got theirs
-    // in the same cycle, from their creation block, instead of waiting for the backlog ahead of them.
-    expect(ranges(rpc)).toEqual([[factory, 0, 99], [a, 0, 99], [sale, 5, 104], [release, 5, 104]]);
-    expect(results.map((result) => result.address)).toEqual([factory, a, sale, release]);
+    // The first chunk scanned the factory and the pre-existing release together. The sale and release it announced
+    // joined before the second chunk: the cursor dropped back to their creation block, the request carried all four
+    // addresses, and the two contracts already past block 99 took nothing from the re-covered blocks (the factory's
+    // ReleaseCreated came back a second time and was not registered again).
+    expect(ranges(rpc)).toEqual([[`${factory},${a}`, 0, 99], [`${factory},${a},${sale},${release}`, 5, 104]]);
+    expect(results.map((result) => [result.address, result.nextBlock, result.partial])).toEqual([[factory, 105, true], [a, 105, true], [sale, 105, true], [release, 105, true]]);
+    for (const address of [factory, a]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 105, lastProcessedBlock: 104 });
+    for (const address of [sale, release]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 105, lastProcessedBlock: 104, status: "RUNNING" });
+  });
+});
+
+// Mainnet measurement (2026-10-24/25): ten contracts × (20 eth_getLogs + 1 anchor + 1 checkpoint verification) + 1
+// tip read = 221 paced calls per cycle, 32–35 min per cycle under the public endpoint's 429 gates. One address-array
+// request per range for the whole chain cuts that to ~23 calls per cycle; the public C-Chain endpoint accepts an
+// address array over the same 100-block span (verified read-only against api.avax.network on 2026-10-25).
+describe("batched eth_getLogs across contracts (INDEXER_BATCH_CONTRACTS)", () => {
+  const a = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const b = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const c = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const erc1155 = (address, extra = {}) => ({ chainId: 43114, address, contractType: "ERC1155", startBlock: 0, eventTopics: { TransferSingle: singleTopic }, ...extra });
+  const filters = (rpc) => rpc.getLogs.mock.calls.map(([filter]) => [[].concat(filter.address), filter.fromBlock, filter.toBlock]);
+  const rpcFor = (tip, logs = async () => []) => ({ getBlockNumber: vi.fn().mockResolvedValue(tip), getLogs: vi.fn(logs), getBlock: vi.fn((_, number) => Promise.resolve(block(number))) });
+  // Mirrors the transfers table: ON CONFLICT (chain, tx, log_index) DO NOTHING.
+  const dedupingStore = (options) => {
+    const store = storeDouble(options);
+    const seen = new Set();
+    const apply = store.applyTransfer.bind(store);
+    store.applyTransfer = async (value) => { const key = `${value.transactionHash}:${value.logIndex}`; if (seen.has(key)) return { duplicate: true }; seen.add(key); return apply(value); };
+    return store;
+  };
+
+  it("dispatches each returned log to the contract that emitted it and reports a log from outside the filter", async () => {
+    const store = storeDouble();
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const stray = singleLog({ blockNumber: 2, address: c, tx: "0xstray" });
+    const rpc = rpcFor(9, async () => [singleLog({ blockNumber: 1, address: a, tx: "0xa1" }), singleLog({ blockNumber: 2, address: b, tx: "0xb2" }), stray]);
+    const indexer = new BlockchainIndexer({ rpc, store, logger, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    const results = await indexer.syncAll();
+    expect(filters(rpc)).toEqual([[[a, b], 0, 9]]);
+    expect(store.transfers.map((transfer) => [transfer.contractAddress, transfer.blockNumber])).toEqual([[a, 1], [b, 2]]);
+    expect([...store.events.values()].map((event) => event.contractAddress)).toEqual([a, b]);
+    expect(store.calls.errors).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith("indexer.sync.unexpected_log", expect.objectContaining({ address: c, blockNumber: 2 }));
+    expect(results.map((result) => [result.address, result.state, result.nextBlock])).toEqual([[a, "CONFIRMED", 10], [b, "CONFIRMED", 10]]);
+    // Blocks 1 and 2 (events) and 9 (anchor) were fetched once each, not once per contract.
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([1, 2, 9]);
+    expect(logger.info).toHaveBeenCalledWith("indexer.sync.group.completed", expect.objectContaining({ chainId: 43114, contracts: 2, chunks: 1, rpcCalls: { getLogs: 1, getBlock: 3 } }));
+  });
+
+  it("costs one eth_getLogs per chunk and one anchor per call on empty ranges, for any number of contracts", async () => {
+    const store = storeDouble();
+    const rpc = rpcFor(299);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b), erc1155(c)] });
+    await indexer.syncAll();
+    expect(filters(rpc)).toEqual([[[a, b, c], 0, 99], [[a, b, c], 100, 199], [[a, b, c], 200, 299]]);
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([299]);
+    for (const address of [a, b, c]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 300, lastProcessedBlock: 299, finalizedBlock: 299, status: "IDLE" });
+  });
+
+  it("records a malformed event for one contract without blocking the other contracts' logs in the same block", async () => {
+    const store = storeDouble();
+    const malformed = { ...singleLog({ blockNumber: 1, address: a, tx: "0xbad" }), topics: [singleTopic], data: "0x01" };
+    const rpc = rpcFor(1, async () => [malformed, singleLog({ blockNumber: 1, address: b, tx: "0xgood", logIndex: 1 })]);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    await expect(indexer.syncAll()).resolves.toHaveLength(2);
+    expect(store.calls.errors.map((error) => [error.errorType, error.contractAddress])).toEqual([["MALFORMED_EVENT", a]]);
+    expect(store.transfers.map((transfer) => transfer.transactionHash)).toEqual(["0xgood"]);
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 2, status: "IDLE" });
+  });
+
+  it("processes a log the node returned twice exactly once", async () => {
+    const store = dedupingStore();
+    const twice = singleLog({ blockNumber: 3, address: a, tx: "0xdup" });
+    const rpc = rpcFor(5, async () => [twice, { ...twice }]);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    await indexer.syncAll();
+    expect(store.events.size).toBe(1);
+    expect(store.transfers).toHaveLength(1);
+  });
+
+  it("resumes every member at the failed block after a block fetch fails mid-chunk, without re-applying processed logs", async () => {
+    const store = dedupingStore();
+    let failOnce = true;
+    const rpc = rpcFor(9, async ({ fromBlock, toBlock }) => [singleLog({ blockNumber: 3, address: a, tx: "0xa3" }), singleLog({ blockNumber: 7, address: b, tx: "0xb7" })].filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock));
+    rpc.getBlock = vi.fn((_, number) => { if (number === 7 && failOnce) { failOnce = false; return Promise.reject(new Error("RPC interrupted")); } return Promise.resolve(block(number)); });
+    const indexer = new BlockchainIndexer({ rpc, store, logger: { info() {}, warn() {}, error() {} }, confirmations: 0, retryOptions: { retries: 0 }, configs: [erc1155(a), erc1155(b)] });
+    await expect(indexer.syncAll()).rejects.toThrow("RPC interrupted");
+    // Block 3 was fully processed for both members before block 7 failed: both resume at 7.
+    for (const address of [a, b]) {
+      expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 7, status: "FAILED" });
+      expect(store.calls.checkpoints.find((write) => write.address === address && write.status === "FAILED")).toMatchObject({ nextBlock: 7, lastProcessedBlock: 6 });
+    }
+    await expect(indexer.syncAll()).resolves.toHaveLength(2);
+    expect(filters(rpc).map(([, from, to]) => [from, to])).toEqual([[0, 9], [7, 9]]);
+    expect(store.transfers.map((transfer) => transfer.transactionHash)).toEqual(["0xa3", "0xb7"]);
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 10, status: "IDLE" });
+  });
+
+  it("advances nothing and marks every member FAILED when the shared eth_getLogs fails", async () => {
+    const store = storeDouble();
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    let failOnce = true;
+    const rpc = rpcFor(49, async () => { if (failOnce) { failOnce = false; throw Object.assign(new Error("RPC HTTP 429"), { status: 429, retryable: true }); } return []; });
+    const indexer = new BlockchainIndexer({ rpc, store, logger, confirmations: 0, retryOptions: { retries: 0 }, configs: [erc1155(a, { startBlock: 10 }), erc1155(b, { startBlock: 10 })] });
+    await expect(indexer.syncAll()).rejects.toMatchObject({ status: 429 });
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 10, status: "FAILED", rpcFailure: true });
+    expect(logger.error).toHaveBeenCalledWith("indexer.sync.failed", expect.objectContaining({ address: [a, b], nextBlock: 10 }));
+    await expect(indexer.syncAll()).resolves.toHaveLength(2);
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 50, status: "IDLE" });
+  });
+
+  it("rewinds every member of the group when an event block's canonical hash changed", async () => {
+    const store = storeDouble({ blocks: new Map([["43114:2", { block_hash: "0xold" }]]) });
+    const rpc = rpcFor(2, async () => [singleLog({ blockNumber: 2, address: a, tx: "0xa2" })]);
+    rpc.getBlock = vi.fn((_, number) => Promise.resolve(block(number, number === 2 ? "0xnew" : undefined)));
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    await indexer.syncAll();
+    expect(store.calls.reorgs).toEqual([expect.objectContaining({ chainId: 43114, fromBlock: 2, replacementHash: "0xnew" })]);
+    expect(store.calls.checkpoints.filter((write) => write.status === "REORGING").map((write) => write.address)).toEqual([a, b]);
+    expect(await store.getBlock({ chainId: 43114, blockNumber: 2 })).toMatchObject({ block_hash: "0xnew" });
+    for (const address of [a, b]) expect(await store.getCheckpoint({ chainId: 43114, address })).toMatchObject({ nextBlock: 3, status: "IDLE" });
+  });
+
+  it("verifies aligned persisted checkpoints with one canonical read per cycle", async () => {
+    const rows = new Map([[a, { next_block: "100", last_processed_block: "99" }], [b, { next_block: "100", last_processed_block: "99" }]]);
+    const store = storeDouble({ blocks: new Map([["43114:99", { block_hash: "0xblock99" }]]) });
+    store.getCheckpoint = async ({ address }) => rows.get(address) || null;
+    const rpc = rpcFor(149);
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    await indexer.syncAll();
+    // Block 99 verified once for both members, block 149 anchored once: two reads, not four.
+    expect(rpc.getBlock.mock.calls.map(([, number]) => number)).toEqual([99, 149]);
+    expect(store.calls.reorgs).toEqual([]);
+    expect(filters(rpc)).toEqual([[[a, b], 100, 149]]);
+  });
+
+  it("keeps a member ahead of the cursor out of the filter until the cursor reaches it, and never re-reads its indexed blocks", async () => {
+    const store = storeDouble();
+    store.getCheckpoint = async ({ address }) => (address === b ? { nextBlock: 150 } : null);
+    const logs = [singleLog({ blockNumber: 120, address: b, tx: "0xb120" }), singleLog({ blockNumber: 160, address: b, tx: "0xb160" }), singleLog({ blockNumber: 40, address: a, tx: "0xa40" })];
+    const rpc = rpcFor(249, async ({ address, fromBlock, toBlock }) => logs.filter((log) => [].concat(address).includes(log.address) && log.blockNumber >= fromBlock && log.blockNumber <= toBlock));
+    const indexer = new BlockchainIndexer({ rpc, store, confirmations: 0, configs: [erc1155(a), erc1155(b)] });
+    const results = await indexer.syncAll();
+    expect(filters(rpc)).toEqual([[[a], 0, 99], [[a, b], 100, 199], [[a, b], 200, 249]]);
+    // b's log at 120 precedes its own checkpoint (150): the node returned it, the indexer did not take it.
+    expect(store.transfers.map((transfer) => transfer.transactionHash)).toEqual(["0xa40", "0xb160"]);
+    expect(results.map((result) => [result.address, result.processedBlocks, result.state])).toEqual([[a, 250, "CONFIRMED"], [b, 100, "CONFIRMED"]]);
+  });
+
+  it("applies the chunk budget to the group and leaves a member beyond the budget untouched this cycle", async () => {
+    const store = storeDouble();
+    store.getCheckpoint = async ({ address }) => (address === b ? { nextBlock: 500 } : null);
+    const rpc = rpcFor(999);
+    const indexer = new BlockchainIndexer({ rpc, store, logger: { info() {}, warn() {}, error() {} }, confirmations: 0, maxChunksPerCycle: 2, configs: [erc1155(a), erc1155(b)] });
+    const results = await indexer.syncAll();
+    expect(filters(rpc)).toEqual([[[a], 0, 99], [[a], 100, 199]]);
+    expect(results.map((result) => [result.address, result.nextBlock, result.state, result.processedBlocks])).toEqual([[a, 200, "CATCHING_UP", 200], [b, 500, "CATCHING_UP", 0]]);
+    // Both are reported partial, so the worker defers the ownership comparison until the group is aligned.
     expect(results.every((result) => result.partial)).toBe(true);
+    expect(store.calls.checkpoints.filter((write) => write.address === b).at(-1)).toMatchObject({ nextBlock: 500, lastProcessedBlock: 499, status: "RUNNING" });
+    expect(store.calls.checkpoints.some((write) => write.address === b && write.markRunSucceeded)).toBe(false);
   });
 });

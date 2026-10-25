@@ -69,7 +69,8 @@ function configs() {
 function rpcFor(logsByAddress, latest = 20) {
   return {
     getBlockNumber: vi.fn().mockResolvedValue(latest),
-    getLogs: vi.fn(({ address, fromBlock, toBlock }) => Promise.resolve((logsByAddress[address.toLowerCase()] || []).filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock))),
+    // The filter may carry one address or every address of the chain (batched scan); answer for each of them.
+    getLogs: vi.fn(({ address, fromBlock, toBlock }) => Promise.resolve([].concat(address).flatMap((item) => logsByAddress[String(item).toLowerCase()] || []).filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock))),
     getBlock: vi.fn((_, number) => Promise.resolve(block(number))),
   };
 }

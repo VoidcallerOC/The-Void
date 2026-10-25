@@ -416,3 +416,14 @@ describe("release deployment manifest", () => {
   });
 });
 
+
+describe("INDEXER_BATCH_CONTRACTS", () => {
+  const contract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const env = (extra = {}) => ({ INDEXER_CHAIN_ID: "43113", INDEXER_RPC_URL: "https://rpc.example", INDEXER_INCLUDE_RELEASE_MANIFEST: "false", INDEXER_CONTRACTS_JSON: JSON.stringify([{ chainId: 43113, address: contract, contractType: "ERC1155", startBlock: 1 }]), ...extra });
+
+  it("batches every contract into one eth_getLogs per range by default and can be switched off", () => {
+    expect(loadIndexerConfig(env()).batchContracts).toBe(true);
+    expect(loadIndexerConfig(env({ INDEXER_BATCH_CONTRACTS: "true" })).batchContracts).toBe(true);
+    expect(loadIndexerConfig(env({ INDEXER_BATCH_CONTRACTS: "false" })).batchContracts).toBe(false);
+  });
+});

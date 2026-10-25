@@ -192,3 +192,31 @@ Changes in the follow-up PR (no change to confirmations, canonical checks or ide
 Estimate, not measured: with no gate active, inclusion to CONFIRMED ≈ 25–35 s (12 confirmations ≈ 13 s, tick ≤ 5 s,
 one head read and one block read on the priority lane ≈ 10 s). During a gate the lane saves nothing; stopping the
 gates needs an RPC source with its own quota.
+
+## 10. Addendum (2026-10-25): one `eth_getLogs` per block range for every contract
+
+**Measured before this change** (worker logs, instance `57qhk`, 2026-10-25 00:10–01:15Z, public endpoint): each
+contract costs 20 `eth_getLogs` + 1 end-block anchor + 1 checkpoint-verification `eth_getBlockByNumber` per cycle;
+with ten contracts and one tip read that is **221 paced calls per cycle**, 32–35 min per cycle under the HTTP 429
+gates (one every ~2.5–2.75 min, `Retry-After` 60 s, ≈75 s of pacing per event). The unified marketplace advanced
+2,000 blocks per cycle while the chain added ~950.
+
+**Change.** `BlockchainIndexer.syncAll` scans every contract of a chain as one group (`syncGroup`): each 100-block
+chunk is a single `eth_getLogs` whose `address` filter lists every contract whose next block lies in the range (the
+public C-Chain endpoint accepts an address array over the same 100-block span; verified read-only on 2026-10-25
+against the purchase block 98,440,238, which returned the same two logs as the single-address query). Each returned
+log is dispatched to the handler of the contract that emitted it and is dropped when it precedes that contract's own
+checkpoint, so a contract that joins the group above the cursor (a release a factory announces mid-cycle, or a
+contract already ahead) never re-processes a block. Per-contract checkpoints are kept and advance only after every
+accepted log of the chunk is processed; an RPC or database failure persists each member at its last fully processed
+block and rethrows. The canonical block read that verifies each persisted checkpoint is shared for the cycle, so
+aligned members cost one `eth_getBlockByNumber` between them. Reorg handling (`verifyCanonicalCheckpoint`,
+`ensureCanonical`, `handleReorg`), the 12-confirmation target, idempotent inserts, the settlement-priority lane and
+the single pacer gate are unchanged. `INDEXER_BATCH_CONTRACTS=false` restores one request per contract per range
+through the same code path (the group is then one contract).
+
+**Estimate, not yet measured in production:** 20 `eth_getLogs` + 1 anchor + 1 verification + 1 tip read ≈ **23 calls
+per 2,000-block cycle** (≈ 90 % fewer), ≈ 2 min per cycle at the 5 s pacer floor, so the 6.9 k-block marketplace lag
+closes in well under an hour if the 429 cadence does not worsen. Per-cycle cost is now logged as
+`indexer.sync.group.completed` (`rpcCalls.getLogs`, `rpcCalls.getBlock`, `chunks`) so the deployment can be measured
+from the logs. Removing contracts from the scan no longer saves RPC calls; it only shrinks the address filter.

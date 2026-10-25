@@ -8,6 +8,9 @@ export { retry } from "./indexer-utils.js";
 
 function cleanHex(value) { return String(value || "0x").replace(/^0x/, ""); }
 function lowerHash(value) { return String(value || "").toLowerCase(); }
+function lowerAddress(value) { return String(value || "").toLowerCase(); }
+// A failure already persisted for its contract (checkpoint admission) is not persisted again by the group handler.
+function markPersisted(error) { if (error && typeof error === "object") error.indexerFailurePersisted = true; return error; }
 // Postgres rows expose next_block (bigint, returned as a string); in-memory stores may use nextBlock.
 function storedNextBlock(checkpoint, config) {
   const value = checkpoint?.nextBlock ?? checkpoint?.next_block;
@@ -254,7 +257,7 @@ export function classifyMarketplaceLog(log, topics = {}) {
 export const DEFAULT_INDEXER_CHUNK_SIZE = 100;
 
 export class BlockchainIndexer {
-  constructor({ rpc, store, configs, confirmations = 12, chunkSize = DEFAULT_INDEXER_CHUNK_SIZE, maxChunksPerCycle = DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, retryOptions = {}, logger = console, onProgress = null } = {}) {
+  constructor({ rpc, store, configs, confirmations = 12, chunkSize = DEFAULT_INDEXER_CHUNK_SIZE, maxChunksPerCycle = DEFAULT_INDEXER_MAX_CHUNKS_PER_CYCLE, batchContracts = true, retryOptions = {}, logger = console, onProgress = null } = {}) {
     if (!rpc || !store || !Array.isArray(configs) || configs.length === 0) throw new TypeError("Indexer requires rpc, store, and at least one contract config.");
     const resolvedChunkSize = Number(chunkSize);
     if (!Number.isSafeInteger(resolvedChunkSize) || resolvedChunkSize < 1) throw new TypeError("Indexer chunkSize must be a positive integer.");
@@ -268,6 +271,9 @@ export class BlockchainIndexer {
     // Fair scheduling: one contract may index at most this many chunks per syncAll before yielding to the
     // next contract. Progress is checkpointed per chunk, so a capped contract resumes where it stopped.
     this.maxChunksPerCycle = resolvedMaxChunks;
+    // One eth_getLogs per block range for every contract on a chain (address array) instead of one per contract.
+    // `false` restores the per-contract scan; both paths share syncGroup, so the semantics differ only in grouping.
+    this.batchContracts = batchContracts !== false;
     this.retryOptions = retryOptions;
     this.logger = logger;
     this.onProgress = onProgress;
@@ -285,7 +291,19 @@ export class BlockchainIndexer {
     // One tip read per cycle — avoids duplicate eth_blockNumber storms across contracts.
     const tipChainId = Number(this.configs[0]?.chainId);
     const sharedLatest = Number(await retry(() => this.rpc.getBlockNumber(tipChainId), this.retryOptions));
+    // Canonical blocks read while verifying persisted checkpoints are shared for the cycle: contracts that stopped at
+    // the same block (every member of a batched group) cost one eth_getBlockByNumber between them, not one each.
+    this.canonicalReads = new Map();
     const results = [];
+    if (this.batchContracts) {
+      // Every contract of a chain is scanned together: one eth_getLogs per block range carries all their addresses.
+      // Members are re-read before each chunk, so a release or sale a factory announces mid-cycle joins the same
+      // cycle from its creation block (its own checkpoint keeps it from re-reading what the others already indexed).
+      for (const chainId of [...new Set(this.configs.map((item) => Number(item.chainId)))]) {
+        results.push(...await this.syncGroup(() => this.configs.filter((item) => Number(item.chainId) === chainId), { latest: sharedLatest }));
+      }
+      return results;
+    }
     for (const config of this.configs.filter((item) => item.contractType === "COLLECTION_FACTORY" || item.contractType === "RELEASE_FACTORY")) {
       results.push(await this.syncContract(config, { latest: sharedLatest }));
     }
@@ -418,99 +436,173 @@ export class BlockchainIndexer {
     }
   }
 
-  async syncContract(config, { latest: providedLatest = null } = {}) {
-    const chainId = Number(config.chainId);
-    const address = String(config.address).toLowerCase();
-    const checkpoint = await this.store.getCheckpoint({ chainId, address });
-    let operation;
+  async syncContract(config, { latest = null } = {}) {
+    const [result] = await this.syncGroup(() => [config], { latest });
+    return result;
+  }
+
+  /**
+   * Scans a group of contracts over one shared block cursor. Each chunk is ONE eth_getLogs whose address filter lists
+   * every member whose next block falls inside the range. A returned log is dispatched to the handler of the member
+   * that emitted it and dropped when it precedes that member's own checkpoint, so nothing is decoded or projected
+   * twice. Every member's checkpoint advances only after every accepted log of the chunk is processed; an RPC or
+   * database failure leaves each member at its last fully processed block and is rethrown. `members` is called
+   * before every chunk, so contracts discovered mid-cycle (factory ReleaseCreated) are admitted and the cursor drops
+   * back to their creation block; the members already past it take nothing from the re-covered blocks.
+   */
+  async syncGroup(members, { latest: providedLatest = null } = {}) {
+    const chainId = Number(members()[0]?.chainId);
+    const states = new Map();
+    const calls = { getLogs: 0, getBlock: 0 };
     let latest;
+    let operation = "rpc";
+    let chunks = 0;
+    let participating = [];
     try {
       latest = providedLatest == null
         ? Number(await retry(() => this.rpc.getBlockNumber(chainId), this.retryOptions))
         : Number(providedLatest);
     } catch (error) {
-      await this.persistFailure({ chainId, address, config, checkpoint, error, rpcFailure: true });
+      for (const config of members()) {
+        const address = lowerAddress(config.address);
+        await this.persistFailure({ chainId, address, config, checkpoint: await this.store.getCheckpoint({ chainId, address }), error, rpcFailure: true });
+      }
       throw error;
     }
-    const target = Math.max(-1, latest - Number(config.confirmations ?? this.confirmations));
-    let nextBlock = storedNextBlock(checkpoint, config);
-    let rewound;
-    try { ({ nextBlock, rewound } = await this.verifyCanonicalCheckpoint(config, checkpoint, nextBlock)); } catch (error) {
-      await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: true });
-      throw error;
-    }
-    operation = "database";
+    // A member is admitted once per call: its persisted checkpoint is read, verified against the canonical chain
+    // (rewinding across a reorg), and marked RUNNING. Failures here are persisted for that member alone.
+    const admit = async (config) => {
+      const address = lowerAddress(config.address);
+      if (states.has(address)) return states.get(address);
+      const checkpoint = await this.store.getCheckpoint({ chainId, address });
+      const state = { config, address, checkpoint, nextBlock: storedNextBlock(checkpoint, config), target: Math.max(-1, latest - Number(config.confirmations ?? this.confirmations)), chunkEnd: null, processed: 0, rewound: false };
+      try {
+        ({ nextBlock: state.nextBlock, rewound: state.rewound } = await this.verifyCanonicalCheckpoint(config, checkpoint, state.nextBlock));
+      } catch (error) {
+        await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock: state.nextBlock }, error, rpcFailure: true });
+        throw markPersisted(error);
+      }
+      try {
+        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: state.nextBlock, latestKnownBlock: latest, ...(state.rewound ? { lastProcessedBlock: state.nextBlock - 1, allowRewind: true } : {}), status: "RUNNING", lastError: null, markRunStarted: true });
+      } catch (error) {
+        await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock: state.nextBlock }, error, databaseFailure: true });
+        throw markPersisted(error);
+      }
+      states.set(address, state);
+      return state;
+    };
     try {
-      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, latestKnownBlock: latest, ...(rewound ? { lastProcessedBlock: nextBlock - 1, allowRewind: true } : {}), status: "RUNNING", lastError: null, markRunStarted: true });
-    } catch (error) {
-      await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, databaseFailure: true });
-      throw error;
-    }
-    let processed = 0;
-    let chunks = 0;
-    try {
-      while (nextBlock <= target && chunks < this.maxChunksPerCycle) {
-        const endBlock = Math.min(target, nextBlock + this.chunkSize - 1);
+      for (;;) {
+        for (const config of members()) await admit(config);
+        const active = [...states.values()].filter((state) => state.nextBlock <= state.target);
+        if (!active.length || chunks >= this.maxChunksPerCycle) break;
+        const rangeStart = Math.min(...active.map((state) => state.nextBlock));
+        const groupTarget = Math.max(...active.map((state) => state.target));
+        const endBlock = Math.min(groupTarget, rangeStart + this.chunkSize - 1);
+        participating = active.filter((state) => state.nextBlock <= endBlock);
+        for (const state of participating) state.chunkEnd = Math.min(endBlock, state.target);
+        const addresses = participating.map((state) => state.address);
         operation = "rpc";
-        const logs = await retry(() => this.rpc.getLogs({ chainId, address, fromBlock: nextBlock, toBlock: endBlock }), this.retryOptions);
-        const rangeStart = nextBlock;
-        const eventBlocks = [...new Set(logs.map((log) => Number(log.blockNumber)))].filter((n) => n >= rangeStart && n <= endBlock);
+        calls.getLogs += 1;
+        const logs = await retry(() => this.rpc.getLogs({ chainId, address: addresses.length === 1 ? addresses[0] : addresses, fromBlock: rangeStart, toBlock: endBlock }), this.retryOptions);
+        // Each log is routed to the member that emitted it. A log before that member's own checkpoint was indexed by
+        // an earlier call (the member joined above the cursor); a log from an address outside the filter is a
+        // provider fault and is reported, never processed. Order is the node's: by block, then log index.
+        const accepted = [];
+        for (const log of logs) {
+          const state = states.get(lowerAddress(log.address));
+          const blockNumber = Number(log.blockNumber);
+          if (!state || !participating.includes(state)) {
+            this.logger.warn?.("indexer.sync.unexpected_log", { chainId, address: lowerAddress(log.address), blockNumber, transactionHash: lowerHash(log.transactionHash) });
+            continue;
+          }
+          if (blockNumber < state.nextBlock || blockNumber > state.chunkEnd) continue;
+          accepted.push({ state, log, blockNumber });
+        }
+        const eventBlocks = [...new Set(accepted.map((item) => item.blockNumber))];
         // Every block with a log is fetched and recorded (reorg anchor + timestamp). The chunk's end block is fetched
         // only for the last chunk of this call, so the persisted checkpoint stays anchored while an empty intermediate
         // chunk costs one paced RPC call (eth_getLogs) instead of two. A reorg across empty blocks changes no indexed
         // state; the next anchor above it still detects it.
-        const lastChunkOfCall = endBlock >= target || chunks + 1 >= this.maxChunksPerCycle;
+        const lastChunkOfCall = endBlock >= groupTarget || chunks + 1 >= this.maxChunksPerCycle;
         if (lastChunkOfCall && !eventBlocks.includes(endBlock)) eventBlocks.push(endBlock);
         eventBlocks.sort((a, b) => a - b);
         for (const blockNumber of eventBlocks) {
           let block;
+          operation = "rpc";
           try {
+            calls.getBlock += 1;
             block = await retry(() => this.rpc.getBlock(chainId, blockNumber), this.retryOptions);
           } catch (error) {
-            nextBlock = blockNumber;
-            if (blockNumber > rangeStart) await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: blockNumber, lastProcessedBlock: blockNumber - 1, status: "FAILED", lastError: error.message });
+            await this.persistPartialChunk(participating, blockNumber, error);
             throw error;
           }
           if (!block) {
             const error = new Error("RPC returned an incomplete canonical block.");
-            nextBlock = blockNumber;
-            nextBlock = blockNumber;
-            if (blockNumber > rangeStart) await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: blockNumber, lastProcessedBlock: blockNumber - 1, status: "FAILED", lastError: error.message });
+            await this.persistPartialChunk(participating, blockNumber, error);
             throw error;
           }
           operation = "database";
-          await this.ensureCanonical(config, block);
-          for (const log of logs.filter((item) => Number(item.blockNumber) === blockNumber)) await this.processLog(config, log, block);
-          await this.onProgress?.({ chainId, address, blockNumber, finalizedBlock: target });
+          await this.ensureCanonical(participating.map((state) => state.config), block);
+          for (const item of accepted) if (item.blockNumber === blockNumber) await this.processLog(item.state.config, item.log, block);
+          await this.onProgress?.({ chainId, address: addresses.length === 1 ? addresses[0] : addresses, blockNumber, finalizedBlock: groupTarget });
         }
         // finalized_block never runs ahead of the data actually indexed: this chunk's last block, not the cycle target.
-        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: endBlock + 1, lastProcessedBlock: endBlock, finalizedBlock: endBlock, latestKnownBlock: latest, status: "RUNNING", lastError: null });
-        nextBlock = endBlock + 1;
-        processed += endBlock - rangeStart + 1;
+        operation = "database";
+        for (const state of participating) {
+          await this.store.setCheckpoint({ chainId, address: state.address, contractType: state.config.contractType, nextBlock: state.chunkEnd + 1, lastProcessedBlock: state.chunkEnd, finalizedBlock: state.chunkEnd, latestKnownBlock: latest, status: "RUNNING", lastError: null });
+          state.processed += state.chunkEnd - Math.max(rangeStart, state.nextBlock) + 1;
+          state.nextBlock = state.chunkEnd + 1;
+        }
+        participating = [];
         chunks += 1;
       }
       operation = "database";
-      if (nextBlock <= target) {
-        // The per-cycle chunk budget is spent with blocks still to index. Persist the partial progress as a
-        // RUNNING checkpoint without a successful run (ownership freshness keeps failing closed for this
-        // contract), finalize sale rows only through the indexed block, and yield so the remaining contracts
-        // get their turn this cycle. The next cycle resumes from the persisted next_block.
-        const indexedThrough = nextBlock - 1;
-        const remainingBlocks = target - nextBlock + 1;
-        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: indexedThrough, finalizedBlock: indexedThrough, latestKnownBlock: latest, status: "RUNNING", lastError: null });
-        await this.finalizePrimarySalePurchases(config, indexedThrough);
-        await this.finalizePrimarySaleSettlements(config, indexedThrough);
-        this.logger.info?.("indexer.sync.catching_up", { chainId, address, nextBlock, targetBlock: target, remainingBlocks, chunks });
-        return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: indexedThrough, targetBlock: target, remainingBlocks, state: "CATCHING_UP", partial: true };
+      const results = [];
+      for (const state of states.values()) {
+        const { config, address } = state;
+        if (state.nextBlock <= state.target) {
+          // The per-cycle chunk budget is spent with blocks still to index. Persist the partial progress as a
+          // RUNNING checkpoint without a successful run (ownership freshness keeps failing closed for this
+          // contract), finalize sale rows only through the indexed block, and yield so the remaining contracts
+          // get their turn this cycle. The next cycle resumes from the persisted next_block.
+          const indexedThrough = state.nextBlock - 1;
+          const remainingBlocks = state.target - state.nextBlock + 1;
+          await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: state.nextBlock, lastProcessedBlock: indexedThrough, finalizedBlock: indexedThrough, latestKnownBlock: latest, status: "RUNNING", lastError: null });
+          await this.finalizePrimarySalePurchases(config, indexedThrough);
+          await this.finalizePrimarySaleSettlements(config, indexedThrough);
+          this.logger.info?.("indexer.sync.catching_up", { chainId, address, nextBlock: state.nextBlock, targetBlock: state.target, remainingBlocks, chunks });
+          results.push({ chainId, address, processedBlocks: state.processed, nextBlock: state.nextBlock, finalizedBlock: indexedThrough, targetBlock: state.target, remainingBlocks, state: "CATCHING_UP", partial: true });
+          continue;
+        }
+        await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock: state.nextBlock, lastProcessedBlock: state.nextBlock - 1, finalizedBlock: state.target, latestKnownBlock: latest, status: "IDLE", lastError: null, markRunSucceeded: true, markRunCompleted: true });
+        await this.finalizePrimarySalePurchases(config, state.target);
+        await this.finalizePrimarySaleSettlements(config, state.target);
+        results.push({ chainId, address, processedBlocks: state.processed, nextBlock: state.nextBlock, finalizedBlock: state.target, targetBlock: state.target, remainingBlocks: 0, state: "CONFIRMED", partial: false });
       }
-      await this.store.setCheckpoint({ chainId, address, contractType: config.contractType, nextBlock, lastProcessedBlock: nextBlock - 1, finalizedBlock: target, latestKnownBlock: latest, status: "IDLE", lastError: null, markRunSucceeded: true, markRunCompleted: true });
-      await this.finalizePrimarySalePurchases(config, target);
-      await this.finalizePrimarySaleSettlements(config, target);
-      return { chainId, address, processedBlocks: processed, nextBlock, finalizedBlock: target, targetBlock: target, remainingBlocks: 0, state: "CONFIRMED", partial: false };
+      // One line per group per cycle: the RPC cost of the scan, so a deployment can be measured from the logs alone.
+      if (states.size > 1) this.logger.info?.("indexer.sync.group.completed", { chainId, contracts: states.size, chunks, rpcCalls: calls, catchingUp: results.filter((result) => result.partial).length });
+      return results;
     } catch (error) {
-      await this.persistFailure({ chainId, address, config, checkpoint: { ...checkpoint, nextBlock }, error, rpcFailure: operation === "rpc", databaseFailure: operation === "database" });
-      this.logger.error?.("indexer.sync.failed", { chainId, address, nextBlock, error: error.message });
+      if (!error?.indexerFailurePersisted) {
+        const failed = participating.length ? participating : [...states.values()];
+        for (const state of failed) {
+          await this.persistFailure({ chainId, address: state.address, config: state.config, checkpoint: { ...state.checkpoint, nextBlock: state.nextBlock }, error, rpcFailure: operation === "rpc", databaseFailure: operation === "database" });
+        }
+        this.logger.error?.("indexer.sync.failed", { chainId, address: failed.length === 1 ? failed[0].address : failed.map((state) => state.address), nextBlock: failed.length ? Math.min(...failed.map((state) => state.nextBlock)) : null, error: error.message });
+      }
       throw error;
+    }
+  }
+
+  // A block fetch failed mid-chunk: every block below it is fully processed for each member, so each resumes there.
+  async persistPartialChunk(participating, blockNumber, error) {
+    for (const state of participating) {
+      const resume = Math.max(state.nextBlock, blockNumber);
+      if (resume > state.nextBlock) {
+        await this.store.setCheckpoint({ chainId: Number(state.config.chainId), address: state.address, contractType: state.config.contractType, nextBlock: resume, lastProcessedBlock: resume - 1, status: "FAILED", lastError: error.message });
+      }
+      state.nextBlock = resume;
     }
   }
 
@@ -533,7 +625,7 @@ export class BlockchainIndexer {
       const indexed = await this.store.getBlock({ chainId, blockNumber: cursor });
       // A block that was never recorded is not evidence of divergence; only a hash mismatch is.
       if (!indexed) { cursor -= 1; continue; }
-      const canonical = await retry(() => this.rpc.getBlock(chainId, cursor), this.retryOptions);
+      const canonical = await this.readCanonicalBlock(chainId, cursor);
       if (!canonical?.hash) throw new Error(`RPC returned no canonical hash for block ${cursor} during checkpoint verification.`);
       if (lowerHash(indexed.block_hash) === lowerHash(canonical.hash)) { commonAncestor = cursor; break; }
       replacementHash = canonical.hash;
@@ -547,13 +639,25 @@ export class BlockchainIndexer {
     return { nextBlock: fromBlock, rewound: true };
   }
 
-  async ensureCanonical(config, block) {
+  // One eth_getBlockByNumber per block per cycle, shared by every contract whose checkpoint stops at that block.
+  async readCanonicalBlock(chainId, blockNumber) {
+    const key = `${Number(chainId)}:${Number(blockNumber)}`;
+    if (this.canonicalReads?.has(key)) return this.canonicalReads.get(key);
+    const block = await retry(() => this.rpc.getBlock(chainId, blockNumber), this.retryOptions);
+    if (this.canonicalReads && block?.hash) this.canonicalReads.set(key, block);
+    return block;
+  }
+
+  async ensureCanonical(configOrConfigs, block) {
     if (!block || !Number.isSafeInteger(Number(block.number)) || !block.hash || !block.parentHash) throw new Error("RPC returned an incomplete canonical block.");
-    const chainId = Number(config.chainId);
+    const configs = Array.isArray(configOrConfigs) ? configOrConfigs : [configOrConfigs];
+    const chainId = Number(configs[0].chainId);
     const previous = await this.store.getBlock({ chainId, blockNumber: Number(block.number) });
     if (previous && previous.block_hash !== block.hash) {
       await this.store.handleReorg({ chainId, fromBlock: Number(block.number), replacementHash: block.hash });
-      await this.store.setCheckpoint({ chainId, address: String(config.address).toLowerCase(), contractType: config.contractType, nextBlock: Number(block.number), lastProcessedBlock: Number(block.number) - 1, allowRewind: true, status: "REORGING", lastError: "Canonical block hash changed." });
+      for (const config of configs) {
+        await this.store.setCheckpoint({ chainId, address: lowerAddress(config.address), contractType: config.contractType, nextBlock: Number(block.number), lastProcessedBlock: Number(block.number) - 1, allowRewind: true, status: "REORGING", lastError: "Canonical block hash changed." });
+      }
     }
     await this.store.recordBlock({ chainId, blockNumber: Number(block.number), blockHash: block.hash, parentHash: block.parentHash, blockTimestamp: block.timestamp });
   }
