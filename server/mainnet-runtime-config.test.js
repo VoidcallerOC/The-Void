@@ -94,17 +94,25 @@ describe("mainnet runtime configuration", () => {
     withoutFujiTest.rewrites = withoutFujiTest.rewrites.filter((rule) => rule.source !== "/fuji-rabby-test");
     for (const rule of withoutFujiTest.headers) if (rule.source === "/(owner-deploy|fuji-rabby-test)(.html)?") rule.source = "/owner-deploy(.html)?";
     expect(swap(routing)).toEqual(withoutFujiTest);
-    expect(buildCommand).toContain("VITE_RELEASE_NETWORK=mainnet");
-    expect(buildCommand).toContain("VITE_MARKETPLACE_CHAIN_ID=43114");
+    // Vercel caps buildCommand at 256 characters, so the command runs the root build:mainnet script, which bakes the
+    // network, the marketplace, the fee and the artwork gateway. The baked values are checked on the resolved build.
+    expect(buildCommand).toBe("cd ../.. && npm run build:mainnet");
+    expect(buildCommand.length).toBeLessThanOrEqual(256);
+    const build = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).scripts["build:mainnet"];
+    expect(build).toContain("VITE_RELEASE_NETWORK=mainnet");
+    expect(build).toContain("VITE_MARKETPLACE_CHAIN_ID=43114");
     // The canonical marketplace is the recorded unified marketplace; the build target, the manifest and the buy-target check agree.
-    expect(buildCommand).toContain("VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2");
+    expect(build).toContain("VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2");
     const unified = JSON.parse(readFileSync(new URL("../config/unified-marketplace.json", import.meta.url), "utf8"));
     expect(unified.marketplaceAddress).toBe("0x0F5930113Ec750d867741E05F302053472115eb2");
     // The earlier unified marketplace is retained (its listings stay buyable), never the build's listing target.
     expect(unified.retainedMarketplaces.map((entry) => entry.marketplaceAddress)).toEqual(["0x75964C44cA586b13e98e7c30E74d2B4114f65b06"]);
-    expect(buildCommand).not.toContain("0x75964C44cA586b13e98e7c30E74d2B4114f65b06");
-    expect(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).scripts["build:mainnet"]).toContain("VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2");
-    expect(buildCommand).toContain("VITE_MARKETPLACE_FEE_BPS=250");
+    expect(build).not.toContain("0x75964C44cA586b13e98e7c30E74d2B4114f65b06");
+    expect(build).toContain("VITE_MARKETPLACE_FEE_BPS=250");
+    // Artwork images come from the account's dedicated Pinata gateway (src/lib/artwork.js); the Fuji build stays on the public gateway.
+    expect(build).toContain("VITE_IPFS_GATEWAY=https://fuchsia-labour-butterfly-445.mypinata.cloud/ipfs/");
+    expect(build).toContain("vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir");
+    expect(JSON.stringify(fujiVercel)).not.toContain("VITE_IPFS_GATEWAY");
     expect(JSON.stringify(mainnetVercel)).not.toMatch(/fuji|43113|avax-test/);
     expect({ installCommand, outputDirectory }).toEqual({ installCommand: "cd ../.. && npm ci", outputDirectory: "dist" });
   });
