@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { VOID_LIVE } from "../data.js";
 import { WalletButton } from "./WalletButton.jsx";
+import { BrandLogo } from "./BrandLogo.jsx";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
 
 const LINKS = [
@@ -91,9 +92,8 @@ export function Nav() {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-        <Link to="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
-          <img src="/assets/voidcaller-primary-emblem-header.png" alt="" style={{ height: 40, width: "auto", margin: "-4px 0", display: "block" }} />
-          <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 22, width: "auto", display: "block" }} />
+        <Link to="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+          <BrandLogo />
         </Link>
         <div className="vc-nav-links" style={{ display: "flex", alignItems: "center", gap: 22 }}>
           {primaryLinks.map(([label, path]) => (
