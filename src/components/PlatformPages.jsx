@@ -222,7 +222,8 @@ export function ReleasePage({ children = null } = {}) {
         <p><Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>{artist.name}</Link> · <Status>{release.status}</Status></p>
       </PlatformHeader>
       <div className="vc-grid-2col" style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(280px, 1.15fr)", gap: 32, alignItems: "start" }}>
-        <img src={release.artwork} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
+        {/* Prefer the edition's own cover (token image) when the release has none stored. */}
+        <TokenArtwork sources={artworkSources(artworkFor(editionItems[0]?.edition, release))} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
         <div>
           <Eyebrow>The story</Eyebrow>
           <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>{release.story}</p>
