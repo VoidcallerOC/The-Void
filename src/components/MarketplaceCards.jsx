@@ -6,6 +6,8 @@ import { editionIsCollectable, editionPriceLabel, editionSupplyLabel, editionTyp
 import { artworkFor, ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
 import { ListForSaleLink } from "./AssetActions.jsx";
 import { listedTokenView } from "../lib/token-view.js";
+import { artworkSources } from "../lib/artwork.js";
+import { TokenArtwork } from "./TokenArtwork.jsx";
 
 export function SectionHead({ id, eyebrow, title, children, action }) {
   return (
@@ -72,7 +74,7 @@ export function EditionCard({ item, owned = false }) {
     <article className="vc-market-card" data-edition-id={edition.id}>
       <div className="vc-sleeve" style={{ display: "flex", flexDirection: "column" }}>
         <Link to={`/edition/${edition.id}`} className="vc-sleeve-art" aria-label={`View ${edition.title} edition`} style={{ display: "block" }}>
-          <img src={image} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", height: "auto", objectFit: "contain", objectPosition: "center", display: "block", background: "#000" }} />
+          <TokenArtwork sources={artworkSources(image)} alt={`${edition.title} artwork`} style={{ width: "100%", aspectRatio: "1", height: "auto", objectFit: "contain", objectPosition: "center", display: "block", background: "#000" }} />
         </Link>
         <div className="vc-sleeve-copy">
           <span className={`vc-object-mark ${object.tone}`}>{object.label}</span>
@@ -122,8 +124,10 @@ export function SecondaryListingCard({ item, listings = [], owned = false, catal
   const editionArt = artworkFor(edition, release);
   const [failedImages, setFailedImages] = useState([]);
   // Token image, then the token's local art, then the edition art; each is dropped only after it fails to load.
-  const image = [single?.artwork, single?.artworkFallback, editionArt].filter(Boolean).find((src) => !failedImages.includes(src)) || editionArt;
-  const showingTokenArt = Boolean(single) && image !== editionArt;
+  // An ipfs image expands to its gateway candidates (dedicated resized, dedicated, public) before the next source.
+  const candidates = [...new Set([single?.artwork, single?.artworkFallback, editionArt].filter(Boolean).flatMap((src) => artworkSources(src)))];
+  const image = candidates.find((src) => !failedImages.includes(src)) || editionArt;
+  const showingTokenArt = Boolean(single) && !artworkSources(editionArt).includes(image);
 
   return (
     <article className="vc-market-card" data-edition-id={edition.id}>

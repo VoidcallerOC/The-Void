@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
 import { releaseTypeOf } from "./release-types.js";
 import { DEFAULT_ARTIST_AVATAR, portfolioImageSrc, profileSocials } from "./artist-profile.js";
 import {
@@ -397,7 +397,22 @@ export function withOwnableDuplicates(catalog) {
   return merged;
 }
 
+// One published catalog per page load: Layout mounts CatalogProvider, and every page and panel reads the same
+// result. Without a provider (tests, isolated renders) the hook still loads its own copy.
+const CatalogContext = createContext(null);
+
+export function CatalogProvider({ children }) {
+  const catalog = useCatalogState(true);
+  return createElement(CatalogContext.Provider, { value: catalog }, children);
+}
+
 export function useMarketplaceCatalogs() {
+  const shared = useContext(CatalogContext);
+  const own = useCatalogState(shared === null);
+  return shared ?? own;
+}
+
+function useCatalogState(enabled) {
   const [overlay, setOverlay] = useState(() => readStudioOverlay());
   const [published, setPublished] = useState(emptyCatalog());
   const [publishedLoading, setPublishedLoading] = useState(true);
@@ -413,13 +428,14 @@ export function useMarketplaceCatalogs() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     const controller = new AbortController();
     fetchPublishedCatalog({ signal: controller.signal })
       .then((catalog) => setPublished(catalog))
       .catch(() => {})
       .finally(() => setPublishedLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [enabled]);
 
   return useMemo(() => {
     const collapsed = collapsePublicCatalog(mergeCatalogs([...baseCatalogs().map((base) => withPublishedArtistProfiles(base, published)), withPublishedArtistProfiles(overlay, published), withoutShadowedLegacyAlbum(onActiveReleaseNetwork(published))]));

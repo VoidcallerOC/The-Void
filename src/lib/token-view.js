@@ -1,4 +1,5 @@
 import { ipfsToHttp } from "./web3.js";
+import { artworkSources, artworkSrc } from "./artwork.js";
 import { VC_DATA } from "../data.js";
 
 // Each track is its own token. Views of one track resolve that token's own
@@ -36,7 +37,7 @@ export function experienceTrackTitle({ experience = null, tokenTrack = null, vie
 export function tokenView(catalog, { edition = null, release = null, tokenId = null, experience = null } = {}) {
   const token = tokenFor(catalog, { edition, tokenId, experience });
   const metadata = token?.metadata || {};
-  const sources = [ipfsToHttp(metadata.image || ""), token?.media?.art, edition?.artwork, release?.artwork, DEFAULT_ARTWORK].filter(Boolean);
+  const sources = [...artworkSources(metadata.image || ""), token?.media?.art, edition?.artwork, release?.artwork, DEFAULT_ARTWORK].filter(Boolean);
   return {
     token,
     tokenId: token?.tokenId ?? tokenId ?? null,
@@ -78,7 +79,7 @@ export function listedTokenView(catalog, edition, release, tokenId) {
   const name = metadata.name || view.token.name || null;
   // The token's own metadata image (uri(id) -> image, e.g. the Genesis GIFs) first; the site's copy of that
   // token's art only if the IPFS image is absent or fails to load.
-  const metadataImage = metadata.image ? ipfsToHttp(metadata.image) : null;
+  const metadataImage = metadata.image ? artworkSrc(metadata.image) : null;
   const localArt = view.token.media?.art || null;
   const artwork = metadataImage || localArt;
   return { tokenId: String(tokenId), name, artwork, artworkFallback: localArt && localArt !== artwork ? localArt : null };

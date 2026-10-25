@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { artworkSources } from "../lib/artwork.js";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { getEditionCatalog } from "../domain/models.js";
@@ -30,8 +31,9 @@ export function TokenPage() {
   const { edition, release, artist } = result;
   const token = listedTokenView(catalog, edition, release, tokenId);
   const editionArt = artworkFor(edition, release);
-  const image = [token.artwork, token.artworkFallback, editionArt].filter(Boolean).find((src) => !failedImages.includes(src)) || editionArt;
-  const showingTokenArt = image !== editionArt;
+  const candidates = [...new Set([token.artwork, token.artworkFallback, editionArt].filter(Boolean).flatMap((src) => artworkSources(src, { width: 1200 })))];
+  const image = candidates.find((src) => !failedImages.includes(src)) || editionArt;
+  const showingTokenArt = !artworkSources(editionArt, { width: 1200 }).includes(image);
   const track = playableTrackFor(tokenView(catalog, { edition, release, tokenId }).token);
   const secondary = resolveSecondaryStatus();
   const title = token.name || `Token #${tokenId}`;
