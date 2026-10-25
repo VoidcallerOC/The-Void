@@ -498,13 +498,13 @@ export function CollectionDetailPage() {
         <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>{collection.description}</p>
       </PlatformHeader>
       {artist && <p><Link to={`/artist/${artist.id}`} style={{ color: "var(--vc-bone)" }}>Artist · {artist.name}</Link></p>}
-      <div className="vc-market-grid" style={{ marginTop: 28 }}>
+      <div className="vc-collection-grid" style={{ marginTop: 28 }}>
         {releases.map(releaseCard)}
       </div>
       {moreReleases.length > 0 && (
         <>
           <Eyebrow>More from {artist?.name || "this artist"}</Eyebrow>
-          <div className="vc-market-grid" style={{ marginTop: 16 }}>
+          <div className="vc-collection-grid" style={{ marginTop: 16 }}>
             {moreReleases.map(releaseCard)}
           </div>
         </>
@@ -520,7 +520,7 @@ export function CollectionPage() {
       <PlatformHeader eyebrow="† Catalog" title="The Void">
         <p style={{ color: "var(--vc-bone-dim)", maxWidth: 650 }}>Collections as records. Open one to see the pressing.</p>
       </PlatformHeader>
-      <div className="vc-market-grid">
+      <div className="vc-collection-grid">
         {catalog.collections.map((collection) => {
           const artist = catalog.artists.find((item) => collection.artistIds.includes(item.id));
           const release = catalog.releases.find((item) => collection.releaseIds.includes(item.id));
