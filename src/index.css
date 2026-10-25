@@ -266,6 +266,16 @@ body { padding-bottom: 72px; }
   gap: 22px;
 }
 
+/* Collection cards stay a consistent size and sit side by side. auto-fill keeps
+   empty tracks so a lone card does not expand to the full shell (unlike Discover). */
+.vc-collection-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
+  gap: 22px;
+  justify-content: start;
+}
+
 .vc-market-card {
   border: 1px solid var(--vc-ash);
   background: var(--vc-abyss);
@@ -605,6 +615,7 @@ body { padding-bottom: 72px; }
 
 @media (max-width: 768px) {
   .vc-market-grid,
+  .vc-collection-grid,
   .vc-release-rail {
     grid-template-columns: 1fr;
   }
