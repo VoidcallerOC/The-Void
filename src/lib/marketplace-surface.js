@@ -372,6 +372,16 @@ export function collectableEditionGroups(catalog) {
   return groups;
 }
 
+/**
+ * Published release-scoped editions whose sale is configured and scheduled but not open yet. Discover
+ * lists them as upcoming so a release is findable before its sale starts; they never count as collectable.
+ */
+export function upcomingEditionItems(catalog) {
+  return flattenMarketplaceEditions([catalog])
+    .filter(hasPublicLifecycle)
+    .filter((item) => item.primary?.releaseScoped && item.primary.saleState === SALE_AVAILABILITY.NOT_STARTED);
+}
+
 export function collectableFirst(items = []) {
   return [...items].sort((a, b) => Number((b.primary || b.editions?.[0]?.primary)?.availability === "available") - Number((a.primary || a.editions?.[0]?.primary)?.availability === "available"));
 }
