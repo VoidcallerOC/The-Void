@@ -21,6 +21,12 @@ describe("app icons", () => {
     expect(html.match(/rel="apple-touch-icon"/g)).toHaveLength(1);
   });
 
+  it("lists standard 192/512 icons and a separate maskable icon", () => {
+    const by = (purpose) => manifest.icons.filter((i) => (i.purpose || "any") === purpose).map((i) => i.sizes);
+    expect(by("any")).toEqual(["192x192", "512x512"]);
+    expect(by("maskable")).toEqual(["512x512"]);
+  });
+
   it("keeps the black Void theme color in the manifest and the head", () => {
     expect(manifest.theme_color).toBe("#000000");
     expect(html).toContain('<meta name="theme-color" content="#000000" />');
