@@ -187,11 +187,12 @@ describe("Genesis claim deployment: environment schedule", () => {
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: NANO })).toThrow(/passive wallet/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: NANO })).toThrow(/passive wallet/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toThrow(/not the claim admin/);
-    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: RABBY_DEPLOYER })).toThrow(/not the deployer/);
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_SIGNER_ADDRESS: ARTIST })).toThrow(/not the artist wallet/);
     expect(validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: ARTIST })).toMatchObject({ admin: ARTIST, signer: SIGNER });
-    // The deployer signs the creation and holds no role afterwards: it may be neither the signer nor the admin.
+    // The deployer may also be the voucher signer (custody trade-off documented in OWNER-SIGNING.md), but never the admin.
+    expect(validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: ARTIST, GENESIS_CLAIM_SIGNER_ADDRESS: RABBY_DEPLOYER })).toMatchObject({ admin: ARTIST, signer: RABBY_DEPLOYER, deployerAddress: RABBY_DEPLOYER });
     expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: RABBY_DEPLOYER })).toThrow(/claim admin may not be the deployer/);
+    expect(() => validateClaimDeploymentEnv({ ...MAINNET, GENESIS_CLAIM_ADMIN: RABBY_DEPLOYER, GENESIS_CLAIM_SIGNER_ADDRESS: RABBY_DEPLOYER })).toThrow(/not the claim admin/);
     // Fuji keeps its existing rules.
     expect(validateClaimDeploymentEnv({ ...ENV, GENESIS_CLAIM_SIGNER_ADDRESS: ADMIN })).toMatchObject({ network: "fuji" });
   });
@@ -236,10 +237,24 @@ describe("Genesis claim deployment: read-only preflight", () => {
     ["a public end one second after the planned end", { provider: fuji({ saleState: { endTime: BigInt(PUBLIC_END + 1) } }) }, /endTime/],
     ["mints outside the sale", { provider: fuji({ edition: { mintedSupply: 2n } }) }, /another mint path/],
     ["a claim start too close to now", { provider: fuji({ now: CLAIM_START - 60 }) }, /choose a later start/],
+    ["a past claim start that is not the live sale start", { provider: fuji({ now: CLAIM_START + 60, saleState: { startTime: BigInt(CLAIM_START - 3600) } }) }, /startTime/],
+    ["a late deployment after the claim window closed", { provider: fuji({ now: CLAIM_END }) }, /window has expired/],
+    ["a late deployment too close to the claim end", { provider: fuji({ now: CLAIM_END - 599 }) }, /window has expired/],
     ["a reverting constructor simulation", { provider: fuji({ constructorReverts: true }) }, /constructor reverted/],
     ["a paused sale", { provider: fuji({ saleState: { paused: true } }) }, /paused/],
   ])("refuses %s", async (_label, { provider = fuji(), genesisProvider = cChain() }, message) => {
     await expect(preflight(ENV, provider, genesisProvider)).rejects.toThrow(message);
+  });
+
+  it("binds a late deployment to the live sale start without moving the schedule", async () => {
+    for (const now of [CLAIM_START, CLAIM_START + 3600, CLAIM_END - 600]) {
+      const facts = await preflight(ENV, fuji({ now }));
+      expect(facts.args.slice(5, 7)).toEqual([BigInt(CLAIM_START), 86_400n]);
+      expect(buildPlan(validateClaimDeploymentEnv(ENV), facts).schedule).toMatchObject({ claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleEnd: String(PUBLIC_END) });
+    }
+    // A future start inside the lead time still fails; one at the lead time passes.
+    await expect(preflight(ENV, fuji({ now: CLAIM_START - 599 }))).rejects.toThrow(/choose a later start/);
+    await expect(preflight(ENV, fuji({ now: CLAIM_START - 600 }))).resolves.toMatchObject({ predictedClaim: PREDICTED });
   });
 
   it("checks the sale's paid per-wallet limit when the plan names one", async () => {

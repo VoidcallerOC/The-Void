@@ -261,9 +261,16 @@ Only after this check passes, run step 1 for real.
    | `public_sale_end` | `GENESIS_PUBLIC_SALE_END` | `E`, the sale's `endTime` |
    | `expected_per_wallet_limit` | `GENESIS_EXPECT_PER_WALLET_LIMIT` | the sale's paid per-wallet limit |
    | `claim_admin` | `GENESIS_CLAIM_ADMIN` | not the fee recipient, not the signer, not the deployer |
-   | `claim_signer_address` | `GENESIS_CLAIM_SIGNER_ADDRESS` | the dedicated voucher signer's public address |
+   | `claim_signer_address` | `GENESIS_CLAIM_SIGNER_ADDRESS` | the voucher signer's public address; may be the deployer (see custody note below) |
    | `expected_deployer_address` | `EXPECTED_DEPLOYER_ADDRESS` | `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` |
    | `expected_deployer_nonce` | `EXPECTED_DEPLOYER_NONCE` | the deployer's current nonce (read live by `owner:deploy`) |
+
+   **Custody note, deployer as voucher signer:** the contract only requires signer ≠ admin, and the planner allows
+   signer = deployer. The server must then hold `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` = the deployer key, so a server
+   compromise exposes the deployer's AVAX and its transaction authority (nonce) as well as voucher issuance. The claim
+   admin can rotate the signer (`setSigner`), but not recover funds. Never paste the key into chat, CI or a commit.
+   A past `claim_start` is accepted only when it equals the live sale's `startTime` and the claim window still has at
+   least 600 s left.
 
    The workflow fixes the rest (`GENESIS_CLAIM_WINDOW_SECONDS=86400`, `GENESIS_PUBLIC_PRICE_WEI=250000000000000000`,
    allocations `0`, open edition). The plan refuses a release the active factory did not create, a sale it did
