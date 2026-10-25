@@ -1,4 +1,3 @@
-import { XAccountLink } from "./XAccountLink.jsx";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useHashScroll } from "../lib/use-hash-scroll.js";
@@ -564,7 +563,6 @@ export function MyCollectionPage() {
       <PlatformHeader eyebrow="† Collection" title="My collection">
         <p style={{ color: "var(--vc-bone-dim)" }}>Owned editions and the experiences they unlock.</p>
       </PlatformHeader>
-      <div style={{ marginBottom: 32 }}><XAccountLink /></div>
       {!wallet.connected ? (
         <div style={{ ...card, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>Connect a wallet to reveal your collection.</p>
