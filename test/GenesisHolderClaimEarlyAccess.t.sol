@@ -41,7 +41,8 @@ contract GenesisHolderClaimEarlyAccessTest {
     uint256 internal constant OTHER_KEY = 0xB0B;
     address internal constant ARTIST = address(0xA7157);
     address internal constant ADMIN = address(0xAD01);
-    address internal constant EARLY = address(0xEA21);
+    // The owner-approved early-access wallet (public address; configured nowhere by this test suite but here).
+    address internal constant EARLY = 0x6a86EfA012fEDA64b70112022487fEE22E67d2fb;
     address internal constant OTHER = address(0x0BAD);
     address internal constant HOLDER = address(0xCA11);
     address internal constant PLATFORM = address(0xFEE);
@@ -333,6 +334,85 @@ contract GenesisHolderClaimEarlyAccessTest {
         sale.purchase{value: PRICE}(tokenId, 1);
         require(release.balanceOf(EARLY, tokenId) == 4, "expected one early plus three paid");
         require(release.edition(tokenId).mintedSupply == 4, "supply accounting drifted");
+    }
+
+    // Full lifecycle for the approved wallet: one early mint, then its own Genesis free claim (it holds a
+    // Genesis unit), then three paid mints; a fourth paid mint and a second claim are refused. 5 tokens total.
+    function testApprovedWalletLifecycleEarlyPlusGenesisClaimPlusThreePaid() public {
+        genesis.setBalance(EARLY, 0, 1);
+        vm.warp(EARLY_START);
+        _mint(EARLY, _voucher(EARLY, 40), SIGNER_KEY);
+        vm.warp(CLAIM_START);
+        GenesisHolderClaim.ClaimVoucher memory claimVoucher = _claimVoucher(EARLY, 41);
+        bytes memory claimSignature = _signClaim(claimVoucher);
+        vm.prank(EARLY);
+        claimContract.claim(claimVoucher, claimSignature);
+        require(claimContract.hasClaimed(EARLY), "Genesis claim not recorded");
+        GenesisHolderClaim.ClaimVoucher memory again = _claimVoucher(EARLY, 42);
+        bytes memory againSignature = _signClaim(again);
+        vm.prank(EARLY);
+        vm.expectPartialRevert(GenesisHolderClaim.AlreadyClaimed.selector);
+        claimContract.claim(again, againSignature);
+        vm.warp(CLAIM_END);
+        vm.deal(EARLY, PRICE * 4);
+        vm.prank(EARLY);
+        sale.purchase{value: PRICE * 3}(tokenId, 3);
+        vm.prank(EARLY);
+        vm.expectRevert();
+        sale.purchase{value: PRICE}(tokenId, 1);
+        require(release.balanceOf(EARLY, tokenId) == 5, "expected 1 early + 1 claim + 3 paid");
+        require(claimContract.claimedSupply() == 2, "claimedSupply must hold early + Genesis claim");
+        require(release.edition(tokenId).mintedSupply == 5, "total supply drifted");
+        _expectRevert(EARLY, _voucher(EARLY, 43), SIGNER_KEY, GenesisHolderClaim.EarlyAccessClosed.selector);
+    }
+
+    function testEarlyAccessMintIsNotPayable() public {
+        vm.warp(EARLY_START);
+        GenesisHolderClaim.EarlyAccessVoucher memory voucher = _voucher(EARLY, 44);
+        bytes memory signature = _sign(voucher, SIGNER_KEY);
+        vm.deal(EARLY, 1 ether);
+        vm.prank(EARLY);
+        (bool ok,) = address(claimContract).call{value: 1}(abi.encodeCall(GenesisHolderClaim.earlyAccessMint, (voucher, signature)));
+        require(!ok, "early access accepted AVAX");
+        require(!claimContract.earlyAccessClaimed() && address(claimContract).balance == 0, "payable side effects");
+    }
+
+    // On a capped edition the early mint draws on the reserved claim allocation, so it can never push total
+    // supply past the edition cap. (Forgive & Forget is an open edition; there is no cap to reach.)
+    function testCappedEditionEarlyMintCountsAgainstTheClaimAllocation() public {
+        bytes32 cappedId = keccak256("early-capped");
+        vm.prank(ARTIST);
+        uint256 capped = release.createEdition(RELEASE_KEY, cappedId, 10, "ipfs://capped", ARTIST, 0);
+        vm.prank(ARTIST);
+        sale.configureSale(capped, PRICE, 9, WALLET_LIMIT, uint64(CLAIM_START), uint64(PUBLIC_END), false);
+        GenesisHolderClaim cappedClaim = new GenesisHolderClaim(
+            address(release), address(sale), capped, 1, 9, CLAIM_START, 1 days, 7 days, PRICE, ADMIN, signer
+        );
+        bytes32 issuerRole = release.ISSUER_ROLE();
+        vm.prank(ARTIST);
+        release.grantRole(issuerRole, address(cappedClaim));
+        vm.prank(ADMIN);
+        cappedClaim.configureEarlyAccess(EARLY, uint64(EARLY_START), uint64(EARLY_END));
+        vm.warp(EARLY_START);
+        GenesisHolderClaim.EarlyAccessVoucher memory voucher = GenesisHolderClaim.EarlyAccessVoucher({
+            claimant: EARLY, destinationChainId: 43114, releaseContract: address(release), tokenId: capped, quantity: 1,
+            windowStart: EARLY_START, windowEnd: EARLY_END, nonce: 45, deadline: block.timestamp + 300
+        });
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(SIGNER_KEY, cappedClaim.earlyAccessVoucherDigest(voucher));
+        vm.prank(EARLY);
+        cappedClaim.earlyAccessMint(voucher, abi.encodePacked(r, s, v));
+        require(cappedClaim.claimedSupply() == 1, "early mint not counted against allocation");
+        genesis.setBalance(HOLDER, 0, 1);
+        vm.warp(CLAIM_START);
+        GenesisHolderClaim.ClaimVoucher memory claimVoucher = GenesisHolderClaim.ClaimVoucher({
+            claimant: HOLDER, genesisContract: cappedClaim.GENESIS_CONTRACT(), genesisChainId: 43114,
+            eligibilityRule: cappedClaim.ELIGIBILITY_RULE(), destinationChainId: 43114, releaseContract: address(release),
+            tokenId: capped, quantity: 1, allocation: 1, nonce: 46, deadline: block.timestamp + 300
+        });
+        (v, r, s) = vm.sign(SIGNER_KEY, cappedClaim.voucherDigest(claimVoucher));
+        vm.prank(HOLDER);
+        vm.expectPartialRevert(GenesisHolderClaim.AllocationExhausted.selector);
+        cappedClaim.claim(claimVoucher, abi.encodePacked(r, s, v));
     }
 
     // ---- helpers ----

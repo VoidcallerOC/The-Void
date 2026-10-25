@@ -6,7 +6,8 @@ import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.
 const RELEASE = "0x2222222222222222222222222222222222222222";
 const SALE = "0x3333333333333333333333333333333333333333";
 const CLAIM = "0x4444444444444444444444444444444444444444";
-const APPROVED = "0x9999999999999999999999999999999999999999";
+// The owner-approved early-access wallet (a public address; no key or mapping is stored here).
+const APPROVED = "0x6a86EfA012fEDA64b70112022487fEE22E67d2fb";
 const OTHER = "0x1111111111111111111111111111111111111111";
 // Test-only key; it holds nothing and protects nothing.
 const TEST_SIGNER_KEY = `0x${"11".repeat(32)}`;
@@ -133,6 +134,21 @@ describe("one-wallet early access vouchers", () => {
 });
 
 describe("early access configuration", () => {
+  it("normalizes a lowercase configured wallet and matches requests case-insensitively", async () => {
+    const { instance } = service({ env: { GENESIS_EARLY_ACCESS_WALLET: APPROVED.toLowerCase() } });
+    const { voucher } = await instance.issueEarlyAccessVoucher(APPROVED.toUpperCase().replace("0X", "0x"));
+    expect(voucher.claimant).toBe(APPROVED);
+  });
+
+  it("cannot turn on anything while the Genesis claim itself is disabled", () => {
+    expect(loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_ENABLED: "" })).toBeNull();
+  });
+
+  it("still runs every base claim validation when early access is enabled", () => {
+    expect(() => loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_SIGNER_ADDRESS: OTHER })).toThrow();
+    expect(() => loadGenesisClaimConfig({ ...ENV, GENESIS_CLAIM_START: "" })).toThrow();
+  });
+
   it.each([
     ["a missing wallet", { GENESIS_EARLY_ACCESS_WALLET: "" }],
     ["the zero wallet", { GENESIS_EARLY_ACCESS_WALLET: "0x0000000000000000000000000000000000000000" }],

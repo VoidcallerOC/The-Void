@@ -193,7 +193,19 @@ The API refuses to load unless the deployed claim's parameters match these value
 
 ## Optional one-wallet early access (prepared, not configured)
 
-Status: code and tests only. No wallet, window, or price has been approved. Nothing below has been run.
+Status: code and tests only. Nothing below has been run, configured, or deployed.
+
+Owner decisions (2026-10-25): wallet `0x6a86EfA012fEDA64b70112022487fEE22E67d2fb` (an intentional personal-wallet
+perk); free; exactly one early mint. It is independent of that wallet's Genesis free claim (still available if
+the wallet meets the live-holder rule) and of its three paid mints, so the wallet's maximum is 1 + 1 + 3. The early
+mint counts toward total minted supply. On a capped edition it draws on the reserved claim allocation; Forgive &
+Forget is an open edition, so there is no cap to reach.
+
+Window rule: 30 minutes, ending one minute before `claimStart`: `start = claimStart - 1860`,
+`end = claimStart - 60` (`end` is the first refused second). No timestamps are fixed here: the `claimStart` in the
+table above is a worked example already in the past, and on 2026-10-25 the sale (`sales(1)` on
+`0xB4dAAe78a53c33f52C6EB573c4d6EFC7B86F3845`) read back `configured=false`. Compute the window from the
+`claimStart` of the plan that is actually deployed, in `America/New_York` with its numeric offset.
 
 Phase order: early access (one wallet, one mint) → Genesis free claim (24 h from `claimStart`) →
 paid sale (0.25 AVAX, 3 per wallet, 7 days from `claimStart`). The free claim and the paid sale still open
@@ -218,6 +230,11 @@ Server (Render), all required together or the whole claim config refuses to load
 `POST /api/claims/early-access/vouchers {wallet}`. It signs only for that wallet, inside the window, after
 the normal binding check and only if the contract's early-access wallet/window match and
 `earlyAccessClaimed` is false. The API never returns the wallet address. No migration.
+
+Read back after `configureEarlyAccess`, before setting any Render variable, and compare exactly:
+`earlyAccessWallet()` = the approved wallet, `earlyAccessStart()`/`earlyAccessEnd()` = the computed window,
+`earlyAccessEnabled()` = true, `earlyAccessClaimed()` = false, `earlyAccessEnd() < claimStart()`, and the sale's
+`startTime` = `claimStart()`. The server refuses vouchers (503) if any of these differ from its settings.
 
 Before early access can run: claim contract deployed (this revision), ISSUER_ROLE granted to it, sale
 configured to open at `claimStart`, `configureEarlyAccess` sent by the admin, Render variables set. The
