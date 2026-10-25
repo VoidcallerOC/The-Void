@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:mainnet": "VITE_RELEASE_NETWORK=mainnet VITE_MARKETPLACE_CHAIN_ID=43114 VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2 VITE_MARKETPLACE_FEE_BPS=250 vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
+    "build:mainnet": "VITE_RELEASE_NETWORK=mainnet VITE_MARKETPLACE_CHAIN_ID=43114 VITE_MARKETPLACE_ADDRESS=0x0F5930113Ec750d867741E05F302053472115eb2 VITE_MARKETPLACE_FEE_BPS=250 VITE_IPFS_GATEWAY=https://fuchsia-labour-butterfly-445.mypinata.cloud/ipfs/ vite build --outDir deploy/vercel-mainnet/dist --emptyOutDir",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

@@ -8,6 +8,7 @@ import { DISCOVERY, DISCOVERY_CATEGORIES, VC_DATA } from "../data.js";
 import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback } from "../domain/models.js";
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
+import { artworkSources } from "../lib/artwork.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
@@ -306,7 +307,7 @@ export function EditionPage() {
     <section style={shell}>
       <Eyebrow red>† {objectLabel}</Eyebrow>
       <div className="vc-edition-plate" style={{ marginTop: 18 }}>
-        <img src={artworkFor(edition, release)} alt={`${edition.title} artwork`} />
+        <TokenArtwork sources={artworkSources(artworkFor(edition, release), { width: 1200 })} alt={`${edition.title} artwork`} />
         <div>
           <p className="vc-card-kicker">{artist.name}</p>
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(48px, 8vw, 88px)", lineHeight: 0.9, textTransform: "uppercase", margin: "8px 0 12px" }}>{release.title}</h1>

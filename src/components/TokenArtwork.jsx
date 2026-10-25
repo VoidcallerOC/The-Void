@@ -6,5 +6,5 @@ export function TokenArtwork({ sources = [], alt = "", style }) {
   const [index, setIndex] = useState(0);
   const src = sources[index];
   if (!src) return null;
-  return <img src={src} alt={alt} loading="lazy" style={style} onError={() => setIndex((current) => (current + 1 < sources.length ? current + 1 : current))} />;
+  return <img src={src} alt={alt} loading="lazy" decoding="async" style={style} onError={() => setIndex((current) => (current + 1 < sources.length ? current + 1 : current))} />;
 }

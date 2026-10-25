@@ -6,7 +6,7 @@ import { Nav } from "./Nav.jsx";
 import { Footer } from "./Footer.jsx";
 import { StickyPlayer } from "./StickyPlayer.jsx";
 import { WalletProvider } from "../lib/WalletContext.jsx";
-import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
+import { CatalogProvider, useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { buildMarketplaceOwnershipConfig } from "../lib/marketplace-ownership.js";
 import { ReviewerNotificationsProvider } from "../lib/ReviewerNotificationsProvider.jsx";
 import { PreviewHostBridge } from "./PreviewHostBridge.jsx";
@@ -62,6 +62,10 @@ export function DocumentTitle({ catalog }) {
 // Persistent shell — Nav, Footer, and the sticky audio bar stay mounted across
 // route changes so playback continues as you navigate.
 export function Layout() {
+  return <CatalogProvider><LayoutShell /></CatalogProvider>;
+}
+
+function LayoutShell() {
   const catalog = useMarketplaceCatalogs();
   const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(withOwnableDuplicates(catalog).editions), [catalog]);
   return (
