@@ -49,7 +49,7 @@ on:
         required: true
         type: string
       claim_signer_address:
-        description: Public address of the server voucher signer. May be the deployer (custody trade-off: the server then holds the deployer key; see deploy/mainnet/OWNER-SIGNING.md). Never the admin, artist or fee recipient.
+        description: "Public address of the server voucher signer. May be the deployer (custody trade-off: the server then holds the deployer key; see deploy/mainnet/OWNER-SIGNING.md). Never the admin, artist or fee recipient."
         required: true
         type: string
       expected_deployer_address:
