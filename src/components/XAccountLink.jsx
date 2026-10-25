@@ -14,7 +14,9 @@ function XLogo() {
 
 // Optional X identity link. Signing in with a wallet stays the only way in; this just shows
 // which X account the wallet owner has proven they control. Authorization happens on X's own page.
-export function XAccountLink() {
+// variant="nav" renders only the connect action for the header, next to the wallet button. It is the same
+// component and the same connect() flow as the panel, so there is one OAuth path, not a copy of it.
+export function XAccountLink({ variant = "panel" } = {}) {
   const wallet = useWallet();
   const headers = wallet?.authHeaders || {};
   const signedIn = Boolean(wallet?.connected && wallet?.authenticated && headers.authorization);
@@ -90,6 +92,20 @@ export function XAccountLink() {
     } catch (error) {
       setState((s) => ({ ...s, error: error.message }));
     } finally { busy.current = false; }
+  }
+
+  if (variant === "nav") {
+    // The header needs a wallet session to link, and has nothing to say once linked or when X is unavailable.
+    const { phase, error } = state;
+    if (!signedIn || !(phase === "disconnected" || phase === "pending")) return null;
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+        <button type="button" className="vc-x-connect vc-x-connect--nav" onClick={connect} disabled={phase === "pending"} aria-busy={phase === "pending"} aria-label="Connect X account" title="Connect your X account (optional)">
+          <XLogo /><span aria-hidden="true">{phase === "pending" ? "Waiting for X…" : "Connect X"}</span>
+        </button>
+        {error && <span role="alert" style={{ ...mono, fontSize: 10, color: "var(--vc-crimson)", maxWidth: 220, lineHeight: 1.4, textTransform: "none", letterSpacing: ".04em" }}>{error}</span>}
+      </span>
+    );
   }
 
   if (!signedIn) {
