@@ -29,8 +29,9 @@ try {
   $("next").innerHTML = `<p class="bad">${esc(error.message)}</p>`;
 }
 const provider = rpc ? new JsonRpcProvider(rpc.url, profile.chainId, { staticNetwork: true, cacheTimeout: -1, batchMaxCount: 1 }) : null;
-// A Fuji page may hold the spent probe plan next to the claim plan: offer the claim plan first.
-const PLAN_PREFERENCE = ["genesis-claim-fuji"];
+// Each page may hold a spent plan (the Fuji probe, the executed mainnet release plan) next to the claim plan:
+// offer the claim plan first.
+const PLAN_PREFERENCE = ["genesis-claim-fuji", "genesis-claim-mainnet"];
 const usable = [...plans].sort((a, b) => PLAN_PREFERENCE.indexOf(b.entry?.kind) - PLAN_PREFERENCE.indexOf(a.entry?.kind)).find((item) => !item.error);
 const entry = usable?.entry ?? null;
 const storageKey = entry ? `the-void-owner-deploy:${network}:${entry.binding.digest}` : null;
@@ -65,7 +66,10 @@ function renderPlan() {
       <tr><td>Kind</td><td>${esc(entry.kind)}</td></tr>
       <tr><td>Chain</td><td>${esc(profile.name)} (${profile.chainId})</td></tr>
       <tr><td>Deployer (Rabby)</td><td><code>${esc(profile.deployer)}</code></td></tr>
-      ${MAINNET ? `<tr><td>Fee recipient</td><td><code>${esc(MAINNET_FEE_RECIPIENT)}</code> <span class="muted">(Nano S Plus; passive, signs nothing)</span></td></tr>` : `<tr><td>Purpose</td><td class="warn">${esc(plan.purpose)}</td></tr>
+      ${MAINNET ? `<tr><td>Fee recipient</td><td><code>${esc(MAINNET_FEE_RECIPIENT)}</code> <span class="muted">(Nano S Plus; passive, signs nothing)</span></td></tr>${isClaim ? `<tr><td>Claim admin</td><td><code>${esc(plan.roles.admin)}</code> <span class="muted">(the artist wallet; can pause the claim and rotate the signer)</span></td></tr>
+      <tr><td>Voucher signer</td><td><code>${esc(plan.roles.signer)}</code> <span class="muted">${plan.roles.signer.toLowerCase() === profile.deployer.toLowerCase() ? "(the deployer; its key will be a server secret, so a server compromise also exposes the deployer's AVAX)" : "(signs vouchers on the server only)"}</span></td></tr>
+      <tr><td>Schedule</td><td>claim ${esc(new Date(Number(plan.schedule.claimStart) * 1000).toISOString())} to ${esc(new Date(Number(plan.schedule.claimEnd) * 1000).toISOString())}; public sale ends ${esc(new Date(Number(plan.schedule.publicSaleEnd) * 1000).toISOString())} at ${esc(plan.schedule.publicPriceWei)} wei</td></tr>
+      <tr><td>Not done by this step</td><td>The artist's ISSUER_ROLE grant to the claim, the server signing secret, the Render configuration and activation.</td></tr>` : ""}` : "`<tr><td>Purpose</td><td class="warn">${esc(plan.purpose)}</td></tr>
       <tr><td>Maximum cost</td><td>${esc(plan.cost.maxCostWei)} wei of Fuji test AVAX (no real value)</td></tr>${isClaim ? `<tr><td>Claim admin</td><td><code>${esc(plan.roles.admin)}</code> <span class="muted">(the artist wallet; can pause the claim and rotate the signer)</span></td></tr>
       <tr><td>Voucher signer</td><td><code>${esc(plan.roles.signer)}</code> <span class="muted">(dedicated Genesis voucher signer; signs vouchers on the server only)</span></td></tr>
       <tr><td>Schedule</td><td>claim opens ${esc(new Date(Number(plan.schedule.claimStart) * 1000).toISOString())} for ${esc(plan.schedule.claimWindowSeconds)}s; the public sale opens at the same time and runs for ${esc(plan.schedule.publicWindowSeconds)}s at ${esc(plan.schedule.publicPriceWei)} wei</td></tr>

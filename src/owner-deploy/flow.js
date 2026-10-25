@@ -9,6 +9,9 @@ import { FUJI_CLAIM_KIND, FUJI_GENESIS_VOUCHER_SIGNER } from "../../scripts/fuji
 
 // Seconds of lead the claim start needs over the latest block at signing time (the constructor reverts once it has passed).
 export const CLAIM_START_MARGIN_SECONDS = 120;
+// A late deployment (claim start already passed, bound by the constructor to the live sale start) needs at
+// least this long left in the claim window, matching the planner (MINIMUM_LEAD_SECONDS).
+export const CLAIM_END_MARGIN_SECONDS = 600;
 const isClaimKind = (kind) => kind === "genesis-claim-mainnet" || kind === FUJI_CLAIM_KIND;
 
 // The owner deployment page's logic, without the DOM. Every check reuses the modules the Node tools
@@ -107,8 +110,15 @@ export async function readiness(provider, entry, state, n) {
   for (const target of emptyBefore(entry, n)) add(`Nothing deployed yet at ${target}`, (await provider.getCode(target)) === "0x", target);
   if (isClaimKind(entry.kind)) {
     const latestBlock = await provider.getBlock("latest");
-    const ahead = BigInt(entry.plan.schedule.claimStart) - BigInt(latestBlock.timestamp);
-    add(`Claim start is at least ${CLAIM_START_MARGIN_SECONDS}s ahead of the chain`, ahead >= BigInt(CLAIM_START_MARGIN_SECONDS), `${ahead}s ahead; the plan goes stale when this passes`);
+    const now = BigInt(latestBlock.timestamp);
+    const ahead = BigInt(entry.plan.schedule.claimStart) - now;
+    if (ahead > 0n) {
+      add(`Claim start is at least ${CLAIM_START_MARGIN_SECONDS}s ahead of the chain`, ahead >= BigInt(CLAIM_START_MARGIN_SECONDS), `${ahead}s ahead; the plan goes stale when this passes`);
+    } else {
+      // Late deployment: the constructor simulation below re-checks that claimStart is the live sale's startTime.
+      const left = BigInt(entry.plan.schedule.claimEnd) - now;
+      add(`Claim window has at least ${CLAIM_END_MARGIN_SECONDS}s left (late deployment at the sale's start)`, left >= BigInt(CLAIM_END_MARGIN_SECONDS), `${left}s left; the window is never extended`);
+    }
     let simulation;
     try { await provider.call({ from: deployer, data: request.data }); simulation = "passed"; } catch (error) { simulation = `reverted${error?.shortMessage ? ` (${error.shortMessage})` : ""}`; }
     add("Claim constructor simulation passes (release, sale and schedule still match)", simulation === "passed", simulation);

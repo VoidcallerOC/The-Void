@@ -198,6 +198,9 @@ describe("Fuji claim deployment through the page flow", () => {
       expect(ready.checks.filter((c) => !c.ok).map((c) => c.name).join(";")).toMatch(pattern);
     };
     await check(fuji({ now: CLAIM_START - 60 }), /Claim start is at least 120s/);
+    // Late deployment needs at least 600s of the claim window left: the 300s Fuji window never has that.
+    await check(fuji({ now: CLAIM_START }), /Claim window has at least 600s left/);
+    await check(fuji({ now: CLAIM_END }), /Claim window has at least 600s left/);
     await check(fuji({ constructorReverts: true }), /constructor simulation/);
     await check(fuji({ nonce: NONCE + 1 }), /nonce/);
     await check(fuji({ chainId: 43114n }), /Chain is Avalanche Fuji/);
