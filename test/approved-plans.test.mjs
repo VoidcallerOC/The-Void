@@ -56,6 +56,15 @@ describe("approved mainnet plans", () => {
     expect(plan.artifacts.implementation.path).toBe(RELEASE_FACTORY_PROFILES.sequential.implementationArtifactPath);
   });
 
+  it.runIf(files.includes("genesis-claim-mainnet.json") && (existsSync(resolve(ROOT, "out/GenesisHolderClaim.sol/GenesisHolderClaim.json")) || process.env.CI))("genesis-claim-mainnet.json: the creation is GenesisHolderClaim compiled from this commit with the plan's constructor arguments", () => {
+    const { plan } = load("genesis-claim-mainnet.json");
+    const claim = artifact("out/GenesisHolderClaim.sol/GenesisHolderClaim.json");
+    const s = plan.schedule;
+    const args = [plan.target.releaseContract, plan.target.primarySale, plan.target.tokenId, plan.supply.claimAllocation, plan.supply.publicAllocation, s.claimStart, s.claimWindowSeconds, s.publicWindowSeconds, s.publicPriceWei, plan.roles.admin, plan.roles.signer];
+    const data = `${claim.bytecode.object}${AbiCoder.defaultAbiCoder().encode(["address", "address", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "address", "address"], args).slice(2)}`.toLowerCase();
+    expect(plan.signingRequests[0].data.toLowerCase()).toBe(data);
+  });
+
   it("the executed release plan can never authorize a new deployment", async () => {
     const entry = executedPlan();
     expect(() => validateApprovedPlan(entry)).not.toThrow();
@@ -89,6 +98,19 @@ describe("approved mainnet plans", () => {
     ];
     for (const [mutate, message] of cases) expect(() => validateApprovedPlan(tamper(mutate))).toThrow(message);
     expect(() => validateApprovedPlan(tamper((e) => { e.plan.signingRequests[0].data = "0x00"; }))).toThrow(ApprovedPlanError);
+  });
+
+  it.runIf(files.includes("genesis-claim-mainnet.json"))("refuses a mainnet claim plan with other roles, a capped supply or a grant from another wallet", () => {
+    const original = load("genesis-claim-mainnet.json");
+    const rebound = (mutate) => { const e = JSON.parse(JSON.stringify(original)); mutate(e.plan); e.binding = bindPlan(e.kind, e.plan, e.binding.sourceCommit); return e; };
+    const NANO = "0xb65C575CaE01574296Fab6E620B9A15cC0121ce4";
+    for (const [mutate, message] of [
+      [(p) => { p.roles.admin = p.deployer; }, /claim admin must be the artist/],
+      [(p) => { p.roles.signer = p.roles.admin; }, /neither the claim admin nor the fee recipient/],
+      [(p) => { p.roles.signer = NANO; }, /neither the claim admin nor the fee recipient/],
+      [(p) => { p.supply.claimAllocation = "5"; }, /uncapped open edition/],
+      [(p) => { p.followUps.issuerGrant.from = p.deployer; }, /ISSUER_ROLE grant must come from the artist/],
+    ]) expect(() => validateApprovedPlan(rebound(mutate))).toThrow(message);
   });
 
   describe("release-per-contract-mainnet.json binding (PR #242 release gate)", () => {

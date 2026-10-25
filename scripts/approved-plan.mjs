@@ -1,7 +1,7 @@
 import { getAddress, getCreateAddress, keccak256 } from "ethers";
 import { bindPlan } from "./plan-binding-core.mjs";
 import unifiedManifest from "../config/unified-marketplace.json" with { type: "json" };
-import { MAINNET_FEE_RECIPIENT } from "./mainnet-signing-requests.mjs";
+import { MAINNET_ARTIST_WALLET, MAINNET_FEE_RECIPIENT } from "./mainnet-signing-requests.mjs";
 import { profileFor } from "./network-profiles.mjs";
 import { PROBE_CONTRACT, PROBE_LABEL } from "./fuji-rabby-probe.mjs";
 import { FUJI_CLAIM_ARTIST, FUJI_GENESIS_VOUCHER_SIGNER } from "./fuji-genesis-claim.mjs";
@@ -74,6 +74,15 @@ export function validateApprovedPlan(entry, network = "mainnet") {
     if (getAddress(plan.roles.signer) !== FUJI_GENESIS_VOUCHER_SIGNER) fail(`This Fuji claim plan must deploy the dedicated voucher signer ${FUJI_GENESIS_VOUCHER_SIGNER}, not ${plan.roles.signer}.`);
     if (plan.supply.claimAllocation !== "0" || plan.supply.publicAllocation !== "0") fail("The Fuji claim must be an uncapped open edition (both allocations 0).");
     if (getAddress(plan.followUps?.issuerGrant?.from) !== FUJI_CLAIM_ARTIST) fail("The ISSUER_ROLE grant must come from the artist wallet.");
+    if (getAddress(plan.predictedClaimAddress) !== getAddress(requests[0].predictedAddress)) fail("The claim address disagrees with its transaction.");
+  }
+  if (kind === "genesis-claim-mainnet") {
+    // Same role rules as the planner (assertMainnetClaimRoles); the deployer may be the voucher signer.
+    const [admin, signer] = [getAddress(plan.roles.admin), getAddress(plan.roles.signer)];
+    if (admin !== MAINNET_ARTIST_WALLET) fail(`The mainnet claim admin must be the artist wallet ${MAINNET_ARTIST_WALLET}, not ${admin}.`);
+    if (signer === admin || signer === MAINNET_FEE_RECIPIENT) fail("The voucher signer may be neither the claim admin nor the fee recipient.");
+    if (plan.supply.claimAllocation !== "0" || plan.supply.publicAllocation !== "0") fail("The mainnet claim must be an uncapped open edition (both allocations 0).");
+    if (getAddress(plan.followUps?.issuerGrant?.from) !== MAINNET_ARTIST_WALLET) fail("The ISSUER_ROLE grant must come from the artist wallet.");
     if (getAddress(plan.predictedClaimAddress) !== getAddress(requests[0].predictedAddress)) fail("The claim address disagrees with its transaction.");
   }
   if (kind === "rabby-probe-fuji") {
