@@ -9,6 +9,9 @@ vi.mock("../lib/studio-api.js", async (importOriginal) => ({ ...(await importOri
 const { ArtistProfileEditPage } = await import("./ArtistProfileEditPage.jsx");
 const { MyCollectionPage } = await import("./PlatformPages.jsx");
 const { AppRoutes } = await import("../App.jsx");
+const { Nav } = await import("./Nav.jsx");
+const { ReviewerNotificationsProvider } = await import("../lib/ReviewerNotificationsProvider.jsx");
+const { createReviewerNotificationStore } = await import("../lib/reviewer-notifications.js");
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); studioFetch.mockClear(); });
 
@@ -23,11 +26,18 @@ describe("X account control placement", () => {
     expect(screen.getByText(/Connect your wallet to link an X account/)).toBeTruthy();
   });
 
-  it("is on the My collection page and visible, with its prerequisite, before sign-in", () => {
+  it("is not on the My collection page: the connect action lives in the header", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })));
     mount(<MyCollectionPage />, wallet({ connected: true, account: "0x1111111111111111111111111111111111111111" }));
-    expect(screen.getByLabelText("X account")).toBeTruthy();
-    expect(screen.getByText(/Sign in with your wallet to link an X account/)).toBeTruthy();
+    expect(screen.queryByLabelText("X account")).toBeNull();
+    expect(screen.queryByText(/link an X account/)).toBeNull();
+  });
+
+  it("puts the Connect X button in the header for a signed-in wallet", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) => (String(url).endsWith("/api/x-link") ? { ok: true, status: 200, json: async () => ({ data: { available: true, connected: false } }) } : { ok: true, status: 200, json: async () => ({ data: {} }) })));
+    const store = createReviewerNotificationStore({ fetchMe: vi.fn().mockResolvedValue({ application: null, canReapply: true, reviewer: false }), fetchCount: vi.fn().mockResolvedValue({ count: 0 }) });
+    mount(<ReviewerNotificationsProvider store={store}><Nav /></ReviewerNotificationsProvider>, wallet({ connected: true, authenticated: true, account: "0x1111111111111111111111111111111111111111", authHeaders: { authorization: "Bearer session" } }));
+    expect(await screen.findByRole("button", { name: "Connect X account" })).toBeTruthy();
   });
 
   it("shows the Connect X account control on the profile edit page for a signed-in wallet", async () => {
