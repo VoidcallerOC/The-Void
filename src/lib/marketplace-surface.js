@@ -66,6 +66,12 @@ export function marketplaceCopy(status = resolveInfrastructureStatus()) {
   };
 }
 
+export function collectionCalloutCopy(status) {
+  if (status === MARKETPLACE_STATE.LIVE) return "Owned editions can be listed for sale on the marketplace.";
+  if (status === MARKETPLACE_STATE.UNAVAILABLE) return "The secondary index is unreachable, so owned editions cannot be listed right now.";
+  return "Owned editions can be listed once secondary collection is live. It is not yet live.";
+}
+
 export function formatWeiAsAvax(wei) {
   if (wei === null || wei === undefined || !/^[0-9]+$/.test(String(wei))) return null;
   const value = BigInt(wei);

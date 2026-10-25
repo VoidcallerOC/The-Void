@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { MarketplaceStatusBanner } from "./MarketplaceStatus.jsx";
 import { ghostBtn } from "../lib/marketplace-chrome.js";
 import {
+  collectionCalloutCopy,
   marketplaceCopy,
   marketplaceStatusLabel,
   primaryCollectForEdition,
@@ -47,6 +48,7 @@ export function EditionMarketplaceRail() {
   );
 }
 
+// The general "Open reliquary" action lives on the collection page itself; this panel only offers the marketplace.
 export function CollectionMarketplaceCallout() {
   const secondary = resolveSecondaryStatus();
   return (
@@ -54,14 +56,9 @@ export function CollectionMarketplaceCallout() {
       <MarketplaceStatusBanner
         status={secondary}
         title="List from your collection"
-        actions={[
-          { to: "/marketplace", label: "Open marketplace" },
-          { to: "/reliquary", label: "Open reliquary" },
-        ]}
+        actions={[{ to: "/marketplace", label: "Open marketplace" }]}
       >
-        <p style={{ margin: 0 }}>
-          Owned editions can be listed when secondary collection is live. Until then this remains {marketplaceStatusLabel(secondary).toLowerCase()}.
-        </p>
+        <p style={{ margin: 0 }}>{collectionCalloutCopy(secondary)}</p>
       </MarketplaceStatusBanner>
     </div>
   );
