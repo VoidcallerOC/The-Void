@@ -88,14 +88,15 @@ function httpUrl(value, name) {
   return text;
 }
 
-// Mainnet keeps the deployer, artist, claim signer and the passive platform fee recipient (the
+// Mainnet keeps the artist/claim admin, the claim signer and the passive platform fee recipient (the
 // owner's Nano S Plus) as separate roles: the fee recipient is never a claim admin or signer, and the
-// automated voucher signer is a dedicated key used for nothing else.
+// voucher signer is never the claim admin or the artist. The deployer may also be the voucher signer
+// (the contract only requires signer != admin). Custody trade-off: the server then holds the deployer's
+// key, so a server compromise exposes the deployer's funds and nonce as well as voucher issuance.
 export const MAINNET_FEE_RECIPIENT = getAddress(mainnetReleaseManifest.platformRecipient);
 export function assertMainnetClaimRoles({ admin, signer, deployer }) {
   if (admin === MAINNET_FEE_RECIPIENT || signer === MAINNET_FEE_RECIPIENT) throw new DeploymentError("The platform fee recipient is a passive wallet; it may not be the claim admin or the voucher signer.");
   if (signer === admin) throw new DeploymentError("The voucher signer must be a dedicated key, not the claim admin.");
-  if (signer === deployer) throw new DeploymentError("The voucher signer must be a dedicated key, not the deployer.");
   if (signer === getAddress(MAINNET_ARTIST_WALLET)) throw new DeploymentError("The voucher signer must be a dedicated key, not the artist wallet.");
   // The deployer only signs the creation in Rabby and holds no role afterwards; pause and signer rotation
   // belong to the claim admin, so the two must be different accounts.
@@ -312,7 +313,14 @@ export async function preflightClaimDeployment(config, { provider, genesisProvid
 
   const [latest, deployerNonce, pendingNonce] = await Promise.all([provider.getBlock("latest"), provider.getTransactionCount(config.deployerAddress, "latest"), provider.getTransactionCount(config.deployerAddress, "pending")]);
   const now = BigInt(latest.timestamp);
-  if (config.claimStart < now + MINIMUM_LEAD_SECONDS) throw new DeploymentError(`GENESIS_CLAIM_START ${config.claimStart} is less than ${MINIMUM_LEAD_SECONDS} seconds after the latest block (${now}); choose a later start.`);
+  if (config.claimStart <= now) {
+    // Late deployment: bind only to the sale's existing start (checked against sale.startTime above, and
+    // re-checked here), never reset or extend the window, and leave the lead time for mining before claimEnd.
+    if (config.claimStart !== BigInt(sale.startTime)) throw new DeploymentError(`GENESIS_CLAIM_START ${config.claimStart} is in the past and is not the live sale's startTime ${sale.startTime}; a late deployment binds only to the existing sale start.`);
+    if (config.claimEnd < now + MINIMUM_LEAD_SECONDS) throw new DeploymentError(`The claim window ends at ${config.claimEnd}, less than ${MINIMUM_LEAD_SECONDS} seconds after the latest block (${now}); the window has expired or is too close to closing and is never extended.`);
+  } else if (config.claimStart < now + MINIMUM_LEAD_SECONDS) {
+    throw new DeploymentError(`GENESIS_CLAIM_START ${config.claimStart} is less than ${MINIMUM_LEAD_SECONDS} seconds after the latest block (${now}); choose a later start.`);
+  }
 
   const [issuerRole] = await read(provider, RELEASE, config.releaseContract, "ISSUER_ROLE");
   const predictedClaim = getCreateAddress({ from: config.deployerAddress, nonce: deployerNonce });

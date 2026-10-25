@@ -110,11 +110,14 @@ against the paid per-wallet limit, and a claimant can still buy up to the limit.
   `GENESIS_PUBLIC_WINDOW_SECONDS` is also set it must agree.
 - The sale is not paused, and its `perWalletLimit` equals `GENESIS_EXPECT_PER_WALLET_LIMIT` (required on
   mainnet, optional on Fuji).
-- `claimStart` is at least 600 s after the latest block when the plan is made.
+- `claimStart` is at least 600 s after the latest block when the plan is made, or (late deployment) is already
+  past and equals the live sale's `startTime` exactly, with `claimEnd` still at least 600 s after the latest block.
+  The window is never reset or extended.
 - The constructor is simulated with `eth_call` before the plan is written; the artist wallet must hold
   `DEFAULT_ADMIN_ROLE` on the release for the `grantRole(ISSUER_ROLE, claim)` follow-up.
-- Roles stay separate: the claim admin and voucher signer are not the fee recipient or the deployer, the signer
-  is not the artist or the admin, and the signer is a dedicated key (the artist wallet may be the admin).
+- Roles stay separate: the claim admin and voucher signer are not the fee recipient, the admin is not the
+  deployer, and the signer is not the artist or the admin (the artist wallet may be the admin). The signer may
+  be the deployer; the server then holds the deployer's key, so a server compromise exposes the deployer's AVAX and transaction authority (nonce) as well as voucher issuance.
 - Funding gate: the plan is `readyToSign` only when the deployer has no pending transactions, the predicted claim
   address is empty, the RPC returned usable fee data, and the deployer holds `gasLimit × maxFeePerGas × 1.5`.
   These live checks are re-run before each signature and are not part of the plan binding.
@@ -148,8 +151,8 @@ The schedule (start, end, per-wallet limit) is the owner's decision; nothing her
 1. **Artist wallet** `0x284C09a7CC187E096cbbdc88d99DEFE6df32180a` signs `configureSale(1, 250000000000000000, 0,
    <limit>, <start>, <end>, false)` on the sale `0xB4dAAe78a53c33f52C6EB573c4d6EFC7B86F3845`, with a policy window
    (whole hours, 7-14 days) and `<start>` far enough ahead for steps 2-6.
-2. **Owner** chooses the claim admin (not the fee recipient) and generates a dedicated voucher signer key offline
-   (not the admin, deployer, artist or fee recipient). Only the signer's address goes into the plan.
+2. **Owner** chooses the claim admin (not the fee recipient) and picks the voucher signer: a dedicated key generated
+   offline, or the deployer (custody trade-off above). Never the admin, artist or fee recipient. Only the signer's address goes into the plan.
 3. **Owner** funds the deployer `0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174` for one contract creation before
    signing (planning needs no funds). The plan computes the requirement itself: `funding.requiredAvax` =
    `signingRequests[0].gasLimit` × the RPC's `maxFeePerGas` × 1.5, and its `checks` row *deployer funded with 50%
@@ -186,7 +189,7 @@ The schedule (start, end, per-wallet limit) is the owner's decision; nothing her
 | `GENESIS_CLAIM_WINDOW_SECONDS` | `86400` |
 | `GENESIS_PUBLIC_WINDOW_SECONDS` | the plan's `publicWindowSeconds` (the blueprint default `604800` is wrong for any other window; the API then refuses to serve vouchers) |
 | `GENESIS_PUBLIC_PRICE_WEI` | `250000000000000000` |
-| `GENESIS_CLAIM_SIGNER_ADDRESS` / `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` | the dedicated signer (the key only as a Render secret) |
+| `GENESIS_CLAIM_SIGNER_ADDRESS` / `GENESIS_CLAIM_SIGNER_PRIVATE_KEY` | the voucher signer (the key only as a Render secret; if the signer is the deployer, this is the deployer key) |
 | `GENESIS_RPC_URL` / `GENESIS_DESTINATION_RPC_URL` | C-Chain RPC |
 
 The API refuses to load unless the deployed claim's parameters match these values.
