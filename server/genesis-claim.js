@@ -391,7 +391,7 @@ export async function withProviderRetry(operation, { maxAttempts, baseDelayMs, m
       if (!isRetryableProviderError(error) || attempt + 1 >= maxAttempts) throw error;
       let delay = Math.floor(random() * Math.min(maxDelayMs, baseDelayMs * 2 ** attempt));
       const hinted = retryAfterMs(error);
-      if (hinted !== null) delay = Math.max(delay, Math.min(hinted, maxDelayMs));
+      if (hinted !== null) delay = Math.max(delay, hinted);
       if (now() + delay > deadline) throw error;
       await sleep(delay);
     }
@@ -698,7 +698,7 @@ export function createGenesisClaimService({
   }
   // Endpoint rotation for getLogs chunks. One attempt budget (scan.maxAttempts) per chunk across all
   // endpoints, so there is no nested retry loop. A transient failure puts that endpoint in cooldown
-  // (full-jitter exponential backoff, at least Retry-After, capped at maxDelayMs) and the next attempt
+  // (full-jitter exponential backoff, at least the uncapped Retry-After) and the next attempt
   // uses the other endpoint if it is ready, else waits for the earliest cooldown, never past `deadline`.
   // An incomplete or malformed response excludes that endpoint for the chunk. Every attempt asks for
   // the same filter; the range only moves on after a complete, validated chunk.
@@ -778,7 +778,7 @@ export function createGenesisClaimService({
         if (!isRetryableProviderError(error)) throw error;
         let delay = Math.floor(random() * Math.min(scan.maxDelayMs, scan.baseDelayMs * 2 ** endpoint.failures));
         const hinted = retryAfterMs(error);
-        if (hinted !== null) delay = Math.max(delay, Math.min(hinted, scan.maxDelayMs));
+        if (hinted !== null) delay = Math.max(delay, hinted);
         endpoint.failures += 1;
         endpoint.cooldownUntil = monotonicNow() + delay;
       }

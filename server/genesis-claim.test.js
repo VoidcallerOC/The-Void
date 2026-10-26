@@ -1064,12 +1064,14 @@ describe("Genesis transfer scan: backoff, pacing and verified reuse on a free pu
     expect(retryWaits(ctx.sleep)).toEqual([125, 250]);
   });
 
-  it("honors Retry-After, capped at the maximum delay", async () => {
+  it("honors Retry-After without shortening it and fails closed when it exceeds the scan deadline", async () => {
     const ctx = scanned();
     await prepare(ctx);
     ctx.chain.getLogs.mockRejectedValueOnce(httpError(429, { "retry-after": "2" })).mockRejectedValueOnce(httpError(429, { "retry-after": "120" }));
-    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
-    expect(retryWaits(ctx.sleep)).toEqual([2_000, 4_000]);
+    await expect(ctx.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(2);
+    expect(retryWaits(ctx.sleep)).toEqual([2_000]);
+    expect(ctx.clock.t).toBeLessThan(45_000);
   });
 
   it("fails closed with 503 when retries are exhausted", async () => {

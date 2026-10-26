@@ -148,6 +148,24 @@ describe("persisted Genesis scan checkpoint", () => {
     expect(cl.checkpointStore.saves).toBe(1);
   });
 
+  it("does not shorten a 57-second Retry-After to fit the 45-second scan budget", async () => {
+    const { cl, first } = await seeded();
+    await first.instance.checkEligibility(B);
+    const before = structuredClone(row(cl));
+    cl.genesis.idle(1_000);
+    reset(cl);
+    cl.genesis.getLogs.mockRejectedValue(httpError(429, { "retry-after": "57" }));
+    const restarted = cl.spawn();
+    const startedAt = restarted.clock.t;
+
+    await expect(restarted.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+
+    expect(restarted.clock.t - startedAt).toBeLessThan(45_000);
+    expect(cl.genesis.getLogs).toHaveBeenCalledTimes(1);
+    expect(restarted.sleep.mock.calls).toEqual([[100]]); // initial request pacing only; no 57-second cooldown or retry
+    expect(row(cl)).toEqual(before);
+  });
+
   it("retry exhaustion returns 503 and leaves the persisted checkpoint exactly as it was", async () => {
     const { cl, first } = await seeded();
     await first.instance.checkEligibility(B);
