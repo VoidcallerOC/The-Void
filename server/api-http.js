@@ -89,7 +89,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       }
       if (method === "GET" && base.join("/") === "claims/config") {
         if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
-        await genesisClaim.verifyContractBindings();
+        await (genesisClaim.verifyConfigBindings ?? genesisClaim.verifyContractBindings)();
         return send(response, 200, { data: genesisClaim.config, requestId }, responseHeaders);
       }
       if (method === "GET" && base[0] === "marketplace" && base[1] === "heroes" && base.length === 3) {

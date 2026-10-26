@@ -1,8 +1,9 @@
 import process from "node:process";
 import { performance } from "node:perf_hooks";
-import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
+import { Contract, FetchRequest, Interface, JsonRpcProvider, Network, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
+import { GenesisCheckpointCorruptError, MAX_ANCHORS, normalizeLog } from "./genesis-scan-checkpoint-store.js";
 import { GENESIS_TOKEN_ID_SET, TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC, decodeGenesisTransfers, replayUsedUnits, unitToUse, unusedUnits } from "./genesis-claim-ledger.js";
 
 export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
@@ -397,6 +398,35 @@ export async function withProviderRetry(operation, { maxAttempts, baseDelayMs, m
   }
 }
 
+// Per-request HTTP timeout for the Genesis RPC. A TIMEOUT is retryable, and the scan budget still bounds the total.
+export const GENESIS_RPC_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * The C-Chain provider for Genesis reads. withProviderRetry is the ONLY retry layer, so ethers' own
+ * throttling is switched off (ethers 6.17.0, node_modules/ethers/lib.esm):
+ *   - utils/fetch.js:470-479: on HTTP 429 FetchRequest re-sends by itself (up to MAX_ATTEMPTS = 12,
+ *     fetch.js:26) unless retryFunc returns false. retryFunc -> false makes the 429 fall through to
+ *     assertOk (fetch.js:827-838), a SERVER_ERROR carrying `response` whose lower-cased headers
+ *     (fetch.js:689, 748) include retry-after, which retryAfterMs reads; maxAttempts 1 (fetch.js:412-421)
+ *     is a second guard.
+ *   - providers/provider-jsonrpc.js:63, 253: batchMaxCount 1 sends one JSON-RPC call per HTTP request
+ *     with no batch stall, so one throttled response never fails a whole batch.
+ *   - providers/provider-jsonrpc.js:331-341: staticNetwork skips the eth_chainId round trip ethers
+ *     otherwise makes for getNetwork() before calls such as getLogs. The chain is then checked once
+ *     explicitly (eth_chainId) by the service before it trusts this provider.
+ */
+export function createGenesisRpcProvider(url) {
+  const request = new FetchRequest(url);
+  request.retryFunc = async () => false;
+  request.setThrottleParams({ maxAttempts: 1 });
+  request.timeout = GENESIS_RPC_REQUEST_TIMEOUT_MS;
+  const provider = new JsonRpcProvider(request, Network.from(GENESIS_CHAIN_ID), { staticNetwork: Network.from(GENESIS_CHAIN_ID), batchMaxCount: 1 });
+  return provider;
+}
+
+// Seconds the /api/claims/config binding verification may be reused (config endpoint only; see verifyConfigBindings).
+export const CONFIG_BINDING_CACHE_MS = 30_000;
+
 const STAGE = Symbol("genesisUpstreamStage");
 /** Labels the first upstream stage an error passed through; later labels never overwrite it. */
 async function atStage(stage, operation) {
@@ -446,6 +476,9 @@ export function createGenesisClaimService({
   reservationStore = null,
   balanceReader = null,
   transferLogReader = null,
+  // Persisted, verified scan checkpoint (genesis-scan-checkpoint-store.js, migration 050). Optional: without
+  // it the verified history lives in this process only, as before.
+  checkpointStore = null,
   bindingReader = null,
   claimStateReader = null,
   earlyAccessStateReader = null,
@@ -462,7 +495,11 @@ export function createGenesisClaimService({
   // The used-unit ledger is what stops one Genesis unit from qualifying wallet after wallet; without
   // shared, durable storage for it the claim must not run.
   if (!reservationStore) throw new GenesisClaimConfigurationError("The Genesis claim requires the reservation store (migration 039).");
-  const sourceProvider = genesisProvider || new JsonRpcProvider(config.genesisRpcUrl);
+  const sourceProvider = genesisProvider || createGenesisRpcProvider(config.genesisRpcUrl);
+  // A provider built here has a static network, so getNetwork() no longer asks the RPC; its chain is
+  // verified once with eth_chainId instead. An injected provider keeps the getNetwork() check.
+  const staticGenesisProvider = !genesisProvider;
+  let genesisChainVerified = false;
   const targetProvider = destinationProvider || new JsonRpcProvider(config.destinationRpcUrl);
   const claimSigner = signer || new Wallet(config.privateKey);
   const claim = new Contract(config.claimContract, CLAIM_ABI, targetProvider);
@@ -516,6 +553,12 @@ export function createGenesisClaimService({
 
   // Ownership is read from C-Chain only. A provider on any other chain fails closed.
   async function assertGenesisChain() {
+    if (staticGenesisProvider) {
+      if (genesisChainVerified) return;
+      if (Number(BigInt(await sourceProvider.send("eth_chainId", []))) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
+      genesisChainVerified = true;
+      return;
+    }
     const network = await sourceProvider.getNetwork();
     if (Number(network.chainId) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
   }
@@ -549,13 +592,22 @@ export function createGenesisClaimService({
 
   // Genesis TransferSingle/TransferBatch history. A free public RPC caps eth_getLogs at 100 blocks and
   // throttles bursts, so the scan is paced, retried with bounded backoff, and reused: a completed scan is
-  // kept in process up to `confirmations` blocks behind the head, keyed by its first and last block and
-  // the last block's hash. A later request re-verifies that hash and scans only the blocks after it.
+  // kept up to `confirmations` blocks behind the head, keyed by its first and last block and the last
+  // block's hash. A later request re-verifies that hash and scans only the blocks after it.
   // Scans are serialized (single flight): a concurrent request waits, then reuses the cache. Only a
-  // complete, contiguous, successful scan is cached; any failure leaves the cache as it was and fails closed.
+  // complete, contiguous, successful scan is kept; any failure leaves it as it was and fails closed.
+  //
+  // With a checkpointStore the verified history is also persisted (one row, written in one transaction by
+  // compare-and-set) so a restart or another worker resumes from it instead of rescanning from the
+  // ledger's first block. A loaded checkpoint is trusted only after its digest, shape and transfer logs
+  // validate AND its end block hash matches the chain again. On a hash mismatch (reorg) the history is
+  // rewound to the newest earlier anchor whose hash still matches, else rescanned from the start.
   const scan = config.scan || scanOptions({});
-  let verifiedHistory = null; // { from, end, endHash, logs } with end <= head - confirmations
+  let verifiedHistory = null; // { from, end, endHash, anchors, logs } with end <= head - confirmations
+  // What this process last saw in the checkpoint store: { end, endHash }, null (no row), or undefined (unknown: re-read before writing).
+  let persistedBase = undefined;
   let lastRpcAt = -Infinity;
+  const logCheckpoint = (event, extra = {}) => logger?.warn?.("genesis.scan.checkpoint", { event, ...extra });
   async function paced(operation, deadline) {
     const wait = lastRpcAt + scan.paceMs - monotonicNow();
     if (wait > 0) {
@@ -584,19 +636,73 @@ export function createGenesisClaimService({
       return logs;
     });
   }
+  /** Reads the persisted checkpoint when this process does not know the stored row; adopts it when it is newer. */
+  async function syncPersisted() {
+    if (!checkpointStore || persistedBase !== undefined) return;
+    let stored;
+    let corrupt = false;
+    try {
+      stored = await checkpointStore.load(config.claimContract);
+    } catch (error) {
+      if (!(error instanceof GenesisCheckpointCorruptError)) {
+        // Store unreachable: scan without it (a full scan is still complete) and do not write this round.
+        logCheckpoint("load_failed");
+        return;
+      }
+      corrupt = true;
+    }
+    // Every stored log must still decode as a Genesis transfer.
+    if (stored) try { decodeGenesisTransfers(stored.logs); } catch { corrupt = true; }
+    if (corrupt) {
+      logCheckpoint("corrupt_discarded");
+      try { await checkpointStore.discard(config.claimContract, { corrupt: true }); persistedBase = null; } catch { logCheckpoint("discard_failed"); }
+      return;
+    }
+    persistedBase = stored ? Object.freeze({ end: stored.end, endHash: stored.endHash }) : null;
+    if (stored && (!verifiedHistory || stored.end > verifiedHistory.end)) verifiedHistory = Object.freeze({ ...stored });
+  }
+  /** Writes `next` by compare-and-set. Failure never affects the answer: the in-process history is complete. */
+  async function persist(next, allowRegress) {
+    if (!checkpointStore || persistedBase === undefined) return;
+    if (!allowRegress && persistedBase && next.end <= persistedBase.end) return;
+    try {
+      if (await checkpointStore.save(config.claimContract, persistedBase, next)) persistedBase = Object.freeze({ end: next.end, endHash: next.endHash });
+      else { persistedBase = undefined; logCheckpoint("save_conflict"); } // another worker moved it: re-read next time
+    } catch {
+      // The transaction rolled back; the stored row is unchanged, so persistedBase still describes it.
+      logCheckpoint("save_failed");
+    }
+  }
   async function scanTransfers(fromBlock, head) {
     const deadline = monotonicNow() + scan.budgetMs;
+    await syncPersisted();
     let cached = verifiedHistory;
-    if (cached && (cached.from > fromBlock || cached.end > head)) cached = null;
-    // A reorg (or a provider on another fork) changes the hash: drop the cache and rescan everything.
-    if (cached && await blockHash(cached.end, deadline) !== cached.endHash) cached = verifiedHistory = null;
+    let allowRegress = false;
+    if (cached && (cached.from > fromBlock || cached.end > head)) { cached = null; allowRegress = true; }
+    if (cached && await blockHash(cached.end, deadline) !== cached.endHash) {
+      // A reorg (or a provider on another fork) changed the end hash. Rewind to the newest anchor that is
+      // still canonical; its ancestors, and so every log at or below it, are then unchanged too.
+      allowRegress = true;
+      let rewound = null;
+      for (let index = cached.anchors.length - 1; index >= 0 && !rewound; index -= 1) {
+        const anchor = cached.anchors[index];
+        if (await blockHash(anchor.block, deadline) === anchor.hash) {
+          rewound = Object.freeze({ from: cached.from, end: anchor.block, endHash: anchor.hash, anchors: Object.freeze(cached.anchors.slice(0, index)), logs: Object.freeze(cached.logs.filter((log) => Number(log.blockNumber) <= anchor.block)) });
+        }
+      }
+      logCheckpoint(rewound ? "reorg_rewind" : "reorg_rescan");
+      cached = verifiedHistory = rewound;
+    }
     const scanFrom = cached ? cached.end + 1 : fromBlock;
-    const fresh = await fetchLogs(scanFrom, head, deadline);
+    const fresh = (await fetchLogs(scanFrom, head, deadline)).map(normalizeLog);
     const logs = cached ? [...cached.logs, ...fresh] : fresh;
     const safeEnd = head - scan.confirmations;
     if (safeEnd >= scanFrom) {
       const endHash = await blockHash(safeEnd, deadline);
-      verifiedHistory = Object.freeze({ from: cached ? cached.from : fromBlock, end: safeEnd, endHash, logs: Object.freeze(logs.filter((log) => Number(log.blockNumber) <= safeEnd)) });
+      const anchors = cached ? [...cached.anchors, { block: cached.end, hash: cached.endHash }].slice(-MAX_ANCHORS) : [];
+      const next = Object.freeze({ from: cached ? cached.from : fromBlock, end: safeEnd, endHash, anchors: Object.freeze(anchors.map((anchor) => Object.freeze(anchor))), logs: Object.freeze(logs.filter((log) => log.blockNumber <= safeEnd)) });
+      verifiedHistory = next;
+      await persist(next, allowRegress);
     }
     return logs;
   }
@@ -851,11 +957,28 @@ export function createGenesisClaimService({
     }
   }
 
+  // /api/claims/config only: a successful binding verification is reused for CONFIG_BINDING_CACHE_MS and
+  // concurrent callers share one verification. Failures are never cached. Voucher issuance always calls
+  // verifyContractBindings() fresh, and nothing about a wallet (eligibility, ownership, used units,
+  // hasClaimed, authorization) is ever cached here.
+  let configVerifiedAt = -Infinity;
+  let configVerifying = null;
+  async function verifyConfigBindings() {
+    if (monotonicNow() - configVerifiedAt < CONFIG_BINDING_CACHE_MS) return;
+    if (!configVerifying) {
+      configVerifying = (bindingReader ? bindingReader() : verifyContractBindings())
+        .then(() => { configVerifiedAt = monotonicNow(); })
+        .finally(() => { configVerifying = null; });
+    }
+    await configVerifying;
+  }
+
   return Object.freeze({
     config: toPublicConfig(config),
     checkEligibility,
     issueVoucher,
     issueEarlyAccessVoucher,
     verifyContractBindings,
+    verifyConfigBindings,
   });
 }
