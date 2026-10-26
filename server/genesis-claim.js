@@ -777,47 +777,76 @@ export function createGenesisClaimService({
     }
     return logs;
   }
-  async function fetchChunkLogs(fromBlock, toBlock, deadline) {
+  const safeTelemetryRequestId = (requestId) => typeof requestId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : null;
+  const logRpcAttempt = (requestId, fields) => logger?.info?.("genesis.scan.rpc_attempt", { requestId: safeTelemetryRequestId(requestId), ...fields });
+  const logRpcOutcome = (requestId, fields) => logger?.info?.("genesis.scan.retry_outcome", { requestId: safeTelemetryRequestId(requestId), ...fields });
+  async function fetchChunkLogs(fromBlock, toBlock, deadline, requestId = null) {
     const filter = Object.freeze({ address: GENESIS_CONTRACT, topics: Object.freeze([Object.freeze([TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC])]), fromBlock, toBlock });
     const excluded = new Set();
     let lastError = null;
+    let attempts = 0;
     for (let attempt = 0; attempt < scan.maxAttempts; attempt += 1) {
+      attempts = attempt + 1;
       if (monotonicNow() > deadline) throw new GenesisScanBudgetError();
       const usable = endpoints.filter((endpoint) => !endpoint.disabled && !excluded.has(endpoint));
       if (!usable.length) break;
       let endpoint = usable.find((candidate) => candidate.cooldownUntil <= monotonicNow());
+      let cooldownWaitMs = 0;
       if (!endpoint) {
         endpoint = usable.reduce((a, b) => (b.cooldownUntil < a.cooldownUntil ? b : a));
         const wait = endpoint.cooldownUntil - monotonicNow();
-        if (monotonicNow() + wait > deadline) break;
+        if (monotonicNow() + wait > deadline) {
+          logRpcOutcome(requestId, { outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          break;
+        }
+        cooldownWaitMs = wait;
         await sleep(wait);
       }
       try {
         const logs = await readChunkFrom(endpoint, filter, deadline);
         endpoint.failures = 0;
         endpoint.cooldownUntil = -Infinity;
+        logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "success", cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+        logRpcOutcome(requestId, { outcome: "success", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
         return logs;
       } catch (error) {
-        if (error instanceof GenesisScanBudgetError) throw error;
+        if (error instanceof GenesisScanBudgetError) {
+          logRpcOutcome(requestId, { outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: 0 });
+          throw error;
+        }
         lastError = error;
-        if (error instanceof GenesisIncompleteLogsError) { excluded.add(endpoint); continue; }
-        if (!isRetryableProviderError(error)) throw error;
+        if (error instanceof GenesisIncompleteLogsError) {
+          excluded.add(endpoint);
+          logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          continue;
+        }
+        if (!isRetryableProviderError(error)) {
+          logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          logRpcOutcome(requestId, { outcome: "non-retryable-failure", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          throw error;
+        }
         let delay = Math.floor(random() * Math.min(scan.maxDelayMs, scan.baseDelayMs * 2 ** endpoint.failures));
         const hinted = retryAfterMs(error);
         if (hinted !== null) delay = Math.max(delay, hinted);
         endpoint.failures += 1;
         endpoint.cooldownUntil = monotonicNow() + delay;
+        const remainingBudgetMs = Math.max(0, deadline - monotonicNow());
+        const deadlineWouldBeExceeded = monotonicNow() + delay > deadline;
+        const nextAttemptSkipped = attempt + 1 >= scan.maxAttempts || deadlineWouldBeExceeded;
+        logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "retryable-failure", providerError: sanitizeProviderErrorCode(error), retryAfterPresent: hinted !== null, retryAfterMs: hinted, backoffMs: delay, cooldownWaitMs, remainingBudgetMs, deadlineWouldBeExceeded, nextAttemptSkipped });
       }
     }
+    const outcome = monotonicNow() >= deadline ? "deadline-exceeded" : "exhausted";
+    logRpcOutcome(requestId, { outcome, attempt: attempts, maxAttempts: scan.maxAttempts, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
     throw lastError ?? new GenesisIncompleteLogsError("no_endpoint");
   }
-  async function fetchLogs(fromBlock, toBlock, deadline, progress = null) {
+  async function fetchLogs(fromBlock, toBlock, deadline, progress = null, requestId = null) {
     return atStage("getLogs", async () => {
       const logs = [];
       // Inclusive ranges [start, min(start + chunk - 1, toBlock)]; the next starts at end + 1: no gap, no overlap.
       for (let start = fromBlock; start <= toBlock;) {
         const end = Math.min(toBlock, start + scan.chunkBlocks - 1);
-        logs.push(...await fetchChunkLogs(start, end, deadline));
+        logs.push(...await fetchChunkLogs(start, end, deadline, requestId));
         if (progress) { progress.through = end; progress.logs = logs; }
         start = end + 1;
       }
@@ -861,7 +890,7 @@ export function createGenesisClaimService({
       logCheckpoint("save_failed");
     }
   }
-  async function scanTransfers(fromBlock, head) {
+  async function scanTransfers(fromBlock, head, requestId = null) {
     const deadline = monotonicNow() + scan.budgetMs;
     await syncPersisted();
     let cached = verifiedHistory;
@@ -894,7 +923,7 @@ export function createGenesisClaimService({
     const reserve = checkpointStore && scan.budgetMs > 4 * PARTIAL_CHECKPOINT_RESERVE_MS ? PARTIAL_CHECKPOINT_RESERVE_MS : 0;
     let fresh;
     try {
-      fresh = (await fetchLogs(scanFrom, head, deadline - reserve, progress)).map(normalizeLog);
+      fresh = (await fetchLogs(scanFrom, head, deadline - reserve, progress, requestId)).map(normalizeLog);
     } catch (error) {
       // Keep the fully validated chunks below the confirmation depth (never the failed one), then fail
       // closed: the request still gets a 503 and no eligibility result.
@@ -914,19 +943,19 @@ export function createGenesisClaimService({
   // Single flight: a request whose range is covered by the scan in progress joins it and shares its
   // outcome, success or failure; nothing is kept once it settles, so the next request scans afresh.
   let inflight = null; // { from, promise }
-  function sharedScan(fromBlock, head) {
+  function sharedScan(fromBlock, head, requestId = null) {
     if (inflight && inflight.from <= fromBlock) return inflight.promise;
     const prior = inflight ? inflight.promise.catch(() => {}) : Promise.resolve();
     const entry = { from: fromBlock, promise: null };
-    entry.promise = prior.then(() => scanTransfers(fromBlock, head)).then((logs) => ({ head, logs }))
+    entry.promise = prior.then(() => scanTransfers(fromBlock, head, requestId)).then((logs) => ({ head, logs }))
       .finally(() => { if (inflight === entry) inflight = null; });
     inflight = entry;
     return entry.promise;
   }
   /** Genesis transfers in [fromBlock, through], where `through` is the head the (possibly shared) scan reached. */
-  async function transfersFrom(fromBlock, head) {
+  async function transfersFrom(fromBlock, head, requestId = null) {
     if (transferLogReader) return { through: head, transfers: decodeGenesisTransfers(await atStage("getLogs", () => transferLogReader(fromBlock, head))) };
-    const result = await sharedScan(fromBlock, head);
+    const result = await sharedScan(fromBlock, head, requestId);
     return { through: result.head, transfers: decodeGenesisTransfers(result.logs).filter((transfer) => transfer.block >= fromBlock && transfer.block <= result.head) };
   }
 
@@ -972,7 +1001,7 @@ export function createGenesisClaimService({
   }
 
   /** The wallet's balances and unused units at the current C-Chain head, given the active issuances. */
-  async function ledgerPosition(wallet, active) {
+  async function ledgerPosition(wallet, active, requestId = null) {
     const head = await readHead();
     const latestIssued = active.reduce((max, record) => Math.max(max, Number(record.block)), 0);
     if (latestIssued > head) throw new Error("C-Chain provider is behind the claim ledger.");
@@ -980,9 +1009,9 @@ export function createGenesisClaimService({
     let through = head;
     let transfers = [];
     if (Number.isFinite(earliestIssued)) {
-      ({ through, transfers } = await transfersFrom(earliestIssued + 1, head));
+      ({ through, transfers } = await transfersFrom(earliestIssued + 1, head, requestId));
       // A joined scan that ended before this ledger's newest issuance cannot judge it: scan again.
-      if (through < latestIssued) ({ through, transfers } = await transfersFrom(earliestIssued + 1, head));
+      if (through < latestIssued) ({ through, transfers } = await transfersFrom(earliestIssued + 1, head, requestId));
       if (through < latestIssued) throw new Error("Genesis transfer history is behind the claim ledger.");
     }
     const used = replayUsedUnits({ reservations: active, transfers, throughBlock: through });
@@ -1021,7 +1050,7 @@ export function createGenesisClaimService({
       const active = await activeReservations(records);
       const own = active.find((record) => getAddress(record.wallet) === wallet);
       if (own) return Object.freeze({ eligible: own.status === "PENDING", eligibleTokenIds: heldIds(own.balances), holdingUsed: false, claimIssued: true });
-      const { balances, unused } = await ledgerPosition(wallet, active);
+      const { balances, unused } = await ledgerPosition(wallet, active, requestId);
       const eligibleTokenIds = heldIds(unused);
       return Object.freeze({ eligible: eligibleTokenIds.length > 0, eligibleTokenIds, holdingUsed: heldIds(balances).length > 0 && eligibleTokenIds.length === 0, claimIssued: false });
     } catch (error) {
@@ -1049,7 +1078,7 @@ export function createGenesisClaimService({
     try {
       const records = await reservationStore.withLock(config.claimContract, (tx) => tx.list());
       const active = await activeReservations(records);
-      if (active.length) await ledgerPosition(wallet, active);
+      if (active.length) await ledgerPosition(wallet, active, requestId);
     } catch (error) {
       if (error instanceof ApiError) throw error;
       logUpstreamError(error, requestId, "reservationStore");
@@ -1070,7 +1099,7 @@ export function createGenesisClaimService({
         // A wallet that already holds an unexpired voucher gets the same voucher back: same nonce, so it
         // can be redeemed at most once.
         if (own) return Object.freeze({ voucher: own.voucher, signature: own.signature, target: toPublicConfig(config) });
-        position = await ledgerPosition(wallet, active);
+        position = await ledgerPosition(wallet, active, requestId);
       } catch (error) {
         if (error instanceof ApiError) throw error;
         logUpstreamError(error, requestId, "reservationStore");
