@@ -161,7 +161,7 @@ describe("persisted Genesis scan checkpoint", () => {
     expect(row(cl)).toEqual(before);
   });
 
-  it("an interrupted batch mid-range never advances the checkpoint; the retry resumes from the old one", async () => {
+  it("an interrupted batch mid-range advances the checkpoint only through the last complete chunk, never into the failed one; the retry resumes after it", async () => {
     const { cl, first } = await seeded();
     await first.instance.checkEligibility(B);
     const before = structuredClone(row(cl));
@@ -171,11 +171,13 @@ describe("persisted Genesis scan checkpoint", () => {
     cl.genesis.getLogs.mockImplementation(async (filter) => { calls += 1; if (calls === 15) throw new Error("connection dropped"); return real(filter); });
     const restarted = cl.spawn();
     await expect(restarted.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503 });
-    expect(row(cl)).toEqual(before);
+    // 14 chunks completed before the 15th failed: the checkpoint ends at the 14th chunk's last block.
+    const through = before.checkpoint.end + 14 * 100;
+    expect(row(cl).checkpoint).toMatchObject({ from: before.checkpoint.from, end: through, endHash: (await cl.genesis.getBlock(through)).hash.toLowerCase(), anchors: [{ block: before.checkpoint.end, hash: before.checkpoint.endHash }] });
     cl.genesis.getLogs.mockImplementation(real);
     reset(cl);
     await expect(restarted.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
-    expect(cl.genesis.getLogs.mock.calls[0][0].fromBlock).toBe(before.checkpoint.end + 1);
+    expect(cl.genesis.getLogs.mock.calls[0][0].fromBlock).toBe(through + 1);
   });
 
   it("a failed (rolled back) checkpoint write keeps the correct answer and the old row; the next scan persists", async () => {
