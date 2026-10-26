@@ -1081,10 +1081,61 @@ describe("Genesis transfer scan: backoff, pacing and verified reuse on a free pu
     expect(ctx.chain.getLogs.mock.calls.length).toBeLessThanOrEqual(50 + 2);
   });
 
+  it("a cold 95-chunk scan on a slow-but-healthy RPC (p95 121 ms, 100 ms pacing, one throttled retry) finishes inside the default budget", async () => {
+    const ctx = scanned();
+    await prepare(ctx, 9_500);
+    const real = ctx.chain.getLogs.getMockImplementation();
+    let first = true;
+    ctx.chain.getLogs.mockImplementation(async (filter) => {
+      ctx.clock.t += 121; // observed p95 latency of api.avax.network eth_getLogs (100 blocks)
+      if (first) { first = false; throw httpError(429, { "retry-after": "2" }); }
+      return real(filter);
+    });
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(96);
+    // 96 x (100 ms pace + 121 ms) + a 2 s Retry-After is about 23.2 s: over the old 20 s default, inside the 45 s budget.
+    expect(ctx.clock.t).toBeGreaterThan(20_000);
+    expect(ctx.clock.t).toBeLessThan(45_000);
+  });
+
+  it.each([
+    ["persistent 429", () => httpError(429)],
+    ["persistent 599", () => httpError(599)],
+  ])("during %s, concurrent requests share one failing scan, all fail closed, and the cache is untouched", async (_label, failure) => {
+    const ctx = scanned();
+    await prepare(ctx);
+    await ctx.instance.checkEligibility(B); // verified history now cached
+    for (let i = 0; i < 2_000; i += 1) ctx.chain.idle();
+    const real = ctx.chain.getLogs.getMockImplementation();
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.getLogs.mockImplementation(async () => { await new Promise((resolve) => { setTimeout(resolve, 5); }); throw failure(); });
+    const results = await Promise.allSettled([B, B, C, D, B].map((wallet) => ctx.instance.checkEligibility(wallet)));
+    expect(results.every((r) => r.status === "rejected" && r.reason.status === 503 && r.reason.code === "ELIGIBILITY_UNAVAILABLE")).toBe(true);
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(5); // one scan: its first chunk, 5 attempts
+    // The failure is not kept: the next request scans afresh, and only from the cached verified end.
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.getLogs.mockImplementation(real);
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(21); // 2,032 blocks after the cached end
+  });
+
+  it("concurrent voucher requests during throttling share one scan and none is issued", async () => {
+    const ctx = scanned({ holdings: { [`${A}:0`]: 1n, [`${B}:1`]: 1n, [`${C}:2`]: 1n, [`${D}:3`]: 1n } });
+    await prepare(ctx);
+    ctx.signTypedData.mockClear();
+    ctx.chain.getLogs.mockImplementation(async () => { await new Promise((resolve) => { setTimeout(resolve, 5); }); throw httpError(429); });
+    const results = await Promise.allSettled([B, C, D].map((wallet) => ctx.instance.issueVoucher(wallet)));
+    expect(results.every((r) => r.status === "rejected" && r.reason.status === 503)).toBe(true);
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(5);
+    expect(ctx.signTypedData).toHaveBeenCalledTimes(0);
+  });
+
   it("caps the chunk at 100 blocks: smaller is allowed, larger is refused", () => {
     expect(scanOptions({}).chunkBlocks).toBe(100);
     expect(scanOptions({ GENESIS_LOG_CHUNK_BLOCKS: "50" }).chunkBlocks).toBe(50);
     expect(() => scanOptions({ GENESIS_LOG_CHUNK_BLOCKS: "101" })).toThrow(/1 to 100/);
     expect(() => scanOptions({ GENESIS_SCAN_CONFIRMATIONS: "0" })).toThrow();
+    expect(scanOptions({}).budgetMs).toBe(45_000);
+    expect(() => scanOptions({ GENESIS_SCAN_BUDGET_MS: "60001" })).toThrow(/1000 to 60000/);
   });
 });
