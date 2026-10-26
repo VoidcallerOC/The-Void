@@ -18,6 +18,9 @@ import { isLegacyMainnetEdition } from "./legacy-genesis.js";
 import { RELEASE_DEPLOYMENT } from "../../config/release-network.js";
 import { isSaleAvailabilityState } from "./primary-sale-availability.js";
 
+// Site image a published release gets when it stored no artwork of its own. It is not that release's cover.
+export const RELEASE_ARTWORK_FALLBACK = "/assets/voidcaller_art_4.png";
+
 export const STUDIO_OVERLAY_KEY = "the-void.studio-overlay.v1";
 
 function emptyCatalog() {
@@ -181,7 +184,7 @@ export function mapPublishedCatalog({ artists = [], releases = [], editions = []
       status: String(row.status || "published").toLowerCase(),
       publishedAt: row.published_at || row.publishedAt || null,
       updatedAt: row.updated_at || row.updatedAt || null,
-      artwork: ipfsToHttp(meta.artwork) || "/assets/voidcaller_art_4.png",
+      artwork: ipfsToHttp(meta.artwork) || RELEASE_ARTWORK_FALLBACK,
       publicationArchitecture: meta.publicationArchitecture || row.publication_architecture || "",
       // Persisted Studio release type (server releaseType()): SINGLE, EP or ALBUM.
       // Legacy rows have no releaseType and stay EP.

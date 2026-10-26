@@ -52,10 +52,10 @@ export function Footer() {
     >
       <div className="vc-footer-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", gap: 48 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-            <img src="/assets/VoidcallerLogo.gif" style={{ width: 40, height: 40 }} alt="" />
-            <img src="/assets/voidcaller_wordmark.png" alt="VOIDCALLER" style={{ height: 26, width: "auto", display: "block" }} />
+          <div className="vc-footer-lockup">
+            <img src="/brand/the-void/header-lockup-dark.svg" alt="The Void" width="1218" height="220" />
           </div>
+          <p className="vc-footer-tagline">The Void <span aria-hidden="true">|</span> Music-native platform · Underground archive</p>
           <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--vc-bone-dim)", maxWidth: 380, lineHeight: 1.6, margin: 0 }}>
             The Void is a music-native artist–fan platform. Songs first. Editions and experiences additive. Currently featuring Voidcaller.
           </p>
