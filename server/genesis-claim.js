@@ -355,6 +355,37 @@ export function scanOptions(env = {}) {
 export class GenesisScanBudgetError extends Error {
   constructor() { super("Genesis transfer scan exceeded its time budget."); this.name = "GenesisScanBudgetError"; this.code = "TIMEOUT"; }
 }
+
+/**
+ * Serializes every Genesis source-provider request in one API process. The queue is shared by the
+ * primary and fallback providers, so parallel eligibility requests, balance reads and endpoint
+ * rotation cannot bypass the configured minimum interval or overlap a request.
+ */
+export function createGenesisRpcQueue({ paceMs = 100, now = () => performance.now(), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  const interval = Number(paceMs);
+  if (!Number.isFinite(interval) || interval < 0) throw new TypeError("Genesis RPC pace must be a non-negative finite number.");
+  let tail = Promise.resolve();
+  let lastCompletedAt = -Infinity;
+  const run = (operation, { deadline = Infinity } = {}) => {
+    const execute = async () => {
+      const wait = lastCompletedAt + interval - now();
+      if (wait > 0) {
+        if (now() + wait > deadline) throw new GenesisScanBudgetError();
+        await sleep(wait);
+      }
+      if (now() > deadline) throw new GenesisScanBudgetError();
+      try {
+        return await operation();
+      } finally {
+        lastCompletedAt = now();
+      }
+    };
+    const result = tail.then(execute, execute);
+    tail = result.catch(() => {});
+    return result;
+  };
+  return Object.freeze({ run, getLastCompletedAt: () => lastCompletedAt });
+}
 const RETRYABLE_HTTP = new Set([429, 502, 503, 504, 599]);
 const RETRYABLE_RPC = new Set([429, -32005]);
 const RETRYABLE_CODES = new Set(["TIMEOUT", "NETWORK_ERROR", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "ABORT_ERR"]);
@@ -627,18 +658,18 @@ export function createGenesisClaimService({
   async function assertGenesisChain() {
     if (staticGenesisProvider) {
       if (genesisChainVerified) return;
-      if (Number(BigInt(await sourceProvider.send("eth_chainId", []))) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
+      if (Number(BigInt(await genesisRpcQueue.run(() => sourceProvider.send("eth_chainId", [])))) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
       genesisChainVerified = true;
       return;
     }
-    const network = await sourceProvider.getNetwork();
+    const network = await genesisRpcQueue.run(() => sourceProvider.getNetwork());
     if (Number(network.chainId) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
   }
 
   async function readHead() {
     return atStage("readHead", async () => {
       await assertGenesisChain();
-      const head = Number(await sourceProvider.getBlockNumber());
+      const head = Number(await genesisRpcQueue.run(() => sourceProvider.getBlockNumber()));
       if (!Number.isSafeInteger(head) || head <= 0) throw new Error("Invalid C-Chain block number.");
       return head;
     });
@@ -653,7 +684,7 @@ export function createGenesisClaimService({
       ? await balanceReader(wallet, block)
       : Object.fromEntries(await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
         const data = GENESIS_INTERFACE.encodeFunctionData("balanceOf", [wallet, tokenId]);
-        return [tokenId.toString(), GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block }))[0]];
+        return [tokenId.toString(), GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await genesisRpcQueue.run(() => sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block })))[0]];
       })));
     return Object.freeze(Object.fromEntries(GENESIS_TOKEN_ID_SET.map((id) => {
       const value = BigInt(raw?.[id] ?? 0);
@@ -675,18 +706,13 @@ export function createGenesisClaimService({
   // validate AND its end block hash matches the chain again. On a hash mismatch (reorg) the history is
   // rewound to the newest earlier anchor whose hash still matches, else rescanned from the start.
   const scan = config.scan || scanOptions({});
+  const genesisRpcQueue = createGenesisRpcQueue({ paceMs: scan.paceMs, now: monotonicNow, sleep });
   let verifiedHistory = null; // { from, end, endHash, anchors, logs } with end <= head - confirmations
   // What this process last saw in the checkpoint store: { end, endHash }, null (no row), or undefined (unknown: re-read before writing).
   let persistedBase = undefined;
-  let lastRpcAt = -Infinity;
   const logCheckpoint = (event, extra = {}) => logger?.warn?.("genesis.scan.checkpoint", { event, ...extra });
   async function paced(operation, deadline) {
-    const wait = lastRpcAt + scan.paceMs - monotonicNow();
-    if (wait > 0) {
-      if (monotonicNow() + wait > deadline) throw new GenesisScanBudgetError();
-      await sleep(wait);
-    }
-    try { return await operation(); } finally { lastRpcAt = monotonicNow(); }
+    return genesisRpcQueue.run(operation, { deadline });
   }
   const rpc = (operation, deadline) => withProviderRetry(() => paced(operation, deadline), { ...scan, deadline, now: monotonicNow, sleep, random });
   async function blockHash(block, deadline) {
