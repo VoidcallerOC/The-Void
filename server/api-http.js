@@ -162,12 +162,12 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
         else if (method === "POST" && base.join("/") === "claims/eligibility") {
           if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
           claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-eligibility`);
-          data = await genesisClaim.checkEligibility(body.wallet);
+          data = await genesisClaim.checkEligibility(body.wallet, { requestId });
         }
         else if (method === "POST" && base.join("/") === "claims/vouchers") {
           if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
           claimVoucherLimiter.check(`${apiRequest.rateLimitKey}:genesis-voucher`);
-          data = await genesisClaim.issueVoucher(body.wallet);
+          data = await genesisClaim.issueVoucher(body.wallet, { requestId });
         }
         else if (method === "POST" && base.join("/") === "claims/early-access/vouchers") {
           if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");

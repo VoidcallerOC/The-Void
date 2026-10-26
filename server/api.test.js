@@ -93,13 +93,13 @@ describe("HTTP API boundary", () => {
     await handler(requestDouble({ method: "POST", url: "/api/claims/eligibility", body: JSON.stringify({ wallet }) }), eligibilityResponse);
     expect(eligibilityResponse.status).toBe(200);
     expect(JSON.parse(eligibilityResponse.body).data).toEqual({ eligible: true, eligibleTokenIds: ["2"] });
-    expect(genesisClaim.checkEligibility).toHaveBeenCalledWith(wallet);
+    expect(genesisClaim.checkEligibility).toHaveBeenCalledWith(wallet, { requestId: expect.any(String) });
 
     const voucherResponse = responseDouble();
     await handler(requestDouble({ method: "POST", url: "/api/claims/vouchers", body: JSON.stringify({ wallet }) }), voucherResponse);
     expect(voucherResponse.status).toBe(200);
     expect(JSON.parse(voucherResponse.body).data).toMatchObject({ voucher: { claimant: wallet, quantity: "1" }, signature: "0xsignature" });
-    expect(genesisClaim.issueVoucher).toHaveBeenCalledWith(wallet);
+    expect(genesisClaim.issueVoucher).toHaveBeenCalledWith(wallet, { requestId: expect.any(String) });
 
     const unavailable = createApiHandler({ service: {} });
     const unavailableResponse = responseDouble();

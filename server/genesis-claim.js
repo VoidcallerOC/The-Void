@@ -304,8 +304,40 @@ function toPublicConfig(config) {
 export const VOUCHER_LIFETIME_SECONDS = 300;
 // Seconds past a voucher's deadline before an unredeemed issuance is released (destination-chain time).
 export const RESERVATION_EXPIRY_GRACE_SECONDS = 120n;
-// Block span per eth_getLogs request for Genesis transfers (public C-Chain RPC limit).
-export const TRANSFER_LOG_CHUNK_BLOCKS = 2048;
+// Maximum inclusive block span per eth_getLogs request for Genesis transfers. The public Avalanche
+// C-Chain RPC rejects eth_getLogs ranges above 100 blocks, so each request covers [start, start + 99].
+export const TRANSFER_LOG_CHUNK_BLOCKS = 100;
+
+// Provider error codes that may be logged: ethers' fixed error enum. Anything else is dropped.
+const SAFE_PROVIDER_CODE = /^[A-Z][A-Z_]{1,40}$/;
+
+/**
+ * A provider error reduced to a code that cannot carry a URL, address, credential or message: the
+ * numeric JSON-RPC error code, the HTTP status, or ethers' error enum, in that order; otherwise null.
+ */
+export function sanitizeProviderErrorCode(error) {
+  const rpc = error?.error?.code ?? error?.info?.error?.code;
+  if (Number.isInteger(rpc)) return { rpcCode: rpc };
+  const status = error?.status ?? error?.info?.responseStatus ?? error?.response?.statusCode;
+  const httpStatus = Number.isInteger(status) ? status : Number.parseInt(String(status ?? "").match(/^\s*(\d{3})\b/)?.[1], 10);
+  if (Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599) return { httpStatus };
+  if (Number.isInteger(error?.code)) return { rpcCode: error.code };
+  if (typeof error?.code === "string" && SAFE_PROVIDER_CODE.test(error.code)) return { providerCode: error.code };
+  return null;
+}
+
+const STAGE = Symbol("genesisUpstreamStage");
+/** Labels the first upstream stage an error passed through; later labels never overwrite it. */
+async function atStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error && typeof error === "object" && !(error instanceof ApiError) && !error[STAGE]) {
+      try { Object.defineProperty(error, STAGE, { value: stage }); } catch { /* frozen error: stage stays unknown */ }
+    }
+    throw error;
+  }
+}
 
 /**
  * Settles stored PENDING reservations from the claim contract, the source of truth (hasClaimed).
@@ -348,6 +380,7 @@ export function createGenesisClaimService({
   earlyAccessStateReader = null,
   destinationClock = null,
   clock = () => Math.floor(Date.now() / 1000),
+  logger = console,
   // 256 random bits. ethers' randomBytes returns a Uint8Array, so it must be hex-encoded explicitly.
   nonce = () => BigInt(hexlify(randomBytes(32))),
 } = {}) {
@@ -414,14 +447,19 @@ export function createGenesisClaimService({
   }
 
   async function readHead() {
-    await assertGenesisChain();
-    const head = Number(await sourceProvider.getBlockNumber());
-    if (!Number.isSafeInteger(head) || head <= 0) throw new Error("Invalid C-Chain block number.");
-    return head;
+    return atStage("readHead", async () => {
+      await assertGenesisChain();
+      const head = Number(await sourceProvider.getBlockNumber());
+      if (!Number.isSafeInteger(head) || head <= 0) throw new Error("Invalid C-Chain block number.");
+      return head;
+    });
   }
 
   /** Balances of Genesis IDs 0-3 at one C-Chain block, as decimal strings keyed by ID. */
   async function readBalances(wallet, block) {
+    return atStage("balances", () => readBalancesUnlabelled(wallet, block));
+  }
+  async function readBalancesUnlabelled(wallet, block) {
     const raw = balanceReader
       ? await balanceReader(wallet, block)
       : Object.fromEntries(await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
@@ -439,11 +477,16 @@ export function createGenesisClaimService({
   // final, so a fetched range never changes.
   let logCache = { from: 0, to: -1, logs: [] };
   async function fetchLogs(fromBlock, toBlock) {
+    return atStage("getLogs", () => fetchLogsUnlabelled(fromBlock, toBlock));
+  }
+  async function fetchLogsUnlabelled(fromBlock, toBlock) {
     if (transferLogReader) return transferLogReader(fromBlock, toBlock);
     const logs = [];
-    for (let start = fromBlock; start <= toBlock; start += TRANSFER_LOG_CHUNK_BLOCKS) {
+    // Inclusive ranges [start, min(start + 99, toBlock)]; the next starts at end + 1: no gap, no overlap.
+    for (let start = fromBlock; start <= toBlock;) {
       const end = Math.min(toBlock, start + TRANSFER_LOG_CHUNK_BLOCKS - 1);
       logs.push(...await sourceProvider.getLogs({ address: GENESIS_CONTRACT, topics: [[TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]], fromBlock: start, toBlock: end }));
+      start = end + 1;
     }
     return logs;
   }
@@ -458,12 +501,18 @@ export function createGenesisClaimService({
   }
 
   async function readClaimState(wallet) {
+    return atStage("claimState", () => readClaimStateUnlabelled(wallet));
+  }
+  async function readClaimStateUnlabelled(wallet) {
     return claimStateReader
       ? claimStateReader(wallet)
       : Promise.all([claim.hasClaimed(wallet), claim.claimedSupply()]).then(([alreadyClaimed, claimedSupply]) => ({ alreadyClaimed, claimedSupply }));
   }
 
   async function destinationNow() {
+    return atStage("destinationClock", () => destinationNowUnlabelled());
+  }
+  async function destinationNowUnlabelled() {
     if (destinationClock) return BigInt(await destinationClock());
     const block = await targetProvider.getBlock("latest");
     return BigInt(block.timestamp);
@@ -504,6 +553,19 @@ export function createGenesisClaimService({
     return { head, balances, unused: unusedUnits(wallet, balances, used) };
   }
 
+  /**
+   * One structured diagnostic per upstream failure, at the catch that turns it into a 503. Only the
+   * request ID, a fixed stage label and a sanitized provider code: never a wallet, URL, credential,
+   * voucher, signature or raw provider message.
+   */
+  function logUpstreamError(error, requestId, fallbackStage) {
+    logger?.warn?.("genesis.eligibility.upstream_error", {
+      requestId: typeof requestId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : null,
+      stage: error?.[STAGE] || fallbackStage,
+      providerError: sanitizeProviderErrorCode(error),
+    });
+  }
+
   const heldIds = (units) => GENESIS_TOKEN_ID_SET.filter((id) => BigInt(units[id]) > 0n);
 
   function assertWallet(wallet) {
@@ -513,7 +575,7 @@ export function createGenesisClaimService({
     return getAddress(wallet);
   }
 
-  async function checkEligibility(walletInput) {
+  async function checkEligibility(walletInput, { requestId = null } = {}) {
     const wallet = assertWallet(walletInput);
     try {
       return await reservationStore.withLock(config.claimContract, async (tx) => {
@@ -527,11 +589,12 @@ export function createGenesisClaimService({
       });
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      logUpstreamError(error, requestId, "reservationStore");
       throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
     }
   }
 
-  async function issueVoucher(walletInput) {
+  async function issueVoucher(walletInput, { requestId = null } = {}) {
     const wallet = assertWallet(walletInput);
     const now = BigInt(clock());
     if (now < config.claimStart) throw new ApiError(409, "CLAIM_NOT_OPEN", "The Genesis claim window has not opened yet.");
@@ -541,6 +604,7 @@ export function createGenesisClaimService({
       else await verifyContractBindings();
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      logUpstreamError(error, requestId, "bindings");
       throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
     }
     // One issuance at a time per claim contract: the holding a wallet is judged on cannot be judged for
@@ -561,6 +625,7 @@ export function createGenesisClaimService({
         position = await ledgerPosition(wallet, active);
       } catch (error) {
         if (error instanceof ApiError) throw error;
+        logUpstreamError(error, requestId, "reservationStore");
         throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
       }
       if (!heldIds(position.balances).length) throw new ApiError(403, "ACCESS_DENIED", "This wallet does not currently hold Genesis token 0, 1, 2, or 3 on Avalanche C-Chain.");
@@ -593,7 +658,8 @@ export function createGenesisClaimService({
         // Genesis token is moved, burned, locked or approved; the wallet's other units stay unused.
         await tx.upsert({ claimContract: config.claimContract, wallet, block: position.head, usedTokenId, balances: position.balances, deadline: BigInt(voucher.deadline), status: "PENDING", voucher, signature });
         return Object.freeze({ voucher, signature, target: toPublicConfig(config) });
-      } catch {
+      } catch (error) {
+        logUpstreamError(error, requestId, "signOrRecord");
         throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
       }
     });
