@@ -988,7 +988,7 @@ describe("Genesis transfer history over a public RPC that caps eth_getLogs at 10
   });
 
   it.each([
-    ["readHead", (chain) => { chain.getBlockNumber.mockRejectedValueOnce(Object.assign(new Error(`connect ECONNREFUSED ${RPC_SECRET_URL}`), { code: "NETWORK_ERROR" })); }, { providerCode: "NETWORK_ERROR" }],
+    ["readHead", (chain) => { chain.getBlockNumber.mockRejectedValue(Object.assign(new Error(`connect ECONNREFUSED ${RPC_SECRET_URL}`), { code: "NETWORK_ERROR" })); }, { providerCode: "NETWORK_ERROR" }],
     ["balances", (chain) => { chain.call.mockRejectedValue(Object.assign(new Error(`execution reverted for ${A}`), { error: { code: -32603, message: `internal ${RPC_SECRET_URL}` } })); }, { rpcCode: -32603 }],
     ["getLogs", (chain) => { chain.advance(5_000); chain.getLogs = vi.fn(async () => { throw new Error(`raw ${RPC_SECRET_URL}`); }); }, null],
   ])("diagnostics for a %s failure carry only the stage and a sanitized code", async (stage, breakChain, providerError) => {

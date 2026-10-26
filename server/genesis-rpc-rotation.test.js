@@ -107,7 +107,9 @@ function mirror(genesis, { chainId = GENESIS_CHAIN_ID } = {}) {
   const logs = genesis.getLogs.getMockImplementation();
   return {
     send: vi.fn(async (method) => { if (method !== "eth_chainId") throw new Error("unexpected"); return `0x${chainId.toString(16)}`; }),
+    getBlockNumber: vi.fn(async () => genesis.head),
     getBlock: vi.fn(async (block) => blocks(block)),
+    call: vi.fn(async (req) => genesis.call(req)),
     getLogs: vi.fn(async (filter) => Promise.all((await logs(filter)).map(async (log) => ({ ...log, blockHash: (await blocks(log.blockNumber)).hash })))),
   };
 }
@@ -427,5 +429,33 @@ describe("Genesis getLogs endpoint rotation", () => {
     fallback.getLogs.mockImplementation(async (f) => (await real(f)).map((log) => ({ ...log, blockHash: id("fork") })));
     await expect(first.instance.checkEligibility(C)).rejects.toMatchObject({ status: 503 });
   });
-});
 
+  it("(regression) a primary 429 on head falls back to PublicNode and still returns eligibility", async () => {
+    const cl = cluster({ [`${B}:1`]: 1n });
+    const fallback = mirror(cl.genesis);
+    const w = cl.spawn({ genesisFallbackProvider: fallback });
+    cl.genesis.getBlockNumber.mockRejectedValue(httpError(429));
+    await expect(w.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
+    expect(fallback.getBlockNumber).toHaveBeenCalled();
+  });
+
+  it("(regression) a primary 429 on balanceOf falls back instead of failing in one round trip", async () => {
+    const cl = cluster({ [`${B}:1`]: 1n });
+    const realCall = cl.genesis.call.getMockImplementation();
+    const fallback = mirror(cl.genesis);
+    fallback.call = vi.fn(async (req) => realCall(req));
+    const w = cl.spawn({ genesisFallbackProvider: fallback });
+    cl.genesis.call.mockRejectedValue(httpError(429));
+    await expect(w.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(fallback.call).toHaveBeenCalled();
+  });
+
+  it("(regression) HTTP 403 from the fallback excludes that endpoint and does not abort the chunk", async () => {
+    const { cl, fallback, first } = await setup();
+    cl.genesis.getLogs.mockRejectedValueOnce(httpError(429));
+    fallback.getLogs.mockRejectedValueOnce(httpError(403));
+    await expect(first.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(fallback.getLogs).toHaveBeenCalled();
+    expect(cl.genesis.getLogs.mock.calls.length).toBeGreaterThan(1);
+  });
+});
