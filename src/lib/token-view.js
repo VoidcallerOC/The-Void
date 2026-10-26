@@ -49,6 +49,19 @@ export function tokenView(catalog, { edition = null, release = null, tokenId = n
 }
 
 /**
+ * Collector-facing description for a track token: the Studio track (edition)
+ * description, then the token's published metadata, then the release
+ * description (Studio: "If left blank, this track will use the release
+ * description"). Empty when none was saved; nothing is invented.
+ */
+export function collectorDescription({ edition = null, release = null, view = null } = {}) {
+  for (const value of [edition?.description, view?.description, release?.description]) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+/**
  * The player track for one token, or null. Legacy Voidcaller tokens use their
  * catalog track (public preview, upgraded to the gated full track for
  * holders). Published tokens play their public preview (animation_url).

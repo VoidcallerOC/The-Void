@@ -140,6 +140,7 @@ export function StickyPlayer() {
             </span>
           )}
           {bearer && <Mark on>BEARER</Mark>}
+          {bearer && cur?.sourceKind && <Mark on>{cur.sourceKind === "demo" ? "DEMO" : "FULL TRACK"}</Mark>}
         </span>
         {needsGesture && <button type="button" className="vc-sticky-tap-to-play" data-state="tap-to-play" onClick={() => audio.play().catch(() => {})} style={{ alignSelf: "flex-start", fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.08em", color: "var(--vc-bone)", background: "var(--vc-blood)", border: "1px solid var(--vc-crimson)", padding: "4px 8px", cursor: "pointer" }}>Tap to play</button>}
         {playbackError && <span role="status" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--vc-ember)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playbackError}</span>}

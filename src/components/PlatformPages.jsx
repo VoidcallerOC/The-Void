@@ -25,7 +25,8 @@ import { artworkFor, ghostBtn, primaryBtn, shell } from "../lib/marketplace-chro
 import { WalletButton } from "./WalletButton.jsx";
 import { NotFoundPage } from "./NotFoundPage.jsx";
 import { TokenArtwork } from "./TokenArtwork.jsx";
-import { experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
+import { collectorDescription, experienceTrackTitle, playableTrackFor, tokenView } from "../lib/token-view.js";
+import { UnlockedExperienceSelector } from "./UnlockedExperienceSelector.jsx";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
 import { PrimaryPlayButton } from "./PrimaryPlayButton.jsx";
 import { releaseBindingFor } from "../lib/claim-state.js";
@@ -226,7 +227,7 @@ export function ReleasePage({ children = null } = {}) {
         <TokenArtwork sources={artworkSources(artworkFor(editionItems[0]?.edition, release))} alt={`${release.title} artwork`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", border: "1px solid var(--vc-ash)" }} />
         <div>
           <Eyebrow>The story</Eyebrow>
-          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>{release.story}</p>
+          <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, whiteSpace: "pre-line" }}>{release.story}</p>
           {release.tracks?.length > 0 && (
             <>
               <Eyebrow>Tracks</Eyebrow>
@@ -292,6 +293,7 @@ export function EditionPage() {
   const result = getEditionCatalog(catalog, editionId);
   // "List for sale" links here with #secondary-listing; scroll there once the edition (and its ListingPanel) renders.
   useHashScroll("secondary-listing", Boolean(result));
+  const wallet = useWallet() || {};
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading edition…</p></section>;
   }
@@ -308,6 +310,10 @@ export function EditionPage() {
   const playback = primaryPlayback(experiences);
   const previewToken = tokenView(catalog, { edition, release }).token;
   const hasPreview = Boolean(playableTrackFor(previewToken));
+  const description = collectorDescription({ edition, release, view: tokenView(catalog, { edition, release }) });
+  // Display only: the media gateway re-checks current ownership before any grant.
+  const holder = getCollectorLibrary(catalog, wallet.ownershipRecords || []).editions.some((item) => item.edition.id === edition.id);
+  const holderSelector = holder && previewToken && !isCertifiedFujiEdition(edition) && edition.id !== "voidcaller-chapter-i";
   const chainId = String(edition.chainId || "");
   const objectLabel = chainId === "43114" ? "The relic" : chainId === "43113" ? "Rehearsal · Fuji test pressing" : "Pressing";
   // Release-scoped editions follow their own sale: supply 0 is an open edition.
@@ -323,10 +329,11 @@ export function EditionPage() {
           <p className="vc-card-kicker">{artist.name}</p>
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(48px, 8vw, 88px)", lineHeight: 0.9, textTransform: "uppercase", margin: "8px 0 12px" }}>{release.title}</h1>
           <p className="vc-card-release"><Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{edition.title}</Link></p>
-          {edition.description && <p style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7 }}>{edition.description}</p>}
+          {description && <p data-testid="collector-description" style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, whiteSpace: "pre-line" }}>{description}</p>}
           <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyLabel}{price ? ` · ${price}` : ""}</p>
           <div style={{ margin: "18px 0" }}>
             <Eyebrow>Listen</Eyebrow>
+            {holderSelector && <UnlockedExperienceSelector experiences={experiences} token={previewToken} collection={release.title} queuePrefix="holder" />}
             {hasPreview ? (
               playback.unavailable
                 ? <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}><PrimaryPlayButton token={previewToken} playback={playback} queueId={`public-preview:${edition.id}`} collection={release.title} /></div>
@@ -406,6 +413,8 @@ export function ExperiencePage() {
   const baseTrack = playableTrackFor(view.token, { protectedExperience: protectedMedia ? experience : null });
   const tokenTrack = baseTrack && protectedMedia && baseTrack.protectedMedia ? { ...baseTrack, protectedTitle: experienceTrackTitle({ experience, tokenTrack: baseTrack, view }) } : baseTrack;
   const access = experience.requirements?.length ? (owned ? "Unlocked for this collector" : "Collector authorization required") : "Open experience";
+  const siblings = edition ? catalog.experiences.filter((item) => item.editionId === edition.id || (edition.experienceIds || []).includes(item.id)) : [];
+  const holderSelector = owned && protectedMedia && view.token && edition && !isCertifiedFujiEdition(edition) && edition.id !== "voidcaller-chapter-i";
   const queueId = release?.id || experience.id;
   const isPlaying = audio.queueId === queueId && audio.playing;
   const hear = async () => {
@@ -456,7 +465,8 @@ export function ExperiencePage() {
             </ol>
           )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            {tokenTrack && <PlayTokenButton track={tokenTrack} protectedExperience={protectedMedia ? experience : null} protectedOnly={Boolean(protectedMedia)} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.protectedTitle || tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
+            {holderSelector && <div style={{ flexBasis: "100%" }}><UnlockedExperienceSelector experiences={siblings} token={view.token} collection={release?.title || edition?.title} queuePrefix="holder" /></div>}
+            {tokenTrack && !holderSelector && <PlayTokenButton track={tokenTrack} protectedExperience={protectedMedia ? experience : null} protectedOnly={Boolean(protectedMedia)} queueId={`token:${view.token.id}`} collection={release?.title || edition?.title} primary label={owned || !experience.requirements?.length ? `Play ${tokenTrack.protectedTitle || tokenTrack.title}` : `Play ${tokenTrack.title} preview`} />}
             {!tokenTrack && tracks.length > 0 && (
               <button type="button" style={primaryBtn} onClick={hear}>
                 {isPlaying ? "Pause experience" : owned || !experience.requirements?.length ? "Open experience" : "Hear the preview"}
@@ -602,6 +612,7 @@ export function MyCollectionPage() {
                 <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".16em", color: "var(--vc-crimson)", textTransform: "uppercase", margin: 0 }}>{artist?.name}</p>
                 <h3 style={{ fontFamily: "var(--font-display)", fontSize: 28, textTransform: "uppercase", margin: "8px 0" }}>{view.token ? view.name : release?.title || edition.title}</h3>
                 <p style={{ color: "var(--vc-bone-dim)" }}>{release?.title && view.token ? `${release.title} · ` : ""}{edition.title}{view.token ? ` · Token #${view.tokenId}` : ""} · {quantity} owned</p>
+                {collectorDescription({ edition, release, view }) && <p data-testid="collector-description" style={{ color: "var(--vc-bone-dim)", lineHeight: 1.6, whiteSpace: "pre-line", margin: "0 0 4px" }}>{collectorDescription({ edition, release, view })}</p>}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
                   <PrimaryPlayButton token={view.token} playback={playback} queueId={`token:${view.token?.id}`} collection={release?.title || edition.title} primary />
                   <ListForSaleLink edition={edition} tokenId={tokenId} owned style={ghostBtn} />
