@@ -110,3 +110,52 @@ describe("sticky player seek accessibility", () => {
     expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
   });
 });
+
+describe("sticky player tap-to-play and audio diagnostics", () => {
+  afterEach(() => { VC_AUDIO.needsGesture = false; VC_AUDIO.lastError = null; VC_AUDIO.setDiagnosticsEnabled(false); vi.unstubAllGlobals(); });
+
+  it("shows a tap-to-play state after a NotAllowedError instead of failing silently", () => {
+    const track = { n: "1", title: "Song", time: "03:00" };
+    VC_AUDIO.queue = [track];
+    VC_AUDIO.needsGesture = true;
+    VC_AUDIO.lastError = { track, code: null, kind: "gesture", message: "Tap play to start playback." };
+    const play = vi.spyOn(VC_AUDIO, "play").mockResolvedValue();
+    render(<StickyPlayer />);
+    const tap = screen.getByRole("button", { name: "Tap to play" });
+    expect(tap.getAttribute("data-state")).toBe("tap-to-play");
+    fireEvent.click(tap);
+    expect(play).toHaveBeenCalled();
+    play.mockRestore();
+  });
+
+  it("hides the diagnostics panel by default", () => {
+    render(<StickyPlayer />);
+    expect(screen.queryByRole("region", { name: "Audio diagnostics" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy diagnostics" })).toBeNull();
+  });
+
+  it("copies sanitized diagnostics with navigator.clipboard when enabled", async () => {
+    VC_AUDIO.setDiagnosticsEnabled(true);
+    VC_AUDIO.record("play-attempt", { category: "preview", host: "gateway.example" });
+    const writeText = vi.fn().mockResolvedValue();
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<StickyPlayer />);
+    expect(screen.getByRole("region", { name: "Audio diagnostics" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+    await screen.findByText("Copied");
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("gateway.example"));
+    const copied = writeText.mock.calls[0][0];
+    expect(copied).not.toMatch(/userAgent/i);
+    expect(copied).not.toContain(navigator.userAgent);
+  });
+
+  it("falls back to a textarea copy when the clipboard API is unavailable", async () => {
+    VC_AUDIO.setDiagnosticsEnabled(true);
+    vi.stubGlobal("navigator", { userAgent: "test" });
+    document.execCommand = vi.fn().mockReturnValue(true);
+    render(<StickyPlayer />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+    await screen.findByText("Copied");
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
+  });
+});

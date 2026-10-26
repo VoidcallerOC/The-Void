@@ -120,3 +120,204 @@ describe("independent full-track experiences", () => {
     expect(sameTrack(fullTrack, { ...fullTrack, n: "1" })).toBe(false);
   });
 });
+
+describe("retry, source identity, stale grants, and diagnostics", () => {
+  const WALLET = "0x6a86efa012feda64b70112022487fee22e67d2fb";
+  const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  afterEach(() => { VC_AUDIO.setDiagnosticsEnabled(false); vi.useRealTimers(); });
+
+  it("resets and reloads the element when retrying a failed source instead of reusing it", async () => {
+    const track = { n: "p1", title: "Public", src: "https://a.example/audio/song.mp3" };
+    VC_AUDIO.setQueue([track], "retry-q");
+    await VC_AUDIO.play(0);
+    const el = VC_AUDIO.el;
+    const loadsBefore = el.loads;
+    el.error = { code: 2 };
+    const removed = vi.spyOn(el, "removeAttribute");
+    await VC_AUDIO.play(0);
+    expect(removed).toHaveBeenCalledWith("src");
+    expect(el.loads).toBe(loadsBefore + 1);
+    expect(el.src).toBe(track.src);
+  });
+
+  it("reuses a healthy element on the same source without reloading", async () => {
+    const track = { n: "p1", title: "Public", src: "https://a.example/audio/song.mp3" };
+    VC_AUDIO.setQueue([track], "reuse-q");
+    await VC_AUDIO.play(0);
+    const loads = VC_AUDIO.el.loads;
+    await VC_AUDIO.play(0);
+    expect(VC_AUDIO.el.loads).toBe(loads);
+  });
+
+  it("treats the same filename on different hosts as different sources", async () => {
+    const { sameSource, sourceIdentity } = await import("./audio.js");
+    expect(sameSource("https://a.example/ipfs/x/song.mp3", "https://b.example/ipfs/x/song.mp3")).toBe(false);
+    expect(sameSource("https://a.example/one/song.mp3", "https://a.example/two/song.mp3")).toBe(false);
+    expect(sameSource("https://a.example/one/song.mp3?sig=1", "https://a.example/one/song.mp3?sig=2")).toBe(true);
+    expect(sourceIdentity("https://a.example/one/song.mp3?sig=1")).toBe("https://a.example/one/song.mp3");
+
+    const first = { n: "a", title: "A", src: "https://a.example/ipfs/x/song.mp3" };
+    const second = { n: "b", title: "B", src: "https://b.example/ipfs/x/song.mp3" };
+    VC_AUDIO.setQueue([first, second], "hosts-q");
+    await VC_AUDIO.play(0);
+    await VC_AUDIO.play(1);
+    expect(VC_AUDIO.el.src).toBe(second.src);
+  });
+
+  it("does not request a protected grant when the public preview errors", async () => {
+    VC_AUDIO.grantedKeys.add(`${fullTrack.protectedMedia.experienceId}:AUDIO:${fullTrack.n}`);
+    VC_AUDIO.setMediaAuthorization({ wallet: WALLET, authHeaders: {} });
+    VC_AUDIO.setQueue([fullTrack], "preview-q");
+    VC_AUDIO.ensure();
+    VC_AUDIO.el.src = PREVIEW;
+    VC_AUDIO.el.error = { code: 4 };
+    VC_AUDIO.el.emit("error");
+    await vi.waitFor(() => expect(VC_AUDIO.lastError).toMatchObject({ code: 4, kind: "media" }));
+    expect(requestProtectedMediaGrant).not.toHaveBeenCalled();
+  });
+
+  it("bounds protected renewal on repeated errors and does not loop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await VC_AUDIO.playGranted(fullTrack, grant("full-1"), "token:ff");
+    let n = 1;
+    requestProtectedMediaGrant.mockImplementation(async () => grant(`full-${++n}`));
+    for (let i = 0; i < 6; i += 1) {
+      vi.setSystemTime(Date.now() + 11_000);
+      VC_AUDIO.el.error = { code: 2 };
+      VC_AUDIO.el.emit("error");
+      await vi.waitFor(() => expect(VC_AUDIO.mediaRequests.size).toBe(0));
+      await Promise.resolve();
+    }
+    expect(requestProtectedMediaGrant).toHaveBeenCalledTimes(VC_AUDIO.maxRenewalAttempts);
+    await vi.waitFor(() => expect(VC_AUDIO.lastError).toMatchObject({ code: 2, kind: "media" }));
+  });
+
+  it("stays capped at two renewals when metadata loads between repeated errors", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await VC_AUDIO.playGranted(fullTrack, grant("full-1"), "token:ff");
+    let n = 1;
+    requestProtectedMediaGrant.mockImplementation(async () => grant(`full-${++n}`));
+    for (let i = 0; i < 6; i += 1) {
+      vi.setSystemTime(Date.now() + 11_000);
+      VC_AUDIO.el.emit("loadedmetadata");
+      VC_AUDIO.el.error = { code: 2 };
+      VC_AUDIO.el.emit("error");
+      await vi.waitFor(() => expect(VC_AUDIO.mediaRequests.size).toBe(0));
+      await Promise.resolve();
+    }
+    expect(requestProtectedMediaGrant).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives a new explicit play attempt a fresh renewal budget, still capped at two", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await VC_AUDIO.playGranted(fullTrack, grant("full-1"), "token:ff");
+    let n = 1;
+    requestProtectedMediaGrant.mockImplementation(async () => grant(`full-${++n}`));
+    const failRepeatedly = async (times) => {
+      for (let i = 0; i < times; i += 1) {
+        vi.setSystemTime(Date.now() + 11_000);
+        VC_AUDIO.el.error = { code: 2 };
+        VC_AUDIO.el.emit("error");
+        await vi.waitFor(() => expect(VC_AUDIO.mediaRequests.size).toBe(0));
+        await Promise.resolve();
+      }
+    };
+    await failRepeatedly(4);
+    expect(requestProtectedMediaGrant).toHaveBeenCalledTimes(2);
+    VC_AUDIO.el.error = null;
+    await VC_AUDIO.play();
+    await failRepeatedly(4);
+    expect(requestProtectedMediaGrant).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the 10 second throttle between renewals", async () => {
+    await VC_AUDIO.playGranted(fullTrack, grant("full-1"), "token:ff");
+    requestProtectedMediaGrant.mockResolvedValue(grant("full-2"));
+    VC_AUDIO.el.error = { code: 2 };
+    VC_AUDIO.el.emit("error");
+    await vi.waitFor(() => expect(VC_AUDIO.el.src).toBe("/api/media/full-2"));
+    VC_AUDIO.el.error = { code: 2 };
+    VC_AUDIO.el.emit("error");
+    await vi.waitFor(() => expect(VC_AUDIO.lastError).toMatchObject({ code: 2 }));
+    expect(requestProtectedMediaGrant).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a grant that arrives after the track changed", async () => {
+    VC_AUDIO.grantedKeys.add(`${fullTrack.protectedMedia.experienceId}:AUDIO:${fullTrack.n}`);
+    const pending = deferred();
+    requestProtectedMediaGrant.mockReturnValue(pending.promise);
+    const other = { n: "other", title: "Other", src: "https://a.example/other.mp3" };
+    VC_AUDIO.setQueue([fullTrack, other], "late-q");
+    const started = VC_AUDIO.play(0);
+    await VC_AUDIO.play(1);
+    pending.resolve(grant("late-1"));
+    await started;
+    await Promise.resolve();
+    expect(VC_AUDIO.idx).toBe(1);
+    expect(VC_AUDIO.el.src).toBe(other.src);
+  });
+
+  it("ignores a grant that arrives after the wallet changed", async () => {
+    VC_AUDIO.grantedKeys.add(`${fullTrack.protectedMedia.experienceId}:AUDIO:${fullTrack.n}`);
+    const pending = deferred();
+    requestProtectedMediaGrant.mockReturnValue(pending.promise);
+    VC_AUDIO.setQueue([fullTrack], "wallet-q");
+    const started = VC_AUDIO.play(0);
+    VC_AUDIO.setMediaAuthorization({ wallet: "0x1111111111111111111111111111111111111111", authHeaders: {} });
+    pending.resolve(grant("old-wallet-grant"));
+    await started;
+    expect(VC_AUDIO.mediaGrants.size).toBe(0);
+    expect(VC_AUDIO.isBearer(fullTrack)).toBe(false);
+    expect(VC_AUDIO.el?.src || "").not.toContain("old-wallet-grant");
+  });
+
+  it("distinguishes a NotAllowedError (needs a tap) from a media decode error", async () => {
+    await VC_AUDIO.playGranted(fullTrack, grant("full-1"), "token:ff");
+    VC_AUDIO.el.play = () => Promise.reject(Object.assign(new Error("gesture"), { name: "NotAllowedError" }));
+    await expect(VC_AUDIO.play()).rejects.toMatchObject({ name: "NotAllowedError" });
+    expect(VC_AUDIO.needsGesture).toBe(true);
+    expect(VC_AUDIO.lastError).toMatchObject({ kind: "gesture", code: null });
+
+    VC_AUDIO.el.play = FakeAudio.prototype.play;
+    await VC_AUDIO.play();
+    expect(VC_AUDIO.needsGesture).toBe(false);
+    VC_AUDIO.grantedKeys.clear();
+    VC_AUDIO.el.error = { code: 3 };
+    VC_AUDIO.el.emit("error");
+    await vi.waitFor(() => expect(VC_AUDIO.lastError).toMatchObject({ kind: "media", code: 3 }));
+    expect(VC_AUDIO.needsGesture).toBe(false);
+  });
+
+  it("records nothing by default and, when enabled, keeps a bounded ring without URLs, wallets, or grant IDs", async () => {
+    VC_AUDIO.diagnostics.events = [];
+    VC_AUDIO.diagnostics.enabled = false;
+    await VC_AUDIO.playGranted(fullTrack, { ...grant("secret-grant-id"), accessUrl: "https://api.example/api/media/secret-grant-id?token=abc" }, "token:ff");
+    expect(VC_AUDIO.diagnostics.events).toHaveLength(0);
+
+    VC_AUDIO.setDiagnosticsEnabled(true);
+    VC_AUDIO.el.error = { code: 3 };
+    VC_AUDIO.grantedKeys.clear();
+    VC_AUDIO.el.emit("error");
+    VC_AUDIO.el.emit("stalled");
+    VC_AUDIO.record("play-rejected", { name: WALLET, host: "https://evil/path?q=1" });
+    for (let i = 0; i < 150; i += 1) VC_AUDIO.el.emit("emptied");
+    const { AUDIO_DEBUG_LIMIT, audioDebugRequested } = await import("./audio.js");
+    expect(VC_AUDIO.diagnostics.events.length).toBe(AUDIO_DEBUG_LIMIT);
+    const text = VC_AUDIO.diagnosticsText();
+    expect(JSON.parse(text)).toEqual({ events: expect.any(Array) });
+    expect(text).not.toMatch(/userAgent/i);
+    expect(text).not.toContain(navigator.userAgent);
+    for (const secret of ["secret-grant-id", "token=abc", "/api/media", WALLET, "6a86efa", "evil", "experience-ff"]) expect(text).not.toContain(secret);
+    expect(audioDebugRequested("?audioDebug=1")).toBe(true);
+    expect(audioDebugRequested("")).toBe(false);
+    expect(audioDebugRequested("?audioDebug=true")).toBe(false);
+  });
+
+  it("records source category and hostname only", async () => {
+    VC_AUDIO.setDiagnosticsEnabled(true);
+    await VC_AUDIO.playGranted(fullTrack, { ...grant("g-9"), accessUrl: "https://api.example/api/media/g-9" }, "token:ff");
+    const select = VC_AUDIO.diagnostics.events.find((e) => e.type === "source-select");
+    expect(select).toMatchObject({ category: "protected", host: "api.example", reused: false });
+    expect(Object.keys(select).sort()).toEqual(expect.arrayContaining(["t", "type", "category", "host"]));
+  });
+});
