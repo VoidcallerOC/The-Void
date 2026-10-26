@@ -1,4 +1,5 @@
 import { VC_DATA } from "../data.js";
+import { useState } from "react";
 import { useAudio, fmt } from "../lib/audio.js";
 import { PlayerBtn, TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
@@ -40,6 +41,47 @@ function MasterVolume({ audio }) {
   );
 }
 
+async function copyText(text) {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* Fall back to a hidden textarea below. */ }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand?.("copy") ?? false;
+    document.body.removeChild(area);
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+// Opt-in (?audioDebug=1) panel. Shows only the sanitized event ring from audio.js.
+function AudioDebugPanel({ audio }) {
+  const [copied, setCopied] = useState("");
+  const events = audio.diagnostics.events;
+  const onCopy = async () => setCopied((await copyText(audio.diagnosticsText())) ? "Copied" : "Copy failed");
+  return (
+    <section aria-label="Audio diagnostics" className="vc-audio-debug" style={{ position: "fixed", bottom: 96, right: 12, zIndex: 91, width: "min(420px, calc(100vw - 24px))", maxHeight: "40vh", overflow: "auto", background: "rgba(6,6,7,0.97)", border: "1px solid var(--vc-ash)", padding: 10, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <strong style={{ color: "var(--vc-bone)" }}>Audio diagnostics ({events.length})</strong>
+        <button type="button" onClick={onCopy} style={{ marginLeft: "auto" }}>Copy diagnostics</button>
+        {copied && <span role="status">{copied}</span>}
+      </div>
+      <ol style={{ margin: 0, paddingLeft: 18 }}>
+        {events.slice(-30).map((event, i) => (
+          <li key={`${event.t}-${i}`}>{[event.type, event.category, event.host, event.reused != null ? (event.reused ? "reused" : "reset") : null, event.code != null ? `code=${event.code}` : null, event.name, `net=${event.networkState ?? "-"}`, `ready=${event.readyState ?? "-"}`].filter(Boolean).join(" ")}</li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 // ---------------- Bottom audio bar (sticky) ----------------
 export function StickyPlayer() {
   const audio = useAudio();
@@ -51,7 +93,8 @@ export function StickyPlayer() {
   // A bearer stream of an experience with its own audio (a demo attached to a
   // token) is named after that experience, not the token's song.
   const title = bearer && cur?.protectedTitle ? cur.protectedTitle : cur.title;
-  const playbackError = audio.lastError && audio.lastError.track === cur ? audio.lastError.message : "";
+  const needsGesture = Boolean(audio.needsGesture);
+  const playbackError = audio.lastError && audio.lastError.track === cur && audio.lastError.kind !== "gesture" ? audio.lastError.message : "";
   const t = audio.el?.currentTime || 0;
   const total = dur ? fmt(dur) : cur.time;
   const frac = dur ? t / dur : 0;
@@ -98,6 +141,7 @@ export function StickyPlayer() {
           )}
           {bearer && <Mark on>BEARER</Mark>}
         </span>
+        {needsGesture && <button type="button" className="vc-sticky-tap-to-play" data-state="tap-to-play" onClick={() => audio.play().catch(() => {})} style={{ alignSelf: "flex-start", fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.08em", color: "var(--vc-bone)", background: "var(--vc-blood)", border: "1px solid var(--vc-crimson)", padding: "4px 8px", cursor: "pointer" }}>Tap to play</button>}
         {playbackError && <span role="status" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--vc-ember)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playbackError}</span>}
       </div>
       <div
@@ -136,6 +180,7 @@ export function StickyPlayer() {
           <PlayerBtn label="Next track" onClick={() => audio.next()}><SkipForward size={20} strokeWidth={1.75} fill="currentColor" /></PlayerBtn>
         </div>
       </div>
+      {audio.diagnostics.enabled && <AudioDebugPanel audio={audio} />}
     </div>
   );
 }
