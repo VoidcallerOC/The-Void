@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SALE_AVAILABILITY,
+  SALE_WINDOW,
   isOpenEditionSupply,
   primarySaleAvailability,
   saleAvailabilityLabel,
@@ -51,5 +52,32 @@ describe("primary sale availability", () => {
   it("accepts bigint sale tuples as read from chain", () => {
     const sale = { configured: true, paused: false, priceWei: 10n ** 16n, maxSupply: 0n, sold: 1n, perWalletLimit: 1n, startTime: 0n, endTime: BigInt(END) };
     expect(primarySaleAvailability(sale, { editionSupply: "0", now: NOW }).state).toBe(SALE_AVAILABILITY.OPEN);
+  });
+});
+
+describe("sale window keeps schedule and pause distinguishable", () => {
+  // Mirrors mainnet Forgive & Forget sale tokenId 1: configured, paused, start 2026-10-26 13:00 UTC.
+  const sale = { configured: true, paused: true, priceWei: "250000000000000000", maxSupply: "0", sold: "0", perWalletLimit: "3", startTime: "1793019600", endTime: "1793710799" };
+  const before = 1792982165 * 1000;
+  const during = 1793020000 * 1000;
+  const after = 1793710800 * 1000;
+
+  it("reports paused before start with a scheduled window", () => {
+    const result = primarySaleAvailability(sale, { now: before });
+    expect(result).toMatchObject({ state: SALE_AVAILABILITY.PAUSED, window: SALE_WINDOW.SCHEDULED });
+    expect(saleAvailabilityLabel(result)).toMatch(/^Sale paused · scheduled Oct 26, 2026/);
+  });
+
+  it("stays paused after the start time until the pause flag is cleared", () => {
+    const result = primarySaleAvailability(sale, { now: during });
+    expect(result).toMatchObject({ state: SALE_AVAILABILITY.PAUSED, window: SALE_WINDOW.IN_WINDOW });
+    expect(saleAvailabilityLabel(result)).toBe("Sale paused");
+  });
+
+  it("separates not-started, open and ended when unpaused", () => {
+    const live = { ...sale, paused: false };
+    expect(primarySaleAvailability(live, { now: before })).toMatchObject({ state: SALE_AVAILABILITY.NOT_STARTED, window: SALE_WINDOW.SCHEDULED });
+    expect(primarySaleAvailability(live, { now: during })).toMatchObject({ state: SALE_AVAILABILITY.OPEN, window: SALE_WINDOW.IN_WINDOW });
+    expect(primarySaleAvailability(live, { now: after })).toMatchObject({ state: SALE_AVAILABILITY.ENDED, window: SALE_WINDOW.ENDED });
   });
 });

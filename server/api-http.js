@@ -5,7 +5,7 @@ import { ApiError, apiErrorFrom, errorResponse } from "./api-errors.js";
 
 const challengeLimiter = createRateLimiter({ limit: 8, windowMs: 10 * 60 * 1000 });
 const claimVoucherLimiter = createRateLimiter({ limit: 6, windowMs: 10 * 60 * 1000 });
-const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" };
 
 async function readJson(request) {
   const chunks = [];

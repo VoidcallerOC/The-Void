@@ -16,6 +16,15 @@ export const SALE_AVAILABILITY = Object.freeze({
 
 const STATES = new Set(Object.values(SALE_AVAILABILITY));
 
+// Where `now` falls against the sale's start/end times, independent of the pause flag and
+// the cap. `state` follows the contract's revert order, so a sale that is both paused and
+// before its start reports PAUSED; `window` keeps the schedule visible in that case.
+export const SALE_WINDOW = Object.freeze({
+  SCHEDULED: "scheduled",
+  IN_WINDOW: "in-window",
+  ENDED: "ended",
+});
+
 function whole(value) {
   if (value === null || value === undefined || value === "") return 0n;
   try {
@@ -51,7 +60,8 @@ export function primarySaleAvailability(sale, { editionSupply = null, now = Date
   const end = whole(sale.endTime);
   const cap = whole(sale.maxSupply);
   const sold = whole(sale.sold);
-  const base = { openEdition, startTime: Number(start), endTime: Number(end), unlimited: cap === 0n };
+  const window = start !== 0n && nowSeconds < start ? SALE_WINDOW.SCHEDULED : end !== 0n && nowSeconds > end ? SALE_WINDOW.ENDED : SALE_WINDOW.IN_WINDOW;
+  const base = { openEdition, startTime: Number(start), endTime: Number(end), unlimited: cap === 0n, window };
   if (cap !== 0n && sold >= cap) return { ...base, state: SALE_AVAILABILITY.SOLD_OUT };
   if (sale.paused === true) return { ...base, state: SALE_AVAILABILITY.PAUSED };
   if (start !== 0n && nowSeconds < start) return { ...base, state: SALE_AVAILABILITY.NOT_STARTED };
@@ -85,8 +95,11 @@ export function saleAvailabilityLabel(availability) {
       return "Sale ended";
     case SALE_AVAILABILITY.SOLD_OUT:
       return "Sold out";
-    case SALE_AVAILABILITY.PAUSED:
-      return "Sale paused";
+    case SALE_AVAILABILITY.PAUSED: {
+      // Paused before the start time stays paused at the start unless the owner unpauses it.
+      const starts = availability.window === SALE_WINDOW.SCHEDULED ? formatSaleTime(availability.startTime) : "";
+      return starts ? `Sale paused · scheduled ${starts}` : "Sale paused";
+    }
     default:
       return "Not yet on sale";
   }

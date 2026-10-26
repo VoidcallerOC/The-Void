@@ -46,7 +46,12 @@ describe("public edition availability", () => {
 
   it("sale that has not started is not-started", async () => {
     const { instance } = api([factoryRow], async () => ({ ...OPEN_SALE, startTime: String(Math.floor(NOW / 1000) + 3600) }));
-    await expect(instance.getEdition({ id: "e-factory" })).resolves.toMatchObject({ primary_availability: "not-started" });
+    await expect(instance.getEdition({ id: "e-factory" })).resolves.toMatchObject({ primary_availability: "not-started", primary_sale_window: "scheduled" });
+  });
+
+  it("paused sale before its start reports paused with a scheduled window", async () => {
+    const { instance } = api([factoryRow], async () => ({ ...OPEN_SALE, paused: true, startTime: String(Math.floor(NOW / 1000) + 3600) }));
+    await expect(instance.getEdition({ id: "e-factory" })).resolves.toMatchObject({ primary_availability: "paused", primary_sale_window: "scheduled" });
   });
 
   it("leaves shared-contract editions untouched and survives a failed sale read", async () => {

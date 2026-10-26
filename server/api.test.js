@@ -499,8 +499,9 @@ describe("indexer health covers factory-discovered release contracts", () => {
     expect(checkpoints[0].contracts.map((contract) => contract.address)).toEqual([staticRelease, staticSale, clone, cloneSale]);
     const ready = await service.getOperationalHealth();
     expect(ready.ok).toBe(true);
-    expect(ready.contracts.release).toMatchObject({ healthy: true, address: staticRelease, addresses: [staticRelease, clone] });
-    expect(ready.contracts.primarySale).toMatchObject({ healthy: true, address: staticSale, addresses: [staticSale, cloneSale] });
+    // The factory-discovered clone and sale are reported as current; static entries stay listed.
+    expect(ready.contracts.release).toMatchObject({ healthy: true, address: clone, addresses: [staticRelease, clone], staticAddresses: [staticRelease] });
+    expect(ready.contracts.primarySale).toMatchObject({ healthy: true, address: cloneSale, addresses: [staticSale, cloneSale], staticAddresses: [staticSale] });
   });
 
   it("fails readiness closed when a discovered clone checkpoint is FAILED or missing", async () => {

@@ -201,7 +201,9 @@ export const VOIDCALLER_CATALOG = createCatalog({
 // Main-page "Fuji certified volume" is scoped to the published Fuji edition,
 // Forgive & Forget (forgive-forget-18). The earlier Fuji VOIDCALLER test edition
 // was archived by migration 027.
-export const FUJI_VOLUME_IDENTITY = Object.freeze({
+// The mainnet build ships no Fuji identity: the Hero then shows no volume rather than
+// querying the mainnet API for a Fuji (43113) token.
+export const FUJI_VOLUME_IDENTITY = import.meta.env.VITE_RELEASE_NETWORK === "mainnet" ? null : Object.freeze({
   releaseId: "release-b96d6a64-3379-4da0-b834-ae2e00bf9571",
   editionId: "edition-e2e5abb4-bf03-42d1-9aea-c0b8492c3267",
   chainId: 43113,
