@@ -64,7 +64,7 @@ describe("site header · navigation inventory", () => {
     renderHeader({ path: "/discover" });
     const logo = document.querySelector("nav a[href='/']");
     expect(logo).toBeTruthy();
-    expect(within(logo).getByAltText("VOIDCALLER")).toBeTruthy();
+    expect(within(logo).getByAltText("The Void")).toBeTruthy();
   });
 
   it("gives the mobile menu the same destinations in the same order, and closes it after a choice", () => {
