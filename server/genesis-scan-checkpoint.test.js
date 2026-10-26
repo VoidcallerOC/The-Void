@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchRequest, Interface, Wallet, getAddress, id } from "ethers";
-import { CONFIG_BINDING_CACHE_MS, GENESIS_CHAIN_ID, GENESIS_CONTRACT, createGenesisClaimService, createGenesisRpcProvider, isRetryableProviderError, loadGenesisClaimConfig, retryAfterMs } from "./genesis-claim.js";
+import { CONFIG_BINDING_CACHE_MS, GENESIS_CHAIN_ID, GENESIS_CONTRACT, createGenesisClaimService, createGenesisRpcProvider, createGenesisRpcQueue, isRetryableProviderError, loadGenesisClaimConfig, retryAfterMs } from "./genesis-claim.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 import { checkpointDigest, createGenesisScanCheckpointStore, createMemoryGenesisScanCheckpointStore, validateCheckpoint } from "./genesis-scan-checkpoint-store.js";
 
@@ -162,7 +162,7 @@ describe("persisted Genesis scan checkpoint", () => {
 
     expect(restarted.clock.t - startedAt).toBeLessThan(45_000);
     expect(cl.genesis.getLogs).toHaveBeenCalledTimes(1);
-    expect(restarted.sleep.mock.calls).toEqual([[100]]); // initial request pacing only; no 57-second cooldown or retry
+    expect(restarted.sleep.mock.calls).toEqual([[100], [100], [100]]); // head plus three balance waits; no 57-second cooldown or retry
     expect(row(cl)).toEqual(before);
   });
 
@@ -416,6 +416,39 @@ describe("Genesis RPC provider: ethers' internal retries are off; our backoff se
     expect(bodies.every((body) => !Array.isArray(body))).toBe(true);
     expect(bodies.map((body) => body.method)).not.toContain("eth_chainId");
     provider.destroy();
+  });
+});
+
+describe("Genesis RPC queue", () => {
+  it("serializes concurrent calls and applies the configured interval between completions", async () => {
+    let clock = 0;
+    const sleep = vi.fn(async (ms) => { clock += ms; });
+    const queue = createGenesisRpcQueue({ paceMs: 250, now: () => clock, sleep });
+    const active = { count: 0, maximum: 0 };
+    const starts = [];
+    const call = (value) => queue.run(async () => {
+      active.count += 1;
+      active.maximum = Math.max(active.maximum, active.count);
+      starts.push(clock);
+      await Promise.resolve();
+      active.count -= 1;
+      return value;
+    });
+    await expect(Promise.all([call("head"), call("balance-0"), call("balance-1")])).resolves.toEqual(["head", "balance-0", "balance-1"]);
+    expect(starts).toEqual([0, 250, 500]);
+    expect(active.maximum).toBe(1);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start a queued request when its scan deadline cannot fit the configured wait", async () => {
+    let clock = 0;
+    const sleep = vi.fn(async (ms) => { clock += ms; });
+    const queue = createGenesisRpcQueue({ paceMs: 100, now: () => clock, sleep });
+    const second = vi.fn();
+    await queue.run(async () => "first", { deadline: 1_000 });
+    await expect(queue.run(second, { deadline: 50 })).rejects.toMatchObject({ name: "GenesisScanBudgetError", code: "TIMEOUT" });
+    expect(second).not.toHaveBeenCalled();
+    expect(clock).toBe(0);
   });
 });
 
