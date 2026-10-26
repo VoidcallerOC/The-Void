@@ -158,7 +158,12 @@ function GenesisClaimLanding({ catalog }) {
         <StateMark state={state.status === "ready" && phase === GENESIS_CLAIM_PHASES.GENESIS ? CLAIM_PHASES.ELIGIBLE : CLAIM_PHASES.CLAIM_UNAVAILABLE} />
       </header>
       <div className="vc-claim-copy">
-        {showCountdown && <GenesisCountdown />}
+        {showCountdown && (
+          <div className="vc-claim-hero">
+            <GenesisCountdown />
+            <img className="vc-claim-emblem" src="/assets/voidcaller-primary-dark-1024.png" width="851" height="1024" alt="Voidcaller emblem" />
+          </div>
+        )}
         {state.status === "loading" && <p className="vc-body vc-body-muted">Checking the claim target.</p>}
         {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
         {state.status === "ready" && (
