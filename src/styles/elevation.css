@@ -1,0 +1,229 @@
+/* ============================================================
+   THE VOID — elevation layer
+   Shared shell, focus, form, card and state primitives applied on
+   top of colors_and_type.css. Presentation only: no component
+   behaviour depends on anything in this file.
+   ============================================================ */
+
+:root {
+  --vc-ivory:       #E6DFCF;   /* distressed ivory, secondary display ink */
+  --page-max:       1360px;
+  --page-gutter:    clamp(16px, 4vw, 56px);
+  --section-y:      clamp(56px, 9vw, 112px);
+  --focus-ring:     2px solid var(--vc-ember);
+  --focus-offset:   3px;
+  --hairline:       1px solid var(--vc-ash);
+}
+
+html { scroll-behavior: smooth; }
+html, body { overflow-x: clip; }
+body { color: var(--vc-bone); text-rendering: optimizeLegibility; }
+img, video, svg, canvas { max-width: 100%; }
+h1, h2, h3 { text-wrap: balance; overflow-wrap: anywhere; }
+p { text-wrap: pretty; }
+
+/* ---------- Focus: one visible ring everywhere ------------------- */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+:where(a, button, summary):focus:not(:focus-visible) { outline: none; }
+
+/* Skip link — first focusable element in the shell */
+.vc-skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 10000;
+  padding: 12px 18px;
+  background: var(--vc-bone);
+  color: var(--vc-void);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform var(--d-fast) var(--ease-blade);
+}
+.vc-skip-link:focus-visible { transform: none; outline-color: var(--vc-crimson); }
+
+/* ---------- Forms: dark, sharp, legible --------------------------- */
+:where(input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"]), select, textarea) {
+  font-family: var(--font-body);
+  font-size: 16px; /* prevents iOS zoom on focus */
+  color: var(--vc-bone);
+  background-color: var(--vc-abyss);
+  border: 1px solid var(--vc-smoke);
+  border-radius: var(--r-0);
+  padding: 12px 14px;
+  min-height: 44px;
+  max-width: 100%;
+  transition: border-color var(--d-fast) var(--ease-drag);
+}
+:where(input, select, textarea):hover:not(:disabled) { border-color: var(--vc-bone-dim); }
+:where(input, select, textarea):focus-visible { border-color: var(--vc-ember); outline-offset: 0; }
+:where(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
+:where(input, textarea)::placeholder { color: var(--vc-smoke); }
+:where(input[type="checkbox"], input[type="radio"]) { accent-color: var(--vc-crimson); width: 16px; height: 16px; }
+label { overflow-wrap: anywhere; }
+
+/* ---------- Buttons rendered from shared style objects ------------ */
+button:disabled { cursor: not-allowed; }
+
+/* ---------- Release artifacts ------------------------------------ */
+/* Sleeves read as objects on a shelf: hairline frame, inset plate, slow lift. */
+.vc-market-card {
+  position: relative;
+  transition: border-color var(--d-base) var(--ease-drag), transform var(--d-slow) var(--ease-blade);
+}
+.vc-market-card::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(242, 237, 226, 0.04);
+  pointer-events: none;
+}
+.vc-market-card:hover,
+.vc-market-card:focus-within { border-color: var(--vc-smoke); }
+.vc-sleeve-art { overflow: hidden; }
+.vc-sleeve-art img,
+.vc-featured-release img {
+  transition: transform var(--d-slow) var(--ease-blade), filter var(--d-slow) var(--ease-blade);
+  filter: saturate(.9) contrast(1.04);
+}
+.vc-market-card:hover .vc-sleeve-art img,
+.vc-featured-release:hover img,
+.vc-featured-release:focus-visible img { transform: scale(1.025); filter: saturate(1) contrast(1.06); }
+.vc-card-title { overflow-wrap: anywhere; }
+
+.vc-featured-release { transition: border-color var(--d-base) var(--ease-drag); overflow: hidden; }
+.vc-featured-release:hover { border-color: var(--vc-smoke); }
+
+/* Status labels: consistent mono caps chip */
+.vc-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 4px 9px;
+  border: 1px solid var(--vc-ash);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--vc-bone-dim);
+}
+.vc-status-chip.is-live { border-color: var(--vc-blood); color: var(--vc-ember); }
+.vc-status-chip.is-live::before {
+  content: "";
+  width: 6px; height: 6px;
+  background: var(--vc-ember);
+  animation: vc-pulse 2.4s ease-in-out infinite;
+}
+
+/* Loading + empty states */
+[role="status"].vc-card-meta { animation: vc-fade var(--d-slow) var(--ease-drag); }
+.vc-empty-rail { border: 1px dashed var(--vc-smoke); background: linear-gradient(180deg, rgba(42,4,8,.18), transparent 70%); }
+
+/* Section rhythm: hairline label rule */
+.vc-section-header { border-top: var(--hairline); padding-top: 22px; }
+
+/* ---------- Home: the archive ------------------------------------ */
+.vc-home-platform {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: -8px;
+}
+.vc-home-platform img { height: clamp(18px, 3.2vw, 26px); width: auto; display: block; }
+.vc-home-platform span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--vc-bone-dim);
+  border-left: 1px solid var(--vc-blood);
+  padding-left: 14px;
+}
+.vc-home-archive {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--section-y) var(--page-gutter);
+}
+.vc-home-archive-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 24px;
+  border-bottom: var(--hairline);
+  padding-bottom: 22px;
+  margin-bottom: 32px;
+}
+.vc-home-archive-head h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(40px, 7vw, 88px);
+  line-height: .92;
+  text-transform: uppercase;
+  margin: 12px 0 0;
+}
+.vc-home-archive-head p { color: var(--vc-bone-dim); max-width: 520px; margin: 14px 0 0; line-height: 1.6; }
+.vc-home-archive-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.vc-home-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: clamp(16px, 2.4vw, 28px);
+}
+.vc-home-relic {
+  display: flex;
+  flex-direction: column;
+  color: inherit;
+  text-decoration: none;
+  border: var(--hairline);
+  background: var(--vc-abyss);
+  transition: border-color var(--d-base) var(--ease-drag);
+}
+.vc-home-relic:hover, .vc-home-relic:focus-visible { border-color: var(--vc-smoke); }
+.vc-home-relic figure { margin: 0; overflow: hidden; background: #000; border-bottom: var(--hairline); }
+.vc-home-relic img {
+  display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+  filter: saturate(.88) contrast(1.05);
+  transition: transform var(--d-slow) var(--ease-blade), filter var(--d-slow) var(--ease-blade);
+}
+.vc-home-relic:hover img, .vc-home-relic:focus-visible img { transform: scale(1.03); filter: saturate(1) contrast(1.07); }
+.vc-home-relic-copy { padding: 18px 20px 22px; display: grid; gap: 8px; }
+.vc-home-relic-index {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--vc-crimson);
+}
+.vc-home-relic h3 {
+  font-family: var(--font-display); font-weight: 400; font-size: clamp(26px, 3vw, 34px);
+  line-height: .95; text-transform: uppercase; margin: 0;
+}
+.vc-home-relic p { margin: 0; color: var(--vc-bone-dim); font-size: 14px; line-height: 1.55; }
+
+/* ---------- Footer platform mark --------------------------------- */
+.vc-footer-platform { display: flex; align-items: center; gap: 14px; }
+.vc-footer-platform img { display: block; height: 18px; width: auto; opacity: .9; }
+
+@media (max-width: 768px) {
+  .vc-home-archive-head { grid-template-columns: 1fr; }
+  .vc-home-platform span { border-left: 0; padding-left: 0; flex-basis: 100%; }
+  .vc-home-archive-actions > * { flex: 1 1 100%; }
+  .vc-market-card::after { inset: 4px; }
+}
+
+/* ---------- Reduced motion: honour it globally -------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .vc-market-card:hover .vc-sleeve-art img,
+  .vc-featured-release:hover img,
+  .vc-home-relic:hover img { transform: none; }
+}

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { Layout } from "./components/Layout.jsx";
 import { Hero } from "./components/Hero.jsx";
+import { HomeArchive } from "./components/HomeArchive.jsx";
 import { VOID_LIVE } from "./data.js";
 import { DiscoverPage, ArtistsPage, ArtistPage, ReleasePage, EditionPage, ExperiencePage, CollectionPage, CollectionDetailPage, MyCollectionPage, CollectorsPage } from "./components/PlatformPages.jsx";
 import { ArtistStudioPage } from "./components/ArtistStudioPage.jsx";
@@ -28,7 +29,7 @@ const FujiIntegrationPage = SUMMIT_DEMO
   : null;
 
 function HomePage() {
-  return <Hero />;
+  return <><Hero /><HomeArchive /></>;
 }
 function ChroniclePage() {
   return <Chronicle />;
