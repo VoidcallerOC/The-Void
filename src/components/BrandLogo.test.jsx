@@ -10,13 +10,14 @@ const root = process.cwd();
 const publicFile = (urlPath) => resolve(root, "public", urlPath.replace(/^\//, ""));
 
 describe("brand logo and head metadata", () => {
-  it("renders the dark-site lockup with a compact symbol-only source", () => {
+  it("renders the dark-site lockup with a compact wordmark source for the narrowest viewports", () => {
     const { container } = render(<BrandLogo />);
     const img = container.querySelector("img");
     expect(img.getAttribute("alt")).toBe("The Void");
     expect(img.getAttribute("src")).toBe("/brand/the-void/header-lockup-dark.svg");
     const source = container.querySelector("picture source");
-    expect(source.getAttribute("srcset")).toBe("/brand/the-void/nav-symbol-dark-64.png");
+    expect(source.getAttribute("srcset")).toBe("/brand/the-void/header-wordmark-dark.svg");
+    expect(source.getAttribute("media")).toBe("(max-width: 300px)");
     expect(existsSync(publicFile(img.getAttribute("src")))).toBe(true);
     expect(existsSync(publicFile(source.getAttribute("srcset")))).toBe(true);
   });
