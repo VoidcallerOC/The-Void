@@ -465,9 +465,9 @@ export function createRateLimitAwareRpcProvider(url, chainId) {
 }
 
 /**
- * NOT USED BY DEFAULT (see resolveGenesisFallbackProvider); kept for an explicitly injected fallback.
- * Secondary, free, keyless C-Chain endpoint for Genesis eth_getLogs chunks only, when the primary
- * (GENESIS_RPC_URL) fails transiently (429/1015, 599, 5xx gateway, timeout, reset). Head, block hashes,
+ * Secondary, free, keyless C-Chain endpoint (PublicNode, independent of the official Avalanche RPC)
+ * for Genesis eth_getLogs chunks only, when the primary (GENESIS_RPC_URL) fails transiently.
+ * Verified to serve the actual Genesis filter over 100-block ranges. Head, block hashes,
  * balances and anchors are always read from the primary. Limits (see fetchChunkLogs):
  *   - its chain is verified with eth_chainId (43114) before first use; a mismatch disables it;
  *   - for every chunk it must return both boundary blocks (fromBlock and toBlock); a missing block or a
@@ -478,15 +478,21 @@ export function createRateLimitAwareRpcProvider(url, chainId) {
  * A node that keeps block headers but silently drops receipts would still pass these checks; this is an
  * accepted, documented limitation of a free public endpoint (no paid or archive provider is used).
  */
-export const GENESIS_FALLBACK_RPC_URL = "https://avax.api.pocket.network/ext/bc/C/rpc";
+export const GENESIS_FALLBACK_RPC_URL = "https://avalanche-c-chain-rpc.publicnode.com";
 
 /**
- * The fallback is OFF by default: the service never builds one itself. A free endpoint that has block
- * headers but is missing logs cannot be told apart from a range with no transfers, and accepting such an
- * empty answer could let a used Genesis unit qualify again. Only an explicitly injected provider is used.
+ * Default ON: builds a provider for the verified free PublicNode endpoint when nothing is injected.
+ * A free endpoint that has block headers but is missing logs cannot be told apart from a range with no
+ * transfers, and accepting such an empty answer could let a used Genesis unit qualify again. That risk is
+ * accepted only because the endpoint was verified to serve the actual Genesis filter, and every fallback
+ * response still must pass the existing chain, boundary-hash, and completeness checks. Inject null to
+ * disable the fallback entirely (throttled primary then fails closed).
  */
 export function resolveGenesisFallbackProvider(injected) {
-  return injected || null;
+  // Default on: verified free independent endpoint (PublicNode) that serves the actual Genesis
+  // eth_getLogs filter. Still opt-out by injecting null. Uses the same paced/retry/fail-closed path.
+  if (injected !== undefined) return injected;
+  return createGenesisRpcProvider(GENESIS_FALLBACK_RPC_URL);
 }
 
 /** A getLogs response that is not provably complete for the requested chain and range. Fails closed (503). */
@@ -564,8 +570,8 @@ export async function reconcileGenesisReservations({ store, claimContract, readA
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,
-  // Secondary getLogs endpoint. OFF by default: used only when explicitly injected (see
-  // resolveGenesisFallbackProvider). Without it a throttled primary fails closed with a 503.
+  // Secondary getLogs endpoint. ON by default (verified PublicNode C-Chain); inject null to disable.
+  // Uses the same paced queue, bounded retries, cooldown, deadline, and fail-closed checks.
   genesisFallbackProvider = undefined,
   destinationProvider = null,
   signer = null,
@@ -1228,3 +1234,4 @@ export function createGenesisClaimService({
     verifyConfigBindings,
   });
 }
+

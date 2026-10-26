@@ -126,8 +126,8 @@ const resetError = () => Object.assign(new Error("socket hang up"), { code: "ECO
 const timeoutError = () => Object.assign(new Error("request timeout"), { code: "TIMEOUT" });
 
 describe("Genesis getLogs endpoint rotation", () => {
-  it("the documented secondary is the public, keyless Pocket C-Chain endpoint (opt-in by injection only)", () => {
-    expect(GENESIS_FALLBACK_RPC_URL).toBe("https://avax.api.pocket.network/ext/bc/C/rpc");
+  it("the documented secondary is the public, keyless PublicNode C-Chain endpoint (on by default)", () => {
+    expect(GENESIS_FALLBACK_RPC_URL).toBe("https://avalanche-c-chain-rpc.publicnode.com");
     expect(TRANSFER_LOG_CHUNK_BLOCKS).toBe(100);
   });
 
@@ -297,7 +297,7 @@ describe("Genesis getLogs endpoint rotation", () => {
   it("(10) a failed fallback cannot overwrite a newer checkpoint written by another worker", async () => {
     const { cl, fallback, first } = await setup();
     await first.instance.checkEligibility(B);
-    const other = cl.spawn();
+    const other = cl.spawn({ genesisFallbackProvider: null });
     cl.genesis.idle(500);
     await other.instance.checkEligibility(B); // the other worker advances the row
     const newest = structuredClone(row(cl));
@@ -370,11 +370,15 @@ describe("Genesis getLogs endpoint rotation", () => {
     expect(fallback.getLogs).not.toHaveBeenCalled();
   });
 
-  it("(regression) default config has no fallback: a throttled primary fails closed with 503", async () => {
-    expect(resolveGenesisFallbackProvider(undefined)).toBeNull();
+  it("(regression) injected null disables fallback: a throttled primary fails closed with 503", async () => {
     expect(resolveGenesisFallbackProvider(null)).toBeNull();
+    // Default (undefined) constructs the verified PublicNode provider; the URL is not configurable by env.
+    const built = resolveGenesisFallbackProvider(undefined);
+    expect(built).not.toBeNull();
+    expect(typeof built.send).toBe("function");
+    expect(GENESIS_FALLBACK_RPC_URL).toBe("https://avalanche-c-chain-rpc.publicnode.com");
     const cl = cluster();
-    const w = cl.spawn(); // no genesisFallbackProvider injected
+    const w = cl.spawn({ genesisFallbackProvider: null }); // explicitly disable
     await w.instance.issueVoucher(A);
     cl.claimed.add(getAddress(A));
     cl.genesis.idle(500);
@@ -398,7 +402,7 @@ describe("Genesis getLogs endpoint rotation", () => {
 
   it("(regression, known limitation) an injected fallback with matching hashes but no logs cannot be proven incomplete", async () => {
     // Documented: the injected path still trusts an empty result when both boundary hashes match the
-    // primary. This is why the fallback is off by default; this test pins that behavior.
+    // primary. The same limitation applies to the default PublicNode fallback; this test pins the injected path.
     const { cl, fallback, first } = await setup();
     cl.claimed.add(getAddress(A));
     cl.genesis.transfer(A, C, 0n);
@@ -424,3 +428,4 @@ describe("Genesis getLogs endpoint rotation", () => {
     await expect(first.instance.checkEligibility(C)).rejects.toMatchObject({ status: 503 });
   });
 });
+

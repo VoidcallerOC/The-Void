@@ -77,6 +77,9 @@ function worker({ genesis, checkpointStore, reservations, claimed = new Set(), c
     config: loadGenesisClaimConfig(ENV),
     signer: { signTypedData, address: ENV.GENESIS_CLAIM_SIGNER_ADDRESS },
     genesisProvider: genesis,
+    // Primary-only by default: these tests cover the primary retry/checkpoint path.
+    // The PublicNode default is covered in genesis-rpc-rotation.test.js; inject to opt in.
+    genesisFallbackProvider: null,
     reservationStore: reservations,
     checkpointStore,
     bindingReader,
