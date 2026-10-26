@@ -225,7 +225,10 @@ describe.skipIf(!testDatabaseUrl)("Retire forgive-forget-6 for the sequential-ID
     // reports every recorded migration; exactly 049 is new.
     const recorded = (await q("SELECT name FROM schema_migrations ORDER BY name")).map((row) => row.name);
     expect(recorded).not.toContain(MIGRATION);
-    expect((await migrate({ pool, config })).applied).toEqual([...recorded, MIGRATION]);
+    // Later migrations (050+) may follow it; none may come before it.
+    const { applied } = await migrate({ pool, config });
+    expect(applied.slice(0, recorded.length + 1)).toEqual([...recorded, MIGRATION]);
+    expect(applied.slice(recorded.length + 1).every((name) => name > MIGRATION)).toBe(true);
     await migrate({ pool, config });
     expect(await q("SELECT count(*)::int AS n FROM schema_migrations WHERE name=$1", [MIGRATION])).toEqual([{ n: 1 }]);
     expect(await q("SELECT count(*)::int AS n FROM audit_events WHERE event_type='STUDIO_RELEASE_ARCHIVED_BY_MIGRATION' AND payload->>'migration'=$1", [MIGRATION])).toEqual([{ n: 1 }]);

@@ -27,6 +27,7 @@ import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { checkGenesisSignerConfig, createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
 import { createGenesisClaimReservationStore } from "./genesis-claim-store.js";
+import { createGenesisScanCheckpointStore } from "./genesis-scan-checkpoint-store.js";
 import { createXAccountLinkService, loadXLinkConfig } from "./x-link.js";
 import { primarySaleStateReaderFromEnv } from "./primary-sale-state.js";
 
@@ -76,7 +77,7 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   logger[signerCheck.status === "MATCH" || signerCheck.status === "ABSENT" ? "info" : "error"]?.("genesis.signer.check", signerCheck);
   let genesisClaim = null;
   try {
-    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env), reservationStore: createGenesisClaimReservationStore(pool) });
+    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env), reservationStore: createGenesisClaimReservationStore(pool), checkpointStore: createGenesisScanCheckpointStore(pool) });
   } catch (error) {
     logger.error?.("genesis.claim.disabled", { error: error.message });
   }
