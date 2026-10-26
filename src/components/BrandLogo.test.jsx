@@ -13,10 +13,10 @@ describe("brand logo and head metadata", () => {
   it("renders the dark-site lockup with a compact symbol-only source", () => {
     const { container } = render(<BrandLogo />);
     const img = container.querySelector("img");
-    expect(img.getAttribute("alt")).toBe("VOIDCALLER");
-    expect(img.getAttribute("src")).toBe("/brand/header-lockup-dark.svg");
+    expect(img.getAttribute("alt")).toBe("The Void");
+    expect(img.getAttribute("src")).toBe("/brand/the-void/header-lockup-dark.svg");
     const source = container.querySelector("picture source");
-    expect(source.getAttribute("srcset")).toBe("/brand/nav-mark-dark.svg");
+    expect(source.getAttribute("srcset")).toBe("/brand/the-void/nav-symbol-dark-64.png");
     expect(existsSync(publicFile(img.getAttribute("src")))).toBe(true);
     expect(existsSync(publicFile(source.getAttribute("srcset")))).toBe(true);
   });

@@ -6,11 +6,11 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-rea
 function Mark({ children, on }) {
   return (
     <span style={{
-      fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em",
+      fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 500, lineHeight: 1, letterSpacing: "0.14em",
       color: on ? "#fff" : "var(--vc-crimson)",
       background: on ? "var(--vc-blood)" : "transparent",
       border: `1px solid ${on ? "var(--vc-blood)" : "var(--vc-crimson)"}`,
-      padding: "1px 5px", flexShrink: 0,
+      padding: "4px 8px", flexShrink: 0,
     }}>
       {children}
     </span>
@@ -73,7 +73,7 @@ export function StickyPlayer() {
         left: 0,
         right: 0,
         zIndex: 90,
-        background: "rgba(10,10,11,0.92)",
+        background: "rgba(6,6,7,0.97)",
         backdropFilter: "blur(14px)",
         borderTop: "1px solid var(--vc-ash)",
         padding: "12px clamp(14px, 4vw, 24px)",
@@ -82,23 +82,23 @@ export function StickyPlayer() {
         gap: 18,
       }}
     >
-      <TrackArt art={art} vid={cur?.artVid} style={{ width: 56, height: 56, objectFit: "cover", filter: "contrast(1.1)", flexShrink: 0, display: "block" }} />
-      <div className="vc-sticky-meta" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--vc-crimson)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <TrackArt art={art} vid={cur?.artVid} style={{ width: 64, height: 64, objectFit: "cover", filter: "contrast(1.1)", flexShrink: 0, display: "block" }} />
+      <div className="vc-sticky-meta" style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: "0 1 440px" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--vc-ember)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {label}
         </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 400, fontSize: 18, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <span style={{ fontFamily: "var(--font-display)", fontWeight: 400, fontSize: "clamp(20px, 2.2vw, 26px)", lineHeight: 1.05, color: "var(--vc-bone)", textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
             {title}
           </span>
           {preview && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.16em", color: "var(--vc-crimson)", border: "1px solid var(--vc-crimson)", padding: "1px 5px", flexShrink: 0 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 500, letterSpacing: "0.14em", lineHeight: 1, color: "var(--vc-bone)", background: "rgba(184,7,16,0.35)", border: "1px solid var(--vc-crimson)", padding: "4px 8px", flexShrink: 0 }}>
               PREVIEW
             </span>
           )}
           {bearer && <Mark on>BEARER</Mark>}
         </span>
-        {playbackError && <span role="status" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--vc-crimson)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playbackError}</span>}
+        {playbackError && <span role="status" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--vc-ember)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playbackError}</span>}
       </div>
       <div
         className="vc-sticky-seek"
@@ -123,7 +123,7 @@ export function StickyPlayer() {
           onChange={onSeekInput}
         />
       </div>
-      <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--vc-bone-dim)" }}>{fmt(t)} / {total}</span>
+      <span className="vc-sticky-time" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--vc-bone-dim)", fontVariantNumeric: "tabular-nums" }}>{fmt(t)} / {total}</span>
       <div className="vc-sticky-controls" style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto", flexShrink: 0 }}>
         <MasterVolume audio={audio} />
         <div style={{ display: "flex", gap: 6 }}>

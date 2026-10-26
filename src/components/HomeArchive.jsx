@@ -1,17 +1,28 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
+import { releaseCoverSources } from "../lib/release-cover.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import { marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn } from "../lib/marketplace-chrome.js";
 
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
 
+export function ReleaseCover({ sources, title }) {
+  const [index, setIndex] = useState(0);
+  const src = sources[index];
+  if (!src) {
+    return <div className="vc-home-relic-blank" role="img" aria-label={`${title}: artwork unavailable`}><span>No artwork</span></div>;
+  }
+  return <img src={src} alt={`${title} artwork`} loading="lazy" decoding="async" onError={() => setIndex((current) => current + 1)} />;
+}
+
 // Homepage shelf: the catalog's real releases, presented as numbered objects in the archive.
 // Reads the same catalog as Discover; it states nothing about sale or ownership.
 export function HomeArchive() {
   const catalog = useMarketplaceCatalogs();
-  const records = marketplaceCatalog([collapsePublicCatalog(catalog)]).filter((record) => record.release?.artwork);
+  const records = marketplaceCatalog([collapsePublicCatalog(catalog)]);
   return (
     <section className="vc-home-archive" aria-labelledby="home-archive-heading">
       <div className="vc-home-archive-head">
@@ -30,7 +41,7 @@ export function HomeArchive() {
           {records.map((record, index) => (
             <Link key={record.release.id} to={`/release/${record.release.id}`} className="vc-home-relic">
               <figure>
-                <img src={record.release.artwork} alt={`${record.release.title} artwork`} loading="lazy" decoding="async" />
+                <ReleaseCover key={record.release.id} sources={releaseCoverSources(record)} title={record.release.title} />
               </figure>
               <div className="vc-home-relic-copy">
                 <span className="vc-home-relic-index">Relic {ROMAN[index] || index + 1} · {record.artist?.name || "The Void"}</span>

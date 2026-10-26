@@ -227,3 +227,30 @@ button:disabled { cursor: not-allowed; }
   .vc-featured-release:hover img,
   .vc-home-relic:hover img { transform: none; }
 }
+
+/* ---------- Footer brand block ------------------------------------ */
+.vc-footer-lockup { display: block; width: fit-content; margin-bottom: 4px; }
+.vc-footer-lockup img { display: block; width: clamp(220px, 24vw, 320px); height: auto; }
+.vc-footer-tagline {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--vc-bone-dim);
+}
+.vc-footer-tagline span { color: var(--vc-crimson); padding: 0 6px; }
+.vc-home-relic-blank {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-linear-gradient(135deg, var(--vc-abyss) 0 12px, var(--vc-pit) 12px 13px);
+}
+.vc-home-relic-blank span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--vc-bone-dim);
+}
