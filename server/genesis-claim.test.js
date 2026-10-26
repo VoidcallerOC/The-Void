@@ -13,6 +13,7 @@ import {
   checkGenesisSignerConfig,
   loadGenesisClaimConfig,
   reconcileGenesisReservations,
+  scanOptions,
 } from "./genesis-claim.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 
@@ -88,6 +89,9 @@ function genesisChain(holdings = {}, { chainId = GENESIS_CHAIN_ID } = {}) {
     idle: () => { head += 1; return head; },
     getNetwork: vi.fn(async () => ({ chainId: BigInt(chainId) })),
     getBlockNumber: vi.fn(async () => head),
+    // Deterministic block hashes; bumping `fork` simulates a reorg that changes every hash.
+    fork: 0,
+    getBlock: vi.fn(async (block) => (Number(block) > head ? null : { number: Number(block), hash: id(`block:${chain.fork}:${Number(block)}`) })),
     call: vi.fn(async ({ to, data, blockTag }) => {
       calls.push({ to, blockTag });
       const [wallet, tokenId] = genesisIface.decodeFunctionData("balanceOf", data);
@@ -135,6 +139,8 @@ function service({ holdings = { [`${WALLET}:0`]: 1n }, alreadyClaimed = false, c
     destinationClock: target.destinationClock,
     clock: () => clock,
     nonce: () => counter++,
+    sleep: async () => {},
+    random: () => 0.5,
     ...overrides,
   });
   return { instance, signTypedData, bindingReader, claimStateReader: target.claimStateReader, chain: genesis, dest: target, store: reservations };
@@ -858,16 +864,19 @@ describe("Genesis transfer history over a public RPC that caps eth_getLogs at 10
     expect(firstOfNext).toBe(first + 100);
     chain.advance(250);
     await expect(instance.checkEligibility(C)).resolves.toMatchObject({ eligible: false, holdingUsed: true });
+    const firstScan = chain.ranges.length;
     await expect(instance.checkEligibility(D)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
+    // The second request reuses the verified history and rescans only the unconfirmed tail.
+    expect(chain.ranges.slice(firstScan)).toEqual([[chain.head - 31, chain.head]]);
     // Contiguous, non-overlapping inclusive ranges from the block after the claim to the head.
     let expected = first;
-    for (const [from, to] of chain.ranges) {
+    for (const [from, to] of chain.ranges.slice(0, firstScan)) {
       expect(from).toBe(expected);
       expect(to - from + 1).toBeLessThanOrEqual(100);
       expected = to + 1;
     }
     expect(expected - 1).toBe(chain.head);
-    const returned = (await Promise.all(chain.getLogs.mock.results.map((result) => result.value))).flat().map((log) => log.blockNumber);
+    const returned = (await Promise.all(chain.getLogs.mock.results.slice(0, firstScan).map((result) => result.value))).flat().map((log) => log.blockNumber);
     expect(returned.filter((block) => block === lastOfChunk)).toHaveLength(1);
     expect(returned.filter((block) => block === firstOfNext)).toHaveLength(1);
   });
@@ -885,7 +894,8 @@ describe("Genesis transfer history over a public RPC that caps eth_getLogs at 10
     const failure = new Error(`server response 429 Too Many Requests (url=${RPC_SECRET_URL}, wallet=${B})`);
     failure.code = "SERVER_ERROR";
     failure.info = { responseStatus: "429 Too Many Requests", requestUrl: RPC_SECRET_URL };
-    chain.getLogs.mockRejectedValueOnce(failure);
+    // Persistent throttling: retries are exhausted and the request fails closed.
+    chain.getLogs.mockRejectedValue(failure);
     await expect(call(instance)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
     expect(signTypedData).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -920,7 +930,7 @@ describe("Genesis transfer history over a public RPC that caps eth_getLogs at 10
     const { instance } = service({ chain, logger });
     await instance.issueVoucher(A);
     chain.advance(5_000);
-    chain.getLogs.mockRejectedValueOnce(Object.assign(new Error(`bad ${RPC_SECRET_URL}`), { error: { code: -32005, message: "limit exceeded" } }));
+    chain.getLogs.mockRejectedValue(Object.assign(new Error(`bad ${RPC_SECRET_URL}`), { error: { code: -32005, message: "limit exceeded" } }));
     const handler = createApiHandler({ service: {}, genesisClaim: instance, logger });
     const response = { status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
     const payload = JSON.stringify({ wallet: B });
@@ -930,5 +940,151 @@ describe("Genesis transfer history over a public RPC that caps eth_getLogs at 10
     expect(JSON.parse(response.body).error).toMatchObject({ code: "ELIGIBILITY_UNAVAILABLE", requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02" });
     expect(response.body).not.toContain("rpc.provider.example");
     expect(logger.warn.mock.calls).toEqual([["genesis.eligibility.upstream_error", { requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02", stage: "getLogs", providerError: { rpcCode: -32005 } }]]);
+  });
+});
+
+describe("Genesis transfer scan: backoff, pacing and verified reuse on a free public RPC", () => {
+  const httpError = (status, headers = {}) => Object.assign(new Error(`server response ${status}`), { code: "SERVER_ERROR", info: { responseStatus: `${status} Error`, responseHeaders: headers } });
+  /** A service on a fake clock: sleep advances time, so pacing, backoff and the budget are deterministic. */
+  function scanned({ env = {}, holdings = { [`${A}:0`]: 1n, [`${B}:1`]: 1n } } = {}) {
+    const clock = { t: 0 };
+    const sleep = vi.fn(async (ms) => { clock.t += ms; });
+    const chain = genesisChain(holdings);
+    const ctx = service({ chain, env, sleep, monotonicNow: () => clock.t, logger: { warn: vi.fn() } });
+    return { ...ctx, sleep, clock };
+  }
+  const prepare = async (ctx, blocks = 5_000) => {
+    await ctx.instance.issueVoucher(A);
+    for (let i = 0; i < blocks; i += 1) ctx.chain.idle();
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.getBlock.mockClear();
+    ctx.sleep.mockClear();
+  };
+  const retryWaits = (sleep) => sleep.mock.calls.map(([ms]) => ms).filter((ms) => ms !== 100);
+
+  it("retries a 429 with jittered backoff, then succeeds", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValueOnce(httpError(429));
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(51);
+    expect(retryWaits(ctx.sleep)).toEqual([125]); // random 0.5 x base 250 (full jitter, first retry)
+  });
+
+  it.each([
+    ["provider status 599", httpError(599)],
+    ["502 gateway", httpError(502)],
+    ["ECONNRESET", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })],
+    ["socket hang up", new Error("socket hang up")],
+    ["timeout abort", Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" })],
+  ])("retries %s, then succeeds", async (_label, failure) => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(retryWaits(ctx.sleep)).toEqual([125, 250]);
+  });
+
+  it("honors Retry-After, capped at the maximum delay", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValueOnce(httpError(429, { "retry-after": "2" })).mockRejectedValueOnce(httpError(429, { "retry-after": "120" }));
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(retryWaits(ctx.sleep)).toEqual([2_000, 4_000]);
+  });
+
+  it("fails closed with 503 when retries are exhausted", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValue(httpError(429));
+    await expect(ctx.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(5);
+  });
+
+  it("fails fast on a non-retryable error such as an invalid block range", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValue(Object.assign(new Error("bad"), { error: { code: -32602, message: "block range too large" } }));
+    await expect(ctx.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(1);
+    expect(retryWaits(ctx.sleep)).toEqual([]);
+  });
+
+  it("fails closed when the scan exceeds its time budget instead of hanging", async () => {
+    const ctx = scanned({ env: { GENESIS_SCAN_BUDGET_MS: "3000", GENESIS_RPC_MAX_ATTEMPTS: "10" } });
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValue(httpError(503, { "retry-after": "1" }));
+    await expect(ctx.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(ctx.chain.getLogs.mock.calls.length).toBeLessThan(10);
+    expect(ctx.clock.t).toBeLessThanOrEqual(3_000 + 100);
+  });
+
+  it("paces sequential getLogs calls by the configured interval", async () => {
+    const ctx = scanned({ env: { GENESIS_RPC_PACE_MS: "250" } });
+    await prepare(ctx);
+    await ctx.instance.checkEligibility(B);
+    expect(ctx.sleep.mock.calls.length).toBeGreaterThanOrEqual(50);
+    expect(ctx.sleep.mock.calls.every(([ms]) => ms > 0 && ms <= 250)).toBe(true);
+  });
+
+  it("reuses the verified history: a repeat request re-checks one block hash and scans only the unconfirmed tail", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    await ctx.instance.checkEligibility(B);
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(50);
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.getBlock.mockClear();
+    ctx.chain.idle();
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(1);
+    expect(ctx.chain.getLogs.mock.calls[0][0]).toMatchObject({ fromBlock: ctx.chain.head - 32, toBlock: ctx.chain.head });
+    expect(ctx.chain.getBlock.mock.calls.map(([block]) => block)).toEqual([ctx.chain.head - 33, ctx.chain.head - 32]);
+  });
+
+  it("still counts a transfer made after the cached range", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    await ctx.instance.checkEligibility(B);
+    ctx.dest.redeem(A);
+    ctx.chain.transfer(A, C, 0n); // the used unit moves to C
+    await expect(ctx.instance.checkEligibility(C)).resolves.toMatchObject({ eligible: false, holdingUsed: true });
+  });
+
+  it("discards the cache and rescans everything when the cached end block hash changed (reorg)", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    await ctx.instance.checkEligibility(B);
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.fork += 1;
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(50);
+  });
+
+  it("a partial scan failure returns 503 and caches nothing; the next request rescans from the start", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    const real = ctx.chain.getLogs.getMockImplementation();
+    let calls = 0;
+    ctx.chain.getLogs.mockImplementation(async (filter) => { calls += 1; if (calls === 20) throw new Error("unexpected"); return real(filter); });
+    await expect(ctx.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    ctx.chain.getLogs.mockClear();
+    ctx.chain.getLogs.mockImplementation(real);
+    await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(ctx.chain.getLogs).toHaveBeenCalledTimes(50);
+  });
+
+  it("concurrent requests share one scan instead of duplicating it", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    const results = await Promise.all([ctx.instance.checkEligibility(B), ctx.instance.checkEligibility(B), ctx.instance.checkEligibility(C)]);
+    expect(results.map((r) => r.eligible)).toEqual([true, true, false]);
+    expect(ctx.chain.getLogs.mock.calls.length).toBeLessThanOrEqual(50 + 2);
+  });
+
+  it("caps the chunk at 100 blocks: smaller is allowed, larger is refused", () => {
+    expect(scanOptions({}).chunkBlocks).toBe(100);
+    expect(scanOptions({ GENESIS_LOG_CHUNK_BLOCKS: "50" }).chunkBlocks).toBe(50);
+    expect(() => scanOptions({ GENESIS_LOG_CHUNK_BLOCKS: "101" })).toThrow(/1 to 100/);
+    expect(() => scanOptions({ GENESIS_SCAN_CONFIRMATIONS: "0" })).toThrow();
   });
 });
