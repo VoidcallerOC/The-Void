@@ -14,6 +14,8 @@ import {
   loadGenesisClaimConfig,
   reconcileGenesisReservations,
   scanOptions,
+  createRateLimitAwareRpcProvider,
+  GENESIS_RPC_REQUEST_TIMEOUT_MS,
 } from "./genesis-claim.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 
@@ -603,7 +605,16 @@ describe("live claim binding verification", () => {
 describe("GET /api/claims/config with the real claim service", () => {
   const responseDouble = () => ({ status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } });
   const requestDouble = () => ({ method: "GET", url: "/api/claims/config", headers: {}, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() {} });
-  const handlerFor = (chain) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW }) });
+  // A fake monotonic clock that sleep advances, so pacing and backoff cost no real time.
+  const fakeTime = () => { let t = 0; return { monotonicNow: () => t, sleep: async (ms) => { t += ms; }, random: () => 0.5 }; };
+  const handlerFor = (chain, logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() }) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW, logger, ...fakeTime() }) });
+  const RPC_URL = "https://rpc.example.invalid/ext/bc/C/rpc?key=secret";
+  // The shape ethers 6 gives a non-retried HTTP 429 (FetchRequest retryFunc -> false, then assertOk).
+  const throttled = () => Object.assign(new Error(`server response 429 Too Many Requests (request={ url: "${RPC_URL}" }, response={ body: "error code: 1015" }, code=SERVER_ERROR)`), { code: "SERVER_ERROR", info: { requestUrl: RPC_URL, responseStatus: "429 Too Many Requests", responseBody: "error code: 1015" } });
+  const flaky = (chain, failures, makeError = throttled) => {
+    let left = failures;
+    return { ...chain, call: async (tx) => { if (left > 0) { left -= 1; throw makeError(); } return chain.call(tx); } };
+  };
 
   it("returns 200 with the exact validated target and no secret", async () => {
     const response = responseDouble();
@@ -619,6 +630,74 @@ describe("GET /api/claims/config with the real claim service", () => {
     await handlerFor(fujiChain({ sale: { priceWei: 1n } }))(requestDouble(), response);
     expect(response.status).toBe(503);
     expect(JSON.parse(response.body).error.code).toBe("CLAIM_BINDING_MISMATCH");
+  });
+
+  it("retries a throttled provider (429 / Cloudflare 1015) and then returns 200 with the unchanged shape", async () => {
+    const ok = responseDouble();
+    await handlerFor(fujiChain())(requestDouble(), ok);
+    const response = responseDouble();
+    await handlerFor(flaky(fujiChain(), 3))(requestDouble(), response);
+    expect(response.status).toBe(200);
+    expect(Object.keys(JSON.parse(response.body).data)).toEqual(Object.keys(JSON.parse(ok.body).data));
+    expect(JSON.parse(response.body).data).toEqual(JSON.parse(ok.body).data);
+  });
+
+  it("returns a clean 503 CLAIM_CONFIG_UNAVAILABLE when retries are exhausted, leaking no URL or provider body, and never caches it", async () => {
+    const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
+    const chain = flaky(fujiChain(), 5);
+    const handler = handlerFor(chain, logger);
+    const response = responseDouble();
+    await handler(requestDouble(), response);
+    expect(response.status).toBe(503);
+    const body = JSON.parse(response.body);
+    expect(body.error.code).toBe("CLAIM_CONFIG_UNAVAILABLE");
+    expect(response.body).not.toMatch(/rpc\.example|secret|1015|429|Too Many/);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/rpc\.example|secret|1015/);
+    // The failure is not cached: the next request (provider recovered) verifies again and succeeds.
+    const retry = responseDouble();
+    await handler(requestDouble(), retry);
+    expect(retry.status).toBe(200);
+  });
+
+  it.each([
+    ["HTTP 599", () => Object.assign(new Error("599 CLIENT ESCALATED SERVER ERROR"), { code: "SERVER_ERROR", info: { responseStatus: "599 CLIENT ESCALATED SERVER ERROR" } })],
+    ["HTTP 502", () => Object.assign(new Error("bad gateway"), { code: "SERVER_ERROR", info: { responseStatus: "502 Bad Gateway" } })],
+    ["timeout", () => Object.assign(new Error("request timeout"), { code: "TIMEOUT" })],
+    ["network error", () => Object.assign(new Error("socket hang up"), { code: "ECONNRESET" })],
+  ])("maps a persistent %s to 503 CLAIM_CONFIG_UNAVAILABLE", async (_label, makeError) => {
+    const response = responseDouble();
+    await handlerFor(flaky(fujiChain(), 100, makeError))(requestDouble(), response);
+    expect(response.status).toBe(503);
+    expect(JSON.parse(response.body).error.code).toBe("CLAIM_CONFIG_UNAVAILABLE");
+  });
+
+  it("keeps an unrelated (non-provider) error as a 500 INTERNAL_ERROR, without retrying it", async () => {
+    const chain = fujiChain();
+    let calls = 0;
+    const broken = { ...chain, call: async () => { calls += 1; throw new TypeError("cannot read properties of undefined"); } };
+    const response = responseDouble();
+    await handlerFor(broken)(requestDouble(), response);
+    expect(response.status).toBe(500);
+    expect(JSON.parse(response.body).error.code).toBe("INTERNAL_ERROR");
+    expect(calls).toBe(1);
+  });
+
+  it("still rejects a destination provider on the wrong chain as a binding mismatch", async () => {
+    const response = responseDouble();
+    await handlerFor({ ...fujiChain(), getNetwork: async () => ({ chainId: 43114n }) })(requestDouble(), response);
+    expect(response.status).toBe(503);
+    expect(JSON.parse(response.body).error.code).toBe("CLAIM_BINDING_MISMATCH");
+  });
+});
+
+describe("createRateLimitAwareRpcProvider", () => {
+  it("turns off ethers' internal retries, pins the network and sends one call per request", () => {
+    const provider = createRateLimitAwareRpcProvider("https://rpc.example.invalid/ext/bc/C/rpc", 43113);
+    expect(provider._getOption("batchMaxCount")).toBe(1);
+    expect(provider._getOption("staticNetwork").chainId).toBe(43113n);
+    const request = provider._getConnection();
+    expect(request.timeout).toBe(GENESIS_RPC_REQUEST_TIMEOUT_MS);
+    provider.destroy();
   });
 });
 
