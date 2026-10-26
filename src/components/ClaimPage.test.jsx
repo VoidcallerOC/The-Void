@@ -95,7 +95,15 @@ describe("Genesis claim landing", () => {
   it("announces that the claim and the mint open together before the window", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(target(NOW + 3600));
     renderClaim();
-    expect(await screen.findByText(/The free Genesis claim and the public mint open /)).toBeTruthy();
+    expect(await screen.findByText(/The free Genesis claim and the public mint open together/)).toBeTruthy();
+    expect(screen.getByTestId("genesis-countdown")).toBeTruthy();
+  });
+
+  it("hides the countdown once the verified target reports the claim window", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(target(NOW - 60));
+    renderClaim();
+    expect(await screen.findByText(/Genesis holders can claim one copy for free/)).toBeTruthy();
+    expect(screen.queryByTestId("genesis-countdown")).toBeNull();
   });
 
   it("shows minting closed after the public window", async () => {

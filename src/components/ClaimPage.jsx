@@ -19,6 +19,7 @@ function claimNetworkLabel(chainId) {
 }
 import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, genesisSaleOpen, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
 import { formatSaleInstant } from "../lib/sale-editor.js";
+import { GenesisCountdown } from "./GenesisCountdown.jsx";
 
 const CLAIM_PHASES = Object.freeze({
   DISCONNECTED: "disconnected",
@@ -115,7 +116,7 @@ function ClaimSchedule({ target }) {
 }
 
 function phaseMessage(phase, target) {
-  if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return `The free Genesis claim and the public mint open ${instant(target.claimStart)}.`;
+  if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return "The free Genesis claim and the public mint open together. The verified schedule below is what the claim contract enforces.";
   if (phase === GENESIS_CLAIM_PHASES.GENESIS) return `Genesis holders can claim one copy for free. The public mint is also open now to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}.`;
   if (phase === GENESIS_CLAIM_PHASES.PUBLIC) return `The Genesis claim has closed. The public mint is open to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}. No Genesis token or voucher is needed.`;
   if (phase === GENESIS_CLAIM_PHASES.CLOSED) return "Minting is closed. The Genesis claim and the public mint have both ended.";
@@ -145,6 +146,8 @@ function GenesisClaimLanding({ catalog }) {
     return null;
   }, [catalog, target]);
   const phase = target ? genesisClaimPhase(target, nowSeconds()) : null;
+  // The countdown is display only; once the verified target reports an open or closed phase it gives way.
+  const showCountdown = !phase || phase === GENESIS_CLAIM_PHASES.UPCOMING;
   return (
     <section className="vc-claim-page" style={shell}>
       <header className="vc-claim-header">
@@ -155,6 +158,7 @@ function GenesisClaimLanding({ catalog }) {
         <StateMark state={state.status === "ready" && phase === GENESIS_CLAIM_PHASES.GENESIS ? CLAIM_PHASES.ELIGIBLE : CLAIM_PHASES.CLAIM_UNAVAILABLE} />
       </header>
       <div className="vc-claim-copy">
+        {showCountdown && <GenesisCountdown />}
         {state.status === "loading" && <p className="vc-body vc-body-muted">Checking the claim target.</p>}
         {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
         {state.status === "ready" && (
@@ -381,6 +385,8 @@ export function ClaimPage() {
           <h2 className="vc-claim-title">{release?.title || edition.title}</h2>
           <p className="vc-claim-edition">{edition.title} · Token #{binding.tokenId || "—"}</p>
           {edition.description && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{edition.description}</p>}
+
+          {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && <GenesisCountdown />}
 
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">
