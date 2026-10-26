@@ -875,3 +875,15 @@ button.vc-x-chip, a.vc-x-chip { cursor: pointer; }
 .vc-x-chip--linked { color: var(--vc-bone); border-color: var(--vc-bone-dim); }
 .vc-x-chip:is(a, button):hover { border-color: var(--vc-crimson); color: var(--vc-bone); }
 .vc-x-chip:focus-visible { outline: 3px solid var(--vc-crimson); outline-offset: 3px; }
+
+/* Genesis countdown — display only; the verified claim status decides availability */
+.vc-countdown { margin:0 0 26px; border-bottom:1px solid var(--vc-ash); padding:22px 0; }
+.vc-countdown-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:clamp(8px,2vw,18px); margin-top:16px; max-width:620px; }
+.vc-countdown-unit { display:flex; flex-direction:column; align-items:flex-start; gap:6px; border-left:1px solid var(--vc-crimson); padding-left:clamp(8px,1.6vw,14px); min-width:0; }
+.vc-countdown-value { font-family:var(--font-mono); font-weight:500; font-size:clamp(32px,8vw,76px); line-height:.9; color:var(--vc-bone); font-variant-numeric:tabular-nums; }
+.vc-countdown-label { font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--vc-bone-dim); }
+.vc-countdown-now { font-family:var(--font-display); font-size:clamp(28px,5vw,48px); line-height:1; text-transform:uppercase; margin:16px 0 0; color:var(--vc-bone); }
+.vc-countdown-target { font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--vc-crimson); margin:18px 0 0; line-height:1.6; }
+.vc-countdown-local { color:var(--vc-bone-dim); }
+.vc-countdown-note { color:var(--vc-bone-dim); line-height:1.6; margin:12px 0 0; max-width:620px; }
+.vc-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
