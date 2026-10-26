@@ -433,6 +433,47 @@ export function createRateLimitAwareRpcProvider(url, chainId) {
   return provider;
 }
 
+/**
+ * Secondary, free, keyless C-Chain endpoint used ONLY for Genesis eth_getLogs chunks when the primary
+ * (GENESIS_RPC_URL) fails transiently (429/1015, 599, 5xx gateway, timeout, reset). Head, block hashes,
+ * balances and anchors are always read from the primary. Limits (see fetchChunkLogs):
+ *   - its chain is verified with eth_chainId (43114) before first use; a mismatch disables it;
+ *   - for every chunk it must return both boundary blocks (fromBlock and toBlock); a missing block or a
+ *     "not found"/missing-history error is treated as UNAVAILABLE history, never as an empty log array;
+ *   - every log is checked for contract, topic, range and duplicates, as for the primary.
+ * A node that keeps block headers but silently drops receipts would still pass these checks; this is an
+ * accepted, documented limitation of a free public endpoint (no paid or archive provider is used).
+ */
+export const GENESIS_FALLBACK_RPC_URL = "https://avax.api.pocket.network/ext/bc/C/rpc";
+
+/** A getLogs response that is not provably complete for the requested chain and range. Fails closed (503). */
+export class GenesisIncompleteLogsError extends Error {
+  constructor(reason) { super("Genesis transfer logs could not be proven complete."); this.name = "GenesisIncompleteLogsError"; this.code = "INCOMPLETE_LOGS"; this.reason = reason; }
+}
+const MISSING_HISTORY = /not found|missing trie|unknown block|pruned|historical state|history/i;
+// Time kept back from the chunk loop so already-verified chunks can be checkpointed when the scan fails.
+const PARTIAL_CHECKPOINT_RESERVE_MS = 2_000;
+
+/** Throws GenesisIncompleteLogsError unless `logs` is a well-formed Genesis transfer log set for `filter`'s range. */
+export function validateChunkLogs(logs, { fromBlock, toBlock }) {
+  if (!Array.isArray(logs)) throw new GenesisIncompleteLogsError("not_array");
+  const topics = new Set([TRANSFER_SINGLE_TOPIC.toLowerCase(), TRANSFER_BATCH_TOPIC.toLowerCase()]);
+  const seen = new Set();
+  for (const log of logs) {
+    const block = Number(log?.blockNumber);
+    const index = Number(log?.index ?? log?.logIndex);
+    if (!log || log.removed === true || String(log.address ?? "").toLowerCase() !== GENESIS_CONTRACT.toLowerCase()
+      || !Array.isArray(log.topics) || !topics.has(String(log.topics[0] ?? "").toLowerCase()) || typeof log.data !== "string"
+      || !Number.isSafeInteger(block) || block < fromBlock || block > toBlock || !Number.isSafeInteger(index) || index < 0) {
+      throw new GenesisIncompleteLogsError("malformed_log");
+    }
+    const key = `${block}:${index}`;
+    if (seen.has(key)) throw new GenesisIncompleteLogsError("duplicate_log");
+    seen.add(key);
+  }
+  return logs;
+}
+
 // Seconds the /api/claims/config binding verification may be reused (config endpoint only; see verifyConfigBindings).
 export const CONFIG_BINDING_CACHE_MS = 30_000;
 
@@ -480,6 +521,9 @@ export async function reconcileGenesisReservations({ store, claimContract, readA
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,
+  // Secondary getLogs endpoint (GENESIS_FALLBACK_RPC_URL by default when the primary is built here).
+  // null/false disables it; an injected primary gets no fallback unless one is injected too.
+  genesisFallbackProvider = undefined,
   destinationProvider = null,
   signer = null,
   reservationStore = null,
@@ -508,6 +552,9 @@ export function createGenesisClaimService({
   // A provider built here has a static network, so getNetwork() no longer asks the RPC; its chain is
   // verified once with eth_chainId instead. An injected provider keeps the getNetwork() check.
   const staticGenesisProvider = !genesisProvider;
+  const fallbackProvider = genesisFallbackProvider === undefined
+    ? (genesisProvider ? null : createGenesisRpcProvider(GENESIS_FALLBACK_RPC_URL))
+    : (genesisFallbackProvider || null);
   let genesisChainVerified = false;
   const targetProvider = destinationProvider || new JsonRpcProvider(config.destinationRpcUrl);
   const claimSigner = signer || new Wallet(config.privateKey);
@@ -639,13 +686,81 @@ export function createGenesisClaimService({
       return found.hash.toLowerCase();
     });
   }
-  async function fetchLogs(fromBlock, toBlock, deadline) {
+  // Endpoint rotation for getLogs chunks. One attempt budget (scan.maxAttempts) per chunk across all
+  // endpoints, so there is no nested retry loop. A transient failure puts that endpoint in cooldown
+  // (full-jitter exponential backoff, at least Retry-After, capped at maxDelayMs) and the next attempt
+  // uses the other endpoint if it is ready, else waits for the earliest cooldown, never past `deadline`.
+  // An incomplete or malformed response excludes that endpoint for the chunk. Every attempt asks for
+  // the same filter; the range only moves on after a complete, validated chunk.
+  const endpoints = [{ provider: sourceProvider, fallback: false, cooldownUntil: -Infinity, failures: 0, disabled: false }];
+  if (fallbackProvider) endpoints.push({ provider: fallbackProvider, fallback: true, cooldownUntil: -Infinity, failures: 0, disabled: false, chainVerified: false });
+  const missingHistory = (error) => (MISSING_HISTORY.test(String(error?.message ?? "")) || MISSING_HISTORY.test(String(error?.error?.message ?? error?.info?.error?.message ?? ""))
+    ? new GenesisIncompleteLogsError("history_unavailable") : error);
+  async function readChunkFrom(endpoint, filter, deadline) {
+    const { provider } = endpoint;
+    if (endpoint.fallback) {
+      if (!endpoint.chainVerified) {
+        const chainId = await paced(() => provider.send("eth_chainId", []), deadline);
+        let ok;
+        try { ok = Number(BigInt(chainId)) === GENESIS_CHAIN_ID; } catch { ok = false; }
+        if (!ok) { endpoint.disabled = true; throw new GenesisIncompleteLogsError("wrong_chain"); }
+        endpoint.chainVerified = true;
+      }
+      // The fallback must hold both ends of the range, else its history is not trusted for it.
+      for (const block of new Set([filter.fromBlock, filter.toBlock])) {
+        let found;
+        try { found = await paced(() => provider.getBlock(block), deadline); } catch (error) { throw missingHistory(error); }
+        if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("history_unavailable");
+      }
+    }
+    let logs;
+    try {
+      logs = await paced(() => provider.getLogs({ ...filter, topics: filter.topics.map((group) => [...group]) }), deadline);
+    } catch (error) { throw endpoint.fallback ? missingHistory(error) : error; }
+    return validateChunkLogs(logs, filter);
+  }
+  async function fetchChunkLogs(fromBlock, toBlock, deadline) {
+    const filter = Object.freeze({ address: GENESIS_CONTRACT, topics: Object.freeze([Object.freeze([TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC])]), fromBlock, toBlock });
+    const excluded = new Set();
+    let lastError = null;
+    for (let attempt = 0; attempt < scan.maxAttempts; attempt += 1) {
+      if (monotonicNow() > deadline) throw new GenesisScanBudgetError();
+      const usable = endpoints.filter((endpoint) => !endpoint.disabled && !excluded.has(endpoint));
+      if (!usable.length) break;
+      let endpoint = usable.find((candidate) => candidate.cooldownUntil <= monotonicNow());
+      if (!endpoint) {
+        endpoint = usable.reduce((a, b) => (b.cooldownUntil < a.cooldownUntil ? b : a));
+        const wait = endpoint.cooldownUntil - monotonicNow();
+        if (monotonicNow() + wait > deadline) break;
+        await sleep(wait);
+      }
+      try {
+        const logs = await readChunkFrom(endpoint, filter, deadline);
+        endpoint.failures = 0;
+        endpoint.cooldownUntil = -Infinity;
+        return logs;
+      } catch (error) {
+        if (error instanceof GenesisScanBudgetError) throw error;
+        lastError = error;
+        if (error instanceof GenesisIncompleteLogsError) { excluded.add(endpoint); continue; }
+        if (!isRetryableProviderError(error)) throw error;
+        let delay = Math.floor(random() * Math.min(scan.maxDelayMs, scan.baseDelayMs * 2 ** endpoint.failures));
+        const hinted = retryAfterMs(error);
+        if (hinted !== null) delay = Math.max(delay, Math.min(hinted, scan.maxDelayMs));
+        endpoint.failures += 1;
+        endpoint.cooldownUntil = monotonicNow() + delay;
+      }
+    }
+    throw lastError ?? new GenesisIncompleteLogsError("no_endpoint");
+  }
+  async function fetchLogs(fromBlock, toBlock, deadline, progress = null) {
     return atStage("getLogs", async () => {
       const logs = [];
       // Inclusive ranges [start, min(start + chunk - 1, toBlock)]; the next starts at end + 1: no gap, no overlap.
       for (let start = fromBlock; start <= toBlock;) {
         const end = Math.min(toBlock, start + scan.chunkBlocks - 1);
-        logs.push(...await rpc(() => sourceProvider.getLogs({ address: GENESIS_CONTRACT, topics: [[TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]], fromBlock: start, toBlock: end }), deadline));
+        logs.push(...await fetchChunkLogs(start, end, deadline));
+        if (progress) { progress.through = end; progress.logs = logs; }
         start = end + 1;
       }
       return logs;
@@ -709,16 +824,33 @@ export function createGenesisClaimService({
       cached = verifiedHistory = rewound;
     }
     const scanFrom = cached ? cached.end + 1 : fromBlock;
-    const fresh = (await fetchLogs(scanFrom, head, deadline)).map(normalizeLog);
-    const logs = cached ? [...cached.logs, ...fresh] : fresh;
     const safeEnd = head - scan.confirmations;
-    if (safeEnd >= scanFrom) {
-      const endHash = await blockHash(safeEnd, deadline);
+    const extend = async (through, logs) => {
+      const endHash = await blockHash(through, deadline);
       const anchors = cached ? [...cached.anchors, { block: cached.end, hash: cached.endHash }].slice(-MAX_ANCHORS) : [];
-      const next = Object.freeze({ from: cached ? cached.from : fromBlock, end: safeEnd, endHash, anchors: Object.freeze(anchors.map((anchor) => Object.freeze(anchor))), logs: Object.freeze(logs.filter((log) => log.blockNumber <= safeEnd)) });
+      const next = Object.freeze({ from: cached ? cached.from : fromBlock, end: through, endHash, anchors: Object.freeze(anchors.map((anchor) => Object.freeze(anchor))), logs: Object.freeze(logs.filter((log) => log.blockNumber <= through)) });
       verifiedHistory = next;
       await persist(next, allowRegress);
+    };
+    const progress = { through: null, logs: [] };
+    const reserve = checkpointStore && scan.budgetMs > 4 * PARTIAL_CHECKPOINT_RESERVE_MS ? PARTIAL_CHECKPOINT_RESERVE_MS : 0;
+    let fresh;
+    try {
+      fresh = (await fetchLogs(scanFrom, head, deadline - reserve, progress)).map(normalizeLog);
+    } catch (error) {
+      // Keep the fully validated chunks below the confirmation depth (never the failed one), then fail
+      // closed: the request still gets a 503 and no eligibility result.
+      const through = progress.through === null ? null : Math.min(progress.through, safeEnd);
+      if (checkpointStore && through !== null && through >= scanFrom) {
+        try {
+          await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)]);
+          logCheckpoint("partial_saved");
+        } catch { logCheckpoint("partial_skipped"); }
+      }
+      throw error;
     }
+    const logs = cached ? [...cached.logs, ...fresh] : fresh;
+    if (safeEnd >= scanFrom) await extend(safeEnd, logs);
     return logs;
   }
   // Single flight: a request whose range is covered by the scan in progress joins it and shares its
