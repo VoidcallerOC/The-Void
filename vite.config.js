@@ -1,10 +1,11 @@
 import process from 'node:process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { mainnetNetworkGate } from './build/mainnet-network-gate.js'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), mainnetNetworkGate({ network: process.env.VITE_RELEASE_NETWORK })],
   test: {
     exclude: [
       '**/node_modules/**',

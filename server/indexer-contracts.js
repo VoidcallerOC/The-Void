@@ -3,6 +3,7 @@ function normalizeContract(item) {
     address: String(item?.address || item?.contractAddress || "").toLowerCase(),
     contractType: String(item?.type || item?.contract_type || item?.contractType || "").toUpperCase(),
     status: item?.status ? String(item.status).toUpperCase() : null,
+    discovered: item?.discovered === true,
   };
 }
 
@@ -11,7 +12,13 @@ function section(contractType, indexedItems, configuredItems) {
   const expected = configuredItems.filter((item) => item.contractType === contractType);
   const addresses = [...new Set([...expected.map((item) => item.address), ...seen.map((item) => item.address)])];
   const healthy = addresses.length > 0 && addresses.every((address) => seen.some((item) => item.address === address && (item.status === "IDLE" || item.status === "RUNNING")));
-  return { contractType, configured: addresses.length > 0, healthy, address: addresses[0] || null, addresses, indexed: seen };
+  // `address` names the current contract: the latest factory-discovered one (discovery is ordered
+  // by deployment block) when any exists, else the first static INDEXER_CONTRACTS_JSON entry.
+  // Static entries stay in `addresses` and `staticAddresses` because they are still indexed.
+  const discovered = expected.filter((item) => item.discovered);
+  const staticAddresses = [...new Set(expected.filter((item) => !item.discovered).map((item) => item.address))];
+  const address = discovered.length ? discovered[discovered.length - 1].address : addresses[0] || null;
+  return { contractType, configured: addresses.length > 0, healthy, address, addresses, staticAddresses, indexed: seen };
 }
 
 export function reportIndexedContracts({ indexed = [], configured = [] } = {}) {

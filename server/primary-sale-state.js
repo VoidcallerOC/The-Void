@@ -73,6 +73,7 @@ export function publicSaleFields(sale, { editionSupply = null, now = Date.now() 
       end_time: sale.endTime,
     },
     primary_availability: availability.state,
+    primary_sale_window: availability.window,
     open_edition: availability.openEdition,
   };
 }

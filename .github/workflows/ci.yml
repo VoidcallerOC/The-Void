@@ -132,3 +132,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The mainnet web build must ship no Fuji (43113) network configuration.
+      - name: Build mainnet web
+        run: npm run build:mainnet
+
+      - name: Reject Fuji configuration in the mainnet bundle
+        run: npm run check:mainnet-bundle

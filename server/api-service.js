@@ -195,8 +195,8 @@ export class ApiService {
     return [
       ...configured,
       ...discovered.flatMap((row) => [
-        { address: String(row.release_contract_address).toLowerCase(), contractType: "ERC1155" },
-        ...(row.primary_sale_address ? [{ address: String(row.primary_sale_address).toLowerCase(), contractType: "PRIMARY_SALE" }] : []),
+        { address: String(row.release_contract_address).toLowerCase(), contractType: "ERC1155", discovered: true },
+        ...(row.primary_sale_address ? [{ address: String(row.primary_sale_address).toLowerCase(), contractType: "PRIMARY_SALE", discovered: true }] : []),
       ]),
     ];
   }

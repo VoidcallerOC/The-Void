@@ -86,8 +86,29 @@ describe("mainnet runtime configuration", () => {
     expect(() => loadServerConfig({ ...indexer.env, DATABASE_URL: "postgres://user:pass@db.example:5432/postgres" })).toThrow(/HTTPS PUBLIC_APP_URL/);
   });
 
+  it("sends security headers on site responses and no wildcard CORS, leaving API CORS to the API", () => {
+    for (const [config, origin] of [[fujiVercel, "https://the-void-alpha.vercel.app"], [mainnetVercel, "https://www.thevoidstudio.xyz"]]) {
+      const site = config.headers[0];
+      // Every path except the API and the two asset paths proxied to the API, which keep the API's allowlisted CORS.
+      expect(site.source).toBe("/((?!api/|assets/marketplace-heroes/|assets/artist-portfolio/).*)");
+      const value = (key) => site.headers.find((header) => header.key === key)?.value;
+      expect(value("X-Content-Type-Options")).toBe("nosniff");
+      expect(value("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+      expect(value("Permissions-Policy")).toMatch(/camera=\(\)/);
+      expect(value("X-Frame-Options")).toBe("DENY");
+      expect(value("Content-Security-Policy")).toBe("frame-ancestors 'none'");
+      // Replaces Vercel's default `*` on static responses with the site's own origin.
+      expect(value("Access-Control-Allow-Origin")).toBe(origin);
+      const pattern = new RegExp(`^${site.source.replace(/^\//, "\\/")}$`);
+      for (const path of ["/", "/index.html", "/assets/main-abc.js", "/release/forgive-forget"]) expect(pattern.test(path)).toBe(true);
+      for (const path of ["/api/health/ready", "/assets/marketplace-heroes/a.webp", "/assets/artist-portfolio/a.webp"]) expect(pattern.test(path)).toBe(false);
+      expect(JSON.stringify(config.headers)).not.toMatch(/"Access-Control-Allow-Origin","value":"\*"/);
+    }
+  });
+
   it("serves the mainnet web build from its own Vercel project with only the API host changed", () => {
-    const swap = (value) => JSON.parse(JSON.stringify(value).replaceAll("the-void-api-mainnet.onrender.com", "the-void-api-fuji.onrender.com"));
+    // Only the API host and the site's own origin (Access-Control-Allow-Origin on site responses) differ.
+    const swap = (value) => JSON.parse(JSON.stringify(value).replaceAll("the-void-api-mainnet.onrender.com", "the-void-api-fuji.onrender.com").replaceAll("https://www.thevoidstudio.xyz", "https://the-void-alpha.vercel.app"));
     const { installCommand, buildCommand, outputDirectory, ...routing } = mainnetVercel;
     // Identical routing, except that the Fuji Rabby test page exists only on the Fuji project.
     const withoutFujiTest = JSON.parse(JSON.stringify(fujiVercel));
