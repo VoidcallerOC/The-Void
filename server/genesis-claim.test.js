@@ -135,6 +135,8 @@ function service({ holdings = { [`${WALLET}:0`]: 1n }, alreadyClaimed = false, c
     config: loadGenesisClaimConfig({ ...ENV, ...env }),
     signer: { signTypedData, address: SIGNER },
     genesisProvider: genesis,
+    // Primary-only by default. PublicNode default and rotation are covered in genesis-rpc-rotation.test.js.
+    genesisFallbackProvider: null,
     reservationStore: reservations,
     bindingReader,
     claimStateReader: target.claimStateReader,
