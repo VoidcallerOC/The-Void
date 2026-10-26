@@ -31,7 +31,7 @@ function sendFile(response, file, cors = {}) {
   response.end(body);
 }
 
-async function sendMedia(response, media, cors = {}) {
+async function sendMedia(response, media, cors = {}, { requestId = null, logger = console } = {}) {
   if (media.type === "redirect") {
     response.writeHead(302, { location: media.url, "cache-control": "no-store", "referrer-policy": "no-referrer", ...cors });
     response.end();
@@ -41,7 +41,25 @@ async function sendMedia(response, media, cors = {}) {
   if (Number.isSafeInteger(media.contentLength)) mediaHeaders["content-length"] = String(media.contentLength);
   if (media.partial) mediaHeaders["content-range"] = `bytes ${media.start}-${media.end}/${Number.isSafeInteger(media.totalLength) ? media.totalLength : "*"}`;
   response.writeHead(media.partial ? 206 : 200, { ...mediaHeaders, ...cors });
-  await pipeline(media.stream, response);
+  // Record which side failed first: a socket close before the upstream errored
+  // is a client disconnect; an upstream error first is a storage failure.
+  let firstFailure = null;
+  media.stream.once?.("error", () => { firstFailure ??= "upstream"; });
+  response.once("close", () => { if (!response.writableFinished) firstFailure ??= "client"; });
+  try {
+    await pipeline(media.stream, response);
+  } catch (error) {
+    // pipeline() has already destroyed both ends, which cancels the upstream
+    // body (and its fetch). Never let a relay failure reach process level.
+    if (response.writableFinished) return;
+    const clientClosed = firstFailure === "client";
+    if (clientClosed) {
+      logger.info?.("api.media.client_closed", { requestId, reason: "MEDIA_CLIENT_CLOSED", code: error?.code || null });
+      return;
+    }
+    logger.error?.("api.media.upstream_failed", { requestId, reason: "MEDIA_UPSTREAM_STREAM_FAILED", code: error?.code || null, detail: error?.message || String(error) });
+    if (!response.destroyed) response.destroy(error);
+  }
 }
 
 function pathParts(pathname) { return pathname.replace(/^\/|\/$/g, "").split("/").filter(Boolean); }
@@ -84,7 +102,7 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       }
       if (method === "GET" && base[0] === "media" && base.length === 2) {
         if (!mediaGateway) throw new ApiError(503, "MEDIA_GATEWAY_UNAVAILABLE", "Protected media gateway is unavailable.");
-        return sendMedia(response, await mediaGateway.openMedia({ request: apiRequest, grantId: base[1] }), responseHeaders);
+        return await sendMedia(response, await mediaGateway.openMedia({ request: apiRequest, grantId: base[1] }), responseHeaders, { requestId, logger });
       }
       let data;
       if (method === "GET" && base[0] === "studio" && base[1] === "catalog" && base.length === 2) {
