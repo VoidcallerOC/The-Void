@@ -1,4 +1,5 @@
 import process from "node:process";
+import { performance } from "node:perf_hooks";
 import { Contract, Interface, JsonRpcProvider, Wallet, getAddress, hexlify, id, isAddress, randomBytes } from "ethers";
 import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
@@ -252,6 +253,7 @@ export function loadGenesisClaimConfig(env = process.env) {
     signerAddress,
     privateKey,
     earlyAccess,
+    scan: scanOptions(env),
   });
 }
 
@@ -326,6 +328,75 @@ export function sanitizeProviderErrorCode(error) {
   return null;
 }
 
+// Scan tuning. Chunk size may be lowered but never raised above the public RPC's 100-block cap.
+export const SCAN_DEFAULTS = Object.freeze({ chunkBlocks: TRANSFER_LOG_CHUNK_BLOCKS, paceMs: 100, maxAttempts: 5, baseDelayMs: 250, maxDelayMs: 4_000, budgetMs: 45_000, confirmations: 32 });
+const SCAN_LIMITS = Object.freeze({
+  chunkBlocks: ["GENESIS_LOG_CHUNK_BLOCKS", 1, TRANSFER_LOG_CHUNK_BLOCKS],
+  paceMs: ["GENESIS_RPC_PACE_MS", 0, 5_000],
+  maxAttempts: ["GENESIS_RPC_MAX_ATTEMPTS", 1, 10],
+  baseDelayMs: ["GENESIS_RPC_RETRY_BASE_MS", 1, 10_000],
+  maxDelayMs: ["GENESIS_RPC_RETRY_MAX_DELAY_MS", 1, 30_000],
+  budgetMs: ["GENESIS_SCAN_BUDGET_MS", 1_000, 60_000],
+  confirmations: ["GENESIS_SCAN_CONFIRMATIONS", 1, 1_024],
+});
+export function scanOptions(env = {}) {
+  const options = {};
+  for (const [key, [name, min, max]] of Object.entries(SCAN_LIMITS)) {
+    const raw = String(env[name] ?? "").trim();
+    if (!raw) { options[key] = SCAN_DEFAULTS[key]; continue; }
+    if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) throw new GenesisClaimConfigurationError(`${name} must be an integer from ${min} to ${max}.`);
+    options[key] = Number(raw);
+  }
+  return Object.freeze(options);
+}
+
+/** The scan ran out of its time budget; the request fails closed rather than hanging. */
+export class GenesisScanBudgetError extends Error {
+  constructor() { super("Genesis transfer scan exceeded its time budget."); this.name = "GenesisScanBudgetError"; this.code = "TIMEOUT"; }
+}
+const RETRYABLE_HTTP = new Set([429, 502, 503, 504, 599]);
+const RETRYABLE_RPC = new Set([429, -32005]);
+const RETRYABLE_CODES = new Set(["TIMEOUT", "NETWORK_ERROR", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "ABORT_ERR"]);
+/** Throttling, gateway, timeout and transient network failures are retried; anything else (bad params, range too large) is not. */
+export function isRetryableProviderError(error) {
+  if (!error || error instanceof ApiError || error instanceof GenesisScanBudgetError) return false;
+  const code = sanitizeProviderErrorCode(error);
+  if (code?.httpStatus !== undefined) return RETRYABLE_HTTP.has(code.httpStatus);
+  if (code?.rpcCode !== undefined) return RETRYABLE_RPC.has(code.rpcCode);
+  const name = error.code ?? error.cause?.code;
+  if (typeof name === "string" && RETRYABLE_CODES.has(name)) return true;
+  if (error.name === "AbortError" || error.name === "TimeoutError" || error.cause?.name === "AbortError") return true;
+  return /socket hang up|ECONNRESET|ETIMEDOUT|network timeout|request timeout/i.test(String(error.message ?? ""));
+}
+/** Retry-After in milliseconds (seconds or an HTTP date), or null. */
+export function retryAfterMs(error, nowMs = Date.now()) {
+  const headers = error?.info?.responseHeaders ?? error?.response?.headers ?? {};
+  const raw = typeof headers.get === "function" ? headers.get("retry-after") : (headers["retry-after"] ?? headers["Retry-After"] ?? error?.retryAfter);
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (/^\s*\d+(\.\d+)?\s*$/.test(String(raw))) return Math.round(Number(raw) * 1000);
+  const at = Date.parse(String(raw));
+  return Number.isFinite(at) ? Math.max(0, at - nowMs) : null;
+}
+/**
+ * Runs `operation` with bounded exponential backoff and full jitter. Stops on a non-retryable error,
+ * after maxAttempts, or when the next wait would pass `deadline`; the last error is rethrown (fail closed).
+ */
+export async function withProviderRetry(operation, { maxAttempts, baseDelayMs, maxDelayMs, deadline = Infinity, now, sleep, random }) {
+  for (let attempt = 0; ; attempt += 1) {
+    if (now() > deadline) throw new GenesisScanBudgetError();
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableProviderError(error) || attempt + 1 >= maxAttempts) throw error;
+      let delay = Math.floor(random() * Math.min(maxDelayMs, baseDelayMs * 2 ** attempt));
+      const hinted = retryAfterMs(error);
+      if (hinted !== null) delay = Math.max(delay, Math.min(hinted, maxDelayMs));
+      if (now() + delay > deadline) throw error;
+      await sleep(delay);
+    }
+  }
+}
+
 const STAGE = Symbol("genesisUpstreamStage");
 /** Labels the first upstream stage an error passed through; later labels never overwrite it. */
 async function atStage(stage, operation) {
@@ -381,6 +452,9 @@ export function createGenesisClaimService({
   destinationClock = null,
   clock = () => Math.floor(Date.now() / 1000),
   logger = console,
+  sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+  random = Math.random,
+  monotonicNow = () => performance.now(),
   // 256 random bits. ethers' randomBytes returns a Uint8Array, so it must be hex-encoded explicitly.
   nonce = () => BigInt(hexlify(randomBytes(32))),
 } = {}) {
@@ -473,31 +547,76 @@ export function createGenesisClaimService({
     })));
   }
 
-  // Genesis TransferSingle/TransferBatch logs, cached by contiguous block range. Avalanche blocks are
-  // final, so a fetched range never changes.
-  let logCache = { from: 0, to: -1, logs: [] };
-  async function fetchLogs(fromBlock, toBlock) {
-    return atStage("getLogs", () => fetchLogsUnlabelled(fromBlock, toBlock));
+  // Genesis TransferSingle/TransferBatch history. A free public RPC caps eth_getLogs at 100 blocks and
+  // throttles bursts, so the scan is paced, retried with bounded backoff, and reused: a completed scan is
+  // kept in process up to `confirmations` blocks behind the head, keyed by its first and last block and
+  // the last block's hash. A later request re-verifies that hash and scans only the blocks after it.
+  // Scans are serialized (single flight): a concurrent request waits, then reuses the cache. Only a
+  // complete, contiguous, successful scan is cached; any failure leaves the cache as it was and fails closed.
+  const scan = config.scan || scanOptions({});
+  let verifiedHistory = null; // { from, end, endHash, logs } with end <= head - confirmations
+  let lastRpcAt = -Infinity;
+  async function paced(operation, deadline) {
+    const wait = lastRpcAt + scan.paceMs - monotonicNow();
+    if (wait > 0) {
+      if (monotonicNow() + wait > deadline) throw new GenesisScanBudgetError();
+      await sleep(wait);
+    }
+    try { return await operation(); } finally { lastRpcAt = monotonicNow(); }
   }
-  async function fetchLogsUnlabelled(fromBlock, toBlock) {
-    if (transferLogReader) return transferLogReader(fromBlock, toBlock);
-    const logs = [];
-    // Inclusive ranges [start, min(start + 99, toBlock)]; the next starts at end + 1: no gap, no overlap.
-    for (let start = fromBlock; start <= toBlock;) {
-      const end = Math.min(toBlock, start + TRANSFER_LOG_CHUNK_BLOCKS - 1);
-      logs.push(...await sourceProvider.getLogs({ address: GENESIS_CONTRACT, topics: [[TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]], fromBlock: start, toBlock: end }));
-      start = end + 1;
+  const rpc = (operation, deadline) => withProviderRetry(() => paced(operation, deadline), { ...scan, deadline, now: monotonicNow, sleep, random });
+  async function blockHash(block, deadline) {
+    return atStage("blockHash", async () => {
+      const found = await rpc(() => sourceProvider.getBlock(block), deadline);
+      if (!found || typeof found.hash !== "string" || Number(found.number) !== block) throw new Error("C-Chain block could not be read.");
+      return found.hash.toLowerCase();
+    });
+  }
+  async function fetchLogs(fromBlock, toBlock, deadline) {
+    return atStage("getLogs", async () => {
+      const logs = [];
+      // Inclusive ranges [start, min(start + chunk - 1, toBlock)]; the next starts at end + 1: no gap, no overlap.
+      for (let start = fromBlock; start <= toBlock;) {
+        const end = Math.min(toBlock, start + scan.chunkBlocks - 1);
+        logs.push(...await rpc(() => sourceProvider.getLogs({ address: GENESIS_CONTRACT, topics: [[TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC]], fromBlock: start, toBlock: end }), deadline));
+        start = end + 1;
+      }
+      return logs;
+    });
+  }
+  async function scanTransfers(fromBlock, head) {
+    const deadline = monotonicNow() + scan.budgetMs;
+    let cached = verifiedHistory;
+    if (cached && (cached.from > fromBlock || cached.end > head)) cached = null;
+    // A reorg (or a provider on another fork) changes the hash: drop the cache and rescan everything.
+    if (cached && await blockHash(cached.end, deadline) !== cached.endHash) cached = verifiedHistory = null;
+    const scanFrom = cached ? cached.end + 1 : fromBlock;
+    const fresh = await fetchLogs(scanFrom, head, deadline);
+    const logs = cached ? [...cached.logs, ...fresh] : fresh;
+    const safeEnd = head - scan.confirmations;
+    if (safeEnd >= scanFrom) {
+      const endHash = await blockHash(safeEnd, deadline);
+      verifiedHistory = Object.freeze({ from: cached ? cached.from : fromBlock, end: safeEnd, endHash, logs: Object.freeze(logs.filter((log) => Number(log.blockNumber) <= safeEnd)) });
     }
     return logs;
   }
-  async function transfersBetween(fromBlock, toBlock) {
-    if (toBlock < fromBlock) return [];
-    if (logCache.to < logCache.from || fromBlock < logCache.from || fromBlock > logCache.to + 1) {
-      logCache = { from: fromBlock, to: toBlock, logs: await fetchLogs(fromBlock, toBlock) };
-    } else if (toBlock > logCache.to) {
-      logCache = { from: logCache.from, to: toBlock, logs: [...logCache.logs, ...await fetchLogs(logCache.to + 1, toBlock)] };
-    }
-    return decodeGenesisTransfers(logCache.logs).filter((transfer) => transfer.block >= fromBlock && transfer.block <= toBlock);
+  // Single flight: a request whose range is covered by the scan in progress joins it and shares its
+  // outcome, success or failure; nothing is kept once it settles, so the next request scans afresh.
+  let inflight = null; // { from, promise }
+  function sharedScan(fromBlock, head) {
+    if (inflight && inflight.from <= fromBlock) return inflight.promise;
+    const prior = inflight ? inflight.promise.catch(() => {}) : Promise.resolve();
+    const entry = { from: fromBlock, promise: null };
+    entry.promise = prior.then(() => scanTransfers(fromBlock, head)).then((logs) => ({ head, logs }))
+      .finally(() => { if (inflight === entry) inflight = null; });
+    inflight = entry;
+    return entry.promise;
+  }
+  /** Genesis transfers in [fromBlock, through], where `through` is the head the (possibly shared) scan reached. */
+  async function transfersFrom(fromBlock, head) {
+    if (transferLogReader) return { through: head, transfers: decodeGenesisTransfers(await atStage("getLogs", () => transferLogReader(fromBlock, head))) };
+    const result = await sharedScan(fromBlock, head);
+    return { through: result.head, transfers: decodeGenesisTransfers(result.logs).filter((transfer) => transfer.block >= fromBlock && transfer.block <= result.head) };
   }
 
   async function readClaimState(wallet) {
@@ -547,10 +666,17 @@ export function createGenesisClaimService({
     const latestIssued = active.reduce((max, record) => Math.max(max, Number(record.block)), 0);
     if (latestIssued > head) throw new Error("C-Chain provider is behind the claim ledger.");
     const earliestIssued = active.reduce((min, record) => Math.min(min, Number(record.block)), Infinity);
-    const transfers = Number.isFinite(earliestIssued) ? await transfersBetween(earliestIssued + 1, head) : [];
-    const used = replayUsedUnits({ reservations: active, transfers, throughBlock: head });
-    const balances = await readBalances(wallet, head);
-    return { head, balances, unused: unusedUnits(wallet, balances, used) };
+    let through = head;
+    let transfers = [];
+    if (Number.isFinite(earliestIssued)) {
+      ({ through, transfers } = await transfersFrom(earliestIssued + 1, head));
+      // A joined scan that ended before this ledger's newest issuance cannot judge it: scan again.
+      if (through < latestIssued) ({ through, transfers } = await transfersFrom(earliestIssued + 1, head));
+      if (through < latestIssued) throw new Error("Genesis transfer history is behind the claim ledger.");
+    }
+    const used = replayUsedUnits({ reservations: active, transfers, throughBlock: through });
+    const balances = await readBalances(wallet, through);
+    return { head: through, balances, unused: unusedUnits(wallet, balances, used) };
   }
 
   /**
@@ -578,15 +704,15 @@ export function createGenesisClaimService({
   async function checkEligibility(walletInput, { requestId = null } = {}) {
     const wallet = assertWallet(walletInput);
     try {
-      return await reservationStore.withLock(config.claimContract, async (tx) => {
-        const records = await tx.list();
-        const active = await activeReservations(records);
-        const own = active.find((record) => getAddress(record.wallet) === wallet);
-        if (own) return Object.freeze({ eligible: own.status === "PENDING", eligibleTokenIds: heldIds(own.balances), holdingUsed: false, claimIssued: true });
-        const { balances, unused } = await ledgerPosition(wallet, active);
-        const eligibleTokenIds = heldIds(unused);
-        return Object.freeze({ eligible: eligibleTokenIds.length > 0, eligibleTokenIds, holdingUsed: heldIds(balances).length > 0 && eligibleTokenIds.length === 0, claimIssued: false });
-      });
+      // Read-only: the lock covers only the ledger read. The transfer scan runs outside it, so concurrent
+      // requests can share one in-flight scan (and its failure) instead of queueing full scans.
+      const records = await reservationStore.withLock(config.claimContract, (tx) => tx.list());
+      const active = await activeReservations(records);
+      const own = active.find((record) => getAddress(record.wallet) === wallet);
+      if (own) return Object.freeze({ eligible: own.status === "PENDING", eligibleTokenIds: heldIds(own.balances), holdingUsed: false, claimIssued: true });
+      const { balances, unused } = await ledgerPosition(wallet, active);
+      const eligibleTokenIds = heldIds(unused);
+      return Object.freeze({ eligible: eligibleTokenIds.length > 0, eligibleTokenIds, holdingUsed: heldIds(balances).length > 0 && eligibleTokenIds.length === 0, claimIssued: false });
     } catch (error) {
       if (error instanceof ApiError) throw error;
       logUpstreamError(error, requestId, "reservationStore");
@@ -606,6 +732,17 @@ export function createGenesisClaimService({
       if (error instanceof ApiError) throw error;
       logUpstreamError(error, requestId, "bindings");
       throw new ApiError(503, "CLAIM_AUTHORIZATION_UNAVAILABLE", "Claim authorization could not be issued for the configured destination.");
+    }
+    // Warm the shared transfer history outside the lock, so concurrent issuances join one scan; the
+    // decision below is still made, and recorded, under the lock (it then scans only newer blocks).
+    try {
+      const records = await reservationStore.withLock(config.claimContract, (tx) => tx.list());
+      const active = await activeReservations(records);
+      if (active.length) await ledgerPosition(wallet, active);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      logUpstreamError(error, requestId, "reservationStore");
+      throw new ApiError(503, "ELIGIBILITY_UNAVAILABLE", "Genesis ownership could not be verified on Avalanche C-Chain.");
     }
     // One issuance at a time per claim contract: the holding a wallet is judged on cannot be judged for
     // another wallet until this issuance is recorded.
