@@ -416,11 +416,20 @@ export const GENESIS_RPC_REQUEST_TIMEOUT_MS = 15_000;
  *     explicitly (eth_chainId) by the service before it trusts this provider.
  */
 export function createGenesisRpcProvider(url) {
+  return createRateLimitAwareRpcProvider(url, GENESIS_CHAIN_ID);
+}
+
+/**
+ * The same no-internal-retry provider for any chain (used for the destination binding reads behind
+ * /api/claims/config). staticNetwork means getNetwork() does not ask the RPC, so callers must verify
+ * the chain explicitly with eth_chainId.
+ */
+export function createRateLimitAwareRpcProvider(url, chainId) {
   const request = new FetchRequest(url);
   request.retryFunc = async () => false;
   request.setThrottleParams({ maxAttempts: 1 });
   request.timeout = GENESIS_RPC_REQUEST_TIMEOUT_MS;
-  const provider = new JsonRpcProvider(request, Network.from(GENESIS_CHAIN_ID), { staticNetwork: Network.from(GENESIS_CHAIN_ID), batchMaxCount: 1 });
+  const provider = new JsonRpcProvider(request, Network.from(chainId), { staticNetwork: Network.from(chainId), batchMaxCount: 1 });
   return provider;
 }
 
@@ -506,17 +515,23 @@ export function createGenesisClaimService({
   const release = new Contract(config.releaseContract, RELEASE_ABI, targetProvider);
   const sale = new Contract(config.primarySale, SALE_ABI, targetProvider);
 
+  const allAtOnce = (reads) => Promise.all(reads.map((read) => read()));
+  const bindingTargets = { readChainId: async () => (await targetProvider.getNetwork()).chainId, claim, release, sale, run: allAtOnce };
   async function verifyContractBindings() {
+    return verifyBindingsWith(bindingTargets);
+  }
+  async function verifyBindingsWith({ readChainId, claim, release, sale, run }) {
     const [network, claimRelease, claimSale, claimToken, claimAllocation, claimPublicAllocation, claimChain, claimStartAt, claimEndAt,
-      claimWindowAt, publicWindowAt, claimPublicStart, claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await Promise.all([
-      targetProvider.getNetwork(), claim.releaseContract(), claim.primarySale(), claim.tokenId(), claim.allocation(),
-      claim.publicAllocation(), claim.destinationChainId(), claim.claimStart(), claim.claimEnd(), claim.claimWindow(), claim.publicWindow(),
-      claim.publicSaleStart(), claim.publicSaleEnd(), claim.publicPriceWei(),
-      claim.GENESIS_CONTRACT(), claim.GENESIS_CHAIN_ID(), claim.ELIGIBILITY_RULE(), claim.signer(), claim.claimedSupply(),
-      release.maxSupplyOf(config.tokenId), release.edition(config.tokenId), sale.sales(config.tokenId),
+      claimWindowAt, publicWindowAt, claimPublicStart, claimPublicEnd, claimPrice, claimGenesis, claimGenesisChain, claimRule, claimSignerAddress, claimedSupply, maxSupply, editionData, saleData] = await run([
+      async () => ({ chainId: await readChainId() }), () => claim.releaseContract(), () => claim.primarySale(), () => claim.tokenId(), () => claim.allocation(),
+      () => claim.publicAllocation(), () => claim.destinationChainId(), () => claim.claimStart(), () => claim.claimEnd(), () => claim.claimWindow(), () => claim.publicWindow(),
+      () => claim.publicSaleStart(), () => claim.publicSaleEnd(), () => claim.publicPriceWei(),
+      () => claim.GENESIS_CONTRACT(), () => claim.GENESIS_CHAIN_ID(), () => claim.ELIGIBILITY_RULE(), () => claim.signer(), () => claim.claimedSupply(),
+      () => release.maxSupplyOf(config.tokenId), () => release.edition(config.tokenId), () => sale.sales(config.tokenId),
     ]);
     // The claim mints through the release's issuer path; without the grant every claim would revert.
-    const claimIsIssuer = await release.hasRole(await release.ISSUER_ROLE(), config.claimContract);
+    const [issuerRole] = await run([() => release.ISSUER_ROLE()]);
+    const [claimIsIssuer] = await run([() => release.hasRole(issuerRole, config.claimContract)]);
     const total = config.allocation + config.publicAllocation;
     // An open edition (maxSupply 0) has no cap to compare against.
     const editionCapTooSmall = BigInt(maxSupply) !== 0n && (config.allocation === 0n || BigInt(maxSupply) < total);
@@ -963,10 +978,51 @@ export function createGenesisClaimService({
   // hasClaimed, authorization) is ever cached here.
   let configVerifiedAt = -Infinity;
   let configVerifying = null;
+  // The config reads go through a no-internal-retry provider (createRateLimitAwareRpcProvider), one call
+  // at a time, paced and retried by withProviderRetry under one scan budget. An injected
+  // destinationProvider (tests) is used as is, with its getNetwork() chain check.
+  const configProvider = destinationProvider || createRateLimitAwareRpcProvider(config.destinationRpcUrl, config.destinationChainId);
+  let lastConfigRpcAt = -Infinity;
+  async function pacedConfig(operation, deadline) {
+    const wait = lastConfigRpcAt + scan.paceMs - monotonicNow();
+    if (wait > 0) {
+      if (monotonicNow() + wait > deadline) throw new GenesisScanBudgetError();
+      await sleep(wait);
+    }
+    try { return await operation(); } finally { lastConfigRpcAt = monotonicNow(); }
+  }
+  async function readConfigBindings() {
+    const deadline = monotonicNow() + scan.budgetMs;
+    const run = async (reads) => {
+      const results = [];
+      for (const read of reads) results.push(await withProviderRetry(() => pacedConfig(read, deadline), { ...scan, deadline, now: monotonicNow, sleep, random }));
+      return results;
+    };
+    return verifyBindingsWith({
+      readChainId: destinationProvider ? async () => (await configProvider.getNetwork()).chainId : async () => BigInt(await configProvider.send("eth_chainId", [])),
+      claim: new Contract(config.claimContract, CLAIM_ABI, configProvider),
+      release: new Contract(config.releaseContract, RELEASE_ABI, configProvider),
+      sale: new Contract(config.primarySale, SALE_ABI, configProvider),
+      run,
+    });
+  }
+  async function verifyConfigBindingsFresh() {
+    try {
+      return await (bindingReader ? bindingReader() : readConfigBindings());
+    } catch (error) {
+      // Temporary provider failures (throttling, gateway, timeout, network, retries or budget exhausted)
+      // become a clean 503. Mismatches (ApiError) and anything else keep their current behavior.
+      if (error instanceof GenesisScanBudgetError || isRetryableProviderError(error)) {
+        logger?.warn?.("genesis.claim.config_unavailable", { providerError: sanitizeProviderErrorCode(error) });
+        throw new ApiError(503, "CLAIM_CONFIG_UNAVAILABLE", "The claim configuration could not be verified right now. Try again shortly.");
+      }
+      throw error;
+    }
+  }
   async function verifyConfigBindings() {
     if (monotonicNow() - configVerifiedAt < CONFIG_BINDING_CACHE_MS) return;
     if (!configVerifying) {
-      configVerifying = (bindingReader ? bindingReader() : verifyContractBindings())
+      configVerifying = verifyConfigBindingsFresh()
         .then(() => { configVerifiedAt = monotonicNow(); })
         .finally(() => { configVerifying = null; });
     }
