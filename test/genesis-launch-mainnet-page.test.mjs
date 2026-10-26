@@ -27,7 +27,7 @@ describe("mainnet Genesis launch artist page", () => {
     expect(constant("ISSUER_ROLE")).toBe(id("ISSUER_ROLE"));
   });
 
-  it("schedules a 24h claim with the sale paused, then 7 full paid days, at 0.25 AVAX, 3 per wallet", () => {
+  it("starts the paid sale with the claim (Mon 09:00 EDT), paused for the 24h claim, then 7 full paid days, at 0.25 AVAX, 3 per wallet", () => {
     const [start, end, saleEnd] = [number("CLAIM_START"), number("CLAIM_END"), number("SALE_END")];
     // Mon Oct 26 2026 09:00 EDT (UTC-4) = 13:00 UTC; the sale's last second is 7 x 24 h after claim close: Tue Nov 3 12:59:59 UTC = 07:59:59 EST (DST ends Nov 1).
     expect(start).toBe(Date.UTC(2026, 9, 26, 13) / 1000);
@@ -43,12 +43,24 @@ describe("mainnet Genesis launch artist page", () => {
     expect(constant("SALES_1")).toBe(sale.encodeFunctionData("sales", [1]).toLowerCase());
   });
 
-  it("configures exactly one early-access test mint to 0x6a86…d2fb from 05:00 EDT to one minute before the claim", () => {
+  it("relies on the sale rejecting purchases while paused before it looks at startTime", () => {
+    const sale = readFileSync(new URL("../contracts/VoidPrimarySaleSettled.sol", import.meta.url), "utf8");
+    const body = sale.slice(sale.indexOf("function purchase("));
+    expect(body.indexOf("if (sale.paused) revert SalePaused")).toBeGreaterThan(0);
+    expect(body.indexOf("if (sale.paused) revert SalePaused")).toBeLessThan(body.indexOf("revert SaleNotStarted"));
+    // The claim contract's schedule check reads sales() but skips the paused field, so pausing never breaks claims.
+    const claim = readFileSync(new URL("../contracts/GenesisHolderClaim.sol", import.meta.url), "utf8");
+    expect(claim).toMatch(/\(uint256 salePrice, uint256 saleMaxSupply, uint256 saleSold,, uint64 saleStart, uint64 saleEnd,, bool configured\)/);
+  });
+
+  it("configures exactly one early-access test mint to 0x6a86…d2fb from 05:00 to 06:00 EDT", () => {
     const [earlyStart, earlyEnd, start] = [number("EARLY_START"), number("EARLY_END"), number("CLAIM_START")];
     expect(getAddress(constant("TEST_WALLET"))).toBe("0x6a86EfA012fEDA64b70112022487fEE22E67d2fb");
     expect(new Date(earlyStart * 1000).toLocaleString("en-US", { timeZone: "America/New_York" })).toBe("10/26/2026, 5:00:00 AM");
     expect(earlyStart).toBe(start - 4 * 3600);
-    expect(earlyEnd).toBe(start - 60); // runbook window rule: end (first refused second) one minute before claimStart
+    expect(earlyEnd).toBe(earlyStart + 3600); // end is the first refused second: 06:00 EDT
+    expect(new Date(earlyEnd * 1000).toLocaleString("en-US", { timeZone: "America/New_York" })).toBe("10/26/2026, 6:00:00 AM");
+    expect(earlyEnd).toBeLessThanOrEqual(start); // configureEarlyAccess requires end <= claimStart
     expect(constant("EARLY_CONFIG")).toBe(early.encodeFunctionData("configureEarlyAccess", ["0x6a86EfA012fEDA64b70112022487fEE22E67d2fb", earlyStart, earlyEnd]).toLowerCase());
     expect(js).toContain(`var EARLY_MINT = "${early.getFunction("earlyAccessMint").selector}";`);
     // The test mint is checked field by field against the fixed recipient, token 1 and quantity 1 before sending.

@@ -2,8 +2,8 @@
 // early-access test mint from 0x6a86…d2fb. No libraries, no keys. Each step is fixed call data (the test mint
 // adds only the server's signed voucher, checked field by field), offered only after its live checks pass, and
 // sent through the user's Rabby on an explicit click. Schedule (America/New_York): test mint window
-// Mon Oct 26 05:00-08:59 EDT; Genesis claim Mon Oct 26 09:00 EDT to Tue Oct 27 09:00 EDT with the paid sale
-// paused; then the paid sale alone until Tue Nov 3 07:59:59 EST (8-day public window, 7 full paid days).
+// Mon Oct 26 05:00-06:00 EDT; Genesis claim and the paid sale's scheduled start Mon Oct 26 09:00 EDT, with the
+// sale paused (purchase() checks paused before startTime) until the claim closes Tue Oct 27 09:00 EDT; then the paid sale alone until Tue Nov 3 07:59:59 EST (8-day public window, 7 full paid days).
 (function () {
   var CHAIN_ID = 43114;
   var ARTIST = "0x284c09a7cc187e096cbbdc88d99defe6df32180a";
@@ -16,16 +16,16 @@
   var CLAIM_START = 1793019600;
   var CLAIM_END = 1793106000;
   var SALE_END = 1793710799;
-  // One early-access test mint (EARLY_ACCESS_QUANTITY = 1) to this wallet: start 05:00 EDT, end one minute
-  // before claimStart (first refused second), per the runbook's window rule.
+  // One early-access test mint (EARLY_ACCESS_QUANTITY = 1) to this wallet: 05:00-06:00 EDT (end is the first
+  // refused second), well before claimStart.
   var TEST_WALLET = "0x6a86efa012feda64b70112022487fee22e67d2fb";
   var EARLY_START = 1793005200;
-  var EARLY_END = 1793019540;
+  var EARLY_END = 1793008800;
   var PRICE_WEI = "250000000000000000";
   var ISSUER_ROLE = "0x114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122";
   var RESCHEDULE = "0x23a12617000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000003782dace9d9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000006adf4ed0000000000000000000000000000000000000000000000000000000006ae9dacf0000000000000000000000000000000000000000000000000000000000000000";
   var PAUSE = "0x23a12617000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000003782dace9d9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000006adf4ed0000000000000000000000000000000000000000000000000000000006ae9dacf0000000000000000000000000000000000000000000000000000000000000001";
-  var EARLY_CONFIG = "0x9dc048040000000000000000000000006a86efa012feda64b70112022487fee22e67d2fb000000000000000000000000000000000000000000000000000000006adf1690000000000000000000000000000000000000000000000000000000006adf4e94";
+  var EARLY_CONFIG = "0x9dc048040000000000000000000000006a86efa012feda64b70112022487fee22e67d2fb000000000000000000000000000000000000000000000000000000006adf1690000000000000000000000000000000000000000000000000000000006adf24a0";
   var EARLY_MINT = "0x43e6253e"; // earlyAccessMint((address,uint256,address,uint256,uint256,uint256,uint256,uint256,uint256),bytes)
   var GRANT = "0x2f2ff15d114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa1220000000000000000000000007d1a068f532ad6c0f591d4fb9f82fd5b97495363";
   var REVOKE = "0xd547741f114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa1220000000000000000000000008512be04a4e54cd8551738165f9c05c3303187a0";
@@ -86,11 +86,11 @@
       checks: function (s) { return [[claimVerified(s), "New claim is deployed and verified as planned"], [!s.hasNew, "New claim does not hold ISSUER_ROLE yet"]]; } },
     { n: 4, from: ARTIST, title: "Revoke ISSUER_ROLE from the old claim " + OLD_CLAIM, to: RELEASE, data: REVOKE,
       checks: function (s) { return [[s.hasNew, "New claim already holds ISSUER_ROLE"], [s.hasOld, "Old claim still holds ISSUER_ROLE"]]; } },
-    { n: 5, from: ARTIST, title: "Pause the paid sale for the claim day", to: SALE, data: PAUSE,
+    { n: 5, from: ARTIST, title: "Pause the paid sale for the claim day (its scheduled start stays Mon 09:00 EDT)", to: SALE, data: PAUSE,
       checks: function (s) { return [[claimVerified(s), "New claim is deployed and verified as planned"], [saleScheduled(s), "Sale is rescheduled to " + CLAIM_START + "-" + SALE_END], [!s.sale.paused, "Sale is not paused yet"], [s.now < CLAIM_START, "Before the claim start"]]; } },
     { n: 6, from: TEST_WALLET, title: "Test mint: exactly 1 token to " + TEST_WALLET + " (early access, free)", to: NEW_CLAIM, data: null,
-      checks: function (s) { return [[claimVerified(s) && earlyConfigured(s), "Early access is configured for this wallet, " + EARLY_START + "-" + EARLY_END], [s.hasNew, "New claim holds ISSUER_ROLE"], [s.now >= EARLY_START && s.now < EARLY_END, "Inside the test window (05:00-08:59 EDT)"], [!!s.claim && !s.claim.early.claimed, "The test mint has not happened yet"], [saleScheduled(s), "Sale schedule unchanged"]]; } },
-    { n: 7, from: ARTIST, title: "Unpause the paid sale when the claim closes", to: SALE, data: RESCHEDULE,
+      checks: function (s) { return [[claimVerified(s) && earlyConfigured(s), "Early access is configured for this wallet, " + EARLY_START + "-" + EARLY_END], [s.hasNew, "New claim holds ISSUER_ROLE"], [s.now >= EARLY_START && s.now < EARLY_END, "Inside the test window (05:00-06:00 EDT)"], [!!s.claim && !s.claim.early.claimed, "The test mint has not happened yet"], [saleScheduled(s), "Sale schedule unchanged"]]; } },
+    { n: 7, from: ARTIST, title: "Unpause the paid sale when the claim closes (Tue 09:00 EDT)", to: SALE, data: RESCHEDULE,
       checks: function (s) { return [[s.now >= CLAIM_END, "The claim window has closed (" + (CLAIM_END - s.now) + "s to go)"], [saleScheduled(s), "Sale schedule unchanged"], [s.sale.paused, "Sale is paused"]]; } },
   ];
 
