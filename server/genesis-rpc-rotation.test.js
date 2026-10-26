@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Interface, Wallet, getAddress, id } from "ethers";
-import { GENESIS_CHAIN_ID, GENESIS_CONTRACT, GENESIS_FALLBACK_RPC_URL, TRANSFER_LOG_CHUNK_BLOCKS, createGenesisClaimService, loadGenesisClaimConfig, validateChunkLogs } from "./genesis-claim.js";
+import { GENESIS_CHAIN_ID, GENESIS_CONTRACT, GENESIS_FALLBACK_RPC_URL, TRANSFER_LOG_CHUNK_BLOCKS, createGenesisClaimService, loadGenesisClaimConfig, resolveGenesisFallbackProvider, validateChunkLogs } from "./genesis-claim.js";
 import { TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC } from "./genesis-claim-ledger.js";
 import { createMemoryGenesisClaimReservationStore } from "./genesis-claim-store.js";
 import { createMemoryGenesisScanCheckpointStore, validateCheckpoint } from "./genesis-scan-checkpoint-store.js";
@@ -108,7 +108,7 @@ function mirror(genesis, { chainId = GENESIS_CHAIN_ID } = {}) {
   return {
     send: vi.fn(async (method) => { if (method !== "eth_chainId") throw new Error("unexpected"); return `0x${chainId.toString(16)}`; }),
     getBlock: vi.fn(async (block) => blocks(block)),
-    getLogs: vi.fn(async (filter) => logs(filter)),
+    getLogs: vi.fn(async (filter) => Promise.all((await logs(filter)).map(async (log) => ({ ...log, blockHash: (await blocks(log.blockNumber)).hash })))),
   };
 }
 /** Like `seeded` in the checkpoint tests: A holds a voucher, then 5,000 idle blocks (50 chunks). */
@@ -126,7 +126,7 @@ const resetError = () => Object.assign(new Error("socket hang up"), { code: "ECO
 const timeoutError = () => Object.assign(new Error("request timeout"), { code: "TIMEOUT" });
 
 describe("Genesis getLogs endpoint rotation", () => {
-  it("the default secondary is the public, keyless Pocket C-Chain endpoint", () => {
+  it("the documented secondary is the public, keyless Pocket C-Chain endpoint (opt-in by injection only)", () => {
     expect(GENESIS_FALLBACK_RPC_URL).toBe("https://avax.api.pocket.network/ext/bc/C/rpc");
     expect(TRANSFER_LOG_CHUNK_BLOCKS).toBe(100);
   });
@@ -367,5 +367,59 @@ describe("Genesis getLogs endpoint rotation", () => {
     await expect(first.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503 });
     expect(cl.genesis.getLogs).toHaveBeenCalledTimes(1);
     expect(fallback.getLogs).not.toHaveBeenCalled();
+  });
+
+  it("(regression) default config has no fallback: a throttled primary fails closed with 503", async () => {
+    expect(resolveGenesisFallbackProvider(undefined)).toBeNull();
+    expect(resolveGenesisFallbackProvider(null)).toBeNull();
+    const cl = cluster();
+    const w = cl.spawn(); // no genesisFallbackProvider injected
+    await w.instance.issueVoucher(A);
+    cl.claimed.add(getAddress(A));
+    cl.genesis.idle(500);
+    cl.genesis.transfer(A, C, 0n);
+    cl.genesis.getLogs.mockRejectedValue(httpError(429));
+    await expect(w.instance.checkEligibility(C)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+  });
+
+  it("(regression) missing logs: an empty fallback answer never makes C eligible for A's used unit", async () => {
+    const { cl, fallback, first } = await setup();
+    cl.claimed.add(getAddress(A));
+    cl.genesis.transfer(A, C, 0n); // A's used unit moves to C inside the scanned range
+    cl.genesis.getLogs.mockRejectedValue(httpError(429));
+    fallback.getLogs.mockResolvedValue([]); // headers present, logs missing
+    // The fallback's boundary hashes are on another fork here, so the empty answer is rejected.
+    const real = fallback.getBlock.getMockImplementation();
+    fallback.getBlock.mockImplementation(async (b) => ({ ...(await real(b)), hash: id(`other:${b}`) }));
+    const result = await first.instance.checkEligibility(C).catch((e) => e);
+    expect(result).toMatchObject({ status: 503 });
+  });
+
+  it("(regression, known limitation) an injected fallback with matching hashes but no logs cannot be proven incomplete", async () => {
+    // Documented: the injected path still trusts an empty result when both boundary hashes match the
+    // primary. This is why the fallback is off by default; this test pins that behavior.
+    const { cl, fallback, first } = await setup();
+    cl.claimed.add(getAddress(A));
+    cl.genesis.transfer(A, C, 0n);
+    cl.genesis.getLogs.mockRejectedValue(httpError(429));
+    fallback.getLogs.mockResolvedValue([]);
+    await expect(first.instance.checkEligibility(C)).resolves.toMatchObject({ eligible: true });
+  });
+
+  it("(regression) wrong fork: fallback boundary hashes that differ from the primary never produce a successful scan", async () => {
+    const { cl, fallback, first } = await setup();
+    cl.genesis.getLogs.mockRejectedValue(httpError(429));
+    fallback.getBlock.mockImplementation(async (b) => ({ number: Number(b), hash: id(`fork:${b}`) }));
+    await expect(first.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503 });
+    expect(row(cl)).toBeUndefined();
+  });
+
+  it("(regression) wrong fork: a fallback log whose blockHash differs from the primary is rejected", async () => {
+    const { cl, fallback, first } = await setup();
+    cl.genesis.transfer(A, C, 0n);
+    cl.genesis.getLogs.mockRejectedValue(httpError(429));
+    const real = fallback.getLogs.getMockImplementation();
+    fallback.getLogs.mockImplementation(async (f) => (await real(f)).map((log) => ({ ...log, blockHash: id("fork") })));
+    await expect(first.instance.checkEligibility(C)).rejects.toMatchObject({ status: 503 });
   });
 });
