@@ -640,6 +640,18 @@ body { padding-bottom: 72px; }
     width: 100%;
     text-align: left;
   }
+  /* Keep the authorized creator action reachable below long wallet/address copy
+     instead of relying on the payout row's desktop-sized flex wrapping. */
+  .vc-earnings-payout-row {
+    align-items: stretch !important;
+  }
+  .vc-earnings-payout-row > div:first-child {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+  .vc-earnings-withdraw {
+    width: 100%;
+  }
   .vc-market-hero-bleed {
     min-height: 0;
     align-items: stretch;

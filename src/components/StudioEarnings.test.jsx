@@ -172,6 +172,14 @@ describe("Studio earnings", () => {
     expect(screen.queryByText("Platform balance")).toBeNull();
   });
 
+  it("keeps the authorized Withdraw action in the mobile payout layout", async () => {
+    setup();
+    const ff = await screen.findByRole("listitem", { name: "Earnings for Forgive & Forget 28" });
+    const button = within(ff).getByRole("button", { name: "Withdraw from Forgive & Forget 28" });
+    expect(button.classList.contains("vc-earnings-withdraw")).toBe(true);
+    expect(document.body.contains(button)).toBe(true);
+  });
+
   it("shows earned to date and derives already-withdrawn from it when the API reports earnings", async () => {
     const withEarnings = catalog();
     withEarnings.releaseBindings[0].artistEarnedWei = ethers.parseEther("0.03").toString();

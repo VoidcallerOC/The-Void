@@ -206,7 +206,7 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
                   </p>
                   {!result.payouts.length && !result.errors?.length && <p style={dim}>No balance on this sale.</p>}
                   {result.payouts.map((row) => (
-                    <div key={row.address} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+                    <div key={row.address} className="vc-earnings-payout-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
                       <div>
                         <Eyebrow>Available to withdraw</Eyebrow>
                         <div data-testid={`balance-${key}-${row.address.toLowerCase()}`} style={{ fontSize: 20, marginTop: 4 }}>{formatEarnings(row.balanceWei)}</div>
@@ -216,7 +216,7 @@ export function StudioEarnings({ catalog, wallet, readProvider }) {
                         {row.canWithdraw && row.balanceWei === 0n && <div style={{ ...dim, fontSize: 13, marginTop: 4 }}>Nothing to withdraw.</div>}
                       </div>
                       {row.canWithdraw && (
-                        <button type="button" style={row.balanceWei > 0n ? primaryBtn : ghostBtn} disabled={row.balanceWei === 0n || busy || !walletChain.ok} onClick={() => withdraw(result)} aria-label={`Withdraw from ${result.title}`}>
+                        <button type="button" className="vc-earnings-withdraw" style={row.balanceWei > 0n ? primaryBtn : ghostBtn} disabled={row.balanceWei === 0n || busy || !walletChain.ok} onClick={() => withdraw(result)} aria-label={`Withdraw from ${result.title}`}>
                           {outcome?.status === "awaiting-wallet" ? "Confirm in wallet…" : outcome?.status === "submitted" ? "Confirming…" : "Withdraw earnings"}
                         </button>
                       )}
