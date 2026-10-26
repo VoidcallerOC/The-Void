@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 import { Interface, Wallet, getAddress, id, verifyTypedData } from "ethers";
 import { ApiError } from "./api-errors.js";
@@ -794,5 +795,140 @@ describe("Genesis reservation reconciliation", () => {
     await run(settled, { apply: true });
     const view = async (store) => store.withLock(CONTRACT, async (tx) => (await tx.list()).map((r) => [r.wallet, r.usedTokenId, r.status === "EXPIRED"]));
     expect(await view(settled)).toEqual((await view(before)));
+  });
+});
+
+describe("Genesis transfer history over a public RPC that caps eth_getLogs at 100 blocks", () => {
+  const RPC_SECRET_URL = "https://user:hunter2@rpc.provider.example/ext/bc/C/rpc?apikey=SECRET_KEY_123";
+  /** A fake C-Chain RPC that rejects any eth_getLogs range wider than 100 blocks, like the public endpoint. */
+  function cappedChain(holdings) {
+    const chain = genesisChain(holdings);
+    const realGetLogs = chain.getLogs.getMockImplementation();
+    chain.ranges = [];
+    chain.getLogs = vi.fn(async (filter) => {
+      const span = Number(filter.toBlock) - Number(filter.fromBlock) + 1;
+      if (span > 100) {
+        const error = new Error(`could not coalesce error (error={ "code": -32000, "message": "requested too many blocks from ${filter.fromBlock} to ${filter.toBlock}, maximum is set to 100" }, url=${RPC_SECRET_URL})`);
+        error.code = "UNKNOWN_ERROR";
+        error.error = { code: -32000, message: "requested too many blocks, maximum is set to 100" };
+        throw error;
+      }
+      chain.ranges.push([Number(filter.fromBlock), Number(filter.toBlock)]);
+      return realGetLogs(filter);
+    });
+    chain.advance = (blocks) => { for (let i = 0; i < blocks; i += 1) chain.idle(); return chain.head; };
+    return chain;
+  }
+  const quietLogger = () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() });
+
+  it("the fake RPC rejects a range above 100 blocks and accepts exactly 100", async () => {
+    const chain = cappedChain({});
+    await expect(chain.getLogs({ address: GENESIS_CONTRACT, fromBlock: 1, toBlock: 101 })).rejects.toThrow(/maximum is set to 100/);
+    await expect(chain.getLogs({ address: GENESIS_CONTRACT, fromBlock: 1, toBlock: 100 })).resolves.toBeInstanceOf(Array);
+  });
+
+  it("with one pending reservation and the head 5,000 blocks later, a legitimately eligible wallet is eligible and every request is at most 100 blocks", async () => {
+    const chain = cappedChain({ [`${A}:0`]: 1n, [`${B}:1`]: 1n });
+    const logger = quietLogger();
+    const { instance, store } = service({ chain, logger });
+    await instance.issueVoucher(A);
+    const [pending] = await store.withLock(getAddress(CLAIM), (tx) => tx.list());
+    expect(pending.status).toBe("PENDING");
+    chain.advance(5_000);
+    await expect(instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"], claimIssued: false });
+    expect(chain.ranges).toHaveLength(50);
+    expect(chain.ranges.every(([from, to]) => to - from + 1 <= 100 && to >= from)).toBe(true);
+    expect(chain.ranges[0][0]).toBe(Number(pending.block) + 1);
+    expect(chain.ranges.at(-1)[1]).toBe(chain.head);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("covers the history with no gaps and counts boundary transfers exactly once", async () => {
+    const chain = cappedChain({ [`${A}:0`]: 1n, [`${B}:1`]: 1n });
+    const { instance, store, dest } = service({ chain });
+    await instance.issueVoucher(A);
+    dest.redeem(A);
+    const [record] = await store.withLock(getAddress(CLAIM), (tx) => tx.list());
+    const first = Number(record.block) + 1;
+    // Put transfers on the last block of one chunk and the first block of the next.
+    chain.advance(first + 99 - chain.head - 1);
+    const lastOfChunk = chain.transfer(A, C, 0n); // the used unit follows the transfer to C
+    expect(lastOfChunk).toBe(first + 99);
+    const firstOfNext = chain.transfer(B, D, 1n);
+    expect(firstOfNext).toBe(first + 100);
+    chain.advance(250);
+    await expect(instance.checkEligibility(C)).resolves.toMatchObject({ eligible: false, holdingUsed: true });
+    await expect(instance.checkEligibility(D)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
+    // Contiguous, non-overlapping inclusive ranges from the block after the claim to the head.
+    let expected = first;
+    for (const [from, to] of chain.ranges) {
+      expect(from).toBe(expected);
+      expect(to - from + 1).toBeLessThanOrEqual(100);
+      expected = to + 1;
+    }
+    expect(expected - 1).toBe(chain.head);
+    const returned = (await Promise.all(chain.getLogs.mock.results.map((result) => result.value))).flat().map((log) => log.blockNumber);
+    expect(returned.filter((block) => block === lastOfChunk)).toHaveLength(1);
+    expect(returned.filter((block) => block === firstOfNext)).toHaveLength(1);
+  });
+
+  it.each([
+    ["eligibility", (instance) => instance.checkEligibility(B, { requestId: "990d46f9-b929-4328-97e4-593aaa3fa08a" })],
+    ["voucher", (instance) => instance.issueVoucher(B, { requestId: "990d46f9-b929-4328-97e4-593aaa3fa08a" })],
+  ])("an upstream getLogs failure in the %s path keeps the 503 and logs exactly one sanitized diagnostic", async (_label, call) => {
+    const chain = cappedChain({ [`${A}:0`]: 1n, [`${B}:0`]: 1n });
+    const logger = quietLogger();
+    const { instance, signTypedData } = service({ chain, logger });
+    await instance.issueVoucher(A);
+    signTypedData.mockClear();
+    chain.advance(300);
+    const failure = new Error(`server response 429 Too Many Requests (url=${RPC_SECRET_URL}, wallet=${B})`);
+    failure.code = "SERVER_ERROR";
+    failure.info = { responseStatus: "429 Too Many Requests", requestUrl: RPC_SECRET_URL };
+    chain.getLogs.mockRejectedValueOnce(failure);
+    await expect(call(instance)).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(signTypedData).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith("genesis.eligibility.upstream_error", { requestId: "990d46f9-b929-4328-97e4-593aaa3fa08a", stage: "getLogs", providerError: { httpStatus: 429 } });
+    const logged = JSON.stringify(logger.warn.mock.calls).toLowerCase();
+    for (const secret of [A, B, getAddress(B), "rpc.provider.example", "hunter2", "secret_key_123", "too many requests", "https://"]) {
+      expect(logged).not.toContain(secret.toLowerCase());
+    }
+  });
+
+  it.each([
+    ["readHead", (chain) => { chain.getBlockNumber.mockRejectedValueOnce(Object.assign(new Error(`connect ECONNREFUSED ${RPC_SECRET_URL}`), { code: "NETWORK_ERROR" })); }, { providerCode: "NETWORK_ERROR" }],
+    ["balances", (chain) => { chain.call.mockRejectedValue(Object.assign(new Error(`execution reverted for ${A}`), { error: { code: -32603, message: `internal ${RPC_SECRET_URL}` } })); }, { rpcCode: -32603 }],
+    ["getLogs", (chain) => { chain.advance(5_000); chain.getLogs = vi.fn(async () => { throw new Error(`raw ${RPC_SECRET_URL}`); }); }, null],
+  ])("diagnostics for a %s failure carry only the stage and a sanitized code", async (stage, breakChain, providerError) => {
+    const chain = cappedChain({ [`${A}:0`]: 1n, [`${B}:0`]: 1n });
+    const logger = quietLogger();
+    const { instance } = service({ chain, logger });
+    await instance.issueVoucher(A);
+    breakChain(chain);
+    await expect(instance.checkEligibility(B, { requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02" })).rejects.toMatchObject({ status: 503, code: "ELIGIBILITY_UNAVAILABLE" });
+    expect(logger.warn.mock.calls).toEqual([["genesis.eligibility.upstream_error", { requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02", stage, providerError }]]);
+    const logged = JSON.stringify(logger.warn.mock.calls).toLowerCase();
+    for (const secret of [A.toLowerCase(), B.toLowerCase(), "rpc.provider.example", "hunter2", "secret_key_123", "reverted", "econnrefused", "internal"]) {
+      expect(logged).not.toContain(secret);
+    }
+  });
+
+  it("an eligibility route failure returns the existing 503 to the client with the request ID and logs one diagnostic", async () => {
+    const chain = cappedChain({ [`${A}:0`]: 1n, [`${B}:0`]: 1n });
+    const logger = quietLogger();
+    const { instance } = service({ chain, logger });
+    await instance.issueVoucher(A);
+    chain.advance(5_000);
+    chain.getLogs.mockRejectedValueOnce(Object.assign(new Error(`bad ${RPC_SECRET_URL}`), { error: { code: -32005, message: "limit exceeded" } }));
+    const handler = createApiHandler({ service: {}, genesisClaim: instance, logger });
+    const response = { status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
+    const payload = JSON.stringify({ wallet: B });
+    const request = { method: "POST", url: "/api/claims/eligibility", headers: { "x-request-id": "028f82e7-cbdb-4bcc-8c6b-364899622b02", "content-type": "application/json" }, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() { yield Buffer.from(payload); } };
+    await handler(request, response);
+    expect(response.status).toBe(503);
+    expect(JSON.parse(response.body).error).toMatchObject({ code: "ELIGIBILITY_UNAVAILABLE", requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02" });
+    expect(response.body).not.toContain("rpc.provider.example");
+    expect(logger.warn.mock.calls).toEqual([["genesis.eligibility.upstream_error", { requestId: "028f82e7-cbdb-4bcc-8c6b-364899622b02", stage: "getLogs", providerError: { rpcCode: -32005 } }]]);
   });
 });
