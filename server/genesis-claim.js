@@ -434,17 +434,29 @@ export function createRateLimitAwareRpcProvider(url, chainId) {
 }
 
 /**
- * Secondary, free, keyless C-Chain endpoint used ONLY for Genesis eth_getLogs chunks when the primary
+ * NOT USED BY DEFAULT (see resolveGenesisFallbackProvider); kept for an explicitly injected fallback.
+ * Secondary, free, keyless C-Chain endpoint for Genesis eth_getLogs chunks only, when the primary
  * (GENESIS_RPC_URL) fails transiently (429/1015, 599, 5xx gateway, timeout, reset). Head, block hashes,
  * balances and anchors are always read from the primary. Limits (see fetchChunkLogs):
  *   - its chain is verified with eth_chainId (43114) before first use; a mismatch disables it;
  *   - for every chunk it must return both boundary blocks (fromBlock and toBlock); a missing block or a
  *     "not found"/missing-history error is treated as UNAVAILABLE history, never as an empty log array;
+ *   - both boundary block hashes, and every log's blockHash, must equal the primary's; a primary that
+ *     cannot be read for that check fails closed;
  *   - every log is checked for contract, topic, range and duplicates, as for the primary.
  * A node that keeps block headers but silently drops receipts would still pass these checks; this is an
  * accepted, documented limitation of a free public endpoint (no paid or archive provider is used).
  */
 export const GENESIS_FALLBACK_RPC_URL = "https://avax.api.pocket.network/ext/bc/C/rpc";
+
+/**
+ * The fallback is OFF by default: the service never builds one itself. A free endpoint that has block
+ * headers but is missing logs cannot be told apart from a range with no transfers, and accepting such an
+ * empty answer could let a used Genesis unit qualify again. Only an explicitly injected provider is used.
+ */
+export function resolveGenesisFallbackProvider(injected) {
+  return injected || null;
+}
 
 /** A getLogs response that is not provably complete for the requested chain and range. Fails closed (503). */
 export class GenesisIncompleteLogsError extends Error {
@@ -521,8 +533,8 @@ export async function reconcileGenesisReservations({ store, claimContract, readA
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,
-  // Secondary getLogs endpoint (GENESIS_FALLBACK_RPC_URL by default when the primary is built here).
-  // null/false disables it; an injected primary gets no fallback unless one is injected too.
+  // Secondary getLogs endpoint. OFF by default: used only when explicitly injected (see
+  // resolveGenesisFallbackProvider). Without it a throttled primary fails closed with a 503.
   genesisFallbackProvider = undefined,
   destinationProvider = null,
   signer = null,
@@ -552,9 +564,7 @@ export function createGenesisClaimService({
   // A provider built here has a static network, so getNetwork() no longer asks the RPC; its chain is
   // verified once with eth_chainId instead. An injected provider keeps the getNetwork() check.
   const staticGenesisProvider = !genesisProvider;
-  const fallbackProvider = genesisFallbackProvider === undefined
-    ? (genesisProvider ? null : createGenesisRpcProvider(GENESIS_FALLBACK_RPC_URL))
-    : (genesisFallbackProvider || null);
+  const fallbackProvider = resolveGenesisFallbackProvider(genesisFallbackProvider);
   let genesisChainVerified = false;
   const targetProvider = destinationProvider || new JsonRpcProvider(config.destinationRpcUrl);
   const claimSigner = signer || new Wallet(config.privateKey);
@@ -706,18 +716,40 @@ export function createGenesisClaimService({
         if (!ok) { endpoint.disabled = true; throw new GenesisIncompleteLogsError("wrong_chain"); }
         endpoint.chainVerified = true;
       }
-      // The fallback must hold both ends of the range, else its history is not trusted for it.
+    }
+    // Primary-sourced hashes, for checking the fallback against the primary's canonical chain. Any
+    // failure to read one (throttled primary, missing block) fails closed: the fallback is not trusted.
+    const canonical = new Map();
+    const primaryHash = async (block) => {
+      if (!canonical.has(block)) {
+        let found;
+        try { found = await paced(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
+        if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("unverified");
+        canonical.set(block, found.hash.toLowerCase());
+      }
+      return canonical.get(block);
+    };
+    if (endpoint.fallback) {
+      // The fallback must hold both ends of the range, on the primary's chain, else it is not trusted for it.
       for (const block of new Set([filter.fromBlock, filter.toBlock])) {
         let found;
         try { found = await paced(() => provider.getBlock(block), deadline); } catch (error) { throw missingHistory(error); }
         if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("history_unavailable");
+        if (found.hash.toLowerCase() !== await primaryHash(block)) throw new GenesisIncompleteLogsError("fork_mismatch");
       }
     }
     let logs;
     try {
       logs = await paced(() => provider.getLogs({ ...filter, topics: filter.topics.map((group) => [...group]) }), deadline);
     } catch (error) { throw endpoint.fallback ? missingHistory(error) : error; }
-    return validateChunkLogs(logs, filter);
+    validateChunkLogs(logs, filter);
+    if (endpoint.fallback) {
+      // Every fallback log must carry the primary's hash for its block.
+      for (const log of logs) {
+        if (typeof log.blockHash !== "string" || log.blockHash.toLowerCase() !== await primaryHash(Number(log.blockNumber))) throw new GenesisIncompleteLogsError("fork_mismatch");
+      }
+    }
+    return logs;
   }
   async function fetchChunkLogs(fromBlock, toBlock, deadline) {
     const filter = Object.freeze({ address: GENESIS_CONTRACT, topics: Object.freeze([Object.freeze([TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC])]), fromBlock, toBlock });
