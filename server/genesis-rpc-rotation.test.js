@@ -343,9 +343,10 @@ describe("Genesis getLogs endpoint rotation", () => {
     fallback.getLogs.mockImplementation(async () => { first.clock.t += 4_000; throw httpError(429, { "retry-after": "30" }); });
     await expect(first.instance.checkEligibility(B)).rejects.toMatchObject({ status: 503 });
     const elapsed = first.clock.t - start;
-    // Retry-After 30 s is capped at maxDelayMs (4 s); attempts stop at maxAttempts or the 45 s budget.
+    // Retry-After is not capped by maxDelayMs (4 s); attempts stop when the 45 s budget cannot fit another wait.
     expect(elapsed).toBeLessThanOrEqual(45_000 + 4_000);
-    expect(Math.max(...first.sleep.mock.calls.map(([ms]) => ms))).toBeLessThanOrEqual(4_000);
+    expect(Math.max(...first.sleep.mock.calls.map(([ms]) => ms))).toBeGreaterThanOrEqual(25_000);
+    expect(Math.max(...first.sleep.mock.calls.map(([ms]) => ms))).toBeLessThanOrEqual(30_000);
     expect(cl.genesis.getLogs.mock.calls.length + fallback.getLogs.mock.calls.length).toBeLessThanOrEqual(5);
   });
 
