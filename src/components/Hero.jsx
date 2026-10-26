@@ -97,16 +97,9 @@ export function Hero() {
         <h1 style={{ margin: 0, padding: 0, border: 0, font: "inherit", color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
           <WordmarkGlitch />
         </h1>
-        <div style={{ marginTop: -8 }}>
-          <span style={{
-            display: "inline-block",
-            fontFamily: "var(--font-display)",
-            fontWeight: 400,
-            fontSize: "clamp(28px, 6vw, 42px)",
-            lineHeight: 1,
-            letterSpacing: "0",
-            textTransform: "uppercase",
-          }}>The Void · music-native platform</span>
+        <div className="vc-home-platform">
+          <img src="/brand/the-void/header-wordmark-dark.svg" alt="The Void" width="1627" height="435" />
+          <span>Music-native platform · Underground archive</span>
         </div>
         <p
           style={{

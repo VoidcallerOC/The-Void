@@ -103,7 +103,8 @@ export function Footer() {
         ))}
       </div>
       <div className="vc-footer-bottom" style={{ marginTop: 64, paddingTop: 24, borderTop: "1px solid var(--vc-ash)", display: "flex", justifyContent: "space-between" }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>
+        <span className="vc-footer-platform" style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>
+          <img src="/brand/the-void/header-wordmark-dark.svg" alt="" width="1627" height="435" />
           © MMXXVI · THE VOID
         </span>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.18em", color: "var(--vc-bone-dim)", textTransform: "uppercase" }}>

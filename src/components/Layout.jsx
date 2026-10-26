@@ -78,13 +78,14 @@ function LayoutShell() {
             starfield (z-index -1) sits above the black page ground and beneath
             every page, the nav, footer and player. */}
         <div className="vc-starfield-host">
+        <a className="vc-skip-link" href="#vc-main">Skip to content</a>
         <VoidStarfield />
         <Grain />
         <Scanlines />
         <Nav />
         {/* Each route fills the viewport so short pages don't expose the footer
             on load — content centers vertically; taller pages just grow. */}
-        <main className="vc-main">
+        <main id="vc-main" className="vc-main" tabIndex={-1}>
           <Suspense fallback={<SectionFallback />}>
             <Outlet context={{ catalog }} />
           </Suspense>
