@@ -26,6 +26,9 @@ import { GENESIS_CHAIN_ID } from "../server/genesis-claim.js";
 // key, shows on the page what blocks signing (funding, nonce, inputs) with a re-check, and lets the
 // owner approve the plan on the page, which binds it to the commit before any step is offered.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** Sessions carry BigInt values (nonces, amounts); JSON.stringify throws on them without this. */
+const jsonReplacer = (key, value) => (typeof value === "bigint" ? value.toString() : value);
+
 const PAGE_PATH = resolve(ROOT, "deploy/mainnet/owner-signing.html");
 const ETHERS_BUNDLE = resolve(ROOT, "node_modules/ethers/dist/ethers.umd.min.js");
 const MAX_BODY_BYTES = 4096;
@@ -202,8 +205,8 @@ export async function approvePlan(session, { recipientVerifiedOnDevice, provider
 async function writePlanFilesToDisk(kind, plan, binding) {
   const dir = resolve(PLAN_DIR, `${kind}-${binding.sourceCommit.slice(0, 7)}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await mkdir(dir, { recursive: true });
-  await writeFile(resolve(dir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`, { flag: "wx" });
-  await writeFile(resolve(dir, "plan-binding.json"), `${JSON.stringify(binding, null, 2)}\n`, { flag: "wx" });
+  await writeFile(resolve(dir, "plan.json"), `${JSON.stringify(plan, jsonReplacer, 2)}\n`, { flag: "wx" });
+  await writeFile(resolve(dir, "plan-binding.json"), `${JSON.stringify(binding, jsonReplacer, 2)}\n`, { flag: "wx" });
   return { plan: `${dir}/plan.json`, binding: `${dir}/plan-binding.json` };
 }
 
@@ -357,10 +360,10 @@ async function readBody(req) {
 }
 
 /** A loopback-only HTTP server for one session. Requests need the session token and same-origin. */
-export function createSigningServer(session, { provider, providers = { provider }, replan, writeRecord, writePlanFiles, timeoutMs, env = process.env, log = (value) => console.log(JSON.stringify(value)), token = randomBytes(16).toString("hex") } = {}) {
+export function createSigningServer(session, { provider, providers = { provider }, replan, writeRecord, writePlanFiles, timeoutMs, env = process.env, log = (value) => console.log(JSON.stringify(value, jsonReplacer)), token = randomBytes(16).toString("hex") } = {}) {
   let origin = null;
   const base = `/s/${token}`;
-  const json = (res, status, value) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(value)); };
+  const json = (res, status, value) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(value, jsonReplacer)); };
   const server = createServer(async (req, res) => {
     try {
       // Loopback host only (DNS rebinding), and for writes the page's own origin only (cross-site requests).
