@@ -77,7 +77,8 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   logger[signerCheck.status === "MATCH" || signerCheck.status === "ABSENT" ? "info" : "error"]?.("genesis.signer.check", signerCheck);
   let genesisClaim = null;
   try {
-    genesisClaim = createGenesisClaimService({ config: loadGenesisClaimConfig(process.env), reservationStore: createGenesisClaimReservationStore(pool), checkpointStore: createGenesisScanCheckpointStore(pool) });
+    const genesisConfig = loadGenesisClaimConfig(process.env);
+    genesisClaim = createGenesisClaimService({ config: genesisConfig, reservationStore: createGenesisClaimReservationStore(pool, { ledgerContracts: genesisConfig?.ledgerContracts || [] }), checkpointStore: createGenesisScanCheckpointStore(pool) });
   } catch (error) {
     logger.error?.("genesis.claim.disabled", { error: error.message });
   }

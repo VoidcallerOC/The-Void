@@ -20,7 +20,8 @@ function toRecord(row) {
 }
 
 /** Postgres store. One advisory lock per claim contract serializes issuance across API instances. */
-export function createGenesisClaimReservationStore(pool) {
+export function createGenesisClaimReservationStore(pool, options = {}) {
+  const ledgerContracts = (options.ledgerContracts || []).map((a) => a.toLowerCase());
   return Object.freeze({
     async withLock(claimContract, fn) {
       const client = await pool.connect();
@@ -29,7 +30,11 @@ export function createGenesisClaimReservationStore(pool) {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`genesis-claim-ledger:${claimContract.toLowerCase()}`]);
         const tx = {
           async list() {
-            const { rows } = await client.query("SELECT * FROM genesis_claim_reservations WHERE claim_contract=$1", [claimContract.toLowerCase()]);
+            const contracts = [claimContract.toLowerCase(), ...ledgerContracts.filter((c) => c !== claimContract.toLowerCase())];
+            const { rows } = await client.query(
+              "SELECT * FROM genesis_claim_reservations WHERE claim_contract = ANY($1)",
+              [contracts],
+            );
             return rows.map(toRecord);
           },
           async upsert(record) {
@@ -59,9 +64,10 @@ export function createGenesisClaimReservationStore(pool) {
 }
 
 /** In-process store for tests and single-process tooling. Same interface, promise-chain lock. */
-export function createMemoryGenesisClaimReservationStore() {
+export function createMemoryGenesisClaimReservationStore(options = {}) {
   const rows = new Map();
   let tail = Promise.resolve();
+  const ledgerContracts = (options.ledgerContracts || []).map((a) => a.toLowerCase());
   return Object.freeze({
     rows,
     async withLock(claimContract, fn) {
@@ -69,7 +75,10 @@ export function createMemoryGenesisClaimReservationStore() {
         const staged = new Map(rows);
         const key = (wallet) => `${claimContract.toLowerCase()}:${wallet.toLowerCase()}`;
         const tx = {
-          async list() { return [...staged.entries()].filter(([k]) => k.startsWith(`${claimContract.toLowerCase()}:`)).map(([, value]) => value); },
+          async list() {
+            const prefixes = new Set([`${claimContract.toLowerCase()}:`, ...ledgerContracts.map((c) => `${c}:`)]);
+            return [...staged.entries()].filter(([k]) => [...prefixes].some((p) => k.startsWith(p))).map(([, value]) => value);
+          },
           async upsert(record) { staged.set(key(record.wallet), Object.freeze({ ...record, claimContract: getAddress(claimContract), wallet: getAddress(record.wallet) })); },
           async setStatus(wallet, status) { const current = staged.get(key(wallet)); if (current) staged.set(key(wallet), Object.freeze({ ...current, status })); },
         };

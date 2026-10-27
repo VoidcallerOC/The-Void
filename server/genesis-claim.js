@@ -5,6 +5,7 @@ import { ApiError } from "./api-errors.js";
 import { productionChainId } from "./config.js";
 import { GenesisCheckpointCorruptError, MAX_ANCHORS, normalizeLog } from "./genesis-scan-checkpoint-store.js";
 import { GENESIS_TOKEN_ID_SET, TRANSFER_BATCH_TOPIC, TRANSFER_SINGLE_TOPIC, decodeGenesisTransfers, replayUsedUnits, unitToUse, unusedUnits } from "./genesis-claim-ledger.js";
+import { checkBridgeEligibility, bridgeEligibilityEnabled } from "./genesis-bridge-eligibility.js";
 
 export const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const GENESIS_CHAIN_ID = 43114;
@@ -45,6 +46,7 @@ export function claimSchedule({ destinationChainId, claimWindow = CLAIM_WINDOW_S
   }
   // Claims run concurrently with the sale and must close strictly before the public sale ends.
   if (claimWindow >= publicWindow) throw new GenesisClaimConfigurationError("The Genesis claim window must be shorter than the public window: claims must close before the public sale ends.");
+
   return Object.freeze({ claimWindow, publicWindow });
 }
 
@@ -207,6 +209,7 @@ export function checkGenesisSignerConfig(env = process.env) {
 export function loadGenesisClaimConfig(env = process.env) {
   if (String(env.GENESIS_CLAIM_ENABLED || "").toLowerCase() !== "true") return null;
   const destinationChainId = productionChainId(env);
+  const recoveryMode = String(env.GENESIS_CLAIM_RECOVERY || "").toLowerCase() === "true";
   const releaseContract = configuredAddress(env.GENESIS_CLAIM_RELEASE_CONTRACT, "GENESIS_CLAIM_RELEASE_CONTRACT");
   const primarySale = configuredAddress(env.GENESIS_CLAIM_PRIMARY_SALE, "GENESIS_CLAIM_PRIMARY_SALE");
   const claimContract = configuredAddress(env.GENESIS_CLAIM_CONTRACT, "GENESIS_CLAIM_CONTRACT");
@@ -230,6 +233,18 @@ export function loadGenesisClaimConfig(env = process.env) {
     publicWindow: env.GENESIS_PUBLIC_WINDOW_SECONDS === undefined || env.GENESIS_PUBLIC_WINDOW_SECONDS === "" ? PUBLIC_WINDOW_SECONDS : positiveBigInt(env.GENESIS_PUBLIC_WINDOW_SECONDS, "GENESIS_PUBLIC_WINDOW_SECONDS"),
     publicPriceWei,
   });
+  const publicSaleStart = recoveryMode
+    ? positiveBigInt(env.GENESIS_PUBLIC_SALE_START, "GENESIS_PUBLIC_SALE_START")
+    : claimStart;
+  const publicSaleEnd = recoveryMode
+    ? positiveBigInt(env.GENESIS_PUBLIC_SALE_END, "GENESIS_PUBLIC_SALE_END")
+    : claimStart + publicWindow - 1n;
+  if (publicSaleEnd < publicSaleStart || publicSaleEnd - publicSaleStart + 1n !== publicWindow) {
+    throw new GenesisClaimConfigurationError("The configured public sale window does not match GENESIS_PUBLIC_WINDOW_SECONDS.");
+  }
+  const ledgerContracts = String(env.GENESIS_CLAIM_LEDGER_CONTRACTS || claimContract)
+    .split(",").map((value) => value.trim()).filter(Boolean).map((value) => configuredAddress(value, "GENESIS_CLAIM_LEDGER_CONTRACTS"));
+  if (!ledgerContracts.some((address) => address.toLowerCase() === claimContract.toLowerCase())) ledgerContracts.push(claimContract);
   const { privateKey, signerAddress } = validateGenesisSignerConfig(env);
   const earlyAccess = loadEarlyAccessConfig(env, { claimStart, signerAddress, addresses: [releaseContract, primarySale, claimContract, GENESIS_CONTRACT] });
   return Object.freeze({
@@ -247,14 +262,16 @@ export function loadGenesisClaimConfig(env = process.env) {
     claimWindow,
     publicWindow,
     claimEnd: claimStart + claimWindow,
-    // The paid sale opens with the claims and its inclusive end gives a window of exactly publicWindow.
-    publicSaleStart: claimStart,
-    publicSaleEnd: claimStart + publicWindow - 1n,
+    // Normal campaigns open the paid sale with the claim. Recovery campaigns retain the live sale schedule.
+    publicSaleStart,
+    publicSaleEnd,
     publicPriceWei,
     eligibilityRule: ELIGIBILITY_RULE,
     signerAddress,
     privateKey,
     earlyAccess,
+    recoveryMode,
+    ledgerContracts: Object.freeze(ledgerContracts),
     scan: scanOptions(env),
   });
 }
@@ -1323,10 +1340,19 @@ export function createGenesisClaimService({
     await configVerifying;
   }
 
+  async function checkBridgeEligibilityForWallet(walletInput) {
+    if (!bridgeEligibilityEnabled(process.env)) {
+      return { eligible: false, reason: "BRIDGE_DISABLED" };
+    }
+    return checkBridgeEligibility({ wallet: walletInput, sourceProvider: null, grottoProvider: null });
+  }
+
   return Object.freeze({
     config: toPublicConfig(config),
+
     checkEligibility,
     issueVoucher,
+    checkBridgeEligibilityForWallet,
     issueEarlyAccessVoucher,
     verifyContractBindings,
     verifyConfigBindings,
