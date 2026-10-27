@@ -778,7 +778,7 @@ export function createGenesisClaimService({
     const primaryHash = async (block) => {
       if (!canonical.has(block)) {
         let found;
-        try { found = await paced(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
+        try { found = await rpc(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
         if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("unverified");
         canonical.set(block, found.hash.toLowerCase());
       }
