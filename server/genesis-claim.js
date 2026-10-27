@@ -967,8 +967,8 @@ export function createGenesisClaimService({
     }
     const scanFrom = cached ? cached.end + 1 : fromBlock;
     const safeEnd = head - scan.confirmations;
-    const extend = async (through, logs) => {
-      const endHash = await blockHash(through, deadline);
+    const extend = async (through, logs, extendDeadline = deadline) => {
+      const endHash = await blockHash(through, extendDeadline);
       const anchors = cached ? [...cached.anchors, { block: cached.end, hash: cached.endHash }].slice(-MAX_ANCHORS) : [];
       const next = Object.freeze({ from: cached ? cached.from : fromBlock, end: through, endHash, anchors: Object.freeze(anchors.map((anchor) => Object.freeze(anchor))), logs: Object.freeze(logs.filter((log) => log.blockNumber <= through)) });
       verifiedHistory = next;
@@ -985,7 +985,10 @@ export function createGenesisClaimService({
       const through = progress.through === null ? null : Math.min(progress.through, safeEnd);
       if (checkpointStore && through !== null && through >= scanFrom) {
         try {
-          await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)]);
+          // Fresh window for the checkpoint's one end-hash read: the scan deadline is spent by
+          // definition here, and a slow fallback getBlock must not defeat the persistence that lets
+          // the next request resume instead of rescanning every block from the start.
+          await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)], monotonicNow() + PARTIAL_CHECKPOINT_RESERVE_MS);
           logCheckpoint("partial_saved");
         } catch { logCheckpoint("partial_skipped"); }
       }
@@ -1312,4 +1315,3 @@ export function createGenesisClaimService({
     verifyConfigBindings,
   });
 }
-
