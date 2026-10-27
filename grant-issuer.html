@@ -40,8 +40,8 @@
   $("go").addEventListener("click", async () => {
     try {
       if (!rabbyProvider) throw new Error("Rabby was not detected. Open this page in the browser profile with Rabby.");
-      const accounts = await rabby.request({ method: "eth_requestAccounts" });
-      const chainId = Number(BigInt(await rabby.request({ method: "eth_chainId" })));
+      const accounts = await rabbyProvider.request({ method: "eth_requestAccounts" });
+      const chainId = Number(BigInt(await rabbyProvider.request({ method: "eth_chainId" })));
       if (chainId !== CHAIN) throw new Error(`Rabby is on chain ${chainId}. Switch to Avalanche C-Chain (43114) and retry.`);
       if (accounts[0].toLowerCase() !== FROM.toLowerCase()) throw new Error(`Rabby's account is ${accounts[0]}. Switch to the artist/admin wallet ${FROM} and retry.`);
       out("Connected. Confirm the transaction in Rabby (to the release contract, value 0)…");
@@ -50,7 +50,7 @@
       let receipt = null;
       for (let i = 0; i < 60 && !receipt; i++) {
         await new Promise((r) => setTimeout(r, 3000));
-        receipt = await rabby.request({ method: "eth_getTransactionReceipt", params: [hash] }).catch(() => null);
+        receipt = await rabbyProvider.request({ method: "eth_getTransactionReceipt", params: [hash] }).catch(() => null);
       }
       out(receipt && Number(receipt.status) === 1
         ? `<span class="ok">CONFIRMED (status 1): <code>${hash}</code></span><br><a style="color:#7bed9f" href="https://snowtrace.io/tx/${hash}" target="_blank" rel="noreferrer">View on Snowtrace</a><br>ISSUER_ROLE is now held by the recovery contract. Report back for on-chain verification.`
