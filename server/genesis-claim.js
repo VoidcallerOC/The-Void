@@ -1010,7 +1010,9 @@ export function createGenesisClaimService({
       throw error;
     }
     const logs = cached ? [...cached.logs, ...fresh] : fresh;
-    if (safeEnd >= scanFrom) await extend(safeEnd, logs);
+    // The scan just spent the whole budget; the checkpoint's end-hash read gets its own fresh window
+    // (fallback allowed), otherwise a fully successful scan dies here and the next request starts over.
+    if (safeEnd >= scanFrom) await extend(safeEnd, logs, monotonicNow() + PARTIAL_CHECKPOINT_RESERVE_MS, { withFallback: true });
     return logs;
   }
   // Single flight: a request whose range is covered by the scan in progress joins it and shares its
