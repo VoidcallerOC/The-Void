@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, formatEther, getAddress, getCreateAddress, id, isAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import unifiedManifest from "../config/unified-marketplace.json" with { type: "json" };
@@ -380,7 +380,7 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   return plan;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((error) => {
     console.error(`Mainnet deployment preflight failed: ${error.message}`);
     process.exitCode = 1;

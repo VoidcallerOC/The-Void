@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // Offline check of Safe owner signatures before anything is submitted. No network,
 // no keys: it recomputes the SafeTx hash for chain 43113 and recovers each signer
 // from the signature bytes. It fails closed: a wallet that signed a different hash
@@ -47,7 +48,7 @@ export function verifySafeSignatures({ safe, chainId, owners, threshold, tx, sig
   };
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   const request = JSON.parse(await readFile(process.argv[2], "utf8"));
   const result = verifySafeSignatures(request);

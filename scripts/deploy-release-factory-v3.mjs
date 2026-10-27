@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { ContractFactory, JsonRpcProvider, Wallet, getAddress, getCreateAddress, id, isAddress } from "ethers";
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
 
@@ -295,7 +295,7 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   return { mode: "BROADCAST_COMPLETE", record };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((error) => {
     console.error(`Factory V3 deployment preflight failed: ${error.message}`);
     process.exitCode = 1;

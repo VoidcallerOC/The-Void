@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { AbiCoder, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroHash, formatEther, getAddress, getCreateAddress, isAddress } from "ethers";
 import { DeploymentError, assertRpcChainId } from "./deploy-release-factory-v3.mjs";
 import mainnetReleaseManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
@@ -546,7 +546,7 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   return { mode: "BROADCAST_COMPLETE", record };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((error) => {
     console.error(`Genesis claim deployment preflight failed: ${error.message}`);
     process.exitCode = 1;

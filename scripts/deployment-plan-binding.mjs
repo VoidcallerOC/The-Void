@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // Command line for the plan binding (bind / verify). The binding logic itself is in
 // plan-binding-core.mjs, which the browser deployment page shares. Reads only local files; no keys.
 import { readFile, writeFile } from "node:fs/promises";
@@ -31,7 +32,7 @@ export async function main(argv = process.argv.slice(2)) {
   throw new BindingError('Use "bind" or "verify".');
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`Deployment plan binding failed: ${error.message}`);
     process.exitCode = 1;

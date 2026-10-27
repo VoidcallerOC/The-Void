@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { APPROVED_KINDS, validateApprovedPlan } from "./approved-plan.mjs";
 
 // Reads a committed approved plan (deploy/mainnet/approved-plans/<kind>.json), validates it, and
@@ -26,7 +26,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(JSON.stringify({ step: "APPROVED_PLAN", kind: entry.kind, digest: entry.binding.digest }));
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`Approved plan refused: ${error.message}`);
     process.exitCode = 1;

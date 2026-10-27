@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { randomBytes } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { JsonRpcProvider, getAddress, keccak256 } from "ethers";
 import mainnetManifest from "../config/mainnet-release-per-contract.json" with { type: "json" };
 import { bindPlan, verifyBinding } from "./deployment-plan-binding.mjs";
@@ -510,7 +510,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   return handle;
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`Owner signing refused: ${error.message}`);
     process.exitCode = 1;

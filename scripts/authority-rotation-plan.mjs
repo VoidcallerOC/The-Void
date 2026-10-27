@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // Offline generator for the deployer-authority rotation package. It encodes
 // calldata from the repository ABIs and prints an ordered, reviewable list of
 // unsigned transactions. It has no RPC access, never signs and never broadcasts.
@@ -297,7 +298,7 @@ export function packageStatus(steps) {
     : { status: "READY_FOR_OWNER_REVIEW" };
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   const scope = process.env.SCOPE || "P0";
   const steps = buildRotationPlan({ safe: process.env.SAFE_AUTHORITY, backup: process.env.BACKUP_ADMIN, safeNonce: process.env.SAFE_NONCE, scope });

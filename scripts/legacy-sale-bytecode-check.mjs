@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // Read-only: identifies the exact source commit and compiler settings of the three
 // legacy VoidPrimarySale deployments, so the storage layout used by the rotation
 // simulations is the layout of the deployed bytecode, not an assumption.
@@ -43,5 +44,5 @@ async function main() {
   console.log(JSON.stringify(out, null, 2));
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) main().catch((error) => { console.error(error); process.exit(1); });

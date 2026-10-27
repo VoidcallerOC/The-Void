@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 // Prepares the Fuji Genesis claim deployment plan, without any key. It reads the artist's release,
 // edition and sale from Fuji, simulates the claim constructor, and builds the one unsigned creation
 // transaction for the Rabby deployer, with the artist as claim admin and the PLACEHOLDER voucher
@@ -65,4 +66,4 @@ async function main() {
   console.log(`Wrote ${out}\nbinding ${binding.digest}\nnonce ${plan.deployerNonce}, creates ${plan.predictedClaimAddress}, max cost ${plan.cost.maxCostWei} wei (Fuji test AVAX)\nclaim opens ${plan.schedule.claimStart}; admin ${plan.roles.admin}; voucher signer ${plan.roles.signer}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().catch((error) => { console.error(error.message); process.exit(1); });
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((error) => { console.error(error.message); process.exit(1); });

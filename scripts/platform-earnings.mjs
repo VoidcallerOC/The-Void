@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 // Read-only: the platform recipient's pull-payment balances on every
 // VoidPrimarySale created by the Fuji release factories (active + historical).
 //
@@ -71,5 +72,5 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) main().catch((error) => { console.error(error); process.exit(1); });

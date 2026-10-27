@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 // Separate recovery deployment path. Does not touch the original claim deployment script.
 // Default is dry-run only. Never broadcasts without explicit CONFIRM_MAINNET_DEPLOY=yes.
 import { readFile } from "node:fs/promises";
@@ -333,7 +334,7 @@ async function main() {
   }, replacer, 2));
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err.message || err);
     process.exit(1);

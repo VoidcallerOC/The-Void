@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // Read-only Fuji preflight for Studio provisioning requests.
 //
 // Each request carries an explicit lifecycle status:
@@ -226,7 +227,7 @@ async function main() {
   process.exitCode = output.ok ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     process.stdout.write(`${JSON.stringify({ ok: false, error: String(error?.shortMessage || error?.message || error).slice(0, 300) })}\n`);
     process.exitCode = 1;

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath , pathToFileURL} from "node:url";
 import { AbiCoder, Contract, ContractFactory, JsonRpcProvider, Wallet, encodeBytes32String, formatEther, getAddress, getCreateAddress, isAddress, keccak256, parseEther, toUtf8Bytes } from "ethers";
 import fujiV1 from "../config/fuji-release-per-contract.json" with { type: "json" };
 import fujiV2 from "../config/fuji-release-per-contract-v2.json" with { type: "json" };
@@ -254,7 +254,7 @@ export async function run(argv = process.argv.slice(2), env = process.env, depen
   return { mode: "REHEARSAL_COMPLETE", record };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().catch((error) => {
     console.error(`Fuji royalty rehearsal failed: ${error.message}`);
     process.exitCode = 1;
