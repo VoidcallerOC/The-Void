@@ -54,7 +54,7 @@
 "use strict";
 const RABBY_RDNS = "io.rabby";
 const announced = new Map();
-let rabby = null;
+let rabbyProvider = null;
 let session = null;
 let account = null;
 
@@ -83,7 +83,7 @@ function findRabby() {
 }
 
 async function walletState() {
-  const [accounts, chainId] = await Promise.all([rabby.request({ method: "eth_accounts" }), rabby.request({ method: "eth_chainId" })]);
+  const [accounts, chainId] = await Promise.all([rabbyProvider.request({ method: "eth_accounts" }), rabbyProvider.request({ method: "eth_chainId" })]);
   return { account: accounts[0] || null, chainId: Number(BigInt(chainId)) };
 }
 
@@ -156,9 +156,9 @@ async function refresh() {
 
 async function connect() {
   if (!session) { $("wallet").innerHTML = NO_SESSION; return; }
-  rabby = findRabby();
-  if (!rabby) { $("wallet").innerHTML = `<span class="bad">Rabby was not detected. Install or unlock the Rabby extension in this browser profile, then reload. Other wallets are not used.</span>`; return; }
-  const accounts = await rabby.request({ method: "eth_requestAccounts" });
+  rabbyProvider = findRabby();
+  if (!rabbyProvider) { $("wallet").innerHTML = `<span class="bad">Rabby was not detected. Install or unlock the Rabby extension in this browser profile, then reload. Other wallets are not used.</span>`; return; }
+  const accounts = await rabbyProvider.request({ method: "eth_requestAccounts" });
   const state = await walletState();
   if (!same(accounts[0], session.deployer) || !same(state.account, session.deployer)) {
     account = null;
@@ -192,7 +192,7 @@ async function sign(n) {
   await refresh();
   let hash;
   try {
-    hash = await rabby.request({ method: "eth_sendTransaction", params: [tx] });
+    hash = await rabbyProvider.request({ method: "eth_sendTransaction", params: [tx] });
   } catch (error) {
     await api(`steps/${n}/cancel`, {});
     // EIP-1193 code 4001 is an explicit user rejection. Any other error does not prove nothing was sent.
