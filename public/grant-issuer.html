@@ -2,30 +2,63 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>Fuji ISSUER_ROLE grant</title>
+<title>The Void — grant ISSUER_ROLE to the recovery contract</title>
 <style>
-  body { margin: 0; background: #0f1012; color: #ececf1; font: 15px/1.5 system-ui, sans-serif; }
-  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
-  code { word-break: break-all; font-size: 13px; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  td { border-bottom: 1px solid #2a2a33; padding: 6px 8px; vertical-align: top; }
-  .ok { color: #3ccf91; } .bad { color: #ff6b6b; } .muted { color: #9a9aa6; }
-  button { font: inherit; padding: 8px 14px; margin: 6px 6px 6px 0; cursor: pointer; }
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee; max-width: 720px; margin: 48px auto; padding: 0 16px; }
+  code, pre { background: #1d1d1d; padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border: 1px solid #333; padding: 8px; }
+  .bad { color: #ff6b6b; } .ok { color: #7bed9f; } .warn { color: #ffd32a; }
+  button { padding: 10px 18px; font-size: 16px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Fuji: grant ISSUER_ROLE to the Genesis claim</h1>
-  <p class="muted">Test network only (Avalanche Fuji, chain 43113). One transaction from the artist wallet. This page holds no key and signs nothing itself: it asks Rabby, and you approve or reject there. It never sends automatically.</p>
-  <table id="call"></table>
-  <button id="connect">Connect Rabby</button>
-  <div id="checks"></div>
-  <label><input type="checkbox" id="review"> I have reviewed the call above and the checks pass.</label><br>
-  <button id="send" disabled>Request grant in Rabby</button>
-  <pre id="result"></pre>
-</main>
-<script src="/grant-issuer.js"></script>
+<h1>Grant ISSUER_ROLE on the release to the recovery contract</h1>
+<p>One transaction, from the artist/admin wallet only. The key never leaves Rabby.</p>
+<table>
+  <tr><td>Release contract (tx goes here)</td><td><code>0xF0C091A159DE16cF0F306b2B61d37685EC5A830e</code></td></tr>
+  <tr><td>From (must select in Rabby)</td><td><code>0x284C09a7CC187E096cbbdc88d99DEFE6df32180a</code> (DEFAULT_ADMIN_ROLE)</td></tr>
+  <tr><td>Role</td><td><code>ISSUER_ROLE</code> = <code>0x114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122</code></td></tr>
+  <tr><td>Grantee (recovery contract)</td><td><code>0xd70dBA7fF6419481d62D4689bDf271ad441766b8</code></td></tr>
+  <tr><td>Value</td><td>0 AVAX</td></tr>
+  <tr><td>Encoded call</td><td><code>grantRole(bytes32,address)</code></td></tr>
+</table>
+<p><label><input type="checkbox" id="review"> I reviewed the table above: this grants ISSUER_ROLE on the release <code>0xF0C091…830e</code> to the recovery contract <code>0xd70dBA7f…66b8</code>.</label></p>
+<p><button id="go" disabled>Connect Rabby and grant</button></p>
+<pre id="out" class="warn">Not connected.</pre>
+<script>
+  const CHAIN = 43114;
+  const FROM = "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a";
+  const RELEASE = "0xF0C091A159DE16cF0F306b2B61d37685EC5A830e";
+  const DATA = "0x2f2ff15d114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000d70dba7ff6419481d62d4689bdf271ad441766b8";
+  const $ = (id) => document.getElementById(id);
+  const out = (html) => { $("out").innerHTML = html; };
+  const rabbyProvider = window.ethereum && window.ethereum.isRabby ? window.ethereum : null;
+
+  $("review").addEventListener("change", (e) => { $("go").disabled = !e.target.checked; });
+  $("go").addEventListener("click", async () => {
+    try {
+      if (!rabbyProvider) throw new Error("Rabby was not detected. Open this page in the browser profile with Rabby.");
+      const accounts = await rabbyProvider.request({ method: "eth_requestAccounts" });
+      const chainId = Number(BigInt(await rabbyProvider.request({ method: "eth_chainId" })));
+      if (chainId !== CHAIN) throw new Error(`Rabby is on chain ${chainId}. Switch to Avalanche C-Chain (43114) and retry.`);
+      if (accounts[0].toLowerCase() !== FROM.toLowerCase()) throw new Error(`Rabby's account is ${accounts[0]}. Switch to the artist/admin wallet ${FROM} and retry.`);
+      out("Connected. Confirm the transaction in Rabby (to the release contract, value 0)…");
+      const hash = await rabbyProvider.request({ method: "eth_sendTransaction", params: [{ from: FROM, to: RELEASE, value: "0x0", data: DATA }] });
+      out(`<span class="ok">Sent: <code>${hash}</code></span><br>Waiting for confirmation…`);
+      let receipt = null;
+      for (let i = 0; i < 60 && !receipt; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        receipt = await rabbyProvider.request({ method: "eth_getTransactionReceipt", params: [hash] }).catch(() => null);
+      }
+      out(receipt && Number(receipt.status) === 1
+        ? `<span class="ok">CONFIRMED (status 1): <code>${hash}</code></span><br><a style="color:#7bed9f" href="https://snowtrace.io/tx/${hash}" target="_blank" rel="noreferrer">View on Snowtrace</a><br>ISSUER_ROLE is now held by the recovery contract. Report back for on-chain verification.`
+        : `Sent: <code>${hash}</code> — not yet confirmed; check <a href="https://snowtrace.io/tx/${hash}" target="_blank" rel="noreferrer">Snowtrace</a>.`);
+    } catch (error) {
+      out(`<span class="bad">${error.code === 4001 ? "You rejected the request in Rabby. Nothing was signed." : (error.message || error)}</span>`);
+    }
+  });
+</script>
 </body>
 </html>
