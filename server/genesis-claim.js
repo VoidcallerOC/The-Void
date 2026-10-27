@@ -761,6 +761,17 @@ export function createGenesisClaimService({
   if (fallbackProvider) endpoints.push({ provider: fallbackProvider, fallback: true, cooldownUntil: -Infinity, failures: 0, disabled: false, chainVerified: false });
   const missingHistory = (error) => (MISSING_HISTORY.test(String(error?.message ?? "")) || MISSING_HISTORY.test(String(error?.error?.message ?? error?.info?.error?.message ?? ""))
     ? new GenesisIncompleteLogsError("history_unavailable") : error);
+  const canonicalKey = (block) => `${GENESIS_CHAIN_ID}:${block}`;
+  async function readPrimaryCanonicalHash(canonical, block, deadline) {
+    const key = canonicalKey(block);
+    if (!canonical.has(key)) {
+      let found;
+      try { found = await rpc(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
+      if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("unverified");
+      canonical.set(key, found.hash.toLowerCase());
+    }
+    return canonical.get(key);
+  }
   async function readChunkFrom(endpoint, filter, deadline, canonical = new Map()) {
     const { provider } = endpoint;
     if (endpoint.fallback) {
@@ -776,15 +787,7 @@ export function createGenesisClaimService({
     // failure to read one (throttled primary, missing block) fails closed: the fallback is not trusted.
     // The map is shared for this chunk so a primary getLogs throttle cannot erase hashes read before it.
 
-    const primaryHash = async (block) => {
-      if (!canonical.has(block)) {
-        let found;
-        try { found = await rpc(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
-        if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("unverified");
-        canonical.set(block, found.hash.toLowerCase());
-      }
-      return canonical.get(block);
-    };
+    const primaryHash = (block) => readPrimaryCanonicalHash(canonical, block, deadline);
     if (!endpoint.fallback && fallbackProvider) {
       // Read both canonical boundary hashes before getLogs. If getLogs is throttled, the fallback can
       // still be checked against the primary chain without making new primary calls during cooldown.
@@ -816,13 +819,12 @@ export function createGenesisClaimService({
   const safeTelemetryRequestId = (requestId) => typeof requestId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? requestId : null;
   const logRpcAttempt = (requestId, fields) => logger?.info?.("genesis.scan.rpc_attempt", { requestId: safeTelemetryRequestId(requestId), ...fields });
   const logRpcOutcome = (requestId, fields) => logger?.info?.("genesis.scan.retry_outcome", { requestId: safeTelemetryRequestId(requestId), ...fields });
-  async function fetchChunkLogs(fromBlock, toBlock, deadline, requestId = null) {
+  async function fetchChunkLogs(fromBlock, toBlock, deadline, requestId = null, canonical = new Map()) {
     const filter = Object.freeze({ address: GENESIS_CONTRACT, topics: Object.freeze([Object.freeze([TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC])]), fromBlock, toBlock });
     const range = { fromBlock, toBlock };
     const excluded = new Set();
     let lastError = null;
     let attempts = 0;
-    const canonical = new Map();
     for (let attempt = 0; attempt < scan.maxAttempts; attempt += 1) {
       attempts = attempt + 1;
       if (monotonicNow() > deadline) throw new GenesisScanBudgetError();
@@ -885,9 +887,20 @@ export function createGenesisClaimService({
     return atStage("getLogs", async () => {
       const logs = [];
       // Inclusive ranges [start, min(start + chunk - 1, toBlock)]; the next starts at end + 1: no gap, no overlap.
+      const canonical = new Map();
+      const lookaheadChunks = 4;
       for (let start = fromBlock; start <= toBlock;) {
+        if (fallbackProvider) {
+          for (let i = 0; i < lookaheadChunks; i += 1) {
+            const prefetchedStart = start + i * scan.chunkBlocks;
+            if (prefetchedStart > toBlock) break;
+            const prefetchedEnd = Math.min(toBlock, prefetchedStart + scan.chunkBlocks - 1);
+            await readPrimaryCanonicalHash(canonical, prefetchedStart, deadline);
+            await readPrimaryCanonicalHash(canonical, prefetchedEnd, deadline);
+          }
+        }
         const end = Math.min(toBlock, start + scan.chunkBlocks - 1);
-        logs.push(...await fetchChunkLogs(start, end, deadline, requestId));
+        logs.push(...await fetchChunkLogs(start, end, deadline, requestId, canonical));
         if (progress) { progress.through = end; progress.logs = logs; }
         start = end + 1;
       }
