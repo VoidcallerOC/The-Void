@@ -811,6 +811,7 @@ export function createGenesisClaimService({
   const logRpcOutcome = (requestId, fields) => logger?.info?.("genesis.scan.retry_outcome", { requestId: safeTelemetryRequestId(requestId), ...fields });
   async function fetchChunkLogs(fromBlock, toBlock, deadline, requestId = null) {
     const filter = Object.freeze({ address: GENESIS_CONTRACT, topics: Object.freeze([Object.freeze([TRANSFER_SINGLE_TOPIC, TRANSFER_BATCH_TOPIC])]), fromBlock, toBlock });
+    const range = { fromBlock, toBlock };
     const excluded = new Set();
     let lastError = null;
     let attempts = 0;
@@ -825,7 +826,7 @@ export function createGenesisClaimService({
         endpoint = usable.reduce((a, b) => (b.cooldownUntil < a.cooldownUntil ? b : a));
         const wait = endpoint.cooldownUntil - monotonicNow();
         if (monotonicNow() + wait > deadline) {
-          logRpcOutcome(requestId, { outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          logRpcOutcome(requestId, { ...range, outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           break;
         }
         cooldownWaitMs = wait;
@@ -835,26 +836,26 @@ export function createGenesisClaimService({
         const logs = await readChunkFrom(endpoint, filter, deadline);
         endpoint.failures = 0;
         endpoint.cooldownUntil = -Infinity;
-        logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "success", cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
-        logRpcOutcome(requestId, { outcome: "success", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+        logRpcAttempt(requestId, { ...range, attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "success", cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+        logRpcOutcome(requestId, { ...range, outcome: "success", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
         return logs;
       } catch (error) {
         if (error instanceof GenesisScanBudgetError) {
-          logRpcOutcome(requestId, { outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: 0 });
+          logRpcOutcome(requestId, { ...range, outcome: "deadline-exceeded", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: 0 });
           throw error;
         }
         lastError = error;
         if (error instanceof GenesisIncompleteLogsError) {
           excluded.add(endpoint);
-          logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          logRpcAttempt(requestId, { ...range, attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), incompleteReason: error instanceof GenesisIncompleteLogsError ? error.reason : undefined, cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           continue;
         }
         // A non-retryable error from the fallback (for example HTTP 403) must not abort the chunk
         // while the primary can still answer. Invalid params from the primary still fail immediately.
         if (!isRetryableProviderError(error)) {
-          logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          logRpcAttempt(requestId, { ...range, attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), incompleteReason: error instanceof GenesisIncompleteLogsError ? error.reason : undefined, cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           if (endpoint.fallback) { excluded.add(endpoint); continue; }
-          logRpcOutcome(requestId, { outcome: "non-retryable-failure", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          logRpcOutcome(requestId, { ...range, outcome: "non-retryable-failure", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           throw error;
         }
         let delay = Math.floor(random() * Math.min(scan.maxDelayMs, scan.baseDelayMs * 2 ** endpoint.failures));
@@ -865,7 +866,7 @@ export function createGenesisClaimService({
         const remainingBudgetMs = Math.max(0, deadline - monotonicNow());
         const deadlineWouldBeExceeded = monotonicNow() + delay > deadline;
         const nextAttemptSkipped = attempt + 1 >= scan.maxAttempts || deadlineWouldBeExceeded;
-        logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "retryable-failure", providerError: sanitizeProviderErrorCode(error), retryAfterPresent: hinted !== null, retryAfterMs: hinted, backoffMs: delay, cooldownWaitMs, remainingBudgetMs, deadlineWouldBeExceeded, nextAttemptSkipped });
+        logRpcAttempt(requestId, { ...range, attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "retryable-failure", providerError: sanitizeProviderErrorCode(error), retryAfterPresent: hinted !== null, retryAfterMs: hinted, backoffMs: delay, cooldownWaitMs, remainingBudgetMs, deadlineWouldBeExceeded, nextAttemptSkipped });
       }
     }
     const outcome = monotonicNow() >= deadline ? "deadline-exceeded" : "exhausted";
