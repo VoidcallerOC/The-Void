@@ -603,6 +603,8 @@ export function createGenesisClaimService({
   const staticGenesisProvider = !genesisProvider;
   const fallbackProvider = resolveGenesisFallbackProvider(genesisFallbackProvider);
   let genesisChainVerified = false;
+  let fallbackChainVerified = false;
+  let fallbackDisabled = false;
   const targetProvider = destinationProvider || new JsonRpcProvider(config.destinationRpcUrl);
   const claimSigner = signer || new Wallet(config.privateKey);
   const claim = new Contract(config.claimContract, CLAIM_ABI, targetProvider);
@@ -664,7 +666,8 @@ export function createGenesisClaimService({
   async function assertGenesisChain() {
     if (staticGenesisProvider) {
       if (genesisChainVerified) return;
-      if (Number(BigInt(await genesisRpcQueue.run(() => sourceProvider.send("eth_chainId", [])))) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
+      const chainId = await sourceRead(() => sourceProvider.send("eth_chainId", []), { fallback: async () => fallbackProvider.send("eth_chainId", []) });
+      if (Number(BigInt(chainId)) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
       genesisChainVerified = true;
       return;
     }
@@ -672,10 +675,28 @@ export function createGenesisClaimService({
     if (Number(network.chainId) !== GENESIS_CHAIN_ID) throw new Error("Genesis RPC is not Avalanche C-Chain (43114).");
   }
 
+  // Head and balances have no scan deadline of their own. A single primary 429 used to fail the
+  // request in one round trip. Retry on the paced queue, then use the verified fallback.
+  async function sourceRead(operation, { fallback = null } = {}) {
+    const deadline = monotonicNow() + scan.budgetMs;
+    try {
+      return await withProviderRetry(() => genesisRpcQueue.run(operation, { deadline }), { ...scan, deadline, now: monotonicNow, sleep, random });
+    } catch (error) {
+      if (!fallbackProvider || !fallback || !isRetryableProviderError(error)) throw error;
+      if (!fallbackChainVerified) {
+        const chainId = await genesisRpcQueue.run(() => fallbackProvider.send("eth_chainId", []), { deadline });
+        if (Number(BigInt(chainId)) !== GENESIS_CHAIN_ID) { fallbackDisabled = true; throw error; }
+        fallbackChainVerified = true;
+      }
+      if (fallbackDisabled) throw error;
+      return await withProviderRetry(() => genesisRpcQueue.run(fallback, { deadline }), { ...scan, deadline, now: monotonicNow, sleep, random });
+    }
+  }
+
   async function readHead() {
     return atStage("readHead", async () => {
       await assertGenesisChain();
-      const head = Number(await genesisRpcQueue.run(() => sourceProvider.getBlockNumber()));
+      const head = Number(await sourceRead(() => sourceProvider.getBlockNumber(), { fallback: () => fallbackProvider.getBlockNumber() }));
       if (!Number.isSafeInteger(head) || head <= 0) throw new Error("Invalid C-Chain block number.");
       return head;
     });
@@ -690,7 +711,9 @@ export function createGenesisClaimService({
       ? await balanceReader(wallet, block)
       : Object.fromEntries(await Promise.all(GENESIS_TOKEN_IDS.map(async (tokenId) => {
         const data = GENESIS_INTERFACE.encodeFunctionData("balanceOf", [wallet, tokenId]);
-        return [tokenId.toString(), GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await genesisRpcQueue.run(() => sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block })))[0]];
+        const read = () => sourceProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block });
+        const alt = () => fallbackProvider.call({ to: GENESIS_CONTRACT, data, blockTag: block });
+        return [tokenId.toString(), GENESIS_INTERFACE.decodeFunctionResult("balanceOf", await sourceRead(read, { fallback: alt }))[0]];
       })));
     return Object.freeze(Object.fromEntries(GENESIS_TOKEN_ID_SET.map((id) => {
       const value = BigInt(raw?.[id] ?? 0);
@@ -826,8 +849,11 @@ export function createGenesisClaimService({
           logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           continue;
         }
+        // A non-retryable error from the fallback (for example HTTP 403) must not abort the chunk
+        // while the primary can still answer. Invalid params from the primary still fail immediately.
         if (!isRetryableProviderError(error)) {
           logRpcAttempt(requestId, { attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "non-retryable-failure", providerError: sanitizeProviderErrorCode(error), cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
+          if (endpoint.fallback) { excluded.add(endpoint); continue; }
           logRpcOutcome(requestId, { outcome: "non-retryable-failure", attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
           throw error;
         }
