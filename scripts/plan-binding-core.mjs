@@ -49,6 +49,26 @@ function genesisClaimFields(plan, network, chainId) {
   };
 }
 
+/** The deployment-defining fields of a Genesis recovery plan (mainnet only). */
+function genesisRecoveryFields(plan, network, chainId) {
+  if (plan.mode !== "DRY_RUN" || plan.network !== network || plan.chainId !== chainId) throw new BindingError("Not a C-Chain mainnet recovery dry-run plan.");
+  return {
+    chainId: plan.chainId,
+    deployer: lower(plan.deployer),
+    deployerNonce: plan.deployerNonce,
+    predictedRecoveryAddress: lower(plan.predictedRecoveryAddress),
+    target: { releaseContract: lower(plan.target?.releaseContract), primarySale: lower(plan.target?.primarySale), tokenId: plan.target?.tokenId },
+    schedule: plan.schedule,
+    supply: plan.supply,
+    roles: { admin: lower(plan.roles?.admin), signer: lower(plan.roles?.signer) },
+    priorClaimants: (plan.priorClaimants || []).map(lower),
+    baselineClaimedSupply: plan.baselineClaimedSupply,
+    eligibilityRule: plan.eligibility?.rule,
+    signingRequests: consistent(signingRequests(plan, 1, chainId), [{ from: plan.deployer, nonce: plan.deployerNonce, predictedAddress: plan.predictedRecoveryAddress }]),
+    issuerGrantFrom: lower(plan.followUps?.issuerGrant?.from),
+  };
+}
+
 /** The deployment-defining fields of a plan, per workflow kind. */
 export const BINDERS = Object.freeze({
   "release-per-contract-mainnet": (plan) => {
@@ -75,6 +95,7 @@ export const BINDERS = Object.freeze({
     };
   },
   "genesis-claim-mainnet": (plan) => genesisClaimFields(plan, "mainnet", 43114),
+  "genesis-recovery-mainnet": (plan) => genesisRecoveryFields(plan, "mainnet", 43114),
   // Fuji test (Rabby path): the same fields on its own kind and chain, so it can never produce a mainnet binding.
   "genesis-claim-fuji": (plan) => genesisClaimFields(plan, "fuji", 43113),
   // Test only (Fuji). Its own kind, chain and fields: it can never produce a mainnet binding.

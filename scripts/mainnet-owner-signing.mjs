@@ -10,6 +10,7 @@ import mainnetManifest from "../config/mainnet-release-per-contract.json" with {
 import { bindPlan, verifyBinding } from "./deployment-plan-binding.mjs";
 import { FEE_RECIPIENT, buildDeploymentRecord, buildDryRunPlan, deploymentRecordPath, validateDeploymentEnv, verifyReleaseStep, writeRecordFile } from "./deploy-release-per-contract-mainnet.mjs";
 import { buildClaimRecord, buildPlan as buildClaimPlan, loadClaimArtifact, mainnetSigningPlan, preflightClaimDeployment, validateClaimDeploymentEnv, verifyClaimDeployment } from "./deploy-genesis-claim.mjs";
+import { buildRecoveryPlan, buildRecoveryRecord, loadRecoveryArtifact, preflightRecoveryDeployment, recoverySigningPlan, validateRecoveryDeploymentEnv, verifyRecoveryDeployment } from "./deploy-genesis-claim-recovery.mjs";
 import { MAINNET_CHAIN_ID, MAINNET_DEPLOYER, NotMinedYetError, assertNoPrivateKeyInEnv, assertReadyToSign, walletTransaction } from "./mainnet-signing-requests.mjs";
 import { GENESIS_CHAIN_ID } from "../server/genesis-claim.js";
 
@@ -65,6 +66,22 @@ export const KINDS = Object.freeze({
     verifyStep: (provider, plan, _step, hash, options) => verifyClaimDeployment(provider, plan, hash, options),
     record: (plan, [claim], meta) => ({ path: `deployments/genesis-claim-mainnet-${claim.address}.json`, record: buildClaimRecord(plan, claim, meta) }),
     summary: (plan) => [{ step: 1, contract: "GenesisHolderClaim", predictedAddress: plan.predictedClaimAddress, target: plan.target, schedule: plan.schedule, roles: plan.roles, issuerGrant: plan.followUps?.issuerGrant }],
+  },
+  "genesis-recovery-mainnet": {
+    title: "Genesis holder claim recovery: GenesisHolderClaimRecovery",
+    needsDeviceConfirmation: false,
+    async replan(inputs, { rpcUrl, provider, artifact }) {
+      const config = validateRecoveryDeploymentEnv({ ...inputs, AVALANCHE_MAINNET_RPC_URL: rpcUrl });
+      const recoveryArtifact = artifact || await loadRecoveryArtifact();
+      const facts = await preflightRecoveryDeployment(config, { provider, artifact: recoveryArtifact });
+      const plan = buildRecoveryPlan(config, facts);
+      return { mode: "DRY_RUN", ...(await recoverySigningPlan(config, facts, plan, { provider, artifact: recoveryArtifact })) };
+    },
+    ready: (plan) => plan.readyToSign === true,
+    emptyBefore: (plan) => [plan.predictedRecoveryAddress],
+    verifyStep: (provider, plan, _step, hash, options) => verifyRecoveryDeployment(provider, plan, hash, options),
+    record: (plan, [recovery], meta) => ({ path: `deployments/genesis-recovery-mainnet-${recovery.address}.json`, record: buildRecoveryRecord(plan, recovery, meta) }),
+    summary: (plan) => [{ step: 1, contract: "GenesisHolderClaimRecovery", predictedAddress: plan.predictedRecoveryAddress, target: plan.target, schedule: plan.schedule, supply: plan.supply, roles: plan.roles, priorClaimants: plan.priorClaimants, issuerGrant: plan.followUps?.issuerGrant }],
   },
 });
 
