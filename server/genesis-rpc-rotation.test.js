@@ -148,16 +148,17 @@ describe("Genesis getLogs endpoint rotation", () => {
     const realBlock = cl.genesis.getBlock.getMockImplementation();
     let logsFailed = false;
     let boundaryFailed = false;
+    let failedRange = null;
     cl.genesis.getLogs.mockImplementation(async (filter) => {
-      if (!logsFailed) { logsFailed = true; throw httpError(429); }
+      if (!logsFailed) { logsFailed = true; failedRange = filter; throw httpError(429); }
       return realLogs(filter);
     });
     cl.genesis.getBlock.mockImplementation(async (block) => {
-      if (logsFailed && !boundaryFailed) { boundaryFailed = true; throw httpError(429, { "retry-after": "1" }); }
+      if (failedRange && !boundaryFailed && (Number(block) === failedRange.fromBlock || Number(block) === failedRange.toBlock)) { boundaryFailed = true; throw httpError(429, { "retry-after": "1" }); }
       return realBlock(block);
     });
     await expect(first.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
-    expect(first.sleep).toHaveBeenCalledWith(1_000);
+    expect(first.sleep).not.toHaveBeenCalledWith(1_000);
     expect(fallback.getLogs).toHaveBeenCalled();
   });
 
