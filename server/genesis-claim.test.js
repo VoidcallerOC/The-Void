@@ -1031,8 +1031,9 @@ describe("Genesis transfer scan: backoff, pacing and verified reuse on a free pu
     const clock = { t: 0 };
     const sleep = vi.fn(async (ms) => { clock.t += ms; });
     const chain = genesisChain(holdings);
-    const ctx = service({ chain, env, sleep, monotonicNow: () => clock.t, logger: { warn: vi.fn() } });
-    return { ...ctx, sleep, clock };
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    const ctx = service({ chain, env, sleep, monotonicNow: () => clock.t, logger });
+    return { ...ctx, sleep, clock, logger };
   }
   const prepare = async (ctx, blocks = 5_000) => {
     await ctx.instance.issueVoucher(A);
@@ -1050,6 +1051,18 @@ describe("Genesis transfer scan: backoff, pacing and verified reuse on a free pu
     await expect(ctx.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true, eligibleTokenIds: ["1"] });
     expect(ctx.chain.getLogs).toHaveBeenCalledTimes(51);
     expect(retryWaits(ctx.sleep)).toEqual([125]); // random 0.5 x base 250 (full jitter, first retry)
+  });
+  it("logs sanitized getLogs retry telemetry with correlation and Retry-After", async () => {
+    const ctx = scanned();
+    await prepare(ctx);
+    ctx.chain.getLogs.mockRejectedValueOnce(httpError(429, { "retry-after": "2" }));
+    await expect(ctx.instance.checkEligibility(B, { requestId: "telemetry-req-1" })).resolves.toMatchObject({ eligible: true });
+    const attempts = ctx.logger.info.mock.calls.filter(([event]) => event === "genesis.scan.rpc_attempt").map(([, fields]) => fields);
+    const retry = attempts.find(({ outcome }) => outcome === "retryable-failure");
+    expect(retry).toMatchObject({ requestId: "telemetry-req-1", attempt: 1, maxAttempts: 5, endpointRole: "primary", providerError: { httpStatus: 429 }, retryAfterPresent: true, retryAfterMs: 2_000, backoffMs: 2_000, nextAttemptSkipped: false });
+    expect(ctx.logger.info.mock.calls.some(([event, fields]) => event === "genesis.scan.retry_outcome" && fields.outcome === "success")).toBe(true);
+    const logged = JSON.stringify(ctx.logger.info.mock.calls).toLowerCase();
+    for (const secret of ["https://rpc.provider.example", A, B, "retry-after", "too many requests", "topics", "transfer_single"]) expect(logged).not.toContain(secret.toLowerCase());
   });
 
   it.each([
