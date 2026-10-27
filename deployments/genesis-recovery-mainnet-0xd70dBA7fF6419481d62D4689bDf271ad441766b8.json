@@ -1,0 +1,101 @@
+{
+  "kind": "genesis-recovery-mainnet",
+  "network": "mainnet",
+  "chainId": 43114,
+  "recordedAt": "2026-10-27T15:38:46Z",
+  "source": {
+    "commit": "db282dbfec517f096d9657ea93e7017a5be7d40a",
+    "planDigest": "14f29c277668c275a4a821ca7199ed9b162a8d2683151da587d5dae41c0e5961",
+    "planDigestSource": "operator-provided deployment handoff"
+  },
+  "signing": {
+    "deployer": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+    "method": "owner-signed in Rabby (operator-reported)",
+    "privateKeyLeftWallet": false
+  },
+  "contract": {
+    "name": "GenesisHolderClaimRecovery",
+    "address": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8",
+    "deploymentTransaction": "0x55e7541d94842b1a2a2a998d08ba477ca7ed0a447d682286d7ea515360eb632b",
+    "deploymentBlock": 98702596,
+    "deployer": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+    "nonce": 15,
+    "transactionStatus": 1,
+    "valueWei": "0",
+    "transactionGasLimit": 2847149,
+    "gasLimitQuotedInOperatorSummary": 2277718,
+    "gasUsed": 1881995,
+    "creationDataBytes": 11588,
+    "creationDataKeccak256": "0xbd9ee51fdc28cbb52207f43b378e12e3576ac73624a583376a56d7271c2b7f2e",
+    "runtimeCodeBytes": 7389,
+    "runtimeCodeHash": "0x74251dec68aa98ec94e6d5adadc3cfb7ce92b394b0b9e36ec93975572895fd75"
+  },
+  "parameters": {
+    "releaseContract": "0xF0C091A159DE16cF0F306b2B61d37685EC5A830e",
+    "primarySale": "0xB4dAAe78a53c33f52C6EB573c4d6EFC7B86F3845",
+    "tokenId": "1",
+    "allocation": "0",
+    "publicAllocation": "0",
+    "claimStart": "1793113200",
+    "claimEnd": "1793199600",
+    "claimWindowSeconds": "86400",
+    "publicSaleStart": "1793019600",
+    "publicSaleEnd": "1793710799",
+    "publicPriceWei": "250000000000000000",
+    "admin": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
+    "signer": "0xAD3A1026b06c2A0B2091322410254363e2764c4e",
+    "baselineClaimedSupply": "2"
+  },
+  "priorClaimants": [
+    {
+      "address": "0x6a86EfA012fEDA64b70112022487fEE22E67d2fb",
+      "hasClaimed": true
+    },
+    {
+      "address": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+      "hasClaimed": true
+    }
+  ],
+  "issuerGrant": {
+    "status": "PENDING",
+    "from": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
+    "releaseContract": "0xF0C091A159DE16cF0F306b2B61d37685EC5A830e",
+    "role": "0x114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122",
+    "grantee": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8",
+    "grantRoleCalldata": "0x2f2ff15d114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000d70dba7ff6419481d62d4689bdf271ad441766b8",
+    "verifiedGranted": false,
+    "verifiedAtBlock": 98702696
+  },
+  "verification": {
+    "method": "Avalanche C-Chain JSON-RPC reads",
+    "observedAt": "2026-10-27T15:36:26Z",
+    "observedAtBlock": 98702696,
+    "chainId": 43114,
+    "constructorAndRuntime": {
+      "transactionReceiptStatus": 1,
+      "transactionContractAddressMatches": true,
+      "creationDataHashMatches": true,
+      "runtimeCodeHashMatches": true
+    },
+    "liveState": {
+      "claimedSupply": "2",
+      "releaseMintedSupply": "3",
+      "primarySaleUnitsSold": "1",
+      "supplyInvariant": "3 = 1 + 2",
+      "priorClaimantMappings": true,
+      "issuerGranted": false,
+      "claimStartUtc": "2026-10-27T15:00:00Z",
+      "claimEndUtc": "2026-10-28T15:00:00Z",
+      "claimWindowOpenAtObservation": true
+    },
+    "operatorReportedSettings": {
+      "recoveryApiEnabled": false,
+      "bridgeEligibilityEnabled": false,
+      "note": "These off-chain settings were not independently inspected in this RPC verification."
+    }
+  },
+  "notes": [
+    "The transaction's actual on-chain gas limit is 2847149; the operator-provided summary quoted 2277718.",
+    "The recovery contract is deployed, but claims remain unavailable until the issuer role and separately controlled off-chain activation requirements are addressed."
+  ]
+}
