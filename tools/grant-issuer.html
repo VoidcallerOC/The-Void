@@ -34,18 +34,18 @@
   const DATA = "0x2f2ff15d114e74f6ea3bd819998f78687bfcb11b140da08e9b7d222fa9c1f1ba1f2aa122000000000000000000000000d70dba7ff6419481d62d4689bdf271ad441766b8";
   const $ = (id) => document.getElementById(id);
   const out = (html) => { $("out").innerHTML = html; };
-  const rabby = window.ethereum && window.ethereum.isRabby ? window.ethereum : null;
+  const rabbyProvider = window.ethereum && window.ethereum.isRabby ? window.ethereum : null;
 
   $("review").addEventListener("change", (e) => { $("go").disabled = !e.target.checked; });
   $("go").addEventListener("click", async () => {
     try {
-      if (!rabby) throw new Error("Rabby was not detected. Open this page in the browser profile with Rabby.");
+      if (!rabbyProvider) throw new Error("Rabby was not detected. Open this page in the browser profile with Rabby.");
       const accounts = await rabby.request({ method: "eth_requestAccounts" });
       const chainId = Number(BigInt(await rabby.request({ method: "eth_chainId" })));
       if (chainId !== CHAIN) throw new Error(`Rabby is on chain ${chainId}. Switch to Avalanche C-Chain (43114) and retry.`);
       if (accounts[0].toLowerCase() !== FROM.toLowerCase()) throw new Error(`Rabby's account is ${accounts[0]}. Switch to the artist/admin wallet ${FROM} and retry.`);
       out("Connected. Confirm the transaction in Rabby (to the release contract, value 0)…");
-      const hash = await rabby.request({ method: "eth_sendTransaction", params: [{ from: FROM, to: RELEASE, value: "0x0", data: DATA }] });
+      const hash = await rabbyProvider.request({ method: "eth_sendTransaction", params: [{ from: FROM, to: RELEASE, value: "0x0", data: DATA }] });
       out(`<span class="ok">Sent: <code>${hash}</code></span><br>Waiting for confirmation…`);
       let receipt = null;
       for (let i = 0; i < 60 && !receipt; i++) {
