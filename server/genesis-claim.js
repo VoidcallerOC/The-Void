@@ -990,7 +990,7 @@ export function createGenesisClaimService({
           // the next request resume instead of rescanning every block from the start.
           await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)], monotonicNow() + PARTIAL_CHECKPOINT_RESERVE_MS);
           logCheckpoint("partial_saved");
-        } catch { logCheckpoint("partial_skipped"); }
+        } catch (saveError) { logCheckpoint("partial_skipped", { reason: sanitizeProviderErrorCode(saveError) ?? saveError?.name ?? "unknown" }); }
       }
       throw error;
     }
