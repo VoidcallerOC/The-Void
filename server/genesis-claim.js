@@ -235,6 +235,7 @@ export function loadGenesisClaimConfig(env = process.env) {
   return Object.freeze({
     destinationChainId,
     genesisRpcUrl: httpUrl(env.GENESIS_RPC_URL, "GENESIS_RPC_URL"),
+    canonicalRpcUrl: httpUrl(env.GENESIS_CANONICAL_RPC_URL ?? "https://avalanche.drpc.org", "GENESIS_CANONICAL_RPC_URL"),
     destinationRpcUrl: httpUrl(env.GENESIS_DESTINATION_RPC_URL, "GENESIS_DESTINATION_RPC_URL"),
     releaseContract,
     primarySale,
@@ -570,6 +571,7 @@ export async function reconcileGenesisReservations({ store, claimContract, readA
 export function createGenesisClaimService({
   config = loadGenesisClaimConfig(),
   genesisProvider = null,
+  canonicalGenesisProvider = null,
   // Secondary getLogs endpoint. ON by default (verified PublicNode C-Chain); inject null to disable.
   // Uses the same paced queue, bounded retries, cooldown, deadline, and fail-closed checks.
   genesisFallbackProvider = undefined,
@@ -598,6 +600,9 @@ export function createGenesisClaimService({
   // shared, durable storage for it the claim must not run.
   if (!reservationStore) throw new GenesisClaimConfigurationError("The Genesis claim requires the reservation store (migration 039).");
   const sourceProvider = genesisProvider || createGenesisRpcProvider(config.genesisRpcUrl);
+  // Canonical headers come from an independent provider so fallback logs remain verifiable while the
+  // primary provider is throttled. Tests may inject the deterministic primary mock as this provider.
+  const canonicalProvider = canonicalGenesisProvider || genesisProvider || createGenesisRpcProvider(config.canonicalRpcUrl);
   // A provider built here has a static network, so getNetwork() no longer asks the RPC; its chain is
   // verified once with eth_chainId instead. An injected provider keeps the getNetwork() check.
   const staticGenesisProvider = !genesisProvider;
@@ -762,11 +767,17 @@ export function createGenesisClaimService({
   const missingHistory = (error) => (MISSING_HISTORY.test(String(error?.message ?? "")) || MISSING_HISTORY.test(String(error?.error?.message ?? error?.info?.error?.message ?? ""))
     ? new GenesisIncompleteLogsError("history_unavailable") : error);
   const canonicalKey = (block) => `${GENESIS_CHAIN_ID}:${block}`;
+  let canonicalChainVerified = Boolean(genesisProvider && canonicalProvider === genesisProvider);
   async function readPrimaryCanonicalHash(canonical, block, deadline) {
+    if (!canonicalChainVerified) {
+      const chainId = await paced(() => canonicalProvider.send("eth_chainId", []), deadline);
+      try { if (Number(BigInt(chainId)) !== GENESIS_CHAIN_ID) throw new Error("wrong chain"); } catch { throw new GenesisIncompleteLogsError("unverified"); }
+      canonicalChainVerified = true;
+    }
     const key = canonicalKey(block);
     if (!canonical.has(key)) {
       let found;
-      try { found = await rpc(() => sourceProvider.getBlock(block), deadline); } catch { throw new GenesisIncompleteLogsError("unverified"); }
+      try { found = await withProviderRetry(() => paced(() => canonicalProvider.getBlock(block), deadline), { ...scan, deadline, now: monotonicNow, sleep, random }); } catch { throw new GenesisIncompleteLogsError("unverified"); }
       if (!found || Number(found.number) !== block || typeof found.hash !== "string") throw new GenesisIncompleteLogsError("unverified");
       canonical.set(key, found.hash.toLowerCase());
     }
@@ -783,14 +794,14 @@ export function createGenesisClaimService({
         endpoint.chainVerified = true;
       }
     }
-    // Primary-sourced hashes, for checking the fallback against the primary's canonical chain. Any
-    // failure to read one (throttled primary, missing block) fails closed: the fallback is not trusted.
-    // The map is shared for this chunk so a primary getLogs throttle cannot erase hashes read before it.
+    // Independently sourced canonical hashes for checking the fallback. Any failure to read one
+    // (throttling, missing block, wrong chain) fails closed: the fallback is not trusted.
+    // The scan-scoped map lets verified headers survive endpoint rotation across chunks.
 
     const primaryHash = (block) => readPrimaryCanonicalHash(canonical, block, deadline);
     if (!endpoint.fallback && fallbackProvider) {
-      // Read both canonical boundary hashes before getLogs. If getLogs is throttled, the fallback can
-      // still be checked against the primary chain without making new primary calls during cooldown.
+      // Cache only this chunk's boundaries before getLogs. If primary getLogs is throttled, rotation
+      // can use the independent canonical source immediately without waiting on Retry-After.
       await primaryHash(filter.fromBlock);
       await primaryHash(filter.toBlock);
     }
@@ -888,17 +899,7 @@ export function createGenesisClaimService({
       const logs = [];
       // Inclusive ranges [start, min(start + chunk - 1, toBlock)]; the next starts at end + 1: no gap, no overlap.
       const canonical = new Map();
-      const lookaheadChunks = 4;
       for (let start = fromBlock; start <= toBlock;) {
-        if (fallbackProvider) {
-          for (let i = 0; i < lookaheadChunks; i += 1) {
-            const prefetchedStart = start + i * scan.chunkBlocks;
-            if (prefetchedStart > toBlock) break;
-            const prefetchedEnd = Math.min(toBlock, prefetchedStart + scan.chunkBlocks - 1);
-            await readPrimaryCanonicalHash(canonical, prefetchedStart, deadline);
-            await readPrimaryCanonicalHash(canonical, prefetchedEnd, deadline);
-          }
-        }
         const end = Math.min(toBlock, start + scan.chunkBlocks - 1);
         logs.push(...await fetchChunkLogs(start, end, deadline, requestId, canonical));
         if (progress) { progress.through = end; progress.logs = logs; }
