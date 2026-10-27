@@ -756,6 +756,21 @@ export function createGenesisClaimService({
       return found.hash.toLowerCase();
     });
   }
+  // Same read, allowed to answer from the fallback endpoint. Only used for persisting a partial
+  // checkpoint after the scan budget is spent: the stored hash is re-verified against the chain
+  // (on the primary) whenever the checkpoint is adopted, so a divergent fork cannot be trusted.
+  async function blockHashWithFallback(block, deadline) {
+    return atStage("blockHash", async () => {
+      const read = (provider) => provider.getBlock(block);
+      const found = await withProviderRetry(() => paced(() => read(sourceProvider), deadline), { ...scan, deadline, now: monotonicNow, sleep, random })
+        .catch(async (error) => {
+          if (!fallbackProvider || fallbackDisabled || !isRetryableProviderError(error)) throw error;
+          return await withProviderRetry(() => paced(() => read(fallbackProvider), deadline), { ...scan, deadline, now: monotonicNow, sleep, random });
+        });
+      if (!found || typeof found.hash !== "string" || Number(found.number) !== block) throw new Error("C-Chain block could not be read.");
+      return found.hash.toLowerCase();
+    });
+  }
   // Endpoint rotation for getLogs chunks. One attempt budget (scan.maxAttempts) per chunk across all
   // endpoints, so there is no nested retry loop. A transient failure puts that endpoint in cooldown
   // (full-jitter exponential backoff, at least the uncapped Retry-After) and the next attempt
@@ -967,8 +982,8 @@ export function createGenesisClaimService({
     }
     const scanFrom = cached ? cached.end + 1 : fromBlock;
     const safeEnd = head - scan.confirmations;
-    const extend = async (through, logs, extendDeadline = deadline) => {
-      const endHash = await blockHash(through, extendDeadline);
+    const extend = async (through, logs, extendDeadline = deadline, { withFallback = false } = {}) => {
+      const endHash = withFallback ? await blockHashWithFallback(through, extendDeadline) : await blockHash(through, extendDeadline);
       const anchors = cached ? [...cached.anchors, { block: cached.end, hash: cached.endHash }].slice(-MAX_ANCHORS) : [];
       const next = Object.freeze({ from: cached ? cached.from : fromBlock, end: through, endHash, anchors: Object.freeze(anchors.map((anchor) => Object.freeze(anchor))), logs: Object.freeze(logs.filter((log) => log.blockNumber <= through)) });
       verifiedHistory = next;
@@ -988,7 +1003,7 @@ export function createGenesisClaimService({
           // Fresh window for the checkpoint's one end-hash read: the scan deadline is spent by
           // definition here, and a slow fallback getBlock must not defeat the persistence that lets
           // the next request resume instead of rescanning every block from the start.
-          await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)], monotonicNow() + PARTIAL_CHECKPOINT_RESERVE_MS);
+          await extend(through, [...(cached ? cached.logs : []), ...progress.logs.map(normalizeLog)], monotonicNow() + PARTIAL_CHECKPOINT_RESERVE_MS, { withFallback: true });
           logCheckpoint("partial_saved");
         } catch (saveError) { logCheckpoint("partial_skipped", { reason: sanitizeProviderErrorCode(saveError) ?? saveError?.name ?? "unknown" }); }
       }
