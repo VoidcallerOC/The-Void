@@ -761,7 +761,7 @@ export function createGenesisClaimService({
   if (fallbackProvider) endpoints.push({ provider: fallbackProvider, fallback: true, cooldownUntil: -Infinity, failures: 0, disabled: false, chainVerified: false });
   const missingHistory = (error) => (MISSING_HISTORY.test(String(error?.message ?? "")) || MISSING_HISTORY.test(String(error?.error?.message ?? error?.info?.error?.message ?? ""))
     ? new GenesisIncompleteLogsError("history_unavailable") : error);
-  async function readChunkFrom(endpoint, filter, deadline) {
+  async function readChunkFrom(endpoint, filter, deadline, canonical = new Map()) {
     const { provider } = endpoint;
     if (endpoint.fallback) {
       if (!endpoint.chainVerified) {
@@ -774,7 +774,8 @@ export function createGenesisClaimService({
     }
     // Primary-sourced hashes, for checking the fallback against the primary's canonical chain. Any
     // failure to read one (throttled primary, missing block) fails closed: the fallback is not trusted.
-    const canonical = new Map();
+    // The map is shared for this chunk so a primary getLogs throttle cannot erase hashes read before it.
+
     const primaryHash = async (block) => {
       if (!canonical.has(block)) {
         let found;
@@ -784,6 +785,12 @@ export function createGenesisClaimService({
       }
       return canonical.get(block);
     };
+    if (!endpoint.fallback && fallbackProvider) {
+      // Read both canonical boundary hashes before getLogs. If getLogs is throttled, the fallback can
+      // still be checked against the primary chain without making new primary calls during cooldown.
+      await primaryHash(filter.fromBlock);
+      await primaryHash(filter.toBlock);
+    }
     if (endpoint.fallback) {
       // The fallback must hold both ends of the range, on the primary's chain, else it is not trusted for it.
       for (const block of new Set([filter.fromBlock, filter.toBlock])) {
@@ -815,6 +822,7 @@ export function createGenesisClaimService({
     const excluded = new Set();
     let lastError = null;
     let attempts = 0;
+    const canonical = new Map();
     for (let attempt = 0; attempt < scan.maxAttempts; attempt += 1) {
       attempts = attempt + 1;
       if (monotonicNow() > deadline) throw new GenesisScanBudgetError();
@@ -833,7 +841,7 @@ export function createGenesisClaimService({
         await sleep(wait);
       }
       try {
-        const logs = await readChunkFrom(endpoint, filter, deadline);
+        const logs = await readChunkFrom(endpoint, filter, deadline, canonical);
         endpoint.failures = 0;
         endpoint.cooldownUntil = -Infinity;
         logRpcAttempt(requestId, { ...range, attempt: attempt + 1, maxAttempts: scan.maxAttempts, endpointRole: endpoint.fallback ? "fallback" : "primary", outcome: "success", cooldownWaitMs, remainingBudgetMs: Math.max(0, deadline - monotonicNow()) });
