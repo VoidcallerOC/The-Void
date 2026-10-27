@@ -142,6 +142,25 @@ describe("Genesis getLogs endpoint rotation", () => {
     expect(fallback.getBlock).not.toHaveBeenCalled();
   });
 
+  it("retries a transient primary boundary-hash throttle before accepting the fallback", async () => {
+    const { cl, fallback, first } = await setup();
+    const realLogs = cl.genesis.getLogs.getMockImplementation();
+    const realBlock = cl.genesis.getBlock.getMockImplementation();
+    let logsFailed = false;
+    let boundaryFailed = false;
+    cl.genesis.getLogs.mockImplementation(async (filter) => {
+      if (!logsFailed) { logsFailed = true; throw httpError(429); }
+      return realLogs(filter);
+    });
+    cl.genesis.getBlock.mockImplementation(async (block) => {
+      if (logsFailed && !boundaryFailed) { boundaryFailed = true; throw httpError(429, { "retry-after": "1" }); }
+      return realBlock(block);
+    });
+    await expect(first.instance.checkEligibility(B)).resolves.toMatchObject({ eligible: true });
+    expect(first.sleep).toHaveBeenCalledWith(1_000);
+    expect(fallback.getLogs).toHaveBeenCalled();
+  });
+
   it("(2)+(7) primary 429 with Retry-After: the same range and filter go to the fallback, which completes", async () => {
     const { cl, fallback, first } = await setup();
     cl.genesis.getLogs.mockRejectedValueOnce(httpError(429, { "retry-after": "3" }));
