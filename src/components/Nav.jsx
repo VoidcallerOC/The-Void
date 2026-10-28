@@ -11,6 +11,7 @@ const LINKS = [
   ["DISCOVER", "/discover"],
   ["MARKETPLACE", "/marketplace"],
   ["CLAIM", "/claim"],
+  ["BRIDGE", "/bridge"],
   ["ARTISTS", "/artists"],
   ["VERIFY", "/verify"],
   ["COLLECTION", "/my-collection"],

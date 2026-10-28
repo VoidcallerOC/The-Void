@@ -16,6 +16,7 @@ import { VerifyArtistControl } from "./components/VerifyArtistControl.jsx";
 import { XLinkCallbackPage } from "./components/XLinkCallbackPage.jsx";
 import { NotFoundPage } from "./components/NotFoundPage.jsx";
 import { TokenPage } from "./components/TokenPage.jsx";
+import { BridgePage } from "./components/BridgePage.jsx";
 
 const SUMMIT_DEMO = import.meta.env.VITE_SUMMIT_DEMO === "true" || import.meta.env.VITE_SUMMIT_DEMO === "1";
 
@@ -84,6 +85,7 @@ export function AppRoutes() {
         <Route path="marketplace" element={<MarketplacePage />} />
         <Route path="claim" element={<ClaimPage />} />
         <Route path="claim/:edition" element={<ClaimPage />} />
+        <Route path="bridge" element={<BridgePage />} />
         <Route path="artists" element={<ArtistsPage />} />
         <Route path="artist/:artist" element={<ArtistRoutePage />} />
         <Route path="release/:release" element={<ReleaseRoutePage />} />
