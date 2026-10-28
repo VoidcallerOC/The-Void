@@ -12,6 +12,7 @@ import { createReviewerNotificationStore } from "../lib/reviewer-notifications.j
 const PRIMARY_NAV = [
   ["DISCOVER", "/discover"],
   ["MARKETPLACE", "/marketplace"],
+  ["BRIDGE", "/bridge"],
   ["CLAIM", "/claim"],
   ["ARTISTS", "/artists"],
   ["COLLECTION", "/my-collection"],
