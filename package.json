@@ -32,7 +32,8 @@
     "deploy:genesis-claim": "node scripts/deploy-genesis-claim.mjs",
     "deploy:role-granter": "node scripts/deploy-role-granter-fuji.mjs",
     "deploy:marketplace": "node scripts/deploy-marketplace.mjs",
-    "verify:settled-sale": "node scripts/verify-settled-sale-activation.mjs"
+    "verify:settled-sale": "node scripts/verify-settled-sale-activation.mjs",
+    "maint:genesis:settlement": "node scripts/settle-genesis-reservations-mainnet.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",
