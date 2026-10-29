@@ -49,6 +49,17 @@ export function createGenesisClaimReservationStore(pool, options = {}) {
           async setStatus(wallet, status) {
             await client.query("UPDATE genesis_claim_reservations SET status=$3, updated_at=now() WHERE claim_contract=$1 AND wallet=$2", [claimContract.toLowerCase(), wallet.toLowerCase(), status]);
           },
+          async setStatusIfPreimage(record, status) {
+            const { rows } = await client.query(
+              `UPDATE genesis_claim_reservations
+               SET status=$7, updated_at=now()
+               WHERE claim_contract=$1 AND wallet=$2 AND eligibility_block=$3 AND used_token_id=$4
+                 AND deadline=$5 AND status=$6
+               RETURNING claim_contract, wallet, status, updated_at`,
+              [claimContract.toLowerCase(), record.wallet.toLowerCase(), record.block, String(record.usedTokenId), record.deadline.toString(), record.status, status],
+            );
+            return rows;
+          },
         };
         const result = await fn(tx);
         await client.query("COMMIT");
@@ -81,6 +92,14 @@ export function createMemoryGenesisClaimReservationStore(options = {}) {
           },
           async upsert(record) { staged.set(key(record.wallet), Object.freeze({ ...record, claimContract: getAddress(claimContract), wallet: getAddress(record.wallet) })); },
           async setStatus(wallet, status) { const current = staged.get(key(wallet)); if (current) staged.set(key(wallet), Object.freeze({ ...current, status })); },
+          async setStatusIfPreimage(record, status) {
+            const current = staged.get(key(record.wallet));
+            if (!current || current.claimContract.toLowerCase() !== claimContract.toLowerCase()
+              || current.block !== record.block || String(current.usedTokenId) !== String(record.usedTokenId)
+              || BigInt(current.deadline) !== BigInt(record.deadline) || current.status !== record.status) return [];
+            staged.set(key(record.wallet), Object.freeze({ ...current, status }));
+            return [{ claim_contract: claimContract.toLowerCase(), wallet: record.wallet.toLowerCase(), status }];
+          },
         };
         const result = await fn(tx);
         rows.clear();
