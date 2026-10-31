@@ -1,0 +1,9 @@
+{
+  "note": "Every historical Genesis free claim of Forgive & Forget token 1. wallet, claimContract and transactionHash are verified on-chain by the snapshot generator (GenesisHolderClaimed event in the receipt). usedTokenId is the Genesis unit each claim consumed, from the REDEEMED rows of genesis_claim_reservations in the mainnet database (read 2026-10-31); it is off-chain accounting and is checked only by requiring that the claimant still holds that token id.",
+  "claims": [
+    { "wallet": "0x6a86EfA012fEDA64b70112022487fEE22E67d2fb", "claimContract": "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "transactionHash": "0x6e7bed52e99cf240eb1457e3c366bed644cae13fa4503525298ebd3ffde922b3", "usedTokenId": 0 },
+    { "wallet": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174", "claimContract": "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "transactionHash": "0x3ef4fac8381749219121606fe233cb029ebf8a1383025db184a7d0e388cda6dc", "usedTokenId": 3 },
+    { "wallet": "0x920E1E5619124AA8Ed90928Fe233a29263f01A6D", "claimContract": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8", "transactionHash": "0x1988758b0ac3bac83799f05ab79d1846891513535046b4bfdd9dc8064a1382ca", "usedTokenId": 1 },
+    { "wallet": "0x70773318349AF374e86254ef87e2DD542d0bBfC6", "claimContract": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8", "transactionHash": "0xafb7636cbdf5354e6756b9921df743ebbaa74dd3b8f9733d2df8c0260624458f", "usedTokenId": 0 }
+  ]
+}

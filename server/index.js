@@ -26,6 +26,7 @@ import { createProvenanceAnchorService, loadProvenanceAnchorConfig } from "./pro
 import { createIpfsMetadataFetcher } from "./publication-anchor.js";
 import { ProvenanceRecords } from "./provenance-records.js";
 import { checkGenesisSignerConfig, createGenesisClaimService, loadGenesisClaimConfig } from "./genesis-claim.js";
+import { createGenesisWeekendClaimService, loadGenesisWeekendClaimConfig, weekendModeEnabled } from "./genesis-weekend-claim.js";
 import { createGenesisClaimReservationStore } from "./genesis-claim-store.js";
 import { createGenesisScanCheckpointStore } from "./genesis-scan-checkpoint-store.js";
 import { createXAccountLinkService, loadXLinkConfig } from "./x-link.js";
@@ -77,8 +78,13 @@ export function createApiServer({ config = loadServerConfig(), mediaConfig = nul
   logger[signerCheck.status === "MATCH" || signerCheck.status === "ABSENT" ? "info" : "error"]?.("genesis.signer.check", signerCheck);
   let genesisClaim = null;
   try {
-    const genesisConfig = loadGenesisClaimConfig(process.env);
-    genesisClaim = createGenesisClaimService({ config: genesisConfig, reservationStore: createGenesisClaimReservationStore(pool, { ledgerContracts: genesisConfig?.ledgerContracts || [] }), checkpointStore: createGenesisScanCheckpointStore(pool) });
+    if (weekendModeEnabled(process.env)) {
+      // The dual-chain weekend claim: snapshot allowlist, no voucher signer, no database writes.
+      genesisClaim = createGenesisWeekendClaimService({ config: loadGenesisWeekendClaimConfig(process.env), logger });
+    } else {
+      const genesisConfig = loadGenesisClaimConfig(process.env);
+      genesisClaim = createGenesisClaimService({ config: genesisConfig, reservationStore: createGenesisClaimReservationStore(pool, { ledgerContracts: genesisConfig?.ledgerContracts || [] }), checkpointStore: createGenesisScanCheckpointStore(pool) });
+    }
   } catch (error) {
     logger.error?.("genesis.claim.disabled", { error: error.message });
   }
