@@ -36,6 +36,12 @@ describe("Artist Studio guard with the Genesis weekend claim", () => {
     expect(claimGuardErrors({ ...unchanged, endTime: unchanged.endTime + 3600n }, claim).join(" ")).toMatch(/still open/);
   });
 
+  it("blocks sale edits when the weekend claim is configured but unavailable, instead of treating it as no claim", async () => {
+    const unavailable = Object.assign(new Error("The Genesis weekend claim is configured but could not be loaded."), { code: "CLAIM_CONFIG_UNAVAILABLE", status: 503 });
+    await expect(readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => { throw unavailable; } })).rejects.toMatchObject({ code: "CLAIM_CONFIG_UNAVAILABLE" });
+    expect(claimGuardErrors(unchanged, { state: "unknown", message: unavailable.message }).join(" ")).toMatch(/could not be checked/);
+  });
+
   it("returns the sale to the artist after claimEnd", async () => {
     const claim = await readGenesisClaimSaleGuard(provider, binding, { fetchConfig: async () => target, nowSec: Number(CLOSE) });
     expect(claim.live).toBe(false);

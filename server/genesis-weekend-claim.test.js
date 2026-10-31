@@ -1,7 +1,7 @@
 import { Interface, getAddress, id } from "ethers";
 import { describe, expect, it, vi } from "vitest";
 import { createApiHandler } from "./api-http.js";
-import { createGenesisWeekendClaimService, loadGenesisWeekendClaimConfig, loadWeekendSnapshot } from "./genesis-weekend-claim.js";
+import { createGenesisWeekendClaimService, createUnavailableWeekendClaimService, loadGenesisWeekendClaimConfig, loadWeekendSnapshot } from "./genesis-weekend-claim.js";
 import { verifyWeekendProof } from "./genesis-weekend-merkle.js";
 import { computeWeekendSnapshot, SNAPSHOT_FORMAT, SOURCE_BRIDGE, WEEKEND_RULE } from "./genesis-weekend-snapshot.js";
 
@@ -19,7 +19,7 @@ const ISSUER_ROLE = id("ISSUER_ROLE");
 
 function snapshotText() {
   const result = computeWeekendSnapshot({
-    cchain: { block: 99_060_000, blockHash: `0x${"11".repeat(32)}`, timestamp: NOW - 7200, balances: { [CCHAIN_HOLDER]: { 0: 1 }, [CLAIMANT]: { 0: 1 }, [getAddress(SOURCE_BRIDGE)]: { 0: 2 } }, mintsMinusBurns: [4n, 0n, 0n, 0n] },
+    cchain: { block: 99_060_000, blockHash: `0x${"11".repeat(32)}`, timestamp: NOW - 7200, balances: { [CCHAIN_HOLDER]: { 0: 1 }, [CLAIMANT]: { 0: 1 }, [getAddress(SOURCE_BRIDGE)]: { 0: 2 } }, mintsMinusBurns: [4n, 0n, 0n, 0n], independentMintsMinusBurns: [4n, 0n, 0n, 0n] },
     grotto: { block: 151_791, blockHash: `0x${"22".repeat(32)}`, timestamp: NOW - 9000, nextBlockTimestamp: null, balances: { [GROTTO_ONLY]: { 0: 2 } }, mintsMinusBurns: [2n, 0n, 0n, 0n] },
     priorClaimants: [CLAIMANT], historicalClaimedSupply: 1n, historicalClaims: [{ wallet: CLAIMANT, transactionHash: "0x1", usedTokenId: 0 }], bridgeActivity: [],
   });
@@ -125,6 +125,7 @@ describe("weekend claim config binding", () => {
     ["a different eligibility rule", { claim: { ELIGIBILITY_RULE: id("x") } }],
     ["no ISSUER_ROLE while claims can be made", { issuer: false }],
     ["the wrong chain", { chainId: 43113n }],
+    ["a close other than the owner-approved 1793595599", { claim: { claimEnd: BigInt(CLOSE + 3600) } }],
   ])("fails closed with 503 on %s", async (_label, drift) => {
     await expect(service(drift).instance.verifyConfigBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
   });
@@ -150,6 +151,19 @@ describe("weekend claim config binding", () => {
   });
 });
 
+describe("weekend mode that cannot load", () => {
+  it("fails closed with 503 CLAIM_CONFIG_UNAVAILABLE on every route, so Studio keeps blocking sale edits", async () => {
+    const instance = createUnavailableWeekendClaimService("snapshot missing");
+    await expect(instance.verifyConfigBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_CONFIG_UNAVAILABLE" });
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 503, code: "CLAIM_CONFIG_UNAVAILABLE" });
+    expect(() => instance.issueVoucher(CCHAIN_HOLDER)).toThrow(expect.objectContaining({ code: "CLAIM_CONFIG_UNAVAILABLE" }));
+    const response = { status: null, body: "", writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
+    await createApiHandler({ service: {}, genesisClaim: instance })({ method: "GET", url: "/api/claims/config", headers: {}, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() {} }, response);
+    expect(response.status).toBe(503);
+    expect(JSON.parse(response.body).error.code).toBe("CLAIM_CONFIG_UNAVAILABLE");
+  });
+});
+
 describe("weekend claim eligibility", () => {
   it("returns a valid proof for a C-Chain holder and for a Grotto-only holder", async () => {
     const { instance } = service();
@@ -168,8 +182,10 @@ describe("weekend claim eligibility", () => {
     await expect(instance.checkEligibility(STRANGER)).resolves.toMatchObject({ eligible: false, reason: "NOT_IN_SNAPSHOT" });
   });
 
-  it("returns 409 CLAIM_WINDOW_CLOSED at and after claimEnd, and 400 for a bad wallet", async () => {
+  it("returns 409 CLAIM_WINDOW_CLOSED at and after claimEnd, even when chain reads fail, and 400 for a bad wallet", async () => {
     await expect(service({}, { now: CLOSE }).instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+    // A broken binding after the close still answers CLAIM_WINDOW_CLOSED, not 503.
+    await expect(service({ minted: 99n }, { now: CLOSE + 10 }).instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
     await expect(service().instance.checkEligibility("0x123")).rejects.toMatchObject({ status: 400, code: "INVALID_WALLET" });
   });
 

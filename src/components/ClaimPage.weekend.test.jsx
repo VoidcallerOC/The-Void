@@ -77,6 +77,18 @@ describe("Genesis weekend claim page", () => {
     expect(requestGenesisVoucher).not.toHaveBeenCalled();
   });
 
+  it("re-checks the target before signing and sends nothing if the owner paused it meanwhile", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend());
+    readGenesisClaimed.mockResolvedValue(false);
+    checkGenesisEligibility.mockResolvedValue({ eligible: true, wallet: WALLET, sources: ["c-chain"], proof: PROOF });
+    renderEditionClaim();
+    const button = await screen.findByRole("button", { name: "CLAIM FREE" });
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ paused: true }));
+    fireEvent.click(button);
+    expect(await screen.findByText(/weekend claim is paused/)).toBeTruthy();
+    expect(executeWeekendClaim).not.toHaveBeenCalled();
+  });
+
   it("names both chains for a holder on C-Chain and The Grotto", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend());
     readGenesisClaimed.mockResolvedValue(false);

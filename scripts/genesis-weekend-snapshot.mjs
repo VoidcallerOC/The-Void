@@ -17,6 +17,8 @@ import { WEEKEND_CAMPAIGN } from "../server/genesis-weekend-merkle.js";
 export const CCHAIN_RPC = process.env.CCHAIN_RPC_URL || "https://api.avax.network/ext/bc/C/rpc";
 export const GROTTO_RPC = process.env.GROTTO_RPC_URL || "https://subnets.avax.network/thegrotto/mainnet/rpc";
 export const EXPLORER = "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api";
+// Avalanche's own Glacier data API: a second indexer, independent of Routescan.
+export const GLACIER = "https://glacier-api.avax.network/v1/chains/43114/tokens";
 export const GENESIS = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 export const PRIOR_CLAIMS = Object.freeze([
   "0x8512be04a4E54cd8551738165F9c05C3303187a0",
@@ -97,6 +99,42 @@ async function inBatches(items, size, task) {
   const out = [];
   for (let i = 0; i < items.length; i += size) out.push(...await Promise.all(items.slice(i, i + size).map(task)));
   return out;
+}
+
+/**
+ * Every Genesis transfer Glacier has indexed up to `toBlock`: candidate addresses and per-id mints minus burns.
+ * Batch transfers appear once per token id, so entries are keyed by transaction, log, token and parties.
+ */
+export async function glacierIssuance({ address, toBlock, fetchImpl = fetch }) {
+  const candidates = new Set();
+  const issued = [0n, 0n, 0n, 0n];
+  const seen = new Set();
+  let pageToken = "";
+  for (let page = 0; page < 1000; page += 1) {
+    const url = `${GLACIER}/${address}/transfers?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    const body = await withRetry(async () => {
+      const response = await fetchImpl(url);
+      if (!response.ok) throw Object.assign(new Error(`Glacier HTTP ${response.status}`), { code: response.status === 429 ? "SERVER_ERROR" : "GLACIER_ERROR" });
+      return response.json();
+    }, { paceMs: 250 });
+    for (const entry of body.transfers || []) {
+      if (Number(entry.blockNumber) > toBlock) continue;
+      const tokenId = Number(entry.erc1155Token?.tokenId);
+      const from = getAddress(entry.from.address);
+      const to = getAddress(entry.to.address);
+      const key = `${String(entry.txHash).toLowerCase()}:${entry.logIndex}:${tokenId}:${from}:${to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (from !== ZERO) candidates.add(from);
+      if (to !== ZERO) candidates.add(to);
+      if (!GENESIS_TOKEN_IDS.includes(tokenId)) continue;
+      if (from === ZERO) issued[tokenId] += BigInt(entry.value);
+      if (to === ZERO) issued[tokenId] -= BigInt(entry.value);
+    }
+    if (!body.nextPageToken) return { candidates, issued, transfers: seen.size };
+    pageToken = body.nextPageToken;
+  }
+  throw new Error("Glacier pagination did not terminate.");
 }
 
 /** A Genesis transfer log from either the explorer (hex fields) or the node (numeric fields). */
@@ -215,6 +253,10 @@ export async function generateSnapshot({ cchainBlock, historicalClaimsFile = "de
   const cCandidates = new Set([getAddress(SOURCE_BRIDGE)]);
   const cIssued = [0n, 0n, 0n, 0n];
   for (const transfer of cTransfers.values()) applyTransfer(transfer.parsed, cCandidates, cIssued);
+  // Second, independent indexer: its addresses join the candidates and its issuance must match.
+  const glacier = await glacierIssuance({ address: GENESIS, toBlock: cBlock.number });
+  for (const wallet of glacier.candidates) cCandidates.add(wallet);
+  log(`Glacier: ${glacier.transfers} transfers, issuance ${glacier.issued.join("/")} vs explorer+node ${cIssued.join("/")}`);
   log(`C-Chain: ${explorerTransferCount} explorer transfer logs, ${repairs.length} repaired from the node, ${cCandidates.size} candidate addresses; reading balances`);
   const cBalances = new Map();
   await inBatches([...cCandidates], 20, async (wallet) => {
@@ -280,9 +322,14 @@ export async function generateSnapshot({ cchainBlock, historicalClaimsFile = "de
   const historicalClaimedSupply = await new Contract(RECOVERY_CLAIM, PRIOR, cchain).claimedSupply({ blockTag: cBlock.number });
 
   const result = computeWeekendSnapshot({
-    cchain: { block: cBlock.number, blockHash: cBlock.hash, timestamp: cBlock.timestamp, balances: cBalances, mintsMinusBurns: cIssued },
+    cchain: { block: cBlock.number, blockHash: cBlock.hash, timestamp: cBlock.timestamp, balances: cBalances, mintsMinusBurns: cIssued, independentMintsMinusBurns: glacier.issued },
     grotto: { block: gBlock.number, blockHash: gBlock.hash, timestamp: gBlock.timestamp, nextBlockTimestamp: gNext ? gNext.timestamp : null, balances: gBalances, mintsMinusBurns: gIssued },
     priorClaimants, historicalClaimedSupply, historicalClaims, bridgeActivity,
+  });
+  // Informational: an allowlisted contract address (a multisig, say) can claim only if it can call claim().
+  const contractWallets = [];
+  await inBatches(result.eligible.map(({ wallet }) => wallet), 20, async (wallet) => {
+    if ((await withRetry(() => cchain.getCode(wallet, cBlock.number), { paceMs: 20 })) !== "0x") contractWallets.push(wallet);
   });
   return {
     format: SNAPSHOT_FORMAT,
@@ -290,7 +337,7 @@ export async function generateSnapshot({ cchainBlock, historicalClaimsFile = "de
     eligibilityRule: WEEKEND_RULE,
     eligibilityRuleText: WEEKEND_RULE_TEXT,
     generatedAt: new Date(cHead.timestamp * 1000).toISOString(),
-    cchain: { chainId: 43114, block: cBlock.number, blockHash: cBlock.hash, timestamp: cBlock.timestamp, explorerTransferLogs: explorerTransferCount, transferLogs: cTransfers.size, explorerGapsRepaired: repairs, candidates: cCandidates.size },
+    cchain: { chainId: 43114, block: cBlock.number, blockHash: cBlock.hash, timestamp: cBlock.timestamp, explorerTransferLogs: explorerTransferCount, transferLogs: cTransfers.size, explorerGapsRepaired: repairs, glacierTransfers: glacier.transfers, candidates: cCandidates.size },
     grotto: { chainId: 36463, block: gBlock.number, blockHash: gBlock.hash, timestamp: gBlock.timestamp, nextBlockTimestamp: gNext ? gNext.timestamp : null, candidates: gCandidates.size },
     priorClaims: PRIOR_CLAIMS,
     historicalClaimedSupply: historicalClaimedSupply.toString(),
@@ -301,6 +348,7 @@ export async function generateSnapshot({ cchainBlock, historicalClaimsFile = "de
     merkleRoot: result.root ?? null,
     snapshotHash: result.snapshotHash ?? null,
     eligibleWallets: result.eligibleWallets ?? 0,
+    eligibleContractWallets: contractWallets.sort(),
     eligible: result.eligible,
     excluded: result.excluded,
   };

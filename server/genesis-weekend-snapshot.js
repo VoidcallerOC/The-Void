@@ -4,8 +4,10 @@
 // snapshot blocks, that has not claimed through any earlier Genesis claim contract. One entry per wallet.
 //
 // Integrity rules (any failure refuses the snapshot):
-// 1. C-Chain completeness: per token id, the snapshot balances of every address seen in the transfer history
-//    (bridge custody included) sum to mints minus burns. A missing holder makes the sums disagree.
+// 1. C-Chain completeness: two independent indexers (Routescan, plus Avalanche's Glacier data API) must agree on
+//    per-id mints minus burns, and the snapshot balances of every address either indexer has seen (bridge
+//    custody included) must sum to that issuance. A holder missing from one indexer's history makes the
+//    issuance disagree; a holder missing from both makes the balance sums disagree with the issuance.
 // 2. Cross-chain conservation: per token id, the C-Chain bridge custody equals the Grotto wrapped balances,
 //    which equal Grotto mints minus burns. A unit in flight (locked but not yet minted, or burned but not yet
 //    released) breaks the equality, so one unit can never be counted on both chains or for two wallets.
@@ -87,6 +89,13 @@ export function computeWeekendSnapshot({
       bridgeCustody: custody[tokenId].toString(), grottoBalanceSum: gTotal.toString(), grottoMintsMinusBurns: gIssued.toString(),
     };
     if (cTotal !== cIssued) failures.push(`C-Chain token ${tokenId}: holder balances ${cTotal} != mints minus burns ${cIssued} (incomplete holder set).`);
+    if (!cchain.independentMintsMinusBurns) {
+      if (tokenId === 0) failures.push("No independent second indexer issuance was supplied for C-Chain.");
+    } else {
+      const independent = big(cchain.independentMintsMinusBurns[tokenId]);
+      reconciliation.tokenIds[tokenId].independentMintsMinusBurns = independent.toString();
+      if (independent !== cIssued) failures.push(`C-Chain token ${tokenId}: indexers disagree on mints minus burns (${cIssued} vs ${independent}).`);
+    }
     if (gTotal !== gIssued) failures.push(`Grotto token ${tokenId}: holder balances ${gTotal} != mints minus burns ${gIssued}.`);
     if (custody[tokenId] !== gTotal) failures.push(`Token ${tokenId}: bridge custody ${custody[tokenId]} != Grotto wrapped supply ${gTotal} (a bridge message is in flight).`);
   }

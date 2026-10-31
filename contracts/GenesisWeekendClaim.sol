@@ -50,6 +50,8 @@ contract GenesisWeekendClaim {
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     address public constant GROTTO_WRAPPED_COLLECTION = 0x0d6Fa9968aa57295217737379c44eBbc1130B1Fa;
     uint256 public constant CLAIM_QUANTITY = 1;
+    /// @notice The owner-approved close: 2026-11-02 04:59:59 UTC (Sunday 2026-11-01 11:59:59 PM EST).
+    uint256 public constant WEEKEND_CLAIM_END = 1_793_595_599;
     uint256 public constant PRIOR_CLAIM_COUNT = 3;
     bytes32 public constant CAMPAIGN = keccak256("the-void:genesis-weekend-claim:v1");
     bytes32 public constant ELIGIBILITY_RULE = keccak256(
@@ -113,6 +115,7 @@ contract GenesisWeekendClaim {
     error PriorClaimRecorded(address claimant, address priorClaim);
     error NotEligible(address claimant);
     error SupplyAccountingMismatch(uint256 minted, uint256 sold, uint256 claimed);
+    error AllowlistExhausted(uint256 claimedSupply, uint256 limit);
     error Reentrancy();
 
     event Activated(address indexed admin, uint256 claimStart, uint256 claimEnd);
@@ -138,7 +141,7 @@ contract GenesisWeekendClaim {
             || cfg.admin == address(0) || cfg.releaseContract.code.length == 0 || cfg.primarySale.code.length == 0
             || cfg.releaseContract == GENESIS_CONTRACT || cfg.merkleRoot == bytes32(0) || cfg.eligibleWallets == 0
             || cfg.snapshotCChainBlock == 0 || cfg.snapshotCChainBlock >= block.number || cfg.snapshotGrottoBlock == 0
-            || cfg.snapshotHash == bytes32(0) || cfg.claimEnd <= block.timestamp) revert InvalidConfiguration();
+            || cfg.snapshotHash == bytes32(0) || cfg.claimEnd != WEEKEND_CLAIM_END || cfg.claimEnd <= block.timestamp) revert InvalidConfiguration();
         if (IWeekendClaimSale(cfg.primarySale).releases() != cfg.releaseContract) revert InvalidConfiguration();
         IWeekendClaimRelease.EditionData memory edition = IWeekendClaimRelease(cfg.releaseContract).edition(cfg.tokenId);
         if (!edition.exists) revert InvalidConfiguration();
@@ -220,6 +223,10 @@ contract GenesisWeekendClaim {
         _assertNoPriorClaim(msg.sender);
         if (!_verify(proof, leaf(msg.sender))) revert NotEligible(msg.sender);
         _assertSupplyAccounting();
+        // Defense in depth for the release's unlimited ISSUER_ROLE: never more claims than allowlisted wallets.
+        if (claimedSupply + CLAIM_QUANTITY > baselineClaimedSupply + eligibleWallets) {
+            revert AllowlistExhausted(claimedSupply, baselineClaimedSupply + eligibleWallets);
+        }
 
         hasClaimed[msg.sender] = true;
         claimedSupply += CLAIM_QUANTITY;

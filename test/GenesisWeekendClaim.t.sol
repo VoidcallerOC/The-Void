@@ -230,6 +230,9 @@ contract GenesisWeekendClaimTest {
         new GenesisWeekendClaim(_config(bytes32(0), 4, CLOSE));
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
         new GenesisWeekendClaim(_config(ROOT, 4, START));
+        // The close is pinned to the owner-approved timestamp: one second later is refused.
+        vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
+        new GenesisWeekendClaim(_config(ROOT, 4, CLOSE + 1));
         release.setMinted(6);
         vm.expectPartialRevert(GenesisWeekendClaim.InvalidBaseline.selector);
         new GenesisWeekendClaim(_config(ROOT, 4, CLOSE));
@@ -386,6 +389,23 @@ contract GenesisWeekendClaimTest {
         vm.expectRevert(GenesisWeekendClaim.Reentrancy.selector);
         receiver.claim(single, empty);
         require(release.balanceOf(address(receiver)) == 0 && single.claimedSupply() == 4, "no partial mint");
+    }
+
+    function testClaimsNeverExceedTheAllowlistSize() public {
+        // An allowlist declared as two wallets admits at most two claims, even if the root proves more.
+        GenesisWeekendClaim.Config memory cfg = _config(ROOT, 4, CLOSE);
+        cfg.eligibleWallets = 2;
+        GenesisWeekendClaim small = new GenesisWeekendClaim(cfg);
+        release.setIssuer(address(small), true);
+        vm.prank(ADMIN);
+        small.activate();
+        vm.prank(HOLDER_A);
+        small.claim(_proofA());
+        vm.prank(HOLDER_B);
+        small.claim(_proofB());
+        vm.prank(HOLDER_C);
+        vm.expectPartialRevert(GenesisWeekendClaim.AllowlistExhausted.selector);
+        small.claim(_proofC());
     }
 
     function testAdminTransfer() public {

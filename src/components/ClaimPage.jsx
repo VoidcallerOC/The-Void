@@ -342,6 +342,19 @@ export function ClaimPage() {
   async function onClaimAction() {
     if (isWeekendTarget(target)) {
       if (phase !== CLAIM_PHASES.ELIGIBLE || !weekendProof) return;
+      // Re-read the verified target just before signing: the owner may have paused it since the page loaded.
+      try {
+        const latest = await fetchGenesisClaimConfig();
+        if (genesisClaimPhase(latest, nowSeconds()) !== GENESIS_CLAIM_PHASES.GENESIS) {
+          setPhase(CLAIM_PHASES.CLAIM_UNAVAILABLE);
+          setMessage(phaseMessage(genesisClaimPhase(latest, nowSeconds()), latest));
+          return;
+        }
+      } catch (error) {
+        setPhase(classifyError(error));
+        setMessage(error?.message || "The claim could not be re-checked before signing. Nothing was sent.");
+        return;
+      }
       setPhase(CLAIM_PHASES.PENDING);
       setMessage("Confirm the free claim in your wallet. The claim will not show as successful until the receipt and token ownership are verified.");
       try {
@@ -446,7 +459,7 @@ export function ClaimPage() {
           <p className="vc-claim-edition">{edition.title} · Token #{binding.tokenId || "—"}</p>
           {edition.description && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{edition.description}</p>}
 
-          {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && <GenesisCountdown />}
+          {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(schedule) && <GenesisCountdown />}
 
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">

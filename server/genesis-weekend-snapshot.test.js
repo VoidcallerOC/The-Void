@@ -19,6 +19,7 @@ function world(overrides = {}) {
       block: 99_000_000, blockHash: `0x${"11".repeat(32)}`, timestamp: T,
       balances: { [A]: { 0: 1 }, [B]: { 1: 2 }, [CLAIMANT]: { 0: 1 }, [BRIDGE]: { 0: 2, 3: 1 } },
       mintsMinusBurns: [4n, 2n, 0n, 1n],
+      independentMintsMinusBurns: [4n, 2n, 0n, 1n],
     },
     grotto: {
       block: 151_000, blockHash: `0x${"22".repeat(32)}`, timestamp: T - 7200, nextBlockTimestamp: null,
@@ -88,6 +89,14 @@ describe("weekend eligibility snapshot", () => {
     const result = computeWeekendSnapshot(world({ cchain: { mintsMinusBurns: [5n, 2n, 0n, 1n] } }));
     expect(result.ok).toBe(false);
     expect(result.failures.join(" ")).toMatch(/C-Chain token 0: holder balances 4 != mints minus burns 5/);
+  });
+
+  it("refuses when the two indexers disagree on issuance, or the second indexer is missing", () => {
+    // The first indexer dropped a mint of id 1 to a wallet no other log mentions: both of its sums miss it.
+    const dropped = computeWeekendSnapshot(world({ cchain: { independentMintsMinusBurns: [4n, 3n, 0n, 1n] } }));
+    expect(dropped.ok).toBe(false);
+    expect(dropped.failures.join(" ")).toMatch(/token 1: indexers disagree on mints minus burns \(2 vs 3\)/);
+    expect(computeWeekendSnapshot(world({ cchain: { independentMintsMinusBurns: undefined } })).failures.join(" ")).toMatch(/No independent second indexer/);
   });
 
   it("refuses bridge activity in the quiet window and a stale Grotto block", () => {
