@@ -11,10 +11,13 @@ const CLAIM_ABI = [
   "function snapshotCChainBlock() view returns (uint256)", "function snapshotGrottoBlock() view returns (uint256)", "function baselineClaimedSupply() view returns (uint256)",
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
   "function priorClaimOne() view returns (address)", "function priorClaimTwo() view returns (address)", "function priorClaimThree() view returns (address)",
+  "function publicSaleStart() view returns (uint256)", "function publicSaleEnd() view returns (uint256)", "function publicPriceWei() view returns (uint256)",
   "function activate()",
 ];
 const claimIface = new ethers.Interface(CLAIM_ABI);
 const STORE = "genesis-weekend-claim-address";
+const SENT = "genesis-weekend-deploys-sent";
+const ARTIST = ethers.getAddress(PLAN.signer);
 const $ = (id) => document.getElementById(id);
 
 const state = { manifest: null, artifact: null, wallet: null, provider: null, account: null, claim: null, step: null, ready: null, sending: false };
@@ -60,18 +63,29 @@ async function load() {
   if (stored && ethers.isAddress(stored)) { state.claim = ethers.getAddress(stored); $("claimAddress").textContent = state.claim; }
 }
 
+function disarmAll() {
+  state.ready = null;
+  document.querySelectorAll("button.sign, button.check").forEach((button) => { button.disabled = true; });
+}
+
 async function connect() {
+  disarmAll();
+  state.wallet = null;
+  state.provider = null;
+  state.account = null;
+  $("account").textContent = "not connected";
   const wallet = window.ethereum;
   if (!wallet) stop("No browser wallet found. Open this page in the browser profile where Rabby is installed.");
   if (!wallet.isRabby) log("The injected wallet does not identify as Rabby. Continue only if this is your Rabby wallet.", "warn");
   const accounts = await wallet.request({ method: "eth_requestAccounts" });
   const chainId = Number(BigInt(await wallet.request({ method: "eth_chainId" })));
+  const account = ethers.getAddress(accounts[0]);
+  $("account").textContent = `${account} on chain ${chainId}`;
+  if (chainId !== PLAN.chainId) stop(`Rabby is on chain ${chainId}. Switch to Avalanche C-Chain (43114) and reconnect.`);
+  if (account !== ARTIST) stop(`Connected account ${account} is not the authorized artist wallet ${PLAN.signer}.`);
   state.wallet = wallet;
   state.provider = new ethers.BrowserProvider(wallet, PLAN.chainId);
-  state.account = ethers.getAddress(accounts[0]);
-  $("account").textContent = `${state.account} on chain ${chainId}`;
-  if (chainId !== PLAN.chainId) stop(`Rabby is on chain ${chainId}. Switch to Avalanche C-Chain (43114) and reconnect.`);
-  if (state.account !== ethers.getAddress(PLAN.signer)) stop(`Connected account ${state.account} is not the authorized artist wallet ${PLAN.signer}.`);
+  state.account = account;
   log("Connected: authorized artist wallet on Avalanche C-Chain 43114.", "ok");
   document.querySelectorAll("button.check").forEach((button) => { button.disabled = false; });
 }
@@ -111,6 +125,9 @@ async function verifyDeployed(address) {
   const code = await state.provider.getCode(address);
   if (!runtimeMatches(code, state.artifact)) stop(`Runtime code at ${address} is not the reviewed GenesisWeekendClaim build.`);
   const problems = compareDeployState(state.manifest.expectedAfterDeploy, await readClaimState(address));
+  const sale = saleIface.decodeFunctionResult("sales", await state.provider.call({ to: PLAN.sale, data: saleIface.encodeFunctionData("sales", [1]) }));
+  const [start, end, price] = await Promise.all(["publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => call(address, claimIface, name)));
+  if (start !== BigInt(sale[4]) || end !== BigInt(sale[5]) || price !== BigInt(sale[0])) problems.push(`sale immutables ${start}/${end}/${price} differ from sales(1) ${sale[4]}/${sale[5]}/${sale[0]}`);
   if (problems.length) { problems.forEach((problem) => log(problem, "bad")); stop("The deployed claim's configuration differs from the approved plan."); }
   log(`Verified ${address}: reviewed runtime code; every immutable matches; inactive and paused; baseline 4; closes 1793595599.`, "ok");
 }
@@ -132,6 +149,17 @@ const CHECKS = {
     const ceiling = state.manifest.deploy.gasCeiling;
     const [pending, latest] = await Promise.all([state.provider.getTransactionCount(state.account, "pending"), state.provider.getTransactionCount(state.account, "latest")]);
     if (pending !== latest) stop(`The wallet has ${pending - latest} pending transaction(s). Wait for them before deploying.`);
+    // Never deploy twice: look at every contract-creation address the artist could have used since the manifest was built,
+    // and every deploy this browser recorded, whatever happened to the page or its storage afterwards.
+    const from = Number(state.manifest.deploy.nonceAtGeneration);
+    for (let n = from; n < pending; n += 1) {
+      const address = ethers.getCreateAddress({ from: ARTIST, nonce: n });
+      if ((await state.provider.getCode(address)) !== "0x") stop(`The artist already created a contract at ${address} (nonce ${n}). Load it below instead of deploying again.`);
+    }
+    for (const sent of readSent()) {
+      if ((await state.provider.getCode(sent.predicted)) !== "0x") stop(`A deploy recorded here exists at ${sent.predicted}. Load it below instead of deploying again.`);
+    }
+    if (pending !== from) stop(`The wallet nonce is ${pending}, not ${from} as when the manifest was built. Rebuild the manifest and review it before deploying.`);
     const predicted = ethers.getCreateAddress({ from: state.account, nonce: pending });
     if ((await state.provider.getCode(predicted)) !== "0x") stop(`Address ${predicted} already has code.`);
     if (await issuerHolds(predicted)) stop(`Predicted address ${predicted} already holds ISSUER_ROLE.`);
@@ -220,16 +248,33 @@ async function revokeVerify(index) {
   log(`${target} no longer holds ISSUER_ROLE.`, "ok");
 }
 
+async function requireArtist() {
+  if (!state.wallet || state.account !== ARTIST) stop("Connect the artist wallet first.");
+  const chainId = Number(BigInt(await state.wallet.request({ method: "eth_chainId" })));
+  const [current] = await state.wallet.request({ method: "eth_accounts" });
+  if (chainId !== PLAN.chainId) stop(`Rabby is on chain ${chainId}, not 43114. Nothing was sent.`);
+  if (!current || ethers.getAddress(current) !== ARTIST) stop("Rabby is not on the artist account. Nothing was sent.");
+}
+
 async function onCheck(step) {
   state.ready = null;
   document.querySelectorAll("button.sign").forEach((button) => { button.disabled = true; });
   try {
+    await requireArtist();
     state.ready = { step, ...(await CHECKS[step]()) };
     $(`sign-${step}`).disabled = false;
     log(`${step}: all checks passed. Review in Rabby, then sign. Nothing has been sent.`, "ok");
   } catch (error) {
     if (!error.stopped) log(`${step}: ${error.shortMessage || error.message}`, "bad");
   }
+}
+
+function readSent() {
+  try { const list = JSON.parse(localStorage.getItem(SENT) || "[]"); return Array.isArray(list) ? list.filter((e) => ethers.isAddress(e?.predicted)) : []; } catch { return []; }
+}
+
+function describe(params) {
+  return `from ${params.from}, to ${params.to || "(contract creation)"}, value 0, nonce ${Number(BigInt(params.nonce))}, gas ${Number(BigInt(params.gas))}, data ${params.data.length > 74 ? `${params.data.slice(0, 74)}… keccak ${ethers.keccak256(params.data)}` : params.data}`;
 }
 
 async function onSign(step) {
@@ -239,18 +284,16 @@ async function onSign(step) {
   state.ready = null;
   $(`sign-${step}`).disabled = true;
   try {
-    // Re-confirm the wallet, the chain and (for the deploy) the nonce at the moment of signing.
-    const chainId = Number(BigInt(await state.wallet.request({ method: "eth_chainId" })));
-    const [current] = await state.wallet.request({ method: "eth_accounts" });
-    if (chainId !== PLAN.chainId) stop(`Rabby switched to chain ${chainId}. Nothing was sent.`);
-    if (!current || ethers.getAddress(current) !== state.account) stop("Rabby switched accounts. Nothing was sent.");
-    if (step === "deploy") {
-      const pending = await state.provider.getTransactionCount(state.account, "pending");
-      if (pending !== ready.nonce) stop(`The wallet nonce moved from ${ready.nonce} to ${pending}. Run the deploy check again.`);
-    }
+    // Re-confirm the wallet, the chain and the nonce, and re-simulate, at the moment of signing.
+    await requireArtist();
+    const [pending, latest] = await Promise.all([state.provider.getTransactionCount(ARTIST, "pending"), state.provider.getTransactionCount(ARTIST, "latest")]);
+    if (pending !== latest) stop(`The wallet has ${pending - latest} pending transaction(s). Nothing was sent.`);
+    if (step === "deploy" && pending !== ready.nonce) stop(`The wallet nonce moved from ${ready.nonce} to ${pending}. Run the deploy check again.`);
+    await simulate(ready.tx, ready.ceiling);
     const maxFeePerGas = await feeAndBalance(ready.ceiling);
-    const params = { from: state.account, value: "0x0", gas: toHex(ready.ceiling), maxFeePerGas: toHex(maxFeePerGas), ...("to" in ready.tx ? { to: ready.tx.to } : {}), data: ready.tx.data };
-    log(`${step}: requesting your signature in Rabby…`);
+    const params = { from: ARTIST, value: "0x0", nonce: toHex(pending), gas: toHex(ready.ceiling), maxFeePerGas: toHex(maxFeePerGas), ...("to" in ready.tx ? { to: ready.tx.to } : {}), data: ready.tx.data };
+    log(`${step}: requesting your signature in Rabby for exactly: ${describe(params)}. Reject in Rabby if anything differs (nonce included).`);
+    if (step === "deploy") localStorage.setItem(SENT, JSON.stringify([...readSent(), { nonce: pending, predicted: ready.predicted, at: new Date().toISOString() }]));
     const hash = await state.wallet.request({ method: "eth_sendTransaction", params: [params] });
     log(`${step}: submitted ${hash}. Waiting for the receipt…`);
     const receipt = await state.provider.waitForTransaction(hash, 1, 300_000);
@@ -271,5 +314,22 @@ for (const step of Object.keys(CHECKS)) {
   $(`check-${step}`).addEventListener("click", () => { void onCheck(step); });
   $(`sign-${step}`).addEventListener("click", () => { void onSign(step); });
 }
-$("forget").addEventListener("click", () => { localStorage.removeItem(STORE); state.claim = null; $("claimAddress").textContent = "none"; log("Forgot the stored claim address."); });
+$("forget").addEventListener("click", () => {
+  disarmAll();
+  if (state.account === ARTIST) document.querySelectorAll("button.check").forEach((button) => { button.disabled = false; });
+  localStorage.removeItem(STORE); state.claim = null; $("claimAddress").textContent = "none";
+  log("Forgot the stored claim address. Every armed step was cleared. The deploy check still refuses if the artist already created a contract.");
+});
+$("loadClaim").addEventListener("click", () => {
+  (async () => {
+    disarmAll();
+    await requireArtist();
+    const input = $("existingClaim").value.trim();
+    if (!ethers.isAddress(input)) stop("Enter a contract address.");
+    const address = ethers.getAddress(input);
+    await verifyDeployed(address);
+    state.claim = address; localStorage.setItem(STORE, address); $("claimAddress").textContent = address;
+    document.querySelectorAll("button.check").forEach((button) => { button.disabled = false; });
+  })().catch((error) => { if (!error.stopped) log(error.message, "bad"); if (state.account === ARTIST) document.querySelectorAll("button.check").forEach((b) => { b.disabled = false; }); });
+});
 load().catch((error) => { if (!error.stopped) log(error.message, "bad"); });

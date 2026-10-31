@@ -92,11 +92,23 @@ npm ci
 node scripts/genesis-weekend-signing-server.mjs
 ```
 
-Open `http://127.0.0.1:8790/` in the browser profile that has Rabby. Compare the printed SHA-256 of each file with the reviewed values.
+The server refuses to start unless every file matches the committed `deploy/mainnet/genesis-weekend/signing/SHA256SUMS`. Open exactly `http://127.0.0.1:8790/` (not `localhost`, not another port) in the browser profile that has Rabby.
+
+**In Rabby, before signing the deploy:**
+- from is `0x284C…180a`;
+- there is no "to" (it is a contract creation);
+- value is 0;
+- gas limit is 2,000,000;
+- the nonce equals the one the page logs (191 at manifest time).
+
+**If a deploy was sent but the page did not show "Verified":**
+1. Do not deploy again.
+2. Paste the contract address into **Load existing claim**. It is verified before use.
+3. The deploy check also refuses whenever the artist wallet has already created a contract since the manifest was built.
 
 **For each step:**
 
-1. Press **Check and simulate**. The page:
+1. Press **Check and simulate**. At signing time the page checks the account and chain again, re-simulates, and sends an explicit nonce. The check itself:
    - re-verifies the manifest against the artifact, rebuilding the creation data byte for byte;
    - checks the account, the chain, the pending nonce, the balance against gas ceiling × max fee, and the live roles and supply;
    - simulates the exact transaction against the ceiling.

@@ -35,12 +35,14 @@
     <tr><td>Connected</td><td class="mono" id="account">not connected</td></tr>
     <tr><td>Required signer</td><td class="mono">0x284C09a7CC187E096cbbdc88d99DEFE6df32180a (artist wallet, Avalanche C-Chain 43114)</td></tr>
     <tr><td>Weekend claim</td><td class="mono"><span id="claimAddress">none</span> <button id="forget" type="button">Forget</button></td></tr>
+    <tr><td>Load existing claim</td><td><input id="existingClaim" class="mono" size="44" autocomplete="off" placeholder="0x… (verified before use)"> <button id="loadClaim" type="button">Verify and load</button></td></tr>
   </table>
+  <p>If a deploy was sent but the page did not show "verified", do not deploy again: paste the contract address above. The deploy check also refuses whenever the artist wallet has already created a contract since the manifest was built.</p>
 </section>
 
 <section>
   <h2>1. Deploy GenesisWeekendClaim (paused, inactive)</h2>
-  <p>Contract creation, value 0, gas ceiling 2,000,000. Creation data is the reviewed artifact bytecode plus the pinned constructor config (see manifest below). Predicted address: <span class="mono" id="deployPredicted">run the check</span></p>
+  <p>Contract creation (no "to"), value 0, gas limit 2,000,000, nonce shown in the log; in Rabby the nonce must match. Creation data is the reviewed artifact bytecode plus the pinned constructor config (see manifest below). Predicted address: <span class="mono" id="deployPredicted">run the check</span></p>
   <button class="check" id="check-deploy" disabled>Check and simulate</button>
   <button class="sign" id="sign-deploy" disabled>Sign deploy in Rabby</button>
   <span class="mono" id="done-deploy"></span>

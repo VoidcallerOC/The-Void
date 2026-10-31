@@ -3,7 +3,7 @@
 // files (no directory listing, no other paths), sends a strict CSP, and prints each file's SHA-256 so the owner
 // can compare it with the reviewed commit. It never touches a key, a wallet, or the chain.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,24 @@ export const FILES = Object.freeze({
 export const HOST = "127.0.0.1";
 export const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
+export const SUMS = join(SIGNING, "SHA256SUMS");
+
+/** Problems comparing the served files with the committed SHA256SUMS list; empty means they match. */
+export function checkSums(files, text = readFileSync(SUMS, "utf8")) {
+  const expected = new Map(text.trim().split("\n").map((line) => { const [hash, route] = line.trim().split(/\s+/); return [route, hash]; }));
+  const problems = [];
+  for (const [route, file] of Object.entries(files)) {
+    if (route === "/") continue;
+    if (expected.get(route) !== file.sha256) problems.push(`${route}: sha256 ${file.sha256}, expected ${expected.get(route) ?? "(not listed)"}`);
+  }
+  for (const route of expected.keys()) if (!files[route]) problems.push(`${route}: listed but not served`);
+  return problems;
+}
+
+export function formatSums(files) {
+  return `${Object.entries(files).filter(([route]) => route !== "/").map(([route, file]) => `${file.sha256}  ${route}`).join("\n")}\n`;
+}
+
 export function loadFiles() {
   const loaded = {};
   for (const [route, { path, type }] of Object.entries(FILES)) {
@@ -42,7 +60,9 @@ export function createSigningServer(files = loadFiles()) {
       response.writeHead(403, headers).end("forbidden");
       return;
     }
-    const file = files[new URL(request.url, "http://127.0.0.1").pathname];
+    let pathname;
+    try { pathname = new URL(request.url, "http://127.0.0.1").pathname; } catch { response.writeHead(400, headers).end("bad request"); return; }
+    const file = files[pathname];
     if (!file) { response.writeHead(404, headers).end("not found"); return; }
     response.writeHead(200, { ...headers, "Content-Type": file.type }).end(file.body);
   });
@@ -51,7 +71,18 @@ export function createSigningServer(files = loadFiles()) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.env.PORT || 8790);
   const files = loadFiles();
-  for (const [route, file] of Object.entries(files)) if (route !== "/") console.log(`sha256 ${file.sha256}  ${route}`);
+  if (process.argv.includes("--write-sums")) {
+    writeFileSync(SUMS, formatSums(files));
+    console.log(`Wrote ${SUMS}`);
+    process.exit(0);
+  }
+  process.stdout.write(formatSums(files));
+  const problems = checkSums(files);
+  if (problems.length) {
+    console.error(`\nREFUSING TO START: the files differ from the reviewed SHA256SUMS.\n${problems.join("\n")}`);
+    process.exit(1);
+  }
+  console.log("All files match the reviewed SHA256SUMS.");
   createSigningServer(files).listen(port, HOST, () => {
     console.log(`\nGenesis weekend signing page: http://${HOST}:${port}/  (local only; Ctrl+C to stop)`);
   });

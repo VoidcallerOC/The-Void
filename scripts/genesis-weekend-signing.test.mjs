@@ -5,7 +5,8 @@ import * as ethers from "ethers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PLAN, compareDeployState, covers, maskImmutables, runtimeMatches, verifyManifest } from "../deploy/mainnet/genesis-weekend/signing/core.js";
 import { buildWeekendTree } from "../server/genesis-weekend-merkle.js";
-import { CSP, FILES, HOST, createSigningServer, loadFiles } from "./genesis-weekend-signing-server.mjs";
+import { createConnection } from "node:net";
+import { CSP, FILES, HOST, checkSums, createSigningServer, loadFiles } from "./genesis-weekend-signing-server.mjs";
 
 const DIR = "deploy/mainnet/genesis-weekend";
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -136,9 +137,16 @@ describe("signing page safety rules", () => {
   });
 
   it("sends value 0 with the reviewed gas ceiling and no automatic next step", () => {
-    expect(page).toMatch(/value: "0x0", gas: toHex\(ready\.ceiling\)/);
+    expect(page).toMatch(/from: ARTIST, value: "0x0", nonce: toHex\(pending\), gas: toHex\(ready\.ceiling\)/);
     expect(page).not.toMatch(/onSign\([^s)]/);
     expect(page.match(/onSign\(/g)).toHaveLength(2);
+  });
+
+  it("re-checks the artist, re-simulates and refuses a second deploy", () => {
+    expect(page).toMatch(/async function onSign[\s\S]*await requireArtist\(\);[\s\S]*await simulate\(ready\.tx, ready\.ceiling\)[\s\S]*eth_sendTransaction/);
+    expect(page).toMatch(/async function onCheck[\s\S]*await requireArtist\(\);/);
+    expect(page).toContain("nonceAtGeneration");
+    expect(page).toMatch(/getCreateAddress\(\{ from: ARTIST, nonce: n \}\)/);
   });
 
   it("gates activation behind the separate authorization phrase", () => {
@@ -177,6 +185,25 @@ describe("local signing server", () => {
     expect(page.status).toBe(200);
     expect(page.headers["content-security-policy"]).toBe(CSP);
     expect((await get("/artifact.json")).body).toBe(readFileSync(`${DIR}/GenesisWeekendClaim.artifact.json`, "utf8"));
+  });
+
+  it("served files match the committed SHA256SUMS", () => {
+    expect(checkSums(loadFiles())).toEqual([]);
+    const files = loadFiles();
+    files["/core.js"] = { ...files["/core.js"], sha256: "00" };
+    expect(checkSums(files)).toHaveLength(1);
+  });
+
+  it("answers a malformed request line without crashing", async () => {
+    const reply = await new Promise((resolve, reject) => {
+      const socket = createConnection({ host: HOST, port }, () => socket.write("GET http://[ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"));
+      let data = "";
+      socket.on("data", (chunk) => { data += chunk; socket.end(); });
+      socket.on("end", () => resolve(data));
+      socket.on("error", reject);
+    });
+    expect(reply).toMatch(/^HTTP\/1\.1 (400|403)/);
+    expect((await get("/")).status).toBe(200);
   });
 
   it("refuses other paths, traversal and foreign Host headers", async () => {
