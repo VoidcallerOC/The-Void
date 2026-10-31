@@ -74,14 +74,55 @@ Status: **NOT AUTHORIZED.** Every step below that signs a transaction or changes
 2. Verify that `/api/claims/config` still returns 200; post-close binding does not require the role.
 3. Verify that the Studio sale panel edits freely.
 
-## Gas (simulated on mainnet at block 99,066,061, base fee 2.5 gwei)
+## Owner signing tool (local only)
 
-| Transaction | Gas | Fee at 2.5 gwei |
-|---|---|---|
-| Deploy | 1,587,195 | ≈ 0.0040 AVAX |
-| `grantRole` | 52,623 | ≈ 0.00013 AVAX |
-| `activate()` | ≈ 55,000 (estimate) | ≈ 0.00014 AVAX |
-| 3 × `revokeRole` (2 before activation, 1 after close) | ≈ 3 × 30,000 (estimate) | ≈ 0.00023 AVAX |
-| **Total** | | **≈ 0.0045 AVAX** |
+Steps 4, 5, 6 and 9 are signed from a local page, never from the production site. The page:
 
-The artist wallet holds 0.1429 AVAX, so no extra funding is needed. Rabby reserves gas limit × max fee up front: about 0.016 AVAX for the deploy at a 2× margin and 5 gwei.
+- loads only local files: no remote code, a strict CSP, and a vendored ethers 6.17.0;
+- is served on 127.0.0.1 only;
+- asks Rabby only for `eth_requestAccounts`, `eth_chainId`, `eth_accounts` and one `eth_sendTransaction` per click;
+- never asks for a seed phrase, a private key, an approval or a message signature;
+- never sends the next transaction on its own.
+
+**Launch** (on the owner's computer, with Rabby on the artist wallet and on Avalanche C-Chain):
+
+```bash
+git fetch origin claude/genesis-weekend-claim && git checkout <reviewed commit>
+npm ci
+node scripts/genesis-weekend-signing-server.mjs
+```
+
+Open `http://127.0.0.1:8790/` in the browser profile that has Rabby. Compare the printed SHA-256 of each file with the reviewed values.
+
+**For each step:**
+
+1. Press **Check and simulate**. The page:
+   - re-verifies the manifest against the artifact, rebuilding the creation data byte for byte;
+   - checks the account, the chain, the pending nonce, the balance against gas ceiling × max fee, and the live roles and supply;
+   - simulates the exact transaction against the ceiling.
+2. Only then does it arm **Sign**.
+3. After the receipt, the page verifies:
+   - **deploy:** the address equals the predicted one, the runtime matches with immutables masked, and every immutable equals the plan, with the claim inactive and paused;
+   - **revoke:** the role is gone;
+   - **grant:** the role is held and the claim is still paused;
+   - **activate:** the claim is active.
+4. Then stop and report. Each step needs its own owner approval.
+
+**Rebuild the manifest** before signing if the nonce or the live roles changed: `node scripts/genesis-weekend-manifest.mjs --out deploy/mainnet/genesis-weekend/signing/manifest.json`. It refuses to write when any check fails.
+
+| Step | To | Call | Gas ceiling | Simulated |
+|---|---|---|---|---|
+| Deploy | contract creation | `GenesisWeekendClaim(config)` | 2,000,000 | 1,636,179 |
+| Revoke 1 | release `0xF0C0…830e` | `revokeRole(ISSUER_ROLE, 0x7D1a…5363)` | 60,000 | 35,134 |
+| Revoke 2 | release `0xF0C0…830e` | `revokeRole(ISSUER_ROLE, 0xd70d…66b8)` | 60,000 | 35,134 |
+| Grant | release `0xF0C0…830e` | `grantRole(ISSUER_ROLE, <claim>)` | 80,000 | 52,623 |
+| Activate | the claim | `activate()` | 90,000 | simulated live at that step |
+
+All are value 0. The wallet must cover each ceiling × (2 × base fee + 1 gwei) when it signs. That is about 0.014 AVAX in total at a 2.5 gwei base fee; fund about 0.02 AVAX.
+
+## Allowlist entries that cannot claim in practice (kept as reviewed; not regenerated)
+
+- `0x5bC2fc6A8538e6913995741234c2512D3ae6ada7` is a contract. It can claim only if its code can call `claim()`; it is probably unable to.
+- `0x000000000000000000000000000000000000dEaD` is a burn address and holds no key. It cannot claim.
+
+Both count toward `eligibleWallets` (481), so the claim cap has two slots that will not be used. This does not affect anyone else's claim.

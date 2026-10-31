@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>Genesis Weekend Owner Signing</title>
+<style>
+  :root { color-scheme: light dark; --bad: #c62828; --ok: #2e7d32; --warn: #b26a00; }
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin: 0 0 6px; }
+  .banner { border: 2px solid var(--bad); padding: 10px 12px; border-radius: 6px; }
+  section { border: 1px solid #8884; border-radius: 6px; padding: 12px; margin: 12px 0; }
+  code, pre, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  pre { max-height: 360px; overflow: auto; background: #8881; padding: 8px; }
+  button { padding: 6px 12px; margin-right: 6px; } button.sign { font-weight: 600; }
+  #log div { font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 0; border-bottom: 1px solid #8882; }
+  .bad { color: var(--bad); } .ok { color: var(--ok); } .warn { color: var(--warn); }
+  table { border-collapse: collapse; } td { padding: 2px 8px 2px 0; vertical-align: top; }
+</style>
+</head>
+<body>
+<h1>Genesis weekend claim: owner signing (local only)</h1>
+<div class="banner">
+  <strong>Each button signs one transaction, and only after you approve that step separately.</strong>
+  This page never asks for a seed phrase or private key, never requests token approvals or message signatures,
+  and never sends the next transaction on its own. Read every field in Rabby before you sign. If anything differs from
+  this page, reject it in Rabby and stop.
+</div>
+
+<section>
+  <h2>Wallet</h2>
+  <button id="connect">Connect Rabby</button>
+  <table>
+    <tr><td>Connected</td><td class="mono" id="account">not connected</td></tr>
+    <tr><td>Required signer</td><td class="mono">0x284C09a7CC187E096cbbdc88d99DEFE6df32180a (artist wallet, Avalanche C-Chain 43114)</td></tr>
+    <tr><td>Weekend claim</td><td class="mono"><span id="claimAddress">none</span> <button id="forget" type="button">Forget</button></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>1. Deploy GenesisWeekendClaim (paused, inactive)</h2>
+  <p>Contract creation, value 0, gas ceiling 2,000,000. Creation data is the reviewed artifact bytecode plus the pinned constructor config (see manifest below). Predicted address: <span class="mono" id="deployPredicted">run the check</span></p>
+  <button class="check" id="check-deploy" disabled>Check and simulate</button>
+  <button class="sign" id="sign-deploy" disabled>Sign deploy in Rabby</button>
+  <span class="mono" id="done-deploy"></span>
+</section>
+
+<section>
+  <h2>2. Revoke ISSUER_ROLE from expired claim 0x7D1a…5363</h2>
+  <p>To release 0xF0C091A1…830e, value 0, <code>revokeRole(ISSUER_ROLE, 0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363)</code>, gas ceiling 60,000.</p>
+  <button class="check" id="check-revoke1" disabled>Check and simulate</button>
+  <button class="sign" id="sign-revoke1" disabled>Sign revoke in Rabby</button>
+  <span class="mono" id="done-revoke1"></span>
+</section>
+
+<section>
+  <h2>3. Revoke ISSUER_ROLE from expired claim 0xd70d…66b8</h2>
+  <p>To release 0xF0C091A1…830e, value 0, <code>revokeRole(ISSUER_ROLE, 0xd70dBA7fF6419481d62D4689bDf271ad441766b8)</code>, gas ceiling 60,000.</p>
+  <button class="check" id="check-revoke2" disabled>Check and simulate</button>
+  <button class="sign" id="sign-revoke2" disabled>Sign revoke in Rabby</button>
+  <span class="mono" id="done-revoke2"></span>
+</section>
+
+<section>
+  <h2>4. Grant ISSUER_ROLE to the new weekend claim</h2>
+  <p>To release 0xF0C091A1…830e, value 0, <code>grantRole(ISSUER_ROLE, &lt;deployed claim&gt;)</code>, gas ceiling 80,000. Requires both revokes done and the claim still paused and inactive.</p>
+  <button class="check" id="check-grant" disabled>Check and simulate</button>
+  <button class="sign" id="sign-grant" disabled>Sign grant in Rabby</button>
+  <span class="mono" id="done-grant"></span>
+</section>
+
+<section>
+  <h2>5. Activate (separate owner authorization required)</h2>
+  <p>To the weekend claim, value 0, <code>activate()</code>, gas ceiling 90,000. Do this only after the Render config, production API, frontend and Studio have been verified while inactive.</p>
+  <label><input type="checkbox" id="activateAuthorized"> I separately authorized activation after production verification.</label><br>
+  <label>Type <code>ACTIVATE WEEKEND CLAIM</code>: <input id="activatePhrase" autocomplete="off" size="28"></label><br><br>
+  <button class="check" id="check-activate" disabled>Check and simulate</button>
+  <button class="sign" id="sign-activate" disabled>Sign activate in Rabby</button>
+  <span class="mono" id="done-activate"></span>
+</section>
+
+<section>
+  <h2>Log (newest first)</h2>
+  <div id="log"></div>
+</section>
+
+<section>
+  <h2>Verified manifest</h2>
+  <pre id="manifest">loading…</pre>
+</section>
+
+<script type="module" src="./signing.js"></script>
+</body>
+</html>
