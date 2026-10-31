@@ -78,9 +78,10 @@ export function loadGenesisWeekendClaimConfig(env, { readFile = (path) => fs.rea
     destinationChainId: 43114,
     destinationRpcUrl: String(env.GENESIS_DESTINATION_RPC_URL || "https://api.avax.network/ext/bc/C/rpc"),
     claimContract: configuredAddress(env.GENESIS_WEEKEND_CLAIM_CONTRACT, "GENESIS_WEEKEND_CLAIM_CONTRACT"),
-    releaseContract: configuredAddress(env.GENESIS_RELEASE_CONTRACT, "GENESIS_RELEASE_CONTRACT"),
-    primarySale: configuredAddress(env.GENESIS_PRIMARY_SALE, "GENESIS_PRIMARY_SALE"),
-    tokenId: BigInt(env.GENESIS_RELEASE_TOKEN_ID || "1"),
+    // The same release, sale and token variables the existing claim configuration already sets.
+    releaseContract: configuredAddress(env.GENESIS_CLAIM_RELEASE_CONTRACT, "GENESIS_CLAIM_RELEASE_CONTRACT"),
+    primarySale: configuredAddress(env.GENESIS_CLAIM_PRIMARY_SALE, "GENESIS_CLAIM_PRIMARY_SALE"),
+    tokenId: BigInt(env.GENESIS_CLAIM_TOKEN_ID || "1"),
     priorClaims: Object.freeze(loaded.snapshot.priorClaims.map((address) => getAddress(address))),
     historicalClaimedSupply: BigInt(loaded.snapshot.historicalClaimedSupply),
     ...loaded,

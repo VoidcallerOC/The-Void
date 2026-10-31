@@ -33,7 +33,7 @@ function snapshotText() {
 
 const ENV = Object.freeze({
   GENESIS_CLAIM_MODE: "weekend", GENESIS_WEEKEND_SNAPSHOT: "snapshot.json", GENESIS_WEEKEND_CLAIM_CONTRACT: CLAIM,
-  GENESIS_RELEASE_CONTRACT: RELEASE, GENESIS_PRIMARY_SALE: SALE, GENESIS_RELEASE_TOKEN_ID: "1",
+  GENESIS_CLAIM_RELEASE_CONTRACT: RELEASE, GENESIS_CLAIM_PRIMARY_SALE: SALE, GENESIS_CLAIM_TOKEN_ID: "1",
 });
 const config = (text = snapshotText()) => loadGenesisWeekendClaimConfig(ENV, { readFile: () => text });
 
