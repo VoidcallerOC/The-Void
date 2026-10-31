@@ -653,6 +653,15 @@ export function createGenesisClaimService({
     const total = config.allocation + config.publicAllocation;
     // An open edition (maxSupply 0) has no cap to compare against.
     const editionCapTooSmall = BigInt(maxSupply) !== 0n && (config.allocation === 0n || BigInt(maxSupply) < total);
+    // Once claimEnd has passed the claim contract can no longer mint, so the artist may reschedule or
+    // reprice the paid sale and revoke the claim's ISSUER_ROLE. Identity, chain and supply checks still apply.
+    const claimsClosed = BigInt(clock()) >= config.claimEnd;
+    const saleEndTime = BigInt(saleData.endTime ?? saleData[5]);
+    const saleScheduleDrift = BigInt(saleData.priceWei ?? saleData[0]) !== config.publicPriceWei
+      || BigInt(saleData.maxSupply ?? saleData[1]) !== config.publicAllocation
+      // The paid sale opens together with the claims, not when they close.
+      || BigInt(saleData.startTime ?? saleData[4]) !== config.publicSaleStart
+      || saleEndTime !== config.publicSaleEnd;
     if (Number(network.chainId) !== config.destinationChainId
       || getAddress(claimRelease) !== config.releaseContract
       || getAddress(claimSale) !== config.primarySale
@@ -672,16 +681,12 @@ export function createGenesisClaimService({
       || String(claimRule).toLowerCase() !== config.eligibilityRule.toLowerCase()
       || getAddress(claimSignerAddress) !== getAddress(claimSigner.address)
       || editionCapTooSmall
-      || !claimIsIssuer
+      || (!claimsClosed && (!claimIsIssuer || saleScheduleDrift))
       || BigInt(editionData.mintedSupply ?? editionData[0]?.mintedSupply ?? editionData[0]?.[4] ?? editionData[4]) !== BigInt(saleData.sold ?? saleData[2]) + BigInt(claimedSupply)
-      || BigInt(saleData.priceWei ?? saleData[0]) !== config.publicPriceWei
-      || BigInt(saleData.maxSupply ?? saleData[1]) !== config.publicAllocation
-      // The paid sale opens together with the claims, not when they close.
-      || BigInt(saleData.startTime ?? saleData[4]) !== config.publicSaleStart
-      || BigInt(saleData.endTime ?? saleData[5]) !== config.publicSaleEnd
       || !(saleData.configured ?? saleData[7])) {
       throw new ApiError(503, "CLAIM_BINDING_MISMATCH", "The configured claim contract, release, supply, or chain does not match the authorized target.");
     }
+    return { saleEndTime };
   }
 
   // Ownership is read from C-Chain only. A provider on any other chain fails closed.
@@ -1330,14 +1335,17 @@ export function createGenesisClaimService({
       throw error;
     }
   }
+  // Resolves to the verified binding ({ saleEndTime }) so the config can report the live sale end.
+  let configVerified;
   async function verifyConfigBindings() {
-    if (monotonicNow() - configVerifiedAt < CONFIG_BINDING_CACHE_MS) return;
+    if (monotonicNow() - configVerifiedAt < CONFIG_BINDING_CACHE_MS) return configVerified;
     if (!configVerifying) {
       configVerifying = verifyConfigBindingsFresh()
-        .then(() => { configVerifiedAt = monotonicNow(); })
+        .then((verified) => { configVerified = verified; configVerifiedAt = monotonicNow(); })
         .finally(() => { configVerifying = null; });
     }
     await configVerifying;
+    return configVerified;
   }
 
   async function checkBridgeEligibilityForWallet(walletInput) {

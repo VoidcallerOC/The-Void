@@ -89,8 +89,10 @@ export function createApiHandler({ service, authService = null, mediaGateway = n
       }
       if (method === "GET" && base.join("/") === "claims/config") {
         if (!genesisClaim) throw new ApiError(503, "CLAIM_UNAVAILABLE", "The Genesis holder claim is not configured.");
-        await (genesisClaim.verifyConfigBindings ?? genesisClaim.verifyContractBindings)();
-        return send(response, 200, { data: genesisClaim.config, requestId }, responseHeaders);
+        const verified = await (genesisClaim.verifyConfigBindings ?? genesisClaim.verifyContractBindings)();
+        // After the claims close the artist may extend the paid sale; publish its verified on-chain end.
+        const data = verified?.saleEndTime === undefined ? genesisClaim.config : { ...genesisClaim.config, publicSaleEnd: verified.saleEndTime.toString() };
+        return send(response, 200, { data, requestId }, responseHeaders);
       }
       if (method === "GET" && base[0] === "marketplace" && base[1] === "heroes" && base.length === 3) {
         if (!marketplacePresentation) throw new ApiError(503, "MARKETPLACE_PRESENTATION_UNAVAILABLE", "Marketplace presentation is unavailable.");
