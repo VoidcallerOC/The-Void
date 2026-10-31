@@ -9,6 +9,7 @@ const STATIC_TITLES = Object.freeze({
   "/discover": "Discover",
   "/marketplace": "Marketplace",
   "/claim": "Genesis claim",
+  "/bridge": "Bridge",
   "/artists": "Artists",
   "/verify": "Become verified",
   "/verify/apply": "Artist verification",

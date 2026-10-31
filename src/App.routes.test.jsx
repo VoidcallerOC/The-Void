@@ -71,6 +71,7 @@ const PRIMARY_PAGES = [
   ["/discover", /Currently featuring Voidcaller/i, "Discover · The Void"],
   ["/marketplace", /^Marketplace$/i, "Marketplace · The Void"],
   ["/claim", /Genesis claim/i, "Genesis claim · The Void"],
+  ["/bridge", /Cross the veil/i, "Bridge · The Void"],
   ["/artists", /^Artists$/i, "Artists · The Void"],
   ["/my-collection", /^My collection$/i, "My collection · The Void"],
   ["/verify", /Become verified/i, "Become verified · The Void"],

@@ -13,6 +13,7 @@ const PRIMARY_NAV = [
   ["DISCOVER", "/discover"],
   ["MARKETPLACE", "/marketplace"],
   ["CLAIM", "/claim"],
+  ["BRIDGE", "/bridge"],
   ["ARTISTS", "/artists"],
   ["COLLECTION", "/my-collection"],
   ["VERIFY", "/verify"],
