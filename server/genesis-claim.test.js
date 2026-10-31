@@ -581,7 +581,7 @@ describe("live claim binding verification", () => {
   const bindings = (chain) => createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW });
 
   it("accepts an uncapped open edition whose sale is exactly the scheduled public phase", async () => {
-    await expect(bindings(fujiChain()).verifyContractBindings()).resolves.toBeUndefined();
+    await expect(bindings(fujiChain()).verifyContractBindings()).resolves.toEqual({ saleEndTime: BigInt(PUBLIC_END) });
   });
 
   it.each([
@@ -602,6 +602,34 @@ describe("live claim binding verification", () => {
   ])("fails closed on %s", async (_label, drift) => {
     await expect(bindings(fujiChain(drift)).verifyContractBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
   });
+
+  describe("after the claim window has closed", () => {
+    const closed = (chain) => createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => CLAIM_END });
+
+    it.each([
+      ["an extended public end", { sale: { endTime: BigInt(PUBLIC_END + 7 * 86_400) } }],
+      ["a new sale price", { sale: { priceWei: PRICE * 2n } }],
+      ["a later public start", { sale: { startTime: BigInt(CLAIM_END) } }],
+      ["a sale cap", { sale: { maxSupply: 100n } }],
+      ["a revoked ISSUER_ROLE", { claimIsIssuer: false }],
+    ])("accepts %s, which the closed claim can no longer act on", async (_label, drift) => {
+      await expect(closed(fujiChain(drift)).verifyContractBindings()).resolves.toEqual({ saleEndTime: BigInt(drift.sale?.endTime ?? PUBLIC_END) });
+    });
+
+    it.each([
+      ["a different release", { claim: { releaseContract: SALE } }],
+      ["a different signer", { claim: { signer: WALLET } }],
+      ["a different claim start", { claim: { claimStart: BigInt(CLAIM_START + 1) } }],
+      ["supply accounting drift", { minted: 8n }],
+      ["an unconfigured sale", { sale: { configured: false } }],
+    ])("still fails closed on %s", async (_label, drift) => {
+      await expect(closed(fujiChain(drift)).verifyContractBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
+    });
+
+    it("still refuses to issue a voucher", async () => {
+      await expect(closed(fujiChain()).issueVoucher(WALLET)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+    });
+  });
 });
 
 describe("GET /api/claims/config with the real claim service", () => {
@@ -609,7 +637,7 @@ describe("GET /api/claims/config with the real claim service", () => {
   const requestDouble = () => ({ method: "GET", url: "/api/claims/config", headers: {}, socket: { remoteAddress: "127.0.0.1" }, async *[Symbol.asyncIterator]() {} });
   // A fake monotonic clock that sleep advances, so pacing and backoff cost no real time.
   const fakeTime = () => { let t = 0; return { monotonicNow: () => t, sleep: async (ms) => { t += ms; }, random: () => 0.5 }; };
-  const handlerFor = (chain, logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() }) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => NOW, logger, ...fakeTime() }) });
+  const handlerFor = (chain, logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() }, now = NOW) => createApiHandler({ service: {}, genesisClaim: createGenesisClaimService({ config: loadGenesisClaimConfig(ENV), destinationProvider: chain, genesisProvider: genesisChain(), reservationStore: createMemoryGenesisClaimReservationStore(), signer: { address: SIGNER, signTypedData: vi.fn() }, clock: () => now, logger, ...fakeTime() }) });
   const RPC_URL = "https://rpc.example.invalid/ext/bc/C/rpc?key=secret";
   // The shape ethers 6 gives a non-retried HTTP 429 (FetchRequest retryFunc -> false, then assertOk).
   const throttled = () => Object.assign(new Error(`server response 429 Too Many Requests (request={ url: "${RPC_URL}" }, response={ body: "error code: 1015" }, code=SERVER_ERROR)`), { code: "SERVER_ERROR", info: { requestUrl: RPC_URL, responseStatus: "429 Too Many Requests", responseBody: "error code: 1015" } });
@@ -625,6 +653,14 @@ describe("GET /api/claims/config with the real claim service", () => {
     const data = JSON.parse(response.body).data;
     expect(data).toMatchObject({ enabled: true, destinationChainId: 43113, releaseContract: getAddress(RELEASE), primarySale: getAddress(SALE), claimContract: getAddress(CLAIM), tokenId: "987654321", allocation: "0", publicAllocation: "0", claimStart: String(CLAIM_START), claimEnd: String(CLAIM_END), publicSaleStart: String(CLAIM_START), publicSaleEnd: String(PUBLIC_END), publicPriceWei: PRICE.toString(), eligibility: "live" });
     expect(response.body).not.toContain("11".repeat(32));
+  });
+
+  it("after the claims close, returns 200 for an extended sale and publishes its on-chain end", async () => {
+    const extended = PUBLIC_END + 7 * 86_400;
+    const response = responseDouble();
+    await handlerFor(fujiChain({ sale: { endTime: BigInt(extended) } }), undefined, CLAIM_END)(requestDouble(), response);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).data).toMatchObject({ claimEnd: String(CLAIM_END), publicSaleEnd: String(extended) });
   });
 
   it("returns 503 when the deployed claim or sale does not match the configured target", async () => {
