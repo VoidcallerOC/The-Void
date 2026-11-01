@@ -100,6 +100,26 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+const WEEKEND_INACTIVE_REFRESH_MS = 60_000;
+
+/**
+ * While a verified weekend claim is not yet activated (and activation is still allowed), re-read the
+ * server-verified target every minute, so a page opened before activation shows the opened claim and its
+ * on-chain countdown without a reload. Stops once the claim is active or can no longer be activated.
+ */
+function useInactiveWeekendRefresh(target, onTarget) {
+  const waiting = isWeekendTarget(target) && target.active !== true && nowSeconds() <= Number(target.activationDeadline ?? 0);
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setInterval(() => {
+      fetchGenesisClaimConfig().then(onTarget).catch(() => {});
+    }, WEEKEND_INACTIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+    // onTarget is a state setter wrapper; only the waiting state should restart the timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting]);
+}
+
 /**
  * The schedule as the server-verified target states it; the contracts enforce the same windows.
  * The paid mint opens together with the free claim (publicSaleStart == claimStart) and outlives it.
@@ -153,6 +173,7 @@ function GenesisClaimLanding({ catalog }) {
     return () => { live = false; };
   }, []);
   const target = state.target;
+  useInactiveWeekendRefresh(target, (next) => setState({ status: "ready", target: next }));
   const match = useMemo(() => {
     if (!target) return null;
     for (const record of marketplaceCatalog([catalog])) {
@@ -241,6 +262,7 @@ export function ClaimPage() {
     fetchGenesisClaimConfig().then((loaded) => { if (live) setSchedule(loaded); }).catch(() => { if (live) setSchedule(null); });
     return () => { live = false; };
   }, []);
+  useInactiveWeekendRefresh(schedule, setSchedule);
   const schedulePhase = schedule ? genesisClaimPhase(schedule, nowSeconds()) : null;
   const scheduleMatches = Boolean(schedule && binding.valid && sameAddress(schedule.releaseContract, binding.releaseContractAddress) && String(schedule.tokenId) === String(binding.tokenId));
   const outsideGenesisWindow = scheduleMatches && schedulePhase !== GENESIS_CLAIM_PHASES.GENESIS;

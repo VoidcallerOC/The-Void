@@ -199,11 +199,28 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
   let cached = null;
   let cachedAt = -Infinity;
   let inflight = null;
-  async function verifyConfigBindings({ fresh = false } = {}) {
-    if (!fresh && cached && monotonicNow() - cachedAt < WEEKEND_CONFIG_CACHE_MS) return cached;
+  // Set once a fresh read past the activation deadline still shows the claim inactive: activation can never
+  // succeed after the deadline, so that state is final and needs no further re-reads.
+  let neverActivated = false;
+
+  // A cached "inactive" read past the deadline may predate a last-moment activation, so it is re-read once
+  // (every route: /config and /eligibility) until a fresh read settles it either way.
+  function cacheUsable() {
+    if (!cached || monotonicNow() - cachedAt >= WEEKEND_CONFIG_CACHE_MS) return false;
+    const { active, activationDeadline } = cached.publicConfig;
+    return active || neverActivated || BigInt(clock()) <= BigInt(activationDeadline);
+  }
+
+  async function verifyConfigBindings() {
+    if (cacheUsable()) return cached;
     if (!inflight) {
       inflight = readBindings()
-        .then((verified) => { cached = verified; cachedAt = monotonicNow(); return verified; })
+        .then((verified) => {
+          cached = verified;
+          cachedAt = monotonicNow();
+          if (!verified.publicConfig.active && BigInt(clock()) > BigInt(verified.publicConfig.activationDeadline)) neverActivated = true;
+          return verified;
+        })
         .catch((error) => {
           if (error instanceof ApiError) throw error;
           logger?.warn?.("genesis.weekend.config_unavailable", { error: String(error?.code || "RPC_ERROR") });
@@ -220,10 +237,8 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
     // A close already observed on-chain is final, so it answers before any chain read can fail.
     const windowClosed = () => new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
     if (observedClose !== null && BigInt(clock()) >= observedClose) throw windowClosed();
-    let verified = await verifyConfigBindings();
+    const verified = await verifyConfigBindings();
     // Re-evaluated now, not from the cached read: closed once the window ends, or if activation was never allowed in time.
-    // A cached "inactive" past the deadline may predate a last-moment activation, so that case re-reads the chain.
-    if (!verified.publicConfig.active && BigInt(clock()) > BigInt(verified.publicConfig.activationDeadline)) verified = await verifyConfigBindings({ fresh: true });
     const { active, claimEnd, activationDeadline } = verified.publicConfig;
     if (active ? BigInt(clock()) >= BigInt(claimEnd) : BigInt(clock()) > BigInt(activationDeadline)) throw windowClosed();
     let claimed;

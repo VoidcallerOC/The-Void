@@ -37,13 +37,15 @@ describe("committed signing manifest", () => {
     expect(manifest.deploy.gasCeiling).toBe("2000000");
     expect(manifest.revokes.map((r) => r.gasCeiling)).toEqual(["60000", "60000"]);
     expect(manifest.grant.gasCeiling).toBe("80000");
-    expect(manifest.activate.gasCeiling).toBe("90000");
+    expect(manifest.activate.gasCeiling).toBe("180000");
   });
 
   it("artifact bytecode hashes match the artifact contents", () => {
     expect(ethers.keccak256(artifact.bytecode)).toBe(artifact.bytecodeKeccak256);
     expect(ethers.keccak256(artifact.deployedBytecode)).toBe(artifact.deployedBytecodeKeccak256);
-    expect(artifact.sourceCommit).toBe("cc1535f20a79590deff5ba9fd1ee3a2d3abf68fa");
+    expect(artifact.sourceCommit).toBe("12cc4694b4ce50021318c53fd19de5ea95738576");
+    // The artifact was built from exactly the committed contract source.
+    expect(artifact.sourceKeccak256).toBe(ethers.keccak256(readFileSync("contracts/GenesisWeekendClaim.sol")));
   });
 
   it("artifact source hash matches contracts/GenesisWeekendClaim.sol", () => {

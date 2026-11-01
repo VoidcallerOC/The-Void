@@ -243,3 +243,23 @@ describe("weekend claim eligibility", () => {
     expect(() => instance.issueEarlyAccessVoucher(CCHAIN_HOLDER)).toThrow(expect.objectContaining({ status: 409, code: "CLAIM_WINDOW_CLOSED" }));
   });
 });
+
+describe("weekend claim cache around the activation deadline", () => {
+  it("re-reads a stale inactive /config past the deadline once, then treats never-activated as final", async () => {
+    let now = DEADLINE - 5;
+    const loaded = config();
+    const drift = { live: { active: false, paused: true, claimStart: 0n, claimEnd: 0n } };
+    const provider = chain(loaded, drift);
+    const instance = createGenesisWeekendClaimService({ config: loaded, provider, clock: () => now, monotonicNow: () => 0, logger: { warn: vi.fn() } });
+    expect((await instance.verifyConfigBindings()).publicConfig.active).toBe(false);
+    now = DEADLINE + 1;
+    const beforeFresh = provider.calls.count;
+    expect((await instance.verifyConfigBindings()).publicConfig.active).toBe(false);
+    expect(provider.calls.count).toBeGreaterThan(beforeFresh);
+    // Settled: further requests past the deadline use the cache instead of re-reading the chain each time.
+    const settled = provider.calls.count;
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+    await instance.verifyConfigBindings();
+    expect(provider.calls.count).toBe(settled);
+  });
+});

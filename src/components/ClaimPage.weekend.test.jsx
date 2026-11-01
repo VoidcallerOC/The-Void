@@ -169,6 +169,20 @@ describe("Genesis weekend claim page", () => {
     expect(executeWeekendClaim).not.toHaveBeenCalled();
   });
 
+  it("re-reads the verified target while not yet activated, so the opened claim appears without a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0" }));
+      renderLanding();
+      expect(await screen.findByText(/Genesis claim has not opened/)).toBeTruthy();
+      fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW), claimEnd: String(NOW + 86_400) }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await screen.findByTestId("weekend-claim-countdown")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("treats a claim never activated before its deadline as closed, not as upcoming", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", activationDeadline: String(NOW - 1) }));
     renderEditionClaim();
