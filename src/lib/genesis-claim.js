@@ -4,6 +4,8 @@ import { readReleaseBalance, assertReleaseProvider } from "./release-asset.js";
 const API_ORIGIN = String(import.meta.env?.VITE_API_ORIGIN || "").replace(/\/$/, "");
 const CLAIM_INTERFACE = new Interface([
   "function hasClaimed(address claimant) view returns (bool)",
+  "function hasClaimedAnywhere(address claimant) view returns (bool)",
+  "function claim(bytes32[] proof)",
   "function claim((address claimant,address genesisContract,uint256 genesisChainId,bytes32 eligibilityRule,uint256 destinationChainId,address releaseContract,uint256 tokenId,uint256 quantity,uint256 allocation,uint256 nonce,uint256 deadline) voucher,bytes signature)",
 ]);
 
@@ -51,6 +53,14 @@ export const GENESIS_CLAIM_PHASES = Object.freeze({ UPCOMING: "upcoming", GENESI
  */
 export function genesisClaimPhase(target, nowSec) {
   const now = BigInt(nowSec);
+  // The weekend claim opens only when the owner activates it (and not while paused). Activation sets its window
+  // on-chain: claimStart and claimEnd (claimStart + 24 hours) come from the contract, never from this clock.
+  if (target?.mode === "weekend-merkle") {
+    const afterClaim = now <= BigInt(target.publicSaleEnd) ? GENESIS_CLAIM_PHASES.PUBLIC : GENESIS_CLAIM_PHASES.CLOSED;
+    if (target.active !== true) return now <= BigInt(target.activationDeadline ?? 0) ? GENESIS_CLAIM_PHASES.UPCOMING : afterClaim;
+    if (now >= BigInt(target.claimEnd)) return afterClaim;
+    return target.paused === false ? GENESIS_CLAIM_PHASES.GENESIS : GENESIS_CLAIM_PHASES.UPCOMING;
+  }
   if (now < BigInt(target.claimStart)) return GENESIS_CLAIM_PHASES.UPCOMING;
   if (now < BigInt(target.claimEnd)) return GENESIS_CLAIM_PHASES.GENESIS;
   if (now <= BigInt(target.publicSaleEnd)) return GENESIS_CLAIM_PHASES.PUBLIC;
@@ -83,6 +93,8 @@ const CLAIM_GUARD_INTERFACE = new Interface([
   "function publicSaleEnd() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)",
   "function claimedSupply() view returns (uint256)",
+  "function active() view returns (bool)",
+  "function activationDeadline() view returns (uint256)",
 ]);
 
 /**
@@ -111,6 +123,13 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
   );
   if (getAddress(claimRelease) !== getAddress(releaseContractAddress) || BigInt(claimToken) !== BigInt(tokenId)) return { state: "none" };
   if (getAddress(claimSale) !== getAddress(primarySaleAddress)) return { state: "none" };
+  // The weekend claim has no window until it is activated (claimEnd 0). It stays live, and the sale guarded,
+  // from deployment until activation is no longer allowed, and once activated until its on-chain claimEnd.
+  let live = BigInt(nowSec) < BigInt(claimEnd);
+  if (isWeekendTarget(target)) {
+    const [active, activationDeadline] = await Promise.all(["active", "activationDeadline"].map(read));
+    live = active ? BigInt(nowSec) < BigInt(claimEnd) : BigInt(nowSec) <= BigInt(activationDeadline);
+  }
   return {
     state: "active",
     claimContract: getAddress(target.claimContract),
@@ -123,7 +142,7 @@ export async function readGenesisClaimSaleGuard(provider, { chainId, releaseCont
     publicPriceWei: BigInt(publicPriceWei),
     claimedSupply: BigInt(claimedSupply),
     // The claim checks the sale on every redemption until its window closes. Allocation 0 is uncapped.
-    live: BigInt(nowSec) < BigInt(claimEnd) && (BigInt(allocation) === 0n || BigInt(claimedSupply) < BigInt(allocation)),
+    live: live && (BigInt(allocation) === 0n || BigInt(claimedSupply) < BigInt(allocation)),
   };
 }
 
@@ -140,9 +159,48 @@ export function requestGenesisVoucher(wallet, options = {}) {
 export async function readGenesisClaimed(provider, target, wallet) {
   const binding = validateTarget(target);
   await assertReleaseProvider(provider, binding.destinationChainId);
-  const data = CLAIM_INTERFACE.encodeFunctionData("hasClaimed", [getAddress(wallet)]);
+  // The weekend claim also counts claims made through every earlier Genesis claim contract.
+  const method = isWeekendTarget(binding) ? "hasClaimedAnywhere" : "hasClaimed";
+  const data = CLAIM_INTERFACE.encodeFunctionData(method, [getAddress(wallet)]);
   const result = await provider.request({ method: "eth_call", params: [{ to: binding.claimContract, data }, "latest"] });
-  return Boolean(CLAIM_INTERFACE.decodeFunctionResult("hasClaimed", result)[0]);
+  return Boolean(CLAIM_INTERFACE.decodeFunctionResult(method, result)[0]);
+}
+
+/** The dual-chain Genesis weekend claim: a snapshot allowlist, claimed with a Merkle proof and no voucher. */
+export function isWeekendTarget(target) {
+  return target?.mode === "weekend-merkle";
+}
+
+/** Whether the weekend claim accepts claims at nowSec: activated, not paused and before claimEnd. */
+export function weekendClaimOpen(target, nowSec) {
+  return isWeekendTarget(target) && target.active === true && target.paused === false && BigInt(nowSec) < BigInt(target.claimEnd);
+}
+
+export async function executeWeekendClaim(provider, target, wallet, proof) {
+  const binding = validateTarget(target);
+  if (!isWeekendTarget(binding)) throw new Error("This claim target is not the Genesis weekend claim.");
+  if (!Array.isArray(proof) || proof.some((node) => !/^0x[0-9a-fA-F]{64}$/.test(String(node)))) throw new Error("The eligibility proof is malformed.");
+  await assertReleaseProvider(provider, binding.destinationChainId);
+  const browserProvider = new BrowserProvider(provider);
+  const walletSigner = await browserProvider.getSigner();
+  const signerAddress = getAddress(await walletSigner.getAddress());
+  if (signerAddress !== getAddress(wallet)) {
+    const error = new Error("The connected wallet does not match the wallet that was checked for eligibility.");
+    error.code = "CLAIMANT_MISMATCH";
+    throw error;
+  }
+  const contract = new Contract(binding.claimContract, CLAIM_INTERFACE, walletSigner);
+  return confirmGenesisClaim({
+    send: () => contract.getFunction("claim(bytes32[])")(proof),
+    waitForReceipt: (transaction) => transaction.wait(),
+    verifyOwnership: () => readReleaseBalance(provider, {
+      chainId: binding.destinationChainId,
+      releaseContractAddress: binding.releaseContract,
+      primarySaleAddress: binding.primarySale,
+      tokenId: binding.tokenId,
+    }, signerAddress),
+    quantity: 1n,
+  });
 }
 
 export async function confirmGenesisClaim({ send, waitForReceipt, verifyOwnership, quantity }) {
