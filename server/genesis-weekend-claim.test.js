@@ -116,7 +116,7 @@ describe("weekend snapshot loading", () => {
 describe("weekend claim config binding", () => {
   it("publishes the verified live state, including the live paid-sale end", async () => {
     const verified = await service().instance.verifyConfigBindings();
-    expect(verified.publicConfig).toMatchObject({ mode: "weekend-merkle", claimContract: CLAIM, active: true, paused: false, claimEnd: String(CLOSE), claimStart: String(ACTIVATED), activationDeadline: String(DEADLINE), claimDuration: "86400", publicSaleEnd: "1794315540", claimedSupply: "1", allocation: "0", publicAllocation: "0" });
+    expect(verified.publicConfig).toMatchObject({ mode: "weekend-merkle", claimContract: CLAIM, active: true, paused: false, claimEnd: String(CLOSE), claimStart: String(ACTIVATED), activationDeadline: String(DEADLINE), claimDuration: "86400", publicSaleEnd: "1794315540", claimedSupply: "1", baselineClaimedSupply: "1", allocation: "0", publicAllocation: "0" });
   });
 
   it("publishes an inactive claim with no window yet, and requires ISSUER_ROLE while activation is still allowed", async () => {

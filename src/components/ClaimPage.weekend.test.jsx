@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WalletCtx } from "../lib/wallet-context.js";
@@ -63,6 +63,94 @@ function renderLanding() {
 afterEach(() => { cleanup(); vi.clearAllMocks(); catalogState.catalog = { artists: [], releases: [], editions: [], experiences: [] }; });
 
 describe("Genesis weekend claim page", () => {
+  it("titles the landing Forgive & Forget and counts this window's claims apart from the carried-over baseline", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "12", baselineClaimedSupply: "5" }));
+    renderLanding();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Forgive & Forget");
+    const counter = await screen.findByTestId("claim-counter");
+    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("7");
+    expect(counter.textContent).toMatch(/12 Genesis claims all time, including 5 from earlier claims/);
+  });
+
+  it("lets a holder claim right on the landing while the claim is open, with no link to another page", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend());
+    catalogState.catalog = catalog();
+    renderLanding();
+    const embedded = await screen.findByTestId("embedded-claim");
+    expect(embedded.textContent).toMatch(/Claim status/);
+    const scope = within(embedded);
+    expect(scope.getByRole("button", { name: /connect/i })).toBeTruthy();
+    expect(scope.getByRole("button", { name: /claim/i })).toBeTruthy();
+    expect(await scope.findByRole("link", { name: /MINT · 0\.25 AVAX/ })).toBeTruthy();
+    expect(scope.getByRole("link", { name: /View release/i })).toBeTruthy();
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it.each([
+    ["paused while active", { paused: true }],
+    ["after the window closed, paid mint still open", { claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600) }],
+    ["after the window closed and the paid mint ended", { claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600), publicSaleEnd: String(NOW - 60) }],
+    ["never activated before the deadline", { active: false, paused: true, claimStart: "0", claimEnd: "0", activationDeadline: String(NOW - 600) }],
+  ])("shows no claim controls on the landing when %s", async (_label, overrides) => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend(overrides));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/Verified claim target/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it("shows no claim controls when the claim target fails to load", async () => {
+    fetchGenesisClaimConfig.mockRejectedValue(new Error("Claim service is unavailable."));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/No claim target is configured and verified/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+  });
+
+  it("keeps the paid mint and release reachable from the landing after the free claim closes", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600) }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    const mint = within(await screen.findByTestId("landing-mint"));
+    expect(mint.getByRole("link", { name: /MINT · 0\.25 AVAX/ }).getAttribute("href")).toBe(`/edition/${EDITION_ID}`);
+    expect(mint.getByRole("link", { name: /View release/i }).getAttribute("href")).toBe(`/edition/${EDITION_ID}`);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+  });
+
+  it("offers no mint on the landing once the paid mint has ended too", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600), publicSaleEnd: String(NOW - 60) }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/Minting is closed/);
+    expect(screen.queryByTestId("landing-mint")).toBeNull();
+  });
+
+  it("shows no claim controls on the landing before the claim is activated", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0" }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/has not opened/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it("labels the count all-time, not this window, when the API does not send the carried-over baseline", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "6" }));
+    renderLanding();
+    const counter = await screen.findByTestId("claim-counter");
+    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("6");
+    expect(counter.querySelector(".vc-countdown-label").textContent).toBe("all time");
+    expect(counter.textContent).not.toMatch(/claimed/);
+  });
+
+  it("shows no claim counter before the claim is activated", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", claimedSupply: "5", baselineClaimedSupply: "5" }));
+    renderLanding();
+    await screen.findByText(/has not opened/);
+    expect(screen.queryByTestId("claim-counter")).toBeNull();
+  });
+
   it("lets a Grotto-only holder claim on C-Chain with its proof, without a voucher", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend());
     readGenesisClaimed.mockResolvedValue(false);

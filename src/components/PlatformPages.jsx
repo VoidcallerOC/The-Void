@@ -8,6 +8,7 @@ import { getArtistCatalog, getEditionCatalog, getReleaseCatalog, primaryPlayback
 import { supportedGatewayMediaType } from "../lib/experience-service.js";
 import { useMarketplaceCatalogs, withOwnableDuplicates } from "../lib/catalog-source.js";
 import { artworkSources } from "../lib/artwork.js";
+import { experienceRowMetadata, shortAddress } from "../lib/experience-metadata.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import { canAccessExperience, getCollectorLibrary } from "../lib/collection.js";
 import { useWallet } from "../lib/wallet-context.js";
@@ -45,17 +46,56 @@ function PlatformHeader({ eyebrow, title, children }) {
 function Status({ children }) {
   return <span style={{ color: "var(--vc-crimson)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase" }}>{children}</span>;
 }
-function ExperienceList({ experiences = [] }) {
+const NETWORK_NAMES = { 43114: "Avalanche C-Chain", 43113: "Avalanche Fuji" };
+const metaLabel = { color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" };
+// Short on-chain descriptions show inline; long ones (e.g. full lyrics) fold behind a toggle.
+const INLINE_DESCRIPTION_LIMIT = 240;
+
+function ExperienceMetadata({ meta }) {
+  const network = meta.chainId ? NETWORK_NAMES[meta.chainId] || `Chain ${meta.chainId}` : null;
+  const facts = meta.kind === "track"
+    ? [`Token #${meta.tokenId}`, meta.duration && `Length ${meta.duration}`, network, meta.contract && `Contract ${shortAddress(meta.contract)}`]
+    : [`${meta.trackCount} tracks`, meta.totalDuration && `Total ${meta.totalDuration}`, `Tokens #${meta.tokenIds.join(", #")}`, network, meta.contract && `Contract ${shortAddress(meta.contract)}`];
+  const description = meta.kind === "track" ? meta.description : "";
+  return (
+    <div data-testid="experience-metadata" style={{ marginTop: 10 }}>
+      <p style={{ ...metaLabel, margin: 0, display: "flex", flexWrap: "wrap", gap: "4px 14px" }} title={meta.contract || undefined}>
+        {facts.filter(Boolean).map((fact) => <span key={fact}>{fact}</span>)}
+      </p>
+      {description && (description.length <= INLINE_DESCRIPTION_LIMIT
+        ? <p style={{ color: "var(--vc-bone-dim)", margin: "10px 0 0", whiteSpace: "pre-line" }}>{description}</p>
+        : (
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ ...metaLabel, cursor: "pointer", color: "var(--vc-bone)" }}>Description &amp; lyrics</summary>
+            <p style={{ color: "var(--vc-bone-dim)", margin: "10px 0 0", whiteSpace: "pre-line", maxWidth: 680 }}>{description}</p>
+          </details>
+        ))}
+    </div>
+  );
+}
+
+function ExperienceList({ experiences = [], catalog = null, edition = null }) {
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      {experiences.map((experience) => (
-        <Link key={experience.id} to={`/experience/${experience.id}`} style={{ ...card, padding: 18, color: "inherit", textDecoration: "none" }}>
-          <Status>{experience.experienceType} · {experience.requirements?.length ? "Ownership gated" : "Open access"}</Status>
-          <h3 style={{ fontFamily: "var(--font-display)", fontSize: 24, margin: "10px 0 6px" }}>{experience.title}</h3>
-          <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{experience.description}</p>
-          {experience.media?.protected && <p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".1em", marginBottom: 0 }}>Protected media · collector authorization required</p>}
-        </Link>
-      ))}
+      {experiences.map((experience) => {
+        const meta = experienceRowMetadata(catalog, experience, edition);
+        const art = meta?.kind === "track" ? meta.artworkSources : [];
+        return (
+          <article key={experience.id} data-testid="experience-row" style={{ ...card, padding: 18, display: "grid", gridTemplateColumns: art.length ? "72px minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+            {art.length > 0 && <TokenArtwork sources={art} alt={`${experience.title} token artwork`} style={{ width: 72, height: 72, objectFit: "cover", border: "1px solid var(--vc-ash)", display: "block" }} />}
+            <div style={{ minWidth: 0 }}>
+              <Status>{experience.experienceType} · {experience.requirements?.length ? "Ownership gated" : "Open access"}</Status>
+              <h3 style={{ fontFamily: "var(--font-display)", fontSize: 24, margin: "10px 0 6px" }}>
+                <Link to={`/experience/${experience.id}`} style={{ color: "inherit", textDecoration: "none" }}>{experience.title}</Link>
+              </h3>
+              <p style={{ color: "var(--vc-bone-dim)", margin: 0 }}>{experience.description}</p>
+              {meta && <ExperienceMetadata meta={meta} />}
+              {experience.media?.protected && <p style={{ ...metaLabel, textTransform: "none", marginBottom: 0 }}>Protected media · collector authorization required</p>}
+              <p style={{ margin: "10px 0 0" }}><Link to={`/experience/${experience.id}`} style={{ ...metaLabel, color: "var(--vc-crimson)", textDecoration: "none" }}>Open experience →</Link></p>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -279,7 +319,7 @@ export function ReleasePage({ children = null } = {}) {
       {result.experiences?.length > 0 && (
         <>
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 64, textTransform: "uppercase" }}>Experiences</h2>
-          <ExperienceList experiences={result.experiences} />
+          <ExperienceList experiences={result.experiences} catalog={catalog} />
         </>
       )}
     </section>
@@ -367,7 +407,7 @@ export function EditionPage() {
       {experiences.length > 0 && (
         <>
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 5vw, 48px)", marginTop: 56, textTransform: "uppercase" }}>What this unlocks</h2>
-          <ExperienceList experiences={experiences} />
+          <ExperienceList experiences={experiences} catalog={catalog} edition={edition} />
         </>
       )}
       <details className="vc-colophon" style={{ marginTop: 36 }}>
