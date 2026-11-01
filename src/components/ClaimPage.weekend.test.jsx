@@ -70,6 +70,8 @@ describe("Genesis weekend claim page", () => {
     executeWeekendClaim.mockResolvedValue({ transactionHash: `0x${"cd".repeat(32)}`, balance: 1n });
     renderEditionClaim();
     expect(await screen.findByText(/verified on The Grotto\. This grants one free claim on Avalanche C-Chain/)).toBeTruthy();
+    expect(screen.getByText(/keep a small amount of AVAX on C-Chain for gas\. Nothing is bridged or moved from The Grotto/)).toBeTruthy();
+    expect(screen.getByTestId("grotto-holder-notice").textContent).toMatch(/Your Grotto wallet will not\s+claim for you automatically/);
     const button = screen.getByRole("button", { name: "CLAIM FREE" });
     fireEvent.click(button);
     await waitFor(() => expect(executeWeekendClaim).toHaveBeenCalledWith(provider, expect.objectContaining({ mode: "weekend-merkle" }), WALLET, PROOF));
@@ -137,7 +139,9 @@ describe("Genesis weekend claim page", () => {
   it("asks a wallet still on The Grotto to switch to the claim network, and a disconnected visitor to connect", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend());
     renderEditionClaim({ chainId: 36463 });
-    expect((await screen.findAllByText(/switch your wallet to .* \(43113\) to claim/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/switch this same wallet to .* \(43113\) to claim/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Your wallet is on The Grotto\. The claim happens on/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Grotto Genesis tokens stay where they are and still count/).length).toBeGreaterThan(0);
     expect(checkGenesisEligibility).not.toHaveBeenCalled();
     cleanup();
     renderEditionClaim({ connected: false });
@@ -195,5 +199,6 @@ describe("Genesis weekend claim page", () => {
     const { container } = renderLanding();
     expect(await screen.findByText(/Genesis holders on Avalanche C-Chain or The Grotto at the snapshot can claim one copy free/)).toBeTruthy();
     expect(container.textContent).toMatch(/C-Chain block 99060000, Grotto block 151791/);
+    expect(screen.getByTestId("grotto-holder-notice").textContent).toMatch(/free claim happens on .*, not on The Grotto/);
   });
 });
