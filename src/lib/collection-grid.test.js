@@ -15,6 +15,6 @@ describe("Collection grid layout", () => {
 
   it("does not change the Discover market grid", () => {
     const css = fs.readFileSync("src/index.css", "utf8");
-    expect(css).toMatch(/\.vc-market-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(300px,\s*100%\),\s*1fr\)\)/);
+    expect(css).toMatch(/\.vc-market-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(min\(300px,\s*100%\),\s*1fr\)\)/);
   });
 });
