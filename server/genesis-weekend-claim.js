@@ -199,8 +199,10 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
   let cached = null;
   let cachedAt = -Infinity;
   let inflight = null;
-  // Set once a fresh read past the activation deadline still shows the claim inactive: activation can never
-  // succeed after the deadline, so that state is final and needs no further re-reads.
+  // Set once a read that *started* well after the activation deadline still shows the claim inactive: activation
+  // can never succeed after the deadline, so that state is final and needs no further re-reads. The margin keeps a
+  // read that began before a last-moment activation block (or hit a lagging RPC node) from latching it.
+  const NEVER_ACTIVATED_MARGIN_SECONDS = 120n;
   let neverActivated = false;
 
   // A cached "inactive" read past the deadline may predate a last-moment activation, so it is re-read once
@@ -214,11 +216,12 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
   async function verifyConfigBindings() {
     if (cacheUsable()) return cached;
     if (!inflight) {
+      const startedAt = BigInt(clock());
       inflight = readBindings()
         .then((verified) => {
           cached = verified;
           cachedAt = monotonicNow();
-          if (!verified.publicConfig.active && BigInt(clock()) > BigInt(verified.publicConfig.activationDeadline)) neverActivated = true;
+          if (!verified.publicConfig.active && startedAt > BigInt(verified.publicConfig.activationDeadline) + NEVER_ACTIVATED_MARGIN_SECONDS) neverActivated = true;
           return verified;
         })
         .catch((error) => {

@@ -77,7 +77,7 @@ The new contract takes the same snapshot fields, with the same leaf, campaign an
 | 3 | **[AUTH] Revoke 2** | release | `revokeRole(ISSUER_ROLE, 0xd70dBA7fF6419481d62D4689bDf271ad441766b8)` | 60,000 | 35,134 |
 | 4 | **[AUTH] Grant** | release | `grantRole(ISSUER_ROLE, <claim>)` | 80,000 | 52,623 |
 | 5 | **[AUTH] Merge** the PR, then **[AUTH] Render**: `GENESIS_CLAIM_MODE=weekend`, `GENESIS_WEEKEND_CLAIM_CONTRACT=<claim>` | — | — | — | — |
-| 6 | **[AUTH] Activate** | the claim | `activate()` | 180,000 | about 140,500 on the fork (119,538 execution + 21,000 base) |
+| 6 | **[AUTH] Activate** | the claim | `activate()` | 180,000 | 119,538 total on a local fork (receipt gas; about 34% headroom) |
 
 All transactions are value 0 and come from the artist wallet. The manifest at block 99,124,576 has nonce 191 and predicts the deploy address `0x6A251b2F591Df265A8D2B42991b4e672236e4F4A`. Deploy data is 10,525 bytes, keccak `0x982c7b92…d526`.
 
@@ -107,6 +107,9 @@ All transactions are value 0 and come from the artist wallet. The manifest at bl
 
 **Activation timing:**
 - Activate only when holders can be told immediately. The 24 hours start at the activation block, not at the announcement.
+- **Do not activate in the last 10 minutes before the deadline.** A last-moment activation is valid on-chain, but pages that were already open may keep showing "closed" until they are reloaded (review finding L-A, display only).
+- The deploy must also land before the deadline: the constructor requires `activationDeadline > block.timestamp`.
+- The committed manifest is valid for signing only while the artist nonce is still 191. If the nonce has changed, rebuild the manifest and have it re-reviewed. The signing page re-checks the live balance before each step.
 - The page shows the close the transaction will produce before Rabby opens.
 
 ## Production acceptance checklist (after activation)

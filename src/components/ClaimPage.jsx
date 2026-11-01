@@ -101,6 +101,8 @@ function nowSeconds() {
 }
 
 const WEEKEND_INACTIVE_REFRESH_MS = 60_000;
+// Keep re-reading a little past the deadline, so a page open across a last-moment activation still picks it up.
+const WEEKEND_DEADLINE_GRACE_SECONDS = 300;
 
 /**
  * While a verified weekend claim is not yet activated (and activation is still allowed), re-read the
@@ -108,7 +110,7 @@ const WEEKEND_INACTIVE_REFRESH_MS = 60_000;
  * on-chain countdown without a reload. Stops once the claim is active or can no longer be activated.
  */
 function useInactiveWeekendRefresh(target, onTarget) {
-  const waiting = isWeekendTarget(target) && target.active !== true && nowSeconds() <= Number(target.activationDeadline ?? 0);
+  const waiting = isWeekendTarget(target) && target.active !== true && nowSeconds() <= Number(target.activationDeadline ?? 0) + WEEKEND_DEADLINE_GRACE_SECONDS;
   useEffect(() => {
     if (!waiting) return undefined;
     const timer = setInterval(() => {

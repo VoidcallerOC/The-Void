@@ -256,6 +256,13 @@ describe("weekend claim cache around the activation deadline", () => {
     const beforeFresh = provider.calls.count;
     expect((await instance.verifyConfigBindings()).publicConfig.active).toBe(false);
     expect(provider.calls.count).toBeGreaterThan(beforeFresh);
+    // Within the margin a read may predate a last-moment activation block, so nothing is latched yet.
+    const withinMargin = provider.calls.count;
+    await instance.verifyConfigBindings();
+    expect(provider.calls.count).toBeGreaterThan(withinMargin);
+    // A read that starts well after the deadline and still shows inactive settles it.
+    now = DEADLINE + 121;
+    await instance.verifyConfigBindings();
     // Settled: further requests past the deadline use the cache instead of re-reading the chain each time.
     const settled = provider.calls.count;
     await expect(instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
