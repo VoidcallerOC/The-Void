@@ -72,6 +72,24 @@ describe("Genesis weekend claim page", () => {
     expect(counter.textContent).toMatch(/12 Genesis claims all time, including 5 from earlier claims/);
   });
 
+  it("lets a holder claim right on the landing while the claim is open, with no link to another page", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend());
+    catalogState.catalog = catalog();
+    renderLanding();
+    const embedded = await screen.findByTestId("embedded-claim");
+    expect(embedded.textContent).toMatch(/Claim status/);
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it("shows no claim controls on the landing before the claim is activated", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0" }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/has not opened/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
   it("shows no claim counter before the claim is activated", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", claimedSupply: "5", baselineClaimedSupply: "5" }));
     renderLanding();

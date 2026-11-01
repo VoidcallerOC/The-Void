@@ -282,9 +282,10 @@ function GenesisClaimLanding({ catalog }) {
               </div>
             )}
             <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phaseMessage(phase, target)}</p>
-            <div className="vc-claim-action">
-              {match ? <Link to={`/claim/${match.id}`} style={primaryBtn}>OPEN THE RELEASE CLAIM</Link> : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
-            </div>
+            {/* While the claim is open, claim right here; no separate release page to open first. */}
+            {match
+              ? phase === GENESIS_CLAIM_PHASES.GENESIS && <ReleaseClaim editionId={match.id} catalog={catalog} embedded />
+              : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
             <div className="vc-claim-supporting">
               <Eyebrow red>Verified claim target</Eyebrow>
               <InfoRow label="Network">{claimNetworkLabel(target.destinationChainId)} · {target.destinationChainId}</InfoRow>
@@ -306,6 +307,15 @@ export function ClaimPage() {
   const [params] = useSearchParams();
   const editionId = pathEdition || params.get("edition") || "";
   const catalog = useMarketplaceCatalogs();
+  if (!editionId) return <GenesisClaimLanding catalog={catalog} />;
+  return <ReleaseClaim editionId={editionId} catalog={catalog} />;
+}
+
+/**
+ * The claim flow for one release: wallet, eligibility, and the claim/mint actions. `embedded` renders only the
+ * status and actions, for the /claim landing while the claim is open, so holders claim there without another page.
+ */
+function ReleaseClaim({ editionId, catalog, embedded = false }) {
   const wallet = useWallet();
   const item = useMemo(() => findMarketplaceEdition(editionId, [catalog]), [catalog, editionId]);
   const edition = item?.edition || null;
@@ -532,7 +542,7 @@ export function ClaimPage() {
             ? "ALREADY CLAIMED"
             : "CLAIM UNAVAILABLE";
 
-  if (!editionId) return <GenesisClaimLanding catalog={catalog} />;
+  if (!edition && embedded) return null;
 
   if (!edition) {
     return (
@@ -544,6 +554,41 @@ export function ClaimPage() {
       </section>
     );
   }
+
+  const claimControls = (
+    <>
+      <div className="vc-claim-status" aria-live="polite">
+        <div className="vc-claim-status-head">
+          <Eyebrow red>Claim status</Eyebrow>
+          <StateMark state={phase} />
+        </div>
+        <p className="vc-claim-status-message">{message}</p>
+        {phase === CLAIM_PHASES.AUTHORIZED && <p className="vc-claim-wallet">No claim price; the wallet will pay the destination network’s normal transaction gas.</p>}
+        {!connected && <WalletButton />}
+        {connected && <p className="vc-claim-wallet vc-claim-mono">Wallet · {shortAddress(account)}</p>}
+        {connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {claimNetworkLabel(binding.chainId)} ({binding.chainId}).</p>}
+        {phase === CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE && <p className="vc-claim-warning">An RPC or ownership-read failure is not treated as ineligibility. No voucher or transaction was produced.</p>}
+        {phase === CLAIM_PHASES.PENDING && <p className="vc-claim-warning">Waiting for the destination-chain receipt. Do not close this page until confirmation completes.</p>}
+        {transactionHash && <p className="vc-claim-wallet vc-claim-mono">Receipt · {transactionHash}</p>}
+        {phase === CLAIM_PHASES.OWNED && ownershipBalance !== null && <p className="vc-claim-wallet">Owned balance · {ownershipBalance.toString()}</p>}
+      </div>
+
+      <div className="vc-claim-action">
+        {/* Claims closed but the paid mint still open: the mint is the only action left. */}
+        {!(scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.PUBLIC) && (
+          <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
+            {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.CLOSED ? "MINTING CLOSED" : actionText}
+          </button>
+        )}
+        {/* The paid mint is open alongside the free claim during GENESIS and alone during PUBLIC; the
+            claim stays the primary action for a wallet that can still claim, the mint for every other. */}
+        {saleOpen && <Link to={`/edition/${edition.id}`} style={schedulePhase === GENESIS_CLAIM_PHASES.GENESIS && !actionDisabled ? ghostBtn : primaryBtn}>MINT · {avax(schedule.publicPriceWei)}</Link>}
+        <Link to={`/edition/${edition.id}`} style={ghostBtn}>View release</Link>
+      </div>
+    </>
+  );
+
+  if (embedded) return <div className="vc-claim-embedded" data-testid="embedded-claim">{claimControls}</div>;
 
   return (
     <section className="vc-claim-page" style={shell}>
@@ -571,34 +616,7 @@ export function ClaimPage() {
 
           {scheduleMatches && isWeekendTarget(schedule) && <GrottoHolderNotice chainId={binding.chainId || schedule.destinationChainId} />}
 
-          <div className="vc-claim-status" aria-live="polite">
-            <div className="vc-claim-status-head">
-              <Eyebrow red>Claim status</Eyebrow>
-              <StateMark state={phase} />
-            </div>
-            <p className="vc-claim-status-message">{message}</p>
-            {phase === CLAIM_PHASES.AUTHORIZED && <p className="vc-claim-wallet">No claim price; the wallet will pay the destination network’s normal transaction gas.</p>}
-            {!connected && <WalletButton />}
-            {connected && <p className="vc-claim-wallet vc-claim-mono">Wallet · {shortAddress(account)}</p>}
-            {connected && Number(wallet.chainId) !== binding.chainId && <p className="vc-claim-warning">Wrong network · switch to {claimNetworkLabel(binding.chainId)} ({binding.chainId}).</p>}
-            {phase === CLAIM_PHASES.ELIGIBILITY_UNAVAILABLE && <p className="vc-claim-warning">An RPC or ownership-read failure is not treated as ineligibility. No voucher or transaction was produced.</p>}
-            {phase === CLAIM_PHASES.PENDING && <p className="vc-claim-warning">Waiting for the destination-chain receipt. Do not close this page until confirmation completes.</p>}
-            {transactionHash && <p className="vc-claim-wallet vc-claim-mono">Receipt · {transactionHash}</p>}
-            {phase === CLAIM_PHASES.OWNED && ownershipBalance !== null && <p className="vc-claim-wallet">Owned balance · {ownershipBalance.toString()}</p>}
-          </div>
-
-          <div className="vc-claim-action">
-            {/* Claims closed but the paid mint still open: the mint is the only action left. */}
-            {!(scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.PUBLIC) && (
-              <button type="button" style={{ ...primaryBtn, opacity: actionDisabled ? 0.45 : 1, cursor: actionDisabled ? "not-allowed" : "pointer" }} disabled={actionDisabled} aria-disabled={actionDisabled} onClick={onClaimAction}>
-                {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.CLOSED ? "MINTING CLOSED" : actionText}
-              </button>
-            )}
-            {/* The paid mint is open alongside the free claim during GENESIS and alone during PUBLIC; the
-                claim stays the primary action for a wallet that can still claim, the mint for every other. */}
-            {saleOpen && <Link to={`/edition/${edition.id}`} style={schedulePhase === GENESIS_CLAIM_PHASES.GENESIS && !actionDisabled ? ghostBtn : primaryBtn}>MINT · {avax(schedule.publicPriceWei)}</Link>}
-            <Link to={`/edition/${edition.id}`} style={ghostBtn}>View release</Link>
-          </div>
+          {claimControls}
 
           <div className="vc-claim-supporting">
             <Eyebrow red>Supporting information</Eyebrow>
