@@ -25,6 +25,8 @@ let done = 0;
 const hex = (n) => "0x" + BigInt(n).toString(16);
 function arm() { STEPS.forEach((s, i) => { $("b-" + s.id).disabled = !$("review").checked || i !== done; }); }
 $("review").addEventListener("change", arm);
+window.addEventListener("pageshow", arm);
+arm();
 async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 STEPS.forEach((s, i) => $("b-" + s.id).addEventListener("click", async () => {
   const out = (h) => { $("o-" + s.id).innerHTML = h; };
