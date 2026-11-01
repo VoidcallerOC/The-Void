@@ -163,6 +163,23 @@ function phaseMessage(phase, target) {
 }
 
 /** /claim without an edition: the server-verified target, or a plain closed notice. Never a historical address. */
+const GROTTO_CHAIN_ID = 36463;
+
+/** Grotto holders qualify, but the claim itself is a transaction on the destination chain, not on The Grotto. */
+function GrottoHolderNotice({ chainId }) {
+  const network = claimNetworkLabel(chainId);
+  return (
+    <div className="vc-claim-supporting" data-testid="grotto-holder-notice">
+      <Eyebrow red>Holding Genesis on The Grotto?</Eyebrow>
+      <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>
+        Your Grotto holding counts, but the free claim happens on {network}, not on The Grotto. Your Grotto wallet will not
+        claim for you automatically, and nothing is bridged. To claim: use the same wallet address, switch it to {network},
+        keep a small amount of AVAX there for gas, then claim on this page. Your Genesis tokens on The Grotto stay where they are.
+      </p>
+    </div>
+  );
+}
+
 function GenesisClaimLanding({ catalog }) {
   const [state, setState] = useState({ status: "loading" });
   // Bumped when an activated claim's on-chain close is reached, so the phase below is re-evaluated.
@@ -223,6 +240,7 @@ function GenesisClaimLanding({ catalog }) {
               <InfoRow label="Claim contract" mono>{target.claimContract}</InfoRow>
               <ClaimSchedule target={target} />
             </div>
+            {isWeekendTarget(target) && <GrottoHolderNotice chainId={target.destinationChainId} />}
           </>
         )}
       </div>
@@ -299,7 +317,9 @@ export function ClaimPage() {
       }
       if (Number(wallet.chainId) !== binding.chainId) {
         setPhase(CLAIM_PHASES.WRONG_NETWORK);
-        setMessage(`Switch your wallet to ${claimNetworkLabel(binding.chainId)} (${binding.chainId}) to claim.`);
+        setMessage(Number(wallet.chainId) === GROTTO_CHAIN_ID
+          ? `Your wallet is on The Grotto. The claim happens on ${claimNetworkLabel(binding.chainId)}: switch this same wallet to ${claimNetworkLabel(binding.chainId)} (${binding.chainId}) to claim. Your Grotto Genesis tokens stay where they are and still count; you need a small amount of AVAX on ${claimNetworkLabel(binding.chainId)} for gas.`
+          : `Switch your wallet to ${claimNetworkLabel(binding.chainId)} (${binding.chainId}) to claim.`);
         return;
       }
       if (!provider) {
@@ -349,7 +369,8 @@ export function ClaimPage() {
           const chains = (result.sources || []).map((source) => (source === "grotto" ? "The Grotto" : "Avalanche C-Chain")).join(" and ");
           setWeekendProof(result.proof);
           setPhase(CLAIM_PHASES.ELIGIBLE);
-          setMessage(`Genesis holding at the snapshot verified on ${chains}. This grants one free claim on Avalanche C-Chain.`);
+          const grottoOnly = (result.sources || []).length > 0 && (result.sources || []).every((source) => source === "grotto");
+          setMessage(`Genesis holding at the snapshot verified on ${chains}. This grants one free claim on Avalanche C-Chain.${grottoOnly ? " The claim is a C-Chain transaction from this wallet, so keep a small amount of AVAX on C-Chain for gas. Nothing is bridged or moved from The Grotto." : ""}`);
           return;
         }
         setEligibleTokenIds(result.eligibleTokenIds || []);
@@ -494,6 +515,8 @@ export function ClaimPage() {
 
           {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(schedule) && <GenesisCountdown />}
           {scheduleMatches && isWeekendTarget(schedule) && schedule.active === true && <WeekendClaimCountdown claimEnd={schedule.claimEnd} onClosed={() => setClockTick((tick) => tick + 1)} />}
+
+          {scheduleMatches && isWeekendTarget(schedule) && <GrottoHolderNotice chainId={binding.chainId || schedule.destinationChainId} />}
 
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">
