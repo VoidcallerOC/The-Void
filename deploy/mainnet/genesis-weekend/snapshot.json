@@ -1,0 +1,8897 @@
+{
+  "format": "the-void:genesis-weekend-snapshot:v1",
+  "campaign": "0xd259b28d95ce3082bdfe9f9fc6a819ca8aa290b3a9405e381a4637a16f24282e",
+  "eligibilityRule": "0x3c2cdec2a24accdf45ab235d79ee30102f4c80193896d2e7658e76d57527eea3",
+  "eligibilityRuleText": "the-void:genesis-weekend:v1:snapshot(cchain-balanceOf(wallet,0..3)>0|grotto-wrapped-balanceOf(wallet,0..3)>0);excluding-bridge-custody,zero-address,prior-claimants;one-per-wallet",
+  "generatedAt": "2026-10-31T19:30:18.000Z",
+  "cchain": {
+    "chainId": 43114,
+    "block": 99059260,
+    "blockHash": "0x4caf775d5e5a3383a3fa2a4112c22ddb03a498035d5f94d16f5e55293cd92673",
+    "timestamp": 1793468034,
+    "explorerTransferLogs": 1063,
+    "transferLogs": 1067,
+    "explorerGapsRepaired": [
+      {
+        "wallet": "0x3f21aDc9223e0Ff4598D3ab5a3dF3ff8aC73B835",
+        "block": 51032410,
+        "logsAdded": 1
+      },
+      {
+        "wallet": "0xAe78E365285dB9BfA0FB231038f75f8f3Cc11588",
+        "block": 50961922,
+        "logsAdded": 1
+      },
+      {
+        "wallet": "0xAe78E365285dB9BfA0FB231038f75f8f3Cc11588",
+        "block": 50993066,
+        "logsAdded": 1
+      },
+      {
+        "wallet": "0xC4396400ba3367b89E7F96B5b904A19fE4D907aa",
+        "block": 50936297,
+        "logsAdded": 1
+      }
+    ],
+    "glacierTransfers": 1090,
+    "candidates": 620
+  },
+  "grotto": {
+    "chainId": 36463,
+    "block": 151791,
+    "blockHash": "0xd8e7fdba259322ad8fd974752b9f7ee57dbd1a8929c279fc3737b65d9e922a32",
+    "timestamp": 1793463175,
+    "nextBlockTimestamp": null,
+    "candidates": 11
+  },
+  "priorClaims": [
+    "0x8512be04a4E54cd8551738165F9c05C3303187a0",
+    "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363",
+    "0xd70dBA7fF6419481d62D4689bDf271ad441766b8"
+  ],
+  "historicalClaimedSupply": "4",
+  "historicalClaims": [
+    {
+      "wallet": "0x6a86EfA012fEDA64b70112022487fEE22E67d2fb",
+      "claimContract": "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363",
+      "transactionHash": "0x6e7bed52e99cf240eb1457e3c366bed644cae13fa4503525298ebd3ffde922b3",
+      "usedTokenId": 0
+    },
+    {
+      "wallet": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+      "claimContract": "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363",
+      "transactionHash": "0x3ef4fac8381749219121606fe233cb029ebf8a1383025db184a7d0e388cda6dc",
+      "usedTokenId": 3
+    },
+    {
+      "wallet": "0x920E1E5619124AA8Ed90928Fe233a29263f01A6D",
+      "claimContract": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8",
+      "transactionHash": "0x1988758b0ac3bac83799f05ab79d1846891513535046b4bfdd9dc8064a1382ca",
+      "usedTokenId": 1
+    },
+    {
+      "wallet": "0x70773318349AF374e86254ef87e2DD542d0bBfC6",
+      "claimContract": "0xd70dBA7fF6419481d62D4689bDf271ad441766b8",
+      "transactionHash": "0xafb7636cbdf5354e6756b9921df743ebbaa74dd3b8f9733d2df8c0260624458f",
+      "usedTokenId": 0
+    }
+  ],
+  "ok": true,
+  "failures": [],
+  "reconciliation": {
+    "tokenIds": {
+      "0": {
+        "cchainBalanceSum": "470",
+        "cchainMintsMinusBurns": "470",
+        "bridgeCustody": "9",
+        "grottoBalanceSum": "9",
+        "grottoMintsMinusBurns": "9",
+        "independentMintsMinusBurns": "470"
+      },
+      "1": {
+        "cchainBalanceSum": "459",
+        "cchainMintsMinusBurns": "459",
+        "bridgeCustody": "6",
+        "grottoBalanceSum": "6",
+        "grottoMintsMinusBurns": "6",
+        "independentMintsMinusBurns": "459"
+      },
+      "2": {
+        "cchainBalanceSum": "101",
+        "cchainMintsMinusBurns": "101",
+        "bridgeCustody": "4",
+        "grottoBalanceSum": "4",
+        "grottoMintsMinusBurns": "4",
+        "independentMintsMinusBurns": "101"
+      },
+      "3": {
+        "cchainBalanceSum": "605",
+        "cchainMintsMinusBurns": "605",
+        "bridgeCustody": "5",
+        "grottoBalanceSum": "5",
+        "grottoMintsMinusBurns": "5",
+        "independentMintsMinusBurns": "605"
+      }
+    },
+    "grottoLagSeconds": 4859,
+    "quietWindow": {
+      "from": 1793461375,
+      "to": 1793469834,
+      "events": 0
+    },
+    "priorClaimants": 4,
+    "eligibleBySource": {
+      "cchainOnly": 473,
+      "grottoOnly": 4,
+      "both": 4
+    }
+  },
+  "merkleRoot": "0x30bd03f5dae8be86fc796a166a68b5629423a7138c5b268f285624db82790f98",
+  "snapshotHash": "0x995ca68ef725aedb7f63894dc5ce7310dfaa934452c6fe4c1c0a891c77726eca",
+  "eligibleWallets": 481,
+  "eligibleContractWallets": [
+    "0x5bC2fc6A8538e6913995741234c2512D3ae6ada7"
+  ],
+  "eligible": [
+    {
+      "wallet": "0x000000000000000000000000000000000000dEaD",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "15",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x005B09c3150D873Ee317b8Ce62460b3772cf3945",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x00Bd4890BCcEed8972b23A8b7a24c6d3467fC748",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x00E71E5754f5Ae3e998C89b3f6314964E367Ba15",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x00d3bE15cc9A9d071b6810531fbAC7938C50aC39",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x017be8F5707A0D3ef7a0Ba2e5a1cfEF52B705EBB",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0264c4CaBEcafA630Bf082155bD394EB6a48e7b8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x027371C03326813c9028813c949E5009F7aE3413",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x029d2F948c7Cd47717bF804Ad7256d48CFdC6097",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x038673370955EB929d94f9D0C7992bB48137e998",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0455dE4Fafe5503Efc4bC1f9d72cC04e2186af38",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x04E6359A58b97163D68a62ee6B8FEceB76f366Fa",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x04f59340c0bd6B031beDB2695AC1a68dCdc6634e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x050E358d366bE1e549F02066d6196c55bd443F67",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x052Af22d92a1A21d7a0D4F3bFf17c03514cB088C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x05A1095696EbBE36635eC506589080e45F5d6fF2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x071868DCD2541520565E36fFDF74c59D6E81f7e7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0778ACe00c04F84B58247C6AE821A2320b52D335",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x077aC19FF94d46F7155Ea660C92ab53bf8868763",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "6",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x07cE5Db5F75E58d657926B636b9aD3e3869C91B4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0882e80D6994fd710110fD0041Ca0E48E4570A6b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0988E554b57Ca7B733Ad8BBb943d1E42848bd430",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0B154C5512EE5688374772383E45CcCB8E004226",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "6",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0Bc0A524ECd730be22A5d8f697efeC818FDE0E65",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0Be6Bf75c8BE677a8735B23d6D1b8e626FB26D5d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0C39f0970CF3118Fd004A3f069E59dabc6714980",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0C73dD476a66B40A9524f5B9252894488E78c9DA",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "12",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0D364c5c6c803FEAE75db05aC248fd9DBcc88c21",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0E0eE41547D5E0DA762a8B4db911D0609fd4c62a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0E86ECe72dE57bD5f7Eef0F439a2FCf2fE8cC447",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0Eb4d9dc612f691797883414a43CC4D7b5b372B7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0a6038956b6d24dfD383f57512CF16023f7Ff910",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0fc0EbE63B74C3c90731A3cDaE03c9a51B084F36",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x0ffD17e3eA5b5E91B6B98bc4fdD8B90965072b17",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x10A8f6fcEC6aD125B3acAB3345A6AEdD003Ab666",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x11bf2586068cF9Aa358c69A78165aE2cb97E45D7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1206a5093569854C9FAa5D6212E19c1Cc173d562",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x122025a645663a2891956d1F5096e8815e5Ec8dd",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x126a0b3C1953ce93Cfc2CEe9Ea830cB4698e74a2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x132F6eBbCd85CB25787E81CB9f7B3b828465b33b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x133faB28CaEc665AdE2A67D1B360EA1eb18b812C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x137427CF6Fc4Bb0638b0c702273168161BF20964",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1375F754a0B49ea255984B03E4edfD0AdBFaC8A8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x145f10155aAD87FB21986d764eCca3856566eD55",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1588c55956Ea79702164fA55EEDb98923f562F2c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x165C6F919F95645d159a99E542f4e405BE01dfE1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x176c946Fe3d6B8f7Bd647FAA851771fa185f30a2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x18226522d312b9EbCa96CE9601478570A2645Ff6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x186A1A68aa210581fdd139824aB1e1178886A5ea",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x18bf4dd2AD70d0aDEC255A28FC8Ad7E67Cb1d3a9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x198c5D41Ac29eEeF72f3a445be0e37AE76a08Eac",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x19FD837ab61844684e6f5cB1CE5044e9cEf8Da10",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x19c2A0E1398Ba78C00AF784fDEc4cD0bBE70A392",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1AAD84d41A750E6F6fb1736182F30b2c20EB8C43",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "11",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1BA3DA7f25514C5bFC38e0EaF375f207E3aE8c22",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1C0C40C4DD142dB1e158318F4D59394A3DBe6237",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1D5344F8b19B70771c214237D95204a065155c0c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1Ef43db98BBeF72ece17AB7f805ADd8A94fa27Bd",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1ac7c47b83DacF6A295f7d9870Cd42C3BBe042A5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1c012C98676eAFB6C1D4886a543c4fFf50a43FE0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "5",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x1d06e5ff1510c1E25B9603AbDdcd2D872468267C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x20bA9d5D18bC0D0CECa75D670184D134b3B2337c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x23c7b9d0Ba7852fcbcab6C544c8D443c95BED7AB",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x245538Ca269505224886762D11f12625B231b41B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2535D2558459084330Ee1Bab7aC80A2b01399656",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x25693e1dA8E183d3665E78F961c8f9CA6702Af6C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2611f35C827f23c7510075B68c1371e6B1f61C24",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x265a570691b231b62cEA812F817e83EB2b74fcF1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x266e579fea3835404bE1CE7a03F0EFDDc2eE6b4A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x26BFD2c6f67cCf8bb16Ad61CB3Ae7f092351Ec86",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x26e76CdCc5e3013048Da04d1B832fD80f7620b2A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x27B7Aee0cF2281B4308747bd98DbfC2F0F54F41D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x27e32Ef9576dc05F4D08d978106fC16351d4cb0c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x295D37AD80c1a23e8fA7442072581ffC5ad18A93",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2B1855f3E0d453faF76c91EA8504239D3bbEDb61",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "3",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2B54500D869fb696eBA40a3C392E5529E2Cb56e4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2C7641b6863058FDC2831d72C1467B6738771D23",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2CfB23a627c49AAc3f9C993058AD5Ee5C0695CE7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2CffFaee925a4Bb7274C15EB484E803244a9c622",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2E45E5d9ecd99d905817134Ec9Ba84d9E13D59Fc",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2F02b5b03CA051EfE1784D14Ff15B715D92D1028",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2F6F4e4697F68F37f3E39016b09DF4e38531D40a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2dcFb746e46bDA90E2E7311d9Ad0Eb817f47ebef",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x2f8c329e41851c1804b61d1E1dc0b1f84487e000",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x301264E0976efF4eFAe0baa8A9045A9d347E6104",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x30F7D7E7208ACEA0b19936bC259789bda05699d0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3188C43F664fCcB65FD871516a6b2F54BE8A0AF1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x325409632bccFfAc706d378A2Eca57Cafa21ab11",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3310d442dCDbE0fB63aEAB18aCa7D1293698cF18",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x35AbF90366Ad35aB89dEA62C0eaf9f1beD438DA0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x365F027f73d3d176619b2dd8ca0bDD7766BcF24D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x36EF597c32A1c77904c7F373e1Ed6AB959331449",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x37d2dd57a61E80aB590195eb7e14Afd400B8eB86",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x38910eC1B8A5Abb43054A21F302377Cb262b249E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "9"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x38942446222C686BAE40bcAF9d82ec662b78Ba76",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3938BB50F141784CAc85d49d0A5dCC73ed59088A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x39fFA0838B7b89e35dbf1ff2017001769B76Dd37",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3B291CabAB272a3BD0F7530591491b6c587d0eda",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3C6F802bA1ef7DC37D09b5DE286E6c06B6Fb1D37",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3Dd4e2266E51dA610667e38b91B5488A5ed46250",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3E3FED8f88803CAb8A252a4f4f0a2F4E39F408A3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3Ecb35b0012B71f04dfA994D6dea750a17CfF0b3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3Fe457F01c88FF5Dd0A0D3eA17B54214C1aaEaD2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3b3ad18ffb699eae4bF7997c104a9b206adA9098",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "2",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3bC11f287c0b49328ECE3afd2592f5b1896B0913",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x3eFdA2796A232d4515dFf4Bbcf3095A13737385e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "66"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x409612AbC544FC1215C8aa555759b660552A2731",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x40c40bbEa28923887bb0602a6AC8674B9ba2d2d7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4105286105ceA219cbD4137721a3747f91ef3Bf6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x418Ae278440248eD489874bba470FBc48924d6C4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x41F5Af75766C963a00129427621D8B10ed1dA100",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x425a9121FDe1541EfeB1524C70a0795BF35Aaf3E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x432eD114E0013805fadB5c5a16da660960C955FA",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4330E5434f4657E02B01d0F0005C44310B12B264",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "8"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4398805Dbcd8c08e45FA87070beDb69aB238DDD3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4456f336144682824A108e1b05c08Ed7f4b0fDE8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4512c57eE209D0a55Dd1fc3D4601D6fB2AdE3E87",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4658A2BEA69a4E3b4d3156a3F27c29c11c514D5f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x46F0849Df698b6c5e31936b21EA28f301fb8D7E2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x47E29A49D1521F7d27a93F76F7fCd654e21a61F3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x480cBCe713463C8fE430206D083c00162e95373A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x483048eC2c4c4c207B89102Cab1382E2252165C1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4A651c34354eee152Efe992A75Cb87150dBAbd4C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4AB545149Aa4e473C0c131960E1eeE8B9B8038F1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "3",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4D342448dd062992041DDFBB3772282F84E147BF",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4E1c9Fb3d87ae61E567fE258737001366D5060b6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4E99AEeC9DE67Ffac5F59F0aB8213860B7D6Ae8d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4EF84ab9959f587A473EF39a840B87008Ea5970E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4Eb9448Dc71C19585FdD99571b6873FEF74Ab5D9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4aC147644db1a0c3191954ba30B6c639E5b7ebCf",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "16",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4bb9F0008B7d69fd896A85A0652304502E6BC4a2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4d7BC7eCe4029Eda867e2e0f504D4c71E9c3537D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4e5ce896450dC31D938f400d586a96c7425B4401",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4ec8618AccBA2429c99d30FF28FB465040903bdd",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x4f7b24823a5cb6B9078230BAa76a2b69C983B808",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x50173B4bd3Be290a91825E544A167a05eA2911ed",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x50D97dA209200Ed6bbF45f82948342606f0Da187",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x51A1743A41219a9D13cA651460ED14f2FE74C35b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x51D2bF026Fde1Ce087c178d9cE3F91FdEbF054E6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x52406Ae67fACC71b5cB44fAb7ef6A6b1995eDE82",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x52610dcB444B51d661ad1f7Edc9b6bA22A4Dfc21",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x52e352b165fb68327C75bf18f9431Fa0aAE5c38A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x52f7B68eDC4ABE1443fb8a1848935eBfe269169B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x533b65ce39F438105f36D988D9C106f693Ec2b74",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x53D0D29b5bABDDB0284624D25aBd0F482a09F81b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x547f8B793362df477a23aF6ee05F8e4e291a2Ee4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x548C7B96A9008ecd098206e427cE6eFdDAed82F9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x555536fBbE87c4a9D2A95E06755a8E1569145555",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x555CcE49bbBcd0143e14a44cC7cc6FbC6c761679",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x55A77770FbB3FB0F74E16790A6d30986a40D3095",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x56d31ECf38C5De64aDdcdC49C784e80dBeA344DF",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x572AE992032AF498B1eF0Da78C3489fb4a162689",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x575293864f3B60a3bbE60c154dC5544510f3f277",
+      "sources": [
+        "c-chain",
+        "grotto"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "2",
+        "0",
+        "0",
+        "1"
+      ]
+    },
+    {
+      "wallet": "0x58371d22ec5d2AF6C0B4bFa971B60174dA05fa52",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x595ccaB61bE0B42f3925E018DaBFB7Ee95C2163f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5Abf7CF60F7b9B33E8a5b298CC4eE2C6f5B403FB",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5Bf93365bbf06DDE2669B2633E50fCFb3f6f8e1C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5E8DF2FfD66203FB7Df58240fE91b477455377cb",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5aAa3Aa5608D000f1504e01e8F94d51771F07f5A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5b5A59BdDdC3747Fae3030e6e52f6065a7f3A69e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x5bC2fc6A8538e6913995741234c2512D3ae6ada7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "220",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x60241460cC9c52C37189Ab22e10F9367Eebb29E5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x603a59c8e44bba7635FB8BEA59EaB53106865d89",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x60C1c80Bc74637fDe43823d75455B580Be9C6aab",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x61360C5E0641cefE9E22e877DA550A331988A139",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x61cbf261e98CB4efAc9151eBC015AC781965dbe5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x626b1AeAdB9Fc0b465B40aDE4F4bBF0C01C9Db40",
+      "sources": [
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ]
+    },
+    {
+      "wallet": "0x62CcAe102d5B7376a34a2920Cd57c8Faf1Be2F8e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x62fa1525fa43621c0A72f39bdeD0759063F297a1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x63F73F8952bFfa2fA000F59b4957365e7ac9aB84",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x64d65E1c4f2e70dC1114f14C6505678C048dA7ec",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x653dD01F3DE59a6b1B7d4ddF26d5536f08dEfA52",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6553244941c8ED2b83975c723a1731fd84d1F92e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x65690116a8b689e434754C7D58930e4741B71b83",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "4",
+        "0",
+        "4"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x686813D1E16F0833Afe33Be04cdB05A496df9054",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x693c80C4AbAB154Cf2ADb6147225C4838CbbAa57",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "15"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6954f7ADd88b0c0a2761A5DD0a56913df88894C8",
+      "sources": [
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "1",
+        "1",
+        "1",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x69844Ff0576B4b2d88796D3Cb1308Dc605DF6349",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x69a8eFDD72E285Ac97987350167A2c04211F095b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6B448a7751CDAE91f3f92f13AEe9d75F7E3d35CD",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6EdE5522B1C7773E2E5482E52a6bF75ff3B70597",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6a228d9405FF5DA1382EE2555E0048FeD469B28D",
+      "sources": [
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6b821bD540EF180Ab6e8219af224f9ba52045471",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6bcF29BB75a600391F9A2Dd1c84d15ED29D40dae",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6c0dd723C097425FA56474920385caC75FE02AC7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6dBB8109B561F87DB656C918C86b51Da0661956D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6dceFd396A949a75B3a646B608EDDC7c325b818D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "50"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6f3607c227b2470Db1daef4fcb35414fACba5739",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x6f36919eEfF046d323c118F7d0b38cb23d301D5E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7008e3CB6c797B958ea7cBE26B94C634240daB2d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7024eE7932E4d879409F9618b560Cc82CF093a7a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x702aDa50FC2ae5e5f2F7032a62eF37Ef721f86a0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "5",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x71535AAe1B6C0c51Db317B54d5eEe72d1ab843c1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x71E7bA23f9a7b7c94610f4f5240F537E90A45BB8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7254e99f65BEF14247a5795fcb99d16D11Acc286",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "5",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7321710fc4d2b80d581a51C4CB596728455d1520",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x742611c2815193EBE6b313bFf4a273Ab03fe3301",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x74E18A101946Fb8409C02BD6Ab6cE4bd5085761d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x75D554cf3D4da314C7A376e428ba9410a5F33d70",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x75Fe806453B15faF338350D9fA7361e64f22CE5D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x75e62eb3E0f3e13c471aBb5BB02eBb02a7053338",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x75f60830B9E212fedCb280fE9ECbbaEB5a7E9a0f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7633Fa4465C83eb10EE39135eB118f35B4B4aEa0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7640554F93f776BFb369b25B5892283c5d437321",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x766cEc2aD9CBdFd0f7d88fB2fB7e41ac72A99389",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x76Ec79f2D63241E9fD7e43274819317Fb3Cc9986",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x76eab94AcB86d33666b124d64f63e0D791c5Ee31",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x773d4D4388d6Ab9df33e0ca11f49b858BF0eB551",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77772E2B77F130459b510870cb9620575728176b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77804507d62Ad1D231C31339834e18FEcdD52742",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x779B60f9eB07dcBBeB6dc3D43DAA659C0235e261",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77B5C24F94afE2E12F67368AE0330dBE1033c78c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77E65c9bF35bFC436C818062FBc1fF5Fe09Fb11C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77a83E5226852A3dCC2c076D0406D509eD53f2cd",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x77e1e30E3b86acbaE504052A5F8a44bbd150BF50",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "8"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7854B0Cbdec59156A7bDfcA1481297d310A30457",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x78A9545Ed8209D588393dFB480C6579fBeBcc709",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x791772171858B4f13a9f19343f72B58a7621d263",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x79845fa22894b89bf38D17Af8cF075467f658f8E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x798ea572fe90Fb7bF49c1058e04E86050B9BDe2B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "3",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x79Cb55B282a42Fbd9be1a774b29B72eFB3Ae7859",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x79d4BaE291ab95cbe8d0599f38D854895F2A7f48",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7A5CDF3094059B013aEac644593DfEAA296aa854",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7AA2a2D584100D0ebD2cE804c34B9f2D544d9701",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7B2413561E309C42AAd52A3640D024bA42e9A7d2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7C9b3242E521b8B257c280a126df2B7Cd9F61572",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7Cb552152e2b28F9f6911c51B69B0d8D1FADafe1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7D762DD4d62C8A3c631D18D23e78Ad3691eBf42f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7DA319bD77f48d5605854411E8BB084c181a368D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7Dd1D7aEbb946ca66710323001f3aa3675415bcE",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7E94850eA092Dd314C0519ad675885B50564DAdb",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7F911D97f1f8676AeC5c1868f090E83151815938",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7Fb3993A2fbf49eE4b93DbC0a079f2622825e51B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7a73eaE014Ac47A1075dc6A1f6943DfBAD776839",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7b50D9e82D9747a9af1315Cc9076Ff1893729B0a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7b65E9a5C8f5B788D487A227039c8Dc51bFf6e33",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7bfa88D2E83d910adAd4C6bc149e35DF864D9Df3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7d256d765567D2451951e321A224cE81cB3D0406",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7dF6c061C4BA0bA7ab4F143E1f51AD080E7890b4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x7e4aFc562428Db4897398599dddCD50776b7a6a8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x804772769001F9F617278fFfc246cbAB9a67AaAc",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x80573c7AD89926F63700862f59cBF85B4920EE16",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x80fC724E721cE92bb84CF68211F0A97d9Af7Ab30",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x81A8869c72F51227446C56b08Af7F4d1c245F142",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x83771c019a51462a3407C54345A02Dc8c6A85108",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "35"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x83b902Cf75413f1E37F3CAcA090700eEecB265Ba",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x84a36998C7859C9688f8D2593927935D4B44098E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x852eCE59537F3195C513BAC173dcC89d80C4CDd6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x85B879B552F454137f472337bB309dde752e8f80",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x85c957189C8782314846C7929750514e3404dea1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x86269fE8E5704825c3E5dAd4b678c5dB12182152",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x868eB7EC3C5DD6B84075391aD02815dDF691EC33",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x878d0320075aF41BD18901C0Ba2698dA2870668C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x87BFaf59F2E950d171EBD290A2fe99a270E411ac",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x87C8ca6ee6971fFB2515267Ea4667d54B0f7a76E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x883ce32E186c69559E94C8BA276BfC4322Fc194a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "4",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x88896886F994dEf40213EA82af840c32B8b1942c",
+      "sources": [
+        "c-chain",
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "4",
+        "0",
+        "45"
+      ],
+      "grottoBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8891eA51B7123F6A38D90fa5A1c0Be68852cC144",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x88e85316a246b9e57a25A3481AF990d262CAd4B3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8AC2FC127de265257Efa3de1918F3CcFC78D78c4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8B9869A87d5D5128Eb742FBaed44441e90327e10",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8B9916967988c84064e83280359b8d2D7D03CAfE",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8C4C8CCcDb2ece9dd5aa0E2129C7784788f4e923",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8Ee9E7fcC47a4282aE9c13CCe3382D56BBD41DFE",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8F6aB10A1cc0fc39D3b6fc10131513dF6248238C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8a8C0f6d9D6DC97709736f0A752Af53b3874F04F",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8ae323046633A07FB162043f28Cea39FFc23B50A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8b3e6D123939b24ec980E0A56Fc126F66A5bEE9E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "10",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8bF0c1f5541744509d26608cbC28e2Ef50606c82",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8c092732cA1D125f3a42a0f9C80C94882Ed8FE17",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8e0d2abD5838b66629e82207a0642cA0faaBf503",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x8e2106E1E299744268f32495b7058d8FefA51231",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9056B02aA0C576bd8779Ddfcf462FcF2Bf45F6f3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x913283dD924A35F7Ebe2c2e31447F66C552942BE",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x919AB2FaC961d88660750A93475ADD1901786782",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x924A44F10f99e2F46d35b005261F9df5C077fc4C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9270fd46290c1201f3b5e51F4b56698Ffa64ef45",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x92F8Cb4EaEB153705A3970991572bd6b33747b45",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x92a79044C5e499c20af56b6274f141Ef10DFEFc9",
+      "sources": [
+        "c-chain",
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x930C10d9eD7C9ae889ba15d270d69cA785F942D4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x93473e8F8d501df3291a3077d5A52174FdEa8011",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9431D1615FA755Faa25A74da7f34C8Bd6963bd0A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x94336E9b44E57E07783644CC97eE2CC66Cf34A4A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x944ac0084e56dC4c7D2C9e7F7CbE27aA8f80EAd5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x94542A589Fe8248Be6bEeB99B3a643dC00c3c4cC",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x94F6428d37dAEC60afB62CC2413049EF0Cc1C61a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x95894a9dA8596206545787300f2e77c5B68E5aC6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "2",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x95e75436055A1FFCe449D5636b4436134D09f071",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "4",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x960d2Ca4E26F0D31464CEF4C9fDc216Cfb0eCB30",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9682d6C31f9B2Ff1af4709443515e11a4cFa7f98",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x96D2ADFaEAeE97648910c3a7Ac9cf969f1F87DBd",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x97543e6F6562CBEbb68a730c5fb57B602742447d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x97aA7CC7CAAf10d5afB1E11F6EC9Da6b3B4C6322",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x97dA594bd8F31DBF2Fb25b0B7A539991f85B1d05",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x99375e063d30a2E3F52e4a43Cb040fb5d93FE75f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9950Dd62617F6123551aa61DE4a31a0DEe02A4e9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9B15F13e0C3180aeE2963b5FbA6C0a1C71DdD1Eb",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9CaA41bBdd76D907305fC86f42fbECd61D7Ae1B0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9D4953881605284d0a5ED358590473aef287F45C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9Ed4C77f74eaAA3C595d8bae40de5D592EDFb39B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9ac62d125A7b69E4f8Ea2a875b60b208e9c4f8E4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9b26f0fAbDAAa8370Ad586200A1236B9745FEB3A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9b8c55E8f77618013fBA3Aca621E128593d8b96d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9c38add06A58705B0e4700c34031D238779AF018",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9d4133c308D497C6ee62f0ce3f43B167316F15ed",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0x9e0e25E67ca7C9761cc55cBF531A8F044805613e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA3e52B3B968b970C56beF6a9CCa520B20Eebd616",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA4674F1d9d37880fe12eB79584CA338c199C226a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA524B835bb3AD098f4E643E252cE50984E38b6Be",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA58AE1622BD182b1B732b785741E37F598D2273d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA5B7922F058b4675DcE7ACfDC6d43E9b8eC68De6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA686D6E14c7dc2959AB87f9711666d6EaD75833d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA77269B511D09B813AeED0C0Fd90f08d2c6447B5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA81945730E5Fcb6BfaAa4de29135A3697817F0ed",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA87Dde2F8dDf35eFC21083B3702f07329D356C8f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xA9d4C6304490CDa99db0d3C8f0f1B9E66CC4C2BF",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xAdc47A80344Ce0f33E1fCf04302f3B9d987013f6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xAe78E365285dB9BfA0FB231038f75f8f3Cc11588",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "7",
+        "2",
+        "2",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB01f30bBb31fFf2c7F1796C3BC41c3c22F20a3F3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB1eB0bE6E2185228bF3A6CE14b7d9D2276d2EbA9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB225ed47F6045E3Bc3Acf8494D2EBa5667Cf3Cb4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB39b0422158F52F903F737d956Ab03E6C40EDa82",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB4Bc4d693bF2efe161e43c61A6da8E29c5F3cb85",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xB5dcC1712CcDe4108aE5ca9505eD9cC344b34A60",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xBAC3a5F847F2d720259397997Dae4370c36BaA54",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xBfb3380C166c04bD9798CDE966783c1984a0D8f3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC1D5dCC1Db63ba1753dC009C417cD4B6c2c3394C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC228Ea5CEa00a8B336E80c4Bbe357084A1cc827E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC242f2575D62A1A76ce2ef295b8aAF9E19e081B6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC2787EC3F1bbd5A0BD1423850E94c9446b48E2D0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC2D05D5350A9b5F7cd5c75aE5C67fdbeD852a2E1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC2b8f8Dd84e8738ad7AbFC3eF6199086Ac710fD2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC3F0b561D7822E3A4d67f2193fABbb3a4588BC42",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC4270ADbc6d6E8a52B5Fb8DAD0cD196bD7b2Bbd6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC4396400ba3367b89E7F96B5b904A19fE4D907aa",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC4aEC60de553c5db9e4d4f4814C68B32195c2f07",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC4ed35c9505a1909452EFf4ab30AAC399C0490Ba",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC56E8B7f7062BE82ea3C527C8334D6f5e2a87D4F",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC57b1f6d9b66d528aF1cD2D0a7a2FFA389CD3A10",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xC685a2B36E2E234883A793FB7f3Ed3Fb0c00Bd2c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xCd6D333FF1564Bd60F7195FE9eFB40b22f7056ab",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xCe5F967FDCbaB1ff86B8A7B632Df33d6806C1A1b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD029cC8Ac55Da0AD4Ff8d85135F747B096e8A5fD",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD1Bdb55e4E186EAF1Ba854BA0e5E185B40805117",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD1d46f1cbcE4faE5fE36e072b2B54c0047F10C0e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD2C67929FAbaC8698e9C031A1CDf468464e0F237",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD35CF25F2768A2D82ea123136C393C4586486C25",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD3bbB3Ab0Aa7eC87cdD33626B7E9789A3a97909E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD43a6388eAD01B950598EA589abC05103650d1a4",
+      "sources": [
+        "c-chain",
+        "grotto"
+      ],
+      "cchainBalances": [
+        "4",
+        "2",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "1",
+        "1",
+        "0",
+        "1"
+      ]
+    },
+    {
+      "wallet": "0xD4b38f9476CCb1685fB3fDEC6C5406a8d5de3FcE",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD57cfFc1Fd9816a81235C8891B6D97267FDb5B28",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD59dd4B6122b06ED1925Cce1F66Af7a58D73752c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD8288952d12d30EeeE117e3FD6e068933C2cE967",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD8427794f8e9Af9bC0E027Eb9d4d3ee63b2491B3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xD93679C7614d77D2E5fd2fa505E4F15de9c36C0C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDB5b4853ceaBf6D8e08D73FddFa80F507Ef9Fba4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "8",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDC70C09767D050FCfd6b36fAC370527AE669004b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDDffE03665d437D2a247C7eAE9E55fBD53B0bFd6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDE69304f1e6f667F5649b61c58f391803a15Ad6d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDEE3a3d165123F88280B649971a08CE5aC9B587E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDd1C982C2169485136D0349DF562494642adB305",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDe639C2f28378AB59702354608d51B11a5019c3f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDfA748B899C8fe2d68Be06c3e110CA44994A240b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xDfAc3C7cb710bAa2718fa4EFB151d184ff6f7F0b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE0123787c8B073Eb1BAfbFacA9Cd39EEed2345D3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE1B663646feC34fc39F9b85FFe50b07f9aCd201b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "10",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE2CF7c0Ac165c76000aB5F5aC26ce53EbE6CfC49",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE2ac13C0935235A6ADbcaad5244A1367719b1b28",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE368A3F0cA72709Dc9fb5BE4381B05D54D0E0364",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "4",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE3F5Ebab783B3284120ADd823E99F07efA724742",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE46FbF16cE92ceD16A5b4823856843AF903fD97b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE56169888AB88D11c6aD4247b8650E72566F8569",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE626944Dd329A748b5DaC2Fa9e2627E99d6CfdF0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE6BE1bB5F9030bB75f613af77A9718D5e4717a99",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE7260bbf4b4Ab5648509a12e89e9831af6F73760",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE7368C743cF10cc8Fcdcabd9590C88fA01eeea04",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE770CCEBF6f1A78a1762781Da7E82F80ccB8338C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE8176e7F80845Bf155cc02c26899344c0EbCaeb8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE8178A5cEC4c74DdD2d9ECC220cFfC6bdbB6134F",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "5",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xE8CC331c9C18bA230c69FFf713d7Fa6F80737eE2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xED9A711fF766D9e06e08d6b9a60B915Eb8DCD6E5",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xEaB27B2293f21475Fbf6cfa9944716C29bb4c532",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF1Ae6d1A2190eA395C08AcCc883922C6A49598F3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF467bb65884CE078F1dacF85ae8d1C099FDb03C6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF504B9Be6B064e4ECAA8Af5AE3f77ba64Fcd4b3C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF508c2be6C8b5f10a6ea4637332EC9E3270A6fD0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF5b882cae990AA9BDA8fAE39BDd9f72554A3F989",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF6a15677acfA9420Ff3a0DBF9444c884C481ed3C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xF7f0a49B106679D552C6Ac1F75834b3AA9b32180",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xFBC93C053d958b7D36BCA9ea6370DC35208Ae68a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xFC69c4F1Ac1a89230F640e5B3D08ec9A79FA27A8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xFF5dD45425de5c79327a85CD8a1C4a5507e34d39",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xFe17206845555EAE524aaAEFA23ED08f6CcC7049",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa027e811972e7a75b5Cf999c5Bc1Ca84ac273b1c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa1F6420DE4af52db60C8e82D3c52Ae4b397c503F",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa2f116468f8c60830A881a2F9F7669A0cd44A341",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa344C1401D8fdEC5F842E07a488006c6ec6A26b9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "2",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa38e5bBCeb22Aca04F11D3a3d7E4180ecFDebCD7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa485e19cA1222DFef87412387a8498c70E5243D1",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa638cFcEB2652B9b047e6ae751F76c6B37206D48",
+      "sources": [
+        "grotto"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ]
+    },
+    {
+      "wallet": "0xa6Fcc9880d6773eB7EE3b9bD10b50f5ed6684ad6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xa96B4FB5ce76A841CE1C45FA79FEe209eb63aB0b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xaD6aA544cC94172e693A48401ACED9Ecd776BB41",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xaE6E4BceA7D73689AB8Bbe33e59a3A587168aF4A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xaa02667c23449079506a57a0Fc0a76A7d448F1a4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "8",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xae0421c9f856c9F86993Aa4E71d8760FD8651699",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb04Eb570E4c8103f5C1EfE13845A1DA0a527D6d4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "3",
+        "2",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb066D85234A4A837F1045ef66B6F67AeB0a9dbf6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb0b9B7a30C849160a0027b5bbB65B7E542acd1ad",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb29fC57A24fB71BC9ef194Ef4dD7461F22366a43",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb2D0f56d4FdCe2d712b0CE11d4D25626bC6dE569",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb5eE804C6Ab53Bacfb8687339e0b76073F86BFa7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb6b6F69450203efBBc6eE639819E9EBd19e9F814",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xb74efA1cC2959f8B7Afb6E4178647ea928B421aA",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbA109916A5f1381845d6FC4a2758C1abD196ff93",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "1",
+        "1",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbC8B718bFb350629eBBDbffC97e58cd156c6308d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbC9a939b33B90C53D9658880519192E7560502B3",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbEb69082976e271f434eDB9B29B918D61dfd2ECf",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbb07802D4C0D880E3FCD555Dd37a396b7569254b",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbc98299954312b7D69eceB0f80aB71a45eBF998A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xbeFD65b66B7c314747B3146C2E0998f4b151aE7f",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "2"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc0229733799A32FCBDA487554867239B341bF958",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc0C799c949AD065dF04628f036f371F12C6fDf5e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc1984d6DC28bD40025d5786043B52517443FABD8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc228783a7A0da116DbCfeF14fc1E4c9383915756",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc260fE2D96a3Dd97C82C76f9608086320e86a38d",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc2eaa251D989B5e659E25ebE3C9BfE910ee1BE63",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc671Dd55C60F8F97C74aCB102497A3FD873F5f66",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xc937c2c10688A6E4695Db0593dDEe07DFaf684e6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xcAD53B64Eec83ACF3A7A5Bf6d29Da9616fF5a467",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xcD49c22c4324486109F94f0bad59C360fc242bD9",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xca2ee0d41F0293ca46404CE3825e26589D3De431",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xca82ec691978F2a07894F27882F659EbEBE85c1A",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xccFbFa296363f640594563B8328219f19815CE66",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xcdC718F6c9FD89A6c89e0e30f73510D529AFd9e4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xcfDc5748B125d232CC53A860B5c9aAc1F9651806",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd099CD21055BE0De9EfefADe7BFB5Acb3d74C7a4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "2",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd11982Eff1De645e2693191C4f3031C7C42E4B6B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd1e25341E975E756ffFEbF6aeF74A81f7d8Ed24a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd2eA5370bBbF1fC4D036b1E04E5D415BAA747334",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd2f6d9996d87B3a27fe41765E882a485389B3D02",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd45DA880CCba56527f943862835176C84a6c2A3D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd58891152E0F481dB854722a564D0aa9A7f22Ba4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd6302976E590b9b947DA8774b7f1246164e0ce98",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd632203b84aEd0428A1c0DA7DA5c3f91544a4eE0",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd64bCCCAd99261b8750B2faf92d1Cd03E8C69f16",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd6E86eB17A8Edcc0b264A584c2ACE2547ea963fc",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd723cad7A700cc1018D2F971fa325E508b7452eF",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "2",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd75aeDcD10035c9c949d2A39715D4CE3D5C8f5bC",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "51",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xd98268153d93b1cF82FfAe79C9FF2634b1Ac3A4a",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xdD39161f3eaBB275Df0d12048F9391D5E4F21F3B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xdFbE12391491d4Be121D6cf3c05107Ff260AD23C",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xdc49BEA6f527E7C889969c9380C5232cEa90a3Ed",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe003Ba125747108571D0Cb69fAA63D8ECB8b43F7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe1bff6276Df23a88D74BF64E37c26e42fC95807e",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe254De29487084c1c978Cf4e47BC5c376023186D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe4E01E5F6a9c306Ad7EbCa53BEb943CF6B181045",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe4EB7663a07036ab36b58Bf3dB638D9050E24791",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "4",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe6C35D0aDEeC59101aBE9368154595fdD7278Cf8",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xe9A1BB23F7d9Cac211973dc2100A5362bB1ef3f7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "15",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xeA8D02CAB8104D38277dC723842D8cB24f4aE79D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xeD6B4BE6b054811A15eC75A98E1378f51A51d43E",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xeDd138F8b6652950d79349169F9E65B603BdfB05",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "4",
+        "3",
+        "0",
+        "3"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xec6343965aDb4d69fE85733Cc91Bf4E90B632429",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xefCa8281b1056036414E48f73086C86138EDeeE7",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xefe371dba511121bFD063d2BAcfdf1fd9f3C074B",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf0567179f437C268664b4070d85bf7d73e278783",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf1376072AE0e2E114ce40A3b43609A46Ea99D348",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "10"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf15DDdf06e7e743762E015537C849Ad5C4863E0c",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf16f0Ece297046c47Ac21f578ADf8E191BBF6327",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf1Ec5f5F5BB688155b5E1e0C1a1a3eF0752B43fB",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf202BE18D1bdCab2E025E4487EBe92fb9Cc75C91",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf27f70Baba694309b7E2Fecb1d72803B086C0086",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf5C66CB0D91403cebF91CCC47cfDC983979444d4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf60FD90FC72E1eb4D2054a24F5DCf7658f166EdA",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf68be1558e21591dA273Be8bD3fa3179FE8354F2",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xf764bdc51f080FCeb67Ccdf643e8f607AB441E63",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xfB4Cf95188BFf4161D08E18CC38D4faB74c7Bb08",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xfB67a6a59609662330171f63142c7259f241f346",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "5",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xfb615d3030d12146336Fcac6D33A506f5157F1a4",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    },
+    {
+      "wallet": "0xfc4755e96E7a935d72f7181AdB0aE8B683d5D467",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "0",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "wallet": "0x68539f95FB2758327A9C7EdEDa1002b0F3Ec8992",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "9",
+        "6",
+        "4",
+        "5"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "reason": "BRIDGE_OR_SYSTEM_ADDRESS"
+    },
+    {
+      "wallet": "0x6a86EfA012fEDA64b70112022487fEE22E67d2fb",
+      "sources": [
+        "c-chain",
+        "grotto"
+      ],
+      "cchainBalances": [
+        "4",
+        "1",
+        "0",
+        "20"
+      ],
+      "grottoBalances": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "reason": "PRIOR_CLAIM"
+    },
+    {
+      "wallet": "0x70773318349AF374e86254ef87e2DD542d0bBfC6",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "1",
+        "1",
+        "1",
+        "8"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "reason": "PRIOR_CLAIM"
+    },
+    {
+      "wallet": "0x920E1E5619124AA8Ed90928Fe233a29263f01A6D",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "1",
+        "0",
+        "0"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "reason": "PRIOR_CLAIM"
+    },
+    {
+      "wallet": "0xaBd3746e8b852f55bE52FC44faB6cAb908b1c174",
+      "sources": [
+        "c-chain"
+      ],
+      "cchainBalances": [
+        "0",
+        "0",
+        "0",
+        "1"
+      ],
+      "grottoBalances": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "reason": "PRIOR_CLAIM"
+    }
+  ]
+}

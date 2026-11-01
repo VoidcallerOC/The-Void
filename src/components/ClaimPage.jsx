@@ -17,7 +17,7 @@ function claimNetworkLabel(chainId) {
   if (!Number.isSafeInteger(id) || id <= 0) return "—";
   try { return resolveChainDescriptor({ id }).networkName; } catch { return `Chain ${id}`; }
 }
-import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, fetchGenesisClaimConfig, genesisClaimPhase, genesisSaleOpen, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
+import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, executeWeekendClaim, fetchGenesisClaimConfig, genesisClaimPhase, genesisSaleOpen, isWeekendTarget, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
 import { formatSaleInstant } from "../lib/sale-editor.js";
 import { GenesisCountdown } from "./GenesisCountdown.jsx";
 
@@ -105,6 +105,16 @@ function nowSeconds() {
  */
 function ClaimSchedule({ target }) {
   if (!target?.claimEnd) return null;
+  if (isWeekendTarget(target)) {
+    return (
+      <>
+        <InfoRow label="Genesis weekend claim · free">{target.active ? instant(target.claimStart) : "Opens when activated after verification"} → {instant(target.claimEnd)}</InfoRow>
+        <InfoRow label="Eligibility">Held Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, or wrapped Genesis on The Grotto, at the snapshot (C-Chain block {target.snapshotCChainBlock}, Grotto block {target.snapshotGrottoBlock}). One free claim per wallet; wallets that already claimed a Genesis copy are excluded. Grotto holders claim on Avalanche C-Chain with the same wallet, without bridging back. Your Genesis tokens are never moved, burned or locked.</InfoRow>
+        <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.publicSaleStart)} → {instant(target.publicSaleEnd)}</InfoRow>
+        <InfoRow label="Supply">Open edition · uncapped</InfoRow>
+      </>
+    );
+  }
   return (
     <>
       <InfoRow label="Genesis claim · free">{instant(target.claimStart)} → {instant(target.claimEnd)}</InfoRow>
@@ -116,6 +126,10 @@ function ClaimSchedule({ target }) {
 }
 
 function phaseMessage(phase, target) {
+  if (isWeekendTarget(target)) {
+    if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return target.active ? "The Genesis weekend claim is paused. Nothing can be claimed until it resumes." : "The Genesis weekend claim has not opened. It opens only after its contract, allowlist and accounting are verified.";
+    if (phase === GENESIS_CLAIM_PHASES.GENESIS) return `Genesis holders on Avalanche C-Chain or The Grotto at the snapshot can claim one copy free until ${instant(target.claimEnd)}. The public mint is also open to anyone for ${avax(target.publicPriceWei)}.`;
+  }
   if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return "The free Genesis claim and the public mint open together. The verified schedule below is what the claim contract enforces.";
   if (phase === GENESIS_CLAIM_PHASES.GENESIS) return `Genesis holders can claim one copy for free. The public mint is also open now to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}.`;
   if (phase === GENESIS_CLAIM_PHASES.PUBLIC) return `The Genesis claim has closed. The public mint is open to anyone for ${avax(target.publicPriceWei)} until ${instant(target.publicSaleEnd)}. No Genesis token or voucher is needed.`;
@@ -147,7 +161,7 @@ function GenesisClaimLanding({ catalog }) {
   }, [catalog, target]);
   const phase = target ? genesisClaimPhase(target, nowSeconds()) : null;
   // The countdown is display only; once the verified target reports an open or closed phase it gives way.
-  const showCountdown = !phase || phase === GENESIS_CLAIM_PHASES.UPCOMING;
+  const showCountdown = !phase || (phase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(target));
   return (
     <section className="vc-claim-page" style={shell}>
       <header className="vc-claim-header">
@@ -206,6 +220,7 @@ export function ClaimPage() {
   const [eligibleTokenIds, setEligibleTokenIds] = useState([]);
   const [transactionHash, setTransactionHash] = useState("");
   const [ownershipBalance, setOwnershipBalance] = useState(null);
+  const [weekendProof, setWeekendProof] = useState(null);
 
   const account = wallet.account || "";
   const connected = Boolean(wallet.connected && account);
@@ -231,6 +246,7 @@ export function ClaimPage() {
       setTransactionHash("");
       setOwnershipBalance(null);
       setEligibleTokenIds([]);
+      setWeekendProof(null);
       setTarget(null);
       if (!edition) return;
       if (outsideGenesisWindow) {
@@ -271,6 +287,13 @@ export function ClaimPage() {
           error.code = "INVALID_RELEASE_BINDING";
           throw error;
         }
+        // The weekend claim is claimable only while the server-verified target is activated, unpaused and open.
+        if (isWeekendTarget(configuredTarget) && genesisClaimPhase(configuredTarget, nowSeconds()) !== GENESIS_CLAIM_PHASES.GENESIS) {
+          setTarget(configuredTarget);
+          setPhase(CLAIM_PHASES.CLAIM_UNAVAILABLE);
+          setMessage(phaseMessage(genesisClaimPhase(configuredTarget, nowSeconds()), configuredTarget));
+          return;
+        }
         const alreadyClaimed = await readGenesisClaimed(provider, configuredTarget, account);
         if (!live) return;
         if (alreadyClaimed) {
@@ -282,6 +305,20 @@ export function ClaimPage() {
         const result = await checkGenesisEligibility(account);
         if (!live) return;
         setTarget(configuredTarget);
+        if (isWeekendTarget(configuredTarget)) {
+          if (!result.eligible) {
+            setPhase(result.reason === "ALREADY_CLAIMED" ? CLAIM_PHASES.ALREADY_CLAIMED : CLAIM_PHASES.ACCESS_DENIED);
+            setMessage(result.reason === "ALREADY_CLAIMED"
+              ? "This wallet has already used its one Genesis-holder claim."
+              : "Not eligible. This wallet held no Genesis token on Avalanche C-Chain or The Grotto at the snapshot. Nothing was claimed.");
+            return;
+          }
+          const chains = (result.sources || []).map((source) => (source === "grotto" ? "The Grotto" : "Avalanche C-Chain")).join(" and ");
+          setWeekendProof(result.proof);
+          setPhase(CLAIM_PHASES.ELIGIBLE);
+          setMessage(`Genesis holding at the snapshot verified on ${chains}. This grants one free claim on Avalanche C-Chain.`);
+          return;
+        }
         setEligibleTokenIds(result.eligibleTokenIds || []);
         if (!result.eligible) {
           setPhase(CLAIM_PHASES.ACCESS_DENIED);
@@ -303,6 +340,35 @@ export function ClaimPage() {
   }, [account, binding, connected, edition, provider, wallet.chainId, outsideGenesisWindow, schedulePhase, schedule]);
 
   async function onClaimAction() {
+    if (isWeekendTarget(target)) {
+      if (phase !== CLAIM_PHASES.ELIGIBLE || !weekendProof) return;
+      // Re-read the verified target just before signing: the owner may have paused it since the page loaded.
+      try {
+        const latest = await fetchGenesisClaimConfig();
+        if (genesisClaimPhase(latest, nowSeconds()) !== GENESIS_CLAIM_PHASES.GENESIS) {
+          setPhase(CLAIM_PHASES.CLAIM_UNAVAILABLE);
+          setMessage(phaseMessage(genesisClaimPhase(latest, nowSeconds()), latest));
+          return;
+        }
+      } catch (error) {
+        setPhase(classifyError(error));
+        setMessage(error?.message || "The claim could not be re-checked before signing. Nothing was sent.");
+        return;
+      }
+      setPhase(CLAIM_PHASES.PENDING);
+      setMessage("Confirm the free claim in your wallet. The claim will not show as successful until the receipt and token ownership are verified.");
+      try {
+        const result = await executeWeekendClaim(provider, target, account, weekendProof);
+        setTransactionHash(result.transactionHash);
+        setOwnershipBalance(result.balance);
+        setPhase(CLAIM_PHASES.OWNED);
+        setMessage("Receipt confirmed and the target release token is owned by this wallet.");
+      } catch (error) {
+        setPhase(classifyError(error));
+        setMessage(error?.message || "The claim transaction did not complete.");
+      }
+      return;
+    }
     if (phase === CLAIM_PHASES.ELIGIBLE && !voucher) {
       setPhase(CLAIM_PHASES.CHECKING);
       setMessage("Requesting a signed claim authorization from the server.");
@@ -345,7 +411,9 @@ export function ClaimPage() {
 
   const artwork = artworkFor(edition, release);
   const actionDisabled = ![CLAIM_PHASES.ELIGIBLE, CLAIM_PHASES.AUTHORIZED].includes(phase);
-  const actionText = phase === CLAIM_PHASES.ELIGIBLE && !voucher
+  const actionText = phase === CLAIM_PHASES.ELIGIBLE && isWeekendTarget(target)
+    ? "CLAIM FREE"
+    : phase === CLAIM_PHASES.ELIGIBLE && !voucher
     ? "REQUEST CLAIM AUTHORIZATION"
     : phase === CLAIM_PHASES.AUTHORIZED
       ? "CLAIM FREE"
@@ -391,7 +459,7 @@ export function ClaimPage() {
           <p className="vc-claim-edition">{edition.title} · Token #{binding.tokenId || "—"}</p>
           {edition.description && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{edition.description}</p>}
 
-          {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && <GenesisCountdown />}
+          {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(schedule) && <GenesisCountdown />}
 
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">
@@ -424,7 +492,7 @@ export function ClaimPage() {
 
           <div className="vc-claim-supporting">
             <Eyebrow red>Supporting information</Eyebrow>
-            <InfoRow label="Genesis eligibility">{eligibleTokenIds.length ? `Verified token${eligibleTokenIds.length === 1 ? "" : "s"} ${eligibleTokenIds.join(", ")}` : "Not verified"}</InfoRow>
+            <InfoRow label="Genesis eligibility">{weekendProof ? "Verified at the snapshot" : eligibleTokenIds.length ? `Verified token${eligibleTokenIds.length === 1 ? "" : "s"} ${eligibleTokenIds.join(", ")}` : "Not verified"}</InfoRow>
             <InfoRow label="Claims per wallet">One · enforced by the destination claim contract</InfoRow>
             <InfoRow label="Provenance">Factory-created release binding required</InfoRow>
             <InfoRow label="Release contract" mono>{binding.valid ? binding.releaseContractAddress : "UNVERIFIED · CLOSED"}</InfoRow>
