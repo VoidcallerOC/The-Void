@@ -7,6 +7,7 @@ import { PLAN, RELEASE_ABI, SALE_ABI, compareDeployState, covers, runtimeMatches
 const CLAIM_ABI = [
   "function active() view returns (bool)", "function paused() view returns (bool)", "function claimStart() view returns (uint256)",
   "function claimEnd() view returns (uint256)", "function claimedSupply() view returns (uint256)", "function admin() view returns (address)",
+  "function activationDeadline() view returns (uint256)", "function CLAIM_DURATION() view returns (uint256)",
   "function merkleRoot() view returns (bytes32)", "function snapshotHash() view returns (bytes32)", "function eligibleWallets() view returns (uint256)",
   "function snapshotCChainBlock() view returns (uint256)", "function snapshotGrottoBlock() view returns (uint256)", "function baselineClaimedSupply() view returns (uint256)",
   "function releaseContract() view returns (address)", "function primarySale() view returns (address)", "function tokenId() view returns (uint256)",
@@ -115,7 +116,7 @@ async function issuerHolds(account) {
 }
 
 async function readClaimState(address) {
-  const names = ["active", "paused", "claimStart", "claimedSupply", "admin", "claimEnd", "merkleRoot", "snapshotHash", "eligibleWallets", "snapshotCChainBlock",
+  const names = ["active", "paused", "claimStart", "claimedSupply", "admin", "claimEnd", "activationDeadline", "CLAIM_DURATION", "merkleRoot", "snapshotHash", "eligibleWallets", "snapshotCChainBlock",
     "snapshotGrottoBlock", "baselineClaimedSupply", "releaseContract", "primarySale", "tokenId", "priorClaimOne", "priorClaimTwo", "priorClaimThree"];
   const values = await Promise.all(names.map((name) => call(address, claimIface, name)));
   return Object.fromEntries(names.map((name, i) => [name, typeof values[i] === "boolean" ? values[i] : String(values[i])]));
@@ -129,7 +130,7 @@ async function verifyDeployed(address) {
   const [start, end, price] = await Promise.all(["publicSaleStart", "publicSaleEnd", "publicPriceWei"].map((name) => call(address, claimIface, name)));
   if (start !== BigInt(sale[4]) || end !== BigInt(sale[5]) || price !== BigInt(sale[0])) problems.push(`sale immutables ${start}/${end}/${price} differ from sales(1) ${sale[4]}/${sale[5]}/${sale[0]}`);
   if (problems.length) { problems.forEach((problem) => log(problem, "bad")); stop("The deployed claim's configuration differs from the approved plan."); }
-  log(`Verified ${address}: reviewed runtime code; every immutable matches; inactive and paused; baseline 4; closes 1793595599.`, "ok");
+  log(`Verified ${address}: reviewed runtime code; every immutable matches; inactive and paused with no window yet; baseline 4; activation allowed until ${PLAN.activationDeadline}, then 24 hours.`, "ok");
 }
 
 async function supplyBalances() {
@@ -185,14 +186,17 @@ const CHECKS = {
   },
   async activate() {
     requireClaim();
-    if ($("activatePhrase").value.trim() !== "ACTIVATE WEEKEND CLAIM" || !$("activateAuthorized").checked) {
-      stop("Activation needs the separate owner authorization: tick the box and type ACTIVATE WEEKEND CLAIM.");
+    if ($("activatePhrase").value.trim() !== "ACTIVATE 24-HOUR CLAIM" || !$("activateAuthorized").checked) {
+      stop("Activation needs the separate owner authorization: tick the box and type ACTIVATE 24-HOUR CLAIM.");
     }
     const claimState = await readClaimState(state.claim);
     if (claimState.active) stop("The claim is already active.");
     if (!(await issuerHolds(state.claim))) stop("The weekend claim does not hold ISSUER_ROLE yet.");
     const block = await state.provider.getBlock("latest");
-    if (BigInt(block.timestamp) >= BigInt(PLAN.claimEnd)) stop("The weekend close has passed.");
+    if (BigInt(block.timestamp) > BigInt(PLAN.activationDeadline)) stop("The activation deadline has passed; this claim can no longer be opened.");
+    const saleEnd = BigInt(saleIface.decodeFunctionResult("sales", await state.provider.call({ to: PLAN.sale, data: saleIface.encodeFunctionData("sales", [1]) }))[5]);
+    if (saleEnd !== 0n && BigInt(block.timestamp) + BigInt(PLAN.claimDuration) > saleEnd) stop("A 24-hour window starting now would outlast the paid sale; activation would revert.");
+    log(`If mined now, the claim closes about ${new Date((block.timestamp + Number(PLAN.claimDuration)) * 1000).toISOString()} (24 hours after the activation block).`, "ok");
     const { minted, sold } = await supplyBalances();
     if (minted !== sold + BigInt(claimState.claimedSupply)) stop("Supply invariant broken: activation would revert.");
     const tx = { to: state.claim, data: claimIface.encodeFunctionData("activate") };
@@ -238,7 +242,8 @@ const VERIFY = {
   async activate() {
     const claimState = await readClaimState(state.claim);
     if (!claimState.active || claimState.paused || claimState.claimStart === "0") stop("Activation confirmed but the claim is not active.");
-    log(`Claim active since ${claimState.claimStart}; closes ${PLAN.claimEnd}.`, "ok");
+    if (BigInt(claimState.claimEnd) !== BigInt(claimState.claimStart) + BigInt(PLAN.claimDuration)) stop(`Activation confirmed but claimEnd ${claimState.claimEnd} is not claimStart + 24 hours.`);
+    log(`Claim active since ${claimState.claimStart}; closes at ${claimState.claimEnd} (${new Date(Number(claimState.claimEnd) * 1000).toISOString()}), set on-chain and final.`, "ok");
   },
 };
 

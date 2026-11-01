@@ -8,7 +8,10 @@ export const PLAN = Object.freeze({
   sale: "0xB4dAAe78a53c33f52C6EB573c4d6EFC7B86F3845",
   priorClaims: ["0x8512be04a4E54cd8551738165F9c05C3303187a0", "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "0xd70dBA7fF6419481d62D4689bDf271ad441766b8"],
   revokeTargets: ["0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "0xd70dBA7fF6419481d62D4689bDf271ad441766b8"],
-  claimEnd: "1793595599",
+  // Owner-proposed activation cutoff: 2026-11-04 04:59:59 UTC (Tue 2026-11-03 11:59:59 PM EST). activate() opens
+  // exactly claimDuration seconds from its own block; it cannot succeed after this timestamp.
+  activationDeadline: "1793768399",
+  claimDuration: "86400",
   baseline: "4",
   tokenId: "1",
 });
@@ -40,7 +43,8 @@ export function verifyManifest(ethers, manifest, artifact) {
   // Constructor arguments pinned to the reviewed plan.
   const args = manifest.constructorArgs || {};
   expect(same(args.releaseContract, PLAN.release) && same(args.primarySale, PLAN.sale), "Constructor release or sale differs from the plan.");
-  expect(String(args.tokenId) === PLAN.tokenId && String(args.claimEnd) === PLAN.claimEnd && String(args.baselineClaimedSupply) === PLAN.baseline, "Constructor token, close or baseline differs from the plan.");
+  expect(String(args.tokenId) === PLAN.tokenId && String(args.activationDeadline) === PLAN.activationDeadline && String(args.baselineClaimedSupply) === PLAN.baseline, "Constructor token, activation deadline or baseline differs from the plan.");
+  expect(!("claimEnd" in args), "The constructor arguments still carry a fixed close; the reviewed contract takes an activation deadline.");
   expect(same(args.admin, PLAN.signer), "Constructor admin is not the artist wallet.");
   expect(Array.isArray(args.priorClaims) && args.priorClaims.length === 3 && args.priorClaims.every((address, i) => same(address, PLAN.priorClaims[i])), "Constructor prior claims differ from the plan.");
   expect(args.merkleRoot === manifest.snapshot?.merkleRoot && args.snapshotHash === manifest.snapshot?.snapshotHash
@@ -50,7 +54,7 @@ export function verifyManifest(ethers, manifest, artifact) {
   try {
     const iface = new ethers.Interface(artifact.abi);
     const config = { ...args, tokenId: BigInt(args.tokenId), eligibleWallets: BigInt(args.eligibleWallets), snapshotCChainBlock: BigInt(args.snapshotCChainBlock),
-      snapshotGrottoBlock: BigInt(args.snapshotGrottoBlock), claimEnd: BigInt(args.claimEnd), baselineClaimedSupply: BigInt(args.baselineClaimedSupply) };
+      snapshotGrottoBlock: BigInt(args.snapshotGrottoBlock), activationDeadline: BigInt(args.activationDeadline), baselineClaimedSupply: BigInt(args.baselineClaimedSupply) };
     const data = `${artifact.bytecode}${ethers.AbiCoder.defaultAbiCoder().encode(iface.deploy.inputs, [config]).slice(2)}`;
     expect(data === manifest.deploy?.data, "The deployment data does not rebuild from the artifact and arguments.");
     expect(ethers.keccak256(data) === manifest.deploy?.dataKeccak256, "The deployment data hash differs from the manifest.");

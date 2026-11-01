@@ -40,13 +40,15 @@ interface WeekendForkPrior {
     function claimedSupply() external view returns (uint256);
 }
 
-/// @notice Fork-backed verification against the real C-Chain state at PINNED_BLOCK (after the Forgive & Forget
-/// sale was extended to 2026-11-10 and re-saved from Artist Studio). All mutations happen on the local fork.
+/// @notice Fork-backed verification against the real C-Chain state at PINNED_BLOCK (2026-11-01, after the
+/// Forgive & Forget sale was extended to 2026-11-10 and the fixed weekend close was replaced by a 24-hour window
+/// opened at activation). All mutations happen on the local fork.
 contract GenesisWeekendClaimMainnetForkTest {
     VmWeekendFork internal constant vm = VmWeekendFork(address(uint160(uint256(keccak256("hevm cheat code")))));
-    uint256 internal constant PINNED_BLOCK = 99_062_627;
+    uint256 internal constant PINNED_BLOCK = 99_123_400;
     uint256 internal constant TOKEN_ID = 1;
-    uint256 internal constant CLOSE = 1_793_595_599; // 2026-11-02 04:59:59 UTC
+    uint256 internal constant SALE_END = 1_794_315_540; // 2026-11-10 12:59:00 UTC
+    uint256 internal deadline;
     address internal constant RELEASE = 0xF0C091A159DE16cF0F306b2B61d37685EC5A830e;
     address internal constant SALE = 0xB4dAAe78a53c33f52C6EB573c4d6EFC7B86F3845;
     address internal constant ARTIST = 0x284C09a7CC187E096cbbdc88d99DEFE6df32180a;
@@ -79,10 +81,11 @@ contract GenesisWeekendClaimMainnetForkTest {
         require(WeekendForkPrior(PRIOR_RECOVERY).claimedSupply() == 4, "unexpected historical claims");
         require(WeekendForkPrior(PRIOR_ORIGINAL).hasClaimed(PRIOR_CLAIMANT), "claimant not recorded");
 
+        deadline = block.timestamp + 2 days;
         claim = new GenesisWeekendClaim(GenesisWeekendClaim.Config({
             releaseContract: RELEASE, primarySale: SALE, tokenId: TOKEN_ID, merkleRoot: ROOT, eligibleWallets: 4,
             snapshotCChainBlock: PINNED_BLOCK - 1, snapshotGrottoBlock: 151_791, snapshotHash: keccak256("fork-fixture"),
-            claimEnd: CLOSE, baselineClaimedSupply: 4, admin: ARTIST,
+            activationDeadline: deadline, baselineClaimedSupply: 4, admin: ARTIST,
             priorClaims: [PRIOR_FAILED, PRIOR_ORIGINAL, PRIOR_RECOVERY]
         }));
     }
@@ -108,7 +111,8 @@ contract GenesisWeekendClaimMainnetForkTest {
 
     function testDeploysPausedWithLiveBaselineAndSaleMirror() public view {
         require(!claim.active() && claim.paused() && claim.claimedSupply() == 4, "deploy state");
-        require(claim.publicSaleEnd() == 1_794_315_540 && claim.publicPriceWei() == 0.25 ether, "sale mirror");
+        require(claim.publicSaleEnd() == SALE_END && claim.publicPriceWei() == 0.25 ether, "sale mirror");
+        require(claim.claimStart() == 0 && claim.claimEnd() == 0 && claim.activationDeadline() == deadline, "no window before activation");
         _invariant();
     }
 
@@ -152,9 +156,30 @@ contract GenesisWeekendClaimMainnetForkTest {
         _invariant();
     }
 
+    function testActivationOpensA24HourWindowOnTheRealSale() public {
+        uint256 activatedAt = block.timestamp;
+        _grantAndActivate();
+        require(claim.claimStart() == activatedAt && claim.claimEnd() == activatedAt + 86_400, "24-hour window");
+        require(claim.claimEnd() <= SALE_END, "claim closes before the paid sale");
+        vm.warp(activatedAt + 86_399);
+        vm.prank(GROTTO_ONLY);
+        claim.claim(_proof(0xa8f81af244e056c3f7a725b2e5d599058523fda434192b61b46d9eb82569c350, 0x15f2821db995c722d97bf66490b9277601d9a27179b35173225044b4adb7c1f2));
+        _invariant();
+    }
+
+    function testActivationAfterTheDeadlineIsRefused() public {
+        bytes32 issuer = release.ISSUER_ROLE();
+        vm.prank(ARTIST);
+        release.grantRole(issuer, address(claim));
+        vm.warp(deadline + 1);
+        vm.prank(ARTIST);
+        vm.expectPartialRevert(GenesisWeekendClaim.ActivationWindowClosed.selector);
+        claim.activate();
+    }
+
     function testClosesAtDeadlineAndRoleCanBeRevoked() public {
         _grantAndActivate();
-        vm.warp(CLOSE);
+        vm.warp(claim.claimEnd());
         vm.prank(GROTTO_ONLY);
         vm.expectPartialRevert(GenesisWeekendClaim.ClaimWindowClosed.selector);
         claim.claim(_proof(0xa8f81af244e056c3f7a725b2e5d599058523fda434192b61b46d9eb82569c350, 0x15f2821db995c722d97bf66490b9277601d9a27179b35173225044b4adb7c1f2));

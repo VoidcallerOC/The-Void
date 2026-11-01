@@ -20,6 +20,7 @@ function claimNetworkLabel(chainId) {
 import { GENESIS_CLAIM_PHASES, checkGenesisEligibility, executeGenesisClaim, executeWeekendClaim, fetchGenesisClaimConfig, genesisClaimPhase, genesisSaleOpen, isWeekendTarget, readGenesisClaimed, requestGenesisVoucher } from "../lib/genesis-claim.js";
 import { formatSaleInstant } from "../lib/sale-editor.js";
 import { GenesisCountdown } from "./GenesisCountdown.jsx";
+import { WeekendClaimCountdown } from "./WeekendClaimCountdown.jsx";
 
 const CLAIM_PHASES = Object.freeze({
   DISCONNECTED: "disconnected",
@@ -99,6 +100,28 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+const WEEKEND_INACTIVE_REFRESH_MS = 60_000;
+// Keep re-reading a little past the deadline, so a page open across a last-moment activation still picks it up.
+const WEEKEND_DEADLINE_GRACE_SECONDS = 300;
+
+/**
+ * While a verified weekend claim is not yet activated (and activation is still allowed), re-read the
+ * server-verified target every minute, so a page opened before activation shows the opened claim and its
+ * on-chain countdown without a reload. Stops once the claim is active or can no longer be activated.
+ */
+function useInactiveWeekendRefresh(target, onTarget) {
+  const waiting = isWeekendTarget(target) && target.active !== true && nowSeconds() <= Number(target.activationDeadline ?? 0) + WEEKEND_DEADLINE_GRACE_SECONDS;
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setInterval(() => {
+      fetchGenesisClaimConfig().then(onTarget).catch(() => {});
+    }, WEEKEND_INACTIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+    // onTarget is a state setter wrapper; only the waiting state should restart the timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting]);
+}
+
 /**
  * The schedule as the server-verified target states it; the contracts enforce the same windows.
  * The paid mint opens together with the free claim (publicSaleStart == claimStart) and outlives it.
@@ -108,7 +131,9 @@ function ClaimSchedule({ target }) {
   if (isWeekendTarget(target)) {
     return (
       <>
-        <InfoRow label="Genesis weekend claim · free">{target.active ? instant(target.claimStart) : "Opens when activated after verification"} → {instant(target.claimEnd)}</InfoRow>
+        <InfoRow label="Genesis claim · free · 24 hours">{target.active
+          ? <>{instant(target.claimStart)} → {instant(target.claimEnd)}</>
+          : `Not open yet. Opens when activated after verification, for 24 hours from activation. Activation is allowed until ${instant(target.activationDeadline)}.`}</InfoRow>
         <InfoRow label="Eligibility">Held Genesis token 0, 1, 2 or 3 on Avalanche C-Chain, or wrapped Genesis on The Grotto, at the snapshot (C-Chain block {target.snapshotCChainBlock}, Grotto block {target.snapshotGrottoBlock}). One free claim per wallet; wallets that already claimed a Genesis copy are excluded. Grotto holders claim on Avalanche C-Chain with the same wallet, without bridging back. Your Genesis tokens are never moved, burned or locked.</InfoRow>
         <InfoRow label={`Public mint · ${avax(target.publicPriceWei)}`}>{instant(target.publicSaleStart)} → {instant(target.publicSaleEnd)}</InfoRow>
         <InfoRow label="Supply">Open edition · uncapped</InfoRow>
@@ -127,7 +152,7 @@ function ClaimSchedule({ target }) {
 
 function phaseMessage(phase, target) {
   if (isWeekendTarget(target)) {
-    if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return target.active ? "The Genesis weekend claim is paused. Nothing can be claimed until it resumes." : "The Genesis weekend claim has not opened. It opens only after its contract, allowlist and accounting are verified.";
+    if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return target.active ? `The Genesis claim is paused. Nothing can be claimed until it resumes; pausing does not extend the window, which still closes at ${instant(target.claimEnd)}.` : "The Genesis claim has not opened. It opens only after its contract, allowlist and accounting are verified, and then stays open for 24 hours.";
     if (phase === GENESIS_CLAIM_PHASES.GENESIS) return `Genesis holders on Avalanche C-Chain or The Grotto at the snapshot can claim one copy free until ${instant(target.claimEnd)}. The public mint is also open to anyone for ${avax(target.publicPriceWei)}.`;
   }
   if (phase === GENESIS_CLAIM_PHASES.UPCOMING) return "The free Genesis claim and the public mint open together. The verified schedule below is what the claim contract enforces.";
@@ -140,6 +165,8 @@ function phaseMessage(phase, target) {
 /** /claim without an edition: the server-verified target, or a plain closed notice. Never a historical address. */
 function GenesisClaimLanding({ catalog }) {
   const [state, setState] = useState({ status: "loading" });
+  // Bumped when an activated claim's on-chain close is reached, so the phase below is re-evaluated.
+  const [, setClockTick] = useState(0);
   useEffect(() => {
     let live = true;
     fetchGenesisClaimConfig()
@@ -148,6 +175,7 @@ function GenesisClaimLanding({ catalog }) {
     return () => { live = false; };
   }, []);
   const target = state.target;
+  useInactiveWeekendRefresh(target, (next) => setState({ status: "ready", target: next }));
   const match = useMemo(() => {
     if (!target) return null;
     for (const record of marketplaceCatalog([catalog])) {
@@ -182,6 +210,7 @@ function GenesisClaimLanding({ catalog }) {
         {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
         {state.status === "ready" && (
           <>
+            {isWeekendTarget(target) && target.active === true && <WeekendClaimCountdown claimEnd={target.claimEnd} onClosed={() => setClockTick((tick) => tick + 1)} />}
             <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phaseMessage(phase, target)}</p>
             <div className="vc-claim-action">
               {match ? <Link to={`/claim/${match.id}`} style={primaryBtn}>OPEN THE RELEASE CLAIM</Link> : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
@@ -227,11 +256,15 @@ export function ClaimPage() {
   const provider = wallet.getProvider?.();
   // The schedule is public: it is read without a wallet so every visitor sees the current phase.
   const [schedule, setSchedule] = useState(null);
+  // Bumped when an activated claim's on-chain close is reached, so the schedule phase (and the claim state
+  // that depends on it) is re-evaluated and claiming stops.
+  const [, setClockTick] = useState(0);
   useEffect(() => {
     let live = true;
     fetchGenesisClaimConfig().then((loaded) => { if (live) setSchedule(loaded); }).catch(() => { if (live) setSchedule(null); });
     return () => { live = false; };
   }, []);
+  useInactiveWeekendRefresh(schedule, setSchedule);
   const schedulePhase = schedule ? genesisClaimPhase(schedule, nowSeconds()) : null;
   const scheduleMatches = Boolean(schedule && binding.valid && sameAddress(schedule.releaseContract, binding.releaseContractAddress) && String(schedule.tokenId) === String(binding.tokenId));
   const outsideGenesisWindow = scheduleMatches && schedulePhase !== GENESIS_CLAIM_PHASES.GENESIS;
@@ -460,6 +493,7 @@ export function ClaimPage() {
           {edition.description && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{edition.description}</p>}
 
           {scheduleMatches && schedulePhase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(schedule) && <GenesisCountdown />}
+          {scheduleMatches && isWeekendTarget(schedule) && schedule.active === true && <WeekendClaimCountdown claimEnd={schedule.claimEnd} onClosed={() => setClockTick((tick) => tick + 1)} />}
 
           <div className="vc-claim-status" aria-live="polite">
             <div className="vc-claim-status-head">

@@ -41,17 +41,23 @@ interface IPriorGenesisClaim {
 /// @notice One free edition of `tokenId` per wallet on a fixed snapshot allowlist of Genesis holders on
 /// Avalanche C-Chain or The Grotto, excluding every wallet that already claimed through an earlier
 /// Genesis claim contract. Eligibility is a Merkle root fixed at deployment: no signer, no voucher.
-/// The contract deploys paused and inactive. Only the admin can activate it, once, before `claimEnd`.
-/// `claimEnd` is immutable: the window cannot be extended. Claims mint through the release's
-/// ISSUER_ROLE, so the role must be granted to this contract and should be revoked after `claimEnd`.
+/// The contract deploys paused and inactive. Only the admin can activate it, once, no later than the
+/// immutable `activationDeadline`. Activation opens a window of exactly `CLAIM_DURATION` (24 hours):
+/// `claimStart` is the activation block's timestamp and `claimEnd` is `claimStart + CLAIM_DURATION`.
+/// Neither can be changed, extended or reset afterwards; pausing does not stop the clock. Claims mint
+/// through the release's ISSUER_ROLE, so the role must be granted to this contract and should be revoked
+/// after `claimEnd` (or after `activationDeadline` if it was never activated).
 contract GenesisWeekendClaim {
     uint256 public constant GENESIS_CHAIN_ID = 43114;
     uint256 public constant GROTTO_CHAIN_ID = 36463;
     address public constant GENESIS_CONTRACT = 0xD1B4367dd9f235f9ee61878019d66E31511E98eE;
     address public constant GROTTO_WRAPPED_COLLECTION = 0x0d6Fa9968aa57295217737379c44eBbc1130B1Fa;
     uint256 public constant CLAIM_QUANTITY = 1;
-    /// @notice The owner-approved close: 2026-11-02 04:59:59 UTC (Sunday 2026-11-01 11:59:59 PM EST).
-    uint256 public constant WEEKEND_CLAIM_END = 1_793_595_599;
+    /// @notice The claim window opened by `activate()`: exactly 24 hours.
+    uint256 public constant CLAIM_DURATION = 86_400;
+    /// @notice The latest allowed `activationDeadline`, counted from deployment, so a stale contract can never
+    /// be opened long after its snapshot was reviewed.
+    uint256 public constant MAX_ACTIVATION_DELAY = 7 days;
     uint256 public constant PRIOR_CLAIM_COUNT = 3;
     bytes32 public constant CAMPAIGN = keccak256("the-void:genesis-weekend-claim:v1");
     bytes32 public constant ELIGIBILITY_RULE = keccak256(
@@ -71,7 +77,7 @@ contract GenesisWeekendClaim {
         uint256 snapshotCChainBlock;
         uint256 snapshotGrottoBlock;
         bytes32 snapshotHash;
-        uint256 claimEnd;
+        uint256 activationDeadline;
         uint256 baselineClaimedSupply;
         address admin;
         address[3] priorClaims;
@@ -85,7 +91,8 @@ contract GenesisWeekendClaim {
     uint256 public immutable snapshotCChainBlock;
     uint256 public immutable snapshotGrottoBlock;
     bytes32 public immutable snapshotHash;
-    uint256 public immutable claimEnd;
+    /// @notice The last timestamp at which `activate()` can succeed.
+    uint256 public immutable activationDeadline;
     uint256 public immutable baselineClaimedSupply;
     // The live paid sale's schedule and price at deployment, for Artist Studio's claim guard.
     uint256 public immutable publicSaleStart;
@@ -98,7 +105,9 @@ contract GenesisWeekendClaim {
     address public admin;
     bool public active;
     bool public paused = true;
+    /// @notice Both 0 until activation; then set once, from the activation block's timestamp.
     uint256 public claimStart;
+    uint256 public claimEnd;
     uint256 public claimedSupply;
     mapping(address => bool) public hasClaimed;
 
@@ -111,6 +120,8 @@ contract GenesisWeekendClaim {
     error NotActive();
     error ClaimPaused();
     error ClaimWindowClosed(uint256 claimEnd, uint256 currentTime);
+    error ActivationWindowClosed(uint256 activationDeadline, uint256 currentTime);
+    error ClaimWouldOutlastSale(uint256 claimEnd, uint256 saleEnd);
     error AlreadyClaimed(address claimant);
     error PriorClaimRecorded(address claimant, address priorClaim);
     error NotEligible(address claimant);
@@ -141,7 +152,8 @@ contract GenesisWeekendClaim {
             || cfg.admin == address(0) || cfg.releaseContract.code.length == 0 || cfg.primarySale.code.length == 0
             || cfg.releaseContract == GENESIS_CONTRACT || cfg.merkleRoot == bytes32(0) || cfg.eligibleWallets == 0
             || cfg.snapshotCChainBlock == 0 || cfg.snapshotCChainBlock >= block.number || cfg.snapshotGrottoBlock == 0
-            || cfg.snapshotHash == bytes32(0) || cfg.claimEnd != WEEKEND_CLAIM_END || cfg.claimEnd <= block.timestamp) revert InvalidConfiguration();
+            || cfg.snapshotHash == bytes32(0) || cfg.activationDeadline <= block.timestamp
+            || cfg.activationDeadline > block.timestamp + MAX_ACTIVATION_DELAY) revert InvalidConfiguration();
         if (IWeekendClaimSale(cfg.primarySale).releases() != cfg.releaseContract) revert InvalidConfiguration();
         IWeekendClaimRelease.EditionData memory edition = IWeekendClaimRelease(cfg.releaseContract).edition(cfg.tokenId);
         if (!edition.exists) revert InvalidConfiguration();
@@ -161,6 +173,10 @@ contract GenesisWeekendClaim {
         if (!configured || cfg.baselineClaimedSupply != historical || edition.mintedSupply != sold + historical) {
             revert InvalidBaseline(edition.mintedSupply, sold, cfg.baselineClaimedSupply);
         }
+        // The latest possible window must close no later than the paid sale it runs alongside.
+        if (end != 0 && cfg.activationDeadline + CLAIM_DURATION > end) {
+            revert ClaimWouldOutlastSale(cfg.activationDeadline + CLAIM_DURATION, end);
+        }
 
         releaseContract = cfg.releaseContract;
         primarySale = cfg.primarySale;
@@ -170,7 +186,7 @@ contract GenesisWeekendClaim {
         snapshotCChainBlock = cfg.snapshotCChainBlock;
         snapshotGrottoBlock = cfg.snapshotGrottoBlock;
         snapshotHash = cfg.snapshotHash;
-        claimEnd = cfg.claimEnd;
+        activationDeadline = cfg.activationDeadline;
         baselineClaimedSupply = cfg.baselineClaimedSupply;
         publicSaleStart = start;
         publicSaleEnd = end;
@@ -182,16 +198,21 @@ contract GenesisWeekendClaim {
         claimedSupply = cfg.baselineClaimedSupply;
     }
 
-    /// @notice Opens the claim. Callable once, by the admin, before `claimEnd`, and only while the
-    /// edition's supply accounting balances.
+    /// @notice Opens the claim for exactly `CLAIM_DURATION` from now. Callable once, by the admin, no later
+    /// than `activationDeadline`, only while the edition's supply accounting balances and only if the window
+    /// closes no later than the live paid sale.
     function activate() external onlyAdmin {
         if (active) revert AlreadyActive();
-        if (block.timestamp >= claimEnd) revert ClaimWindowClosed(claimEnd, block.timestamp);
+        if (block.timestamp > activationDeadline) revert ActivationWindowClosed(activationDeadline, block.timestamp);
+        uint256 end = block.timestamp + CLAIM_DURATION;
+        (,,,,, uint64 saleEnd,,) = IWeekendClaimSale(primarySale).sales(tokenId);
+        if (saleEnd != 0 && end > saleEnd) revert ClaimWouldOutlastSale(end, saleEnd);
         _assertSupplyAccounting();
         active = true;
         paused = false;
         claimStart = block.timestamp;
-        emit Activated(msg.sender, block.timestamp, claimEnd);
+        claimEnd = end;
+        emit Activated(msg.sender, block.timestamp, end);
     }
 
     function pause() external onlyAdmin {
