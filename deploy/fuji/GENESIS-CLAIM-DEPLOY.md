@@ -1,7 +1,7 @@
 # Fuji Genesis claim deployment in Rabby (step 4)
 
 **Status: machinery built and rehearsed on a local fork of Fuji; NO plan exists yet and nothing is
-authorized or sent.** This is step 4 of the Fuji Genesis plan in `FORGIVE-FORGET-GENESIS-CLAIM.md` §4a.
+authorized or sent.** This is step 4 of the Fuji Genesis plan in `docs/claims/FORGIVE-FORGET-GENESIS-CLAIM.md` §4a.
 Fuji test AVAX only (chain 43113). Mainnet is unaffected: no mainnet plan, nonce or address is involved.
 
 ## What it does

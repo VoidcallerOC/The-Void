@@ -1,6 +1,6 @@
 # Album / Single Redeploy Package and Acceptance Matrix — 2026-10-09
 
-Builds on [`RELEASE-ARCHITECTURE-RECOVERY.md`](./RELEASE-ARCHITECTURE-RECOVERY.md). Evidence rules: [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md).
+Builds on [`RELEASE-ARCHITECTURE-RECOVERY.md`](./RELEASE-ARCHITECTURE-RECOVERY.md). Evidence rules: [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md).
 **Update 2026-10-10:** the redeploy in §3 **has been broadcast** (owner-authorized run [38054831224](https://github.com/VoidcallerOC/The-Void/actions/runs/38054831224); record `deployments/release-per-contract-fuji-0x3e4E0d9187f6fD11bD6d792a7088D0c2dE8E3aC8.json`). See §6 for the independent re-verification. The album paths (B, C) are still unproven on-chain. Every further on-chain step needs the owner's explicit authorization.
 
 ## 1. Why a redeploy is needed
@@ -55,7 +55,7 @@ The signer is the GitHub Actions secret key. Your authorization is the workflow 
 
 ## 4. End-to-end acceptance matrix
 
-Status for every row is **NOT STARTED** unless noted. A row passes only with the stated evidence. Tier numbers are from [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md). Mocked or simulated runs do not count.
+Status for every row is **NOT STARTED** unless noted. A row passes only with the stated evidence. Tier numbers are from [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md). Mocked or simulated runs do not count.
 
 ### Shared infrastructure
 
@@ -139,7 +139,7 @@ Read-only. `node scripts/fuji-release-capability-probe.mjs` (tier 2, public Fuji
 | Production API `/api/health/ready` | `ok: true`; the indexer covers both factories, both marketplaces, both new clones and their sales. Lag is 15 blocks. |
 | Vercel production | `dpl_994HePxZcJ3ZQiYvT4RBWfEeyRGu` is READY on `fc83364` (main HEAD). |
 
-> **Correction 2026-10-11:** the statement below that Path A was not re-run on the new pair is contradicted by tier-1 receipts mined 2026-10-10 18:20Z–20:04Z on clone `0x4b27…9bB0`. See [`SYSTEM-CHAIN-CERTIFICATION.md`](./SYSTEM-CHAIN-CERTIFICATION.md) §2–§3.
+> **Correction 2026-10-11:** the statement below that Path A was not re-run on the new pair is contradicted by tier-1 receipts mined 2026-10-10 18:20Z–20:04Z on clone `0x4b27…9bB0`. See [`SYSTEM-CHAIN-CERTIFICATION.md`](../certification/SYSTEM-CHAIN-CERTIFICATION.md) §2–§3.
 
 **What this certifies:** contract capability and wiring (S1–S3).
 **What it does not certify:** any album workflow. Paths B and C are **NOT STARTED** on-chain. No album has been created on any clone. Path A has not been re-run end to end on the new pair.

@@ -1,7 +1,7 @@
 # LegacyCollectionMarketplace — deployment, security gates, rollback, acceptance
 
 Status: NOT DEPLOYED. Nothing here has been broadcast. Every step below needs explicit owner authorization.
-Design record: `docs/adr/0001-genesis-legacy-collection-marketplace.md`. Root cause: `GENESIS-RESALE-ROOT-CAUSE.md`.
+Design record: `docs/adr/0001-genesis-legacy-collection-marketplace.md`. Root cause: `docs/claims/GENESIS-RESALE-ROOT-CAUSE.md`.
 
 ## What exists today (verified)
 - Contract `contracts/LegacyCollectionMarketplace.sol`; 18 unit tests + 4 mainnet-fork tests (real Genesis, real operator filter).

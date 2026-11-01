@@ -2,8 +2,8 @@
 
 **Purpose.** The platform is one chain of dependencies. A change to one link does not certify the chain. This ledger records, link by link, what has been proven end to end on Fuji 43113 and what has not.
 
-**Evidence rules:** [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md). Tier 1 means receipts and logs. Tier 2 means contract state. Tier 5 means API and indexer records. No mocked, simulated or unit-test result counts toward a link.
-**Network:** Avalanche **Fuji only**. Nothing here is evidence for C-Chain. C-Chain remains **NO-GO** ([`LAUNCH-GATE.md`](./LAUNCH-GATE.md)).
+**Evidence rules:** [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md). Tier 1 means receipts and logs. Tier 2 means contract state. Tier 5 means API and indexer records. No mocked, simulated or unit-test result counts toward a link.
+**Network:** Avalanche **Fuji only**. Nothing here is evidence for C-Chain. C-Chain remains **NO-GO** ([`LAUNCH-GATE.md`](../../LAUNCH-GATE.md)).
 **Mode:** read-only. No transaction was signed or sent. No configuration was changed.
 
 ---
@@ -52,7 +52,7 @@ Current state, Fuji block 59288058: `balanceOf(artist) = 1`, `balanceOf(collecto
 
 ## 3. Record conflict (correction)
 
-[`ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md`](./ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md) §6 is dated 2026-10-10T22:50Z. It says *"Path A has not been re-run end to end on the new pair."*
+[`ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md`](../contracts/ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md) §6 is dated 2026-10-10T22:50Z. It says *"Path A has not been re-run end to end on the new pair."*
 
 That statement is **CONFLICT**: the tier-1 receipts in §2 show A1, A3, A4, A7 and A8 mined between 18:20Z and 20:04Z the same day, before the re-verification. The higher tier wins. That doc now carries a pointer to this correction.
 
@@ -83,7 +83,7 @@ The §6 findings on capability and wiring (S1–S3) stand. So does "Paths B and 
 
 | Claim | Status | Evidence |
 |---|---|---|
-| D3 lifecycle guard in V5 source (`createAlbum` refused after a standalone edition) | **PARTIAL** (PR pending review, not merged) | `contracts/VoidRelease1155V5.sol`; [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4a. V5 changed after the source audit, so a delta review is required before broadcast. |
+| D3 lifecycle guard in V5 source (`createAlbum` refused after a standalone edition) | **PARTIAL** (PR pending review, not merged) | `contracts/VoidRelease1155V5.sol`; [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](../contracts/RELEASE-CERTIFICATION-TARGET-DECISION.md) §4a. V5 changed after the source audit, so a delta review is required before broadcast. |
 | Atomic provenance anchoring exists in source | **VERIFIED** (source only) | `contracts/VoidRelease1155V5.sol`, `config/release-network.js` (`PROVENANCE_AT_CREATION_RELEASE_VERSION = 3`) |
 | Foundry/unit tests pass | Not counted | Tests are not chain evidence (see evidence rules) and were not re-run for this entry. |
 | V3/V5 deployed on Fuji | **NOT STARTED** | No V3/V5 address in `config/fuji-release-per-contract-v2.json`, `config/` or `deployments/`. The active factory is `VoidReleaseFactoryV2` (`releaseVersion: 2`). This is a repository record. It does not prove that no undeclared V3 deployment exists on chain. |
@@ -105,12 +105,12 @@ Ordered by severity. P0 means it blocks any claim that the chain is certified.
 | # | Pri | Item | Owner | Status |
 |---|---|---|---|---|
 | 1 | P0 | **A6 / L5 never run on a factory clone.** An authenticated owner must get a grant and stream. A non-owner must get 403 with no grant row. Legacy shared contracts: PARTIAL ([`L5-PROTECTED-MEDIA-EVIDENCE.md`](./L5-PROTECTED-MEDIA-EVIDENCE.md)). | Operator + Claude (evidence) | NOT STARTED |
-| 2 | P0 | **Protected masters are publicly reachable.** `refs/pull/{1,2,3,5,6,7}/head` still contain 10 full-length MP3s (36.1 MB) in this public repo ([`ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md`](./ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md) §5). Gating cannot be certified while masters are public elsewhere. **Owner decision (2026-10-11): the repository will be made private after mainnet launch; this is not a pre-launch blocker, and no purge or history rewrite is planned.** | Owner | NOT STARTED (privatization follows launch) |
+| 2 | P0 | **Protected masters are publicly reachable.** `refs/pull/{1,2,3,5,6,7}/head` still contain 10 full-length MP3s (36.1 MB) in this public repo ([`ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md`](../contracts/ALBUM-SINGLE-REDEPLOY-AND-ACCEPTANCE.md) §5). Gating cannot be certified while masters are public elsewhere. **Owner decision (2026-10-11): the repository will be made private after mainnet launch; this is not a pre-launch blocker, and no purge or history rewrite is planned.** | Owner | NOT STARTED (privatization follows launch) |
 | 3 | P1 | A5: ownership in the API for the current holder | Claude, with an authenticated read | UNVERIFIED |
 | 4 | P1 | A7 is a self-resale. It needs a third wallet (≠ artist, ≠ first collector) to buy on V3. | Operator | PARTIAL |
-| 5 | P1 | **D1 is still undecided.** The API labels this fixture `releaseType: "SINGLE"`, but on-chain it is a standalone edition, not an album track with `single = true`. The code has **three** meanings (standalone S1, album single S2, linked S3); none is shown in the public UI. Recommendation: keep all three with distinct labels ([`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §4). | Owner decision | OPEN |
-| 6 | P1 | **Which contracts to certify albums on.** V2/V4 is deployed. V3/V5 (with provenance at creation) is on `main` but **not deployed and not integrated live** (§4b). Certifying both doubles the work. If V3/V5 is chosen, deployment comes first. Read-only preflight recommends **deploy V3/V5 first, then certify**. Activation is gated on fixing Studio release creation for in-flight V2 provisioning requests ([`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §3 7a, §5). | Owner decision | OPEN |
-| 7 | P2 | Paths B (album) and C (single). No `albumCreated() = true` on any clone of the V2/V4 factory as of block 59288557. Rows B1–B11, C1–C2 are tracked separately from deployment in [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) §6. | After items 5 and 6 | NOT STARTED |
+| 5 | P1 | **D1 is still undecided.** The API labels this fixture `releaseType: "SINGLE"`, but on-chain it is a standalone edition, not an album track with `single = true`. The code has **three** meanings (standalone S1, album single S2, linked S3); none is shown in the public UI. Recommendation: keep all three with distinct labels ([`RELEASE-CERTIFICATION-TARGET-DECISION.md`](../contracts/RELEASE-CERTIFICATION-TARGET-DECISION.md) §4). | Owner decision | OPEN |
+| 6 | P1 | **Which contracts to certify albums on.** V2/V4 is deployed. V3/V5 (with provenance at creation) is on `main` but **not deployed and not integrated live** (§4b). Certifying both doubles the work. If V3/V5 is chosen, deployment comes first. Read-only preflight recommends **deploy V3/V5 first, then certify**. Activation is gated on fixing Studio release creation for in-flight V2 provisioning requests ([`RELEASE-CERTIFICATION-TARGET-DECISION.md`](../contracts/RELEASE-CERTIFICATION-TARGET-DECISION.md) §3 7a, §5). | Owner decision | OPEN |
+| 7 | P2 | Paths B (album) and C (single). No `albumCreated() = true` on any clone of the V2/V4 factory as of block 59288557. Rows B1–B11, C1–C2 are tracked separately from deployment in [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](../contracts/RELEASE-CERTIFICATION-TARGET-DECISION.md) §6. | After items 5 and 6 | NOT STARTED |
 | 8 | P2 | Indexer health reports `database_failures: 137` (cumulative counter, cause unknown). `last_error` is null. | Claude: read the Render logs | UNVERIFIED |
 
 ---

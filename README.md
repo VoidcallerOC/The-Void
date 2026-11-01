@@ -228,8 +228,12 @@ Important source locations include:
 | `render.yaml` | Render service definitions and deployment configuration |
 | `vercel.json` | Vercel frontend rewrites, headers, and cron configuration |
 | `LAUNCH-GATE.md` | Verified scope, launch prerequisites, and recovery runbooks |
+| `CHAIN-AUTHORITY.md` | Evidence-tier rule for resolving conflicting evidence |
+| [`docs/README.md`](docs/README.md) | Documentation index: runbooks, contract records, launch history, audits, archive |
 
 ## Documentation Boundaries
+
+Historical reports, audits, contract decision records and launch reports live under `docs/`; start at the [documentation index](docs/README.md).
 
 This README is synchronized to the repository implementation, but live deployment state can change independently. A deployed contract is not automatically certified; a rendered Studio flow is not the same as an authenticated successful publication; configured Pinata code is not proof of a valid production credential; and marketplace tables are not proof of a live secondary market. Current operational evidence and the launch gate must be reviewed before making those claims.
 

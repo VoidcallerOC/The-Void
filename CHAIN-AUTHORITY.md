@@ -36,4 +36,4 @@ When evidence conflicts, prioritize:
 node scripts/fuji-chain-authority-probe.mjs
 ```
 
-Live results are written under `/tmp` or stdout. The latest applied audit is recorded in `CHAIN-AUTHORITY-FUJI-VERIFICATION.md`.
+Live results are written under `/tmp` or stdout. The latest applied audit is recorded in `docs/certification/CHAIN-AUTHORITY-FUJI-VERIFICATION.md`.

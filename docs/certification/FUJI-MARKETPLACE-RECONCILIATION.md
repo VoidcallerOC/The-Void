@@ -1,7 +1,7 @@
 # Fuji Marketplace Reconciliation and Canonical V3 Authority Audit — 2026-10-09
 
 **Mode:** read-only. No transaction was broadcast or signed. No production configuration, environment variable, database row or cron state was changed. The cron `crn-dat953e0tbcc73acrepg` stayed suspended throughout.
-**Evidence rules:** [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md). Tier 1 is receipts and logs, tier 2 is contract state and code, tier 4 is manifests, and tiers 5–7 are indexer, reports and recollection.
+**Evidence rules:** [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md). Tier 1 is receipts and logs, tier 2 is contract state and code, tier 4 is manifests, and tiers 5–7 are indexer, reports and recollection.
 **Chain access:** this audit sandbox cannot reach the Fuji RPC (network policy denies it). All chain evidence comes from read-only GitHub Actions runs of the scripts below on PR #142, against the public RPC `https://api.avax-test.network/ext/bc/C/rpc`.
 
 | Run | Scripts | Fuji tip block |

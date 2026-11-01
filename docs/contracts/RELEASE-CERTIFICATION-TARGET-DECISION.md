@@ -1,8 +1,8 @@
 # Release Certification Target — V3/V5 Preflight and Decision Record — 2026-10-11
 
 **Mode:** read-only. No transaction was signed or sent. No workflow was dispatched. No configuration, environment variable or code was changed.
-**Network:** Avalanche Fuji 43113 only. C-Chain remains **NO-GO** ([`LAUNCH-GATE.md`](./LAUNCH-GATE.md)).
-**Ledger:** [`SYSTEM-CHAIN-CERTIFICATION.md`](./SYSTEM-CHAIN-CERTIFICATION.md). This file feeds §5 items 5 and 6 of that ledger. It moves no certification row.
+**Network:** Avalanche Fuji 43113 only. C-Chain remains **NO-GO** ([`LAUNCH-GATE.md`](../../LAUNCH-GATE.md)).
+**Ledger:** [`SYSTEM-CHAIN-CERTIFICATION.md`](../certification/SYSTEM-CHAIN-CERTIFICATION.md). This file feeds §5 items 5 and 6 of that ledger. It moves no certification row.
 
 ---
 
@@ -151,7 +151,7 @@ A deployed contract or a green test run moves **none** of these rows.
 | B11 | Production Studio behaviour | Each tx linked to a UI session record (ledger A9 rule) | NOT STARTED |
 | C1 | Single discoverable as a single | Depends on D1. With Option A: the public UI shows the S1/S2/S3 labels from API data | NOT STARTED (UI not implemented) |
 | C2 | Single mint window and purchase | B5 + B7 on an S2 track | NOT STARTED |
-| L5 | Protected media | Owner grant; non-owner and anonymous get 403; access moves on resale. Legacy-contract evidence and the no-transaction path for a factory clone: [`L5-PROTECTED-MEDIA-EVIDENCE.md`](./L5-PROTECTED-MEDIA-EVIDENCE.md) | NOT STARTED |
+| L5 | Protected media | Owner grant; non-owner and anonymous get 403; access moves on resale. Legacy-contract evidence and the no-transaction path for a factory clone: [`L5-PROTECTED-MEDIA-EVIDENCE.md`](../certification/L5-PROTECTED-MEDIA-EVIDENCE.md) | NOT STARTED |
 | P0 | Public masters in `refs/pull/*` | Owner decision (2026-10-11): the repository is made private after mainnet launch. Not a pre-launch blocker; no purge or history rewrite. | NOT STARTED (follows launch) |
 
 ## 7. Not verified here

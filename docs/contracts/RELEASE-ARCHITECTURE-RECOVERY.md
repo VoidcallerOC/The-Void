@@ -1,6 +1,6 @@
 # Release Architecture Recovery — 2026-10-09
 
-Evidence rules: [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md). This session could not reach the Fuji RPC
+Evidence rules: [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md). This session could not reach the Fuji RPC
 (the sandbox network policy denies `api.avax-test.network`), so every on-chain claim below is either cited from
 `CHAIN-AUTHORITY-FUJI-VERIFICATION.md` (probe of 2026-10-08) or labelled **UNVERIFIED**.
 

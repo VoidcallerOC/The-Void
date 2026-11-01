@@ -77,7 +77,7 @@ The connected wallet’s `ISSUER_ROLE` was not observable because the inspected 
 
 ## Diagnostic script
 
-The read-only diagnostic used for this report is [`scripts/diagnose-fuji-collect.mjs`](scripts/diagnose-fuji-collect.mjs).
+The read-only diagnostic used for this report is [`scripts/diagnose-fuji-collect.mjs`](../../../scripts/diagnose-fuji-collect.mjs).
 
 ## Changed files
 
