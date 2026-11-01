@@ -1,18 +1,18 @@
 {
  "format": "the-void:genesis-weekend-signing-manifest:v1",
- "generatedAt": "2026-11-01T11:08:30.000Z",
+ "generatedAt": "2026-11-01T12:05:30.000Z",
  "chainId": 43114,
- "atBlock": 99124576,
+ "atBlock": 99128213,
  "baseFeeWei": "2500000000",
  "ok": true,
  "failures": [],
  "signer": "0x284C09a7CC187E096cbbdc88d99DEFE6df32180a",
  "funding": {
-  "balanceWei": "21076961628385",
+  "balanceWei": "172169526961628385",
   "requiredWei": "14280000000000000",
   "maxFeePerGasAssumed": "6000000000",
-  "sufficient": false,
-  "shortfallWei": "14258923038371615"
+  "sufficient": true,
+  "shortfallWei": "0"
  },
  "artifact": {
   "sourceCommit": "12cc4694b4ce50021318c53fd19de5ea95738576",
