@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FUJI_RELEASE_CONFIG } from "./fuji-release.js";
 import { mapPublishedCatalog } from "./catalog-source.js";
 import {
@@ -38,6 +38,16 @@ function apiCatalog({ releaseType = "SINGLE", supply = "0", sale = OPEN_SALE, av
 const factoryOf = (catalog) => catalog.editions.find((edition) => edition.id === "e-factory");
 
 describe("open edition availability (catalog + marketplace surface)", () => {
+  // flattenMarketplaceEditions takes no `now` and reads the real clock; pin it to
+  // NOW so the fixture sale (ends END) stays live regardless of the run date.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("maps the API's live sale state and price onto the factory edition", () => {
     const edition = factoryOf(apiCatalog());
     expect(edition).toMatchObject({
