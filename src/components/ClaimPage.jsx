@@ -136,35 +136,24 @@ function useOpenClaimRefresh(open, onTarget) {
   }, [open]);
 }
 
-/**
- * Claims made through this claim contract, as the contract's own claimedSupply reports it (via the server's verified
- * read). claimedSupply starts at the baseline carried over from earlier claim contracts, so this window's count is
- * claimedSupply - baseline; the all-time total is shown underneath. Renders nothing if the target has no count.
- */
+/** Total Genesis claims, as the claim contract's own claimedSupply reports it (via the server's verified read). */
 export function ClaimCounter({ target }) {
   if (target?.claimedSupply === undefined || target?.claimedSupply === null) return null;
-  // An API that predates baselineClaimedSupply sends only the all-time total: show that, labeled as such,
-  // rather than passing the carried-over claims off as this window's.
-  const baselineKnown = target.baselineClaimedSupply !== undefined && target.baselineClaimedSupply !== null;
   let total;
-  let baseline;
   try {
     total = BigInt(target.claimedSupply);
-    baseline = baselineKnown ? BigInt(target.baselineClaimedSupply) : 0n;
   } catch {
     return null;
   }
-  const shown = baselineKnown ? (total >= baseline ? total - baseline : 0n) : total;
   return (
     <div className="vc-countdown" data-testid="claim-counter">
-      <Eyebrow red>{baselineKnown ? "Claims so far" : "Genesis claims so far"}</Eyebrow>
+      <Eyebrow red>Claims so far</Eyebrow>
       <div className="vc-countdown-grid">
         <div className="vc-countdown-unit">
-          <span className="vc-countdown-value">{shown.toString()}</span>
-          <span className="vc-countdown-label">{baselineKnown ? "claimed" : "all time"}</span>
+          <span className="vc-countdown-value">{total.toString()}</span>
+          <span className="vc-countdown-label">claimed</span>
         </div>
       </div>
-      {baselineKnown && baseline > 0n && <p className="vc-countdown-target">{total.toString()} Genesis claims all time, including {baseline.toString()} from earlier claims</p>}
     </div>
   );
 }

@@ -63,13 +63,14 @@ function renderLanding() {
 afterEach(() => { cleanup(); vi.clearAllMocks(); catalogState.catalog = { artists: [], releases: [], editions: [], experiences: [] }; });
 
 describe("Genesis weekend claim page", () => {
-  it("titles the landing Forgive & Forget and counts this window's claims apart from the carried-over baseline", async () => {
+  it("titles the landing Forgive & Forget and shows the total claims with no earlier-claims breakdown", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "12", baselineClaimedSupply: "5" }));
     renderLanding();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Forgive & Forget");
     const counter = await screen.findByTestId("claim-counter");
-    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("7");
-    expect(counter.textContent).toMatch(/12 Genesis claims all time, including 5 from earlier claims/);
+    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("12");
+    expect(counter.querySelector(".vc-countdown-label").textContent).toBe("claimed");
+    expect(counter.textContent).not.toMatch(/earlier|all time/i);
   });
 
   it("lets a holder claim right on the landing while the claim is open, with no link to another page", async () => {
@@ -133,15 +134,6 @@ describe("Genesis weekend claim page", () => {
     await screen.findByText(/has not opened/);
     expect(screen.queryByTestId("embedded-claim")).toBeNull();
     expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
-  });
-
-  it("labels the count all-time, not this window, when the API does not send the carried-over baseline", async () => {
-    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "6" }));
-    renderLanding();
-    const counter = await screen.findByTestId("claim-counter");
-    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("6");
-    expect(counter.querySelector(".vc-countdown-label").textContent).toBe("all time");
-    expect(counter.textContent).not.toMatch(/claimed/);
   });
 
   it("shows no claim counter before the claim is activated", async () => {
