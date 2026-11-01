@@ -29,6 +29,8 @@ COPY src ./src
 COPY scripts ./scripts
 COPY private-media ./private-media
 COPY contracts ./contracts
+# Genesis weekend claim: the API loads this committed snapshot when GENESIS_CLAIM_MODE=weekend.
+COPY deploy/mainnet/genesis-weekend/snapshot.json ./deploy/mainnet/genesis-weekend/snapshot.json
 COPY .env.example ./
 RUN mkdir -p /app/out /app/cache /app/deployments \
     && chown node:node /app/out /app/cache /app/deployments
