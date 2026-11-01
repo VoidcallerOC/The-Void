@@ -135,6 +135,15 @@ describe("Genesis weekend claim page", () => {
     expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
   });
 
+  it("labels the count all-time, not this window, when the API does not send the carried-over baseline", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "6" }));
+    renderLanding();
+    const counter = await screen.findByTestId("claim-counter");
+    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("6");
+    expect(counter.querySelector(".vc-countdown-label").textContent).toBe("all time");
+    expect(counter.textContent).not.toMatch(/claimed/);
+  });
+
   it("shows no claim counter before the claim is activated", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", claimedSupply: "5", baselineClaimedSupply: "5" }));
     renderLanding();

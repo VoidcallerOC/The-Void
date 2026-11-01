@@ -143,25 +143,28 @@ function useOpenClaimRefresh(open, onTarget) {
  */
 export function ClaimCounter({ target }) {
   if (target?.claimedSupply === undefined || target?.claimedSupply === null) return null;
+  // An API that predates baselineClaimedSupply sends only the all-time total: show that, labeled as such,
+  // rather than passing the carried-over claims off as this window's.
+  const baselineKnown = target.baselineClaimedSupply !== undefined && target.baselineClaimedSupply !== null;
   let total;
   let baseline;
   try {
     total = BigInt(target.claimedSupply);
-    baseline = BigInt(target.baselineClaimedSupply ?? 0);
+    baseline = baselineKnown ? BigInt(target.baselineClaimedSupply) : 0n;
   } catch {
     return null;
   }
-  const thisWindow = total >= baseline ? total - baseline : 0n;
+  const shown = baselineKnown ? (total >= baseline ? total - baseline : 0n) : total;
   return (
     <div className="vc-countdown" data-testid="claim-counter">
-      <Eyebrow red>Claims so far</Eyebrow>
+      <Eyebrow red>{baselineKnown ? "Claims so far" : "Genesis claims so far"}</Eyebrow>
       <div className="vc-countdown-grid">
         <div className="vc-countdown-unit">
-          <span className="vc-countdown-value">{thisWindow.toString()}</span>
-          <span className="vc-countdown-label">claimed</span>
+          <span className="vc-countdown-value">{shown.toString()}</span>
+          <span className="vc-countdown-label">{baselineKnown ? "claimed" : "all time"}</span>
         </div>
       </div>
-      {baseline > 0n && <p className="vc-countdown-target">{total.toString()} Genesis claims all time, including {baseline.toString()} from earlier claims</p>}
+      {baselineKnown && baseline > 0n && <p className="vc-countdown-target">{total.toString()} Genesis claims all time, including {baseline.toString()} from earlier claims</p>}
     </div>
   );
 }
