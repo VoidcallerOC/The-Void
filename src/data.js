@@ -1,4 +1,4 @@
-import { LEGACY_CONTRACT, LEGACY_IPFS_MEDIA, LEGACY_TOKENS, legacyExperienceId } from "./lib/legacy-genesis.js";
+import { LEGACY_CONTRACT, LEGACY_IPFS_MEDIA, LEGACY_TOKEN_DESCRIPTIONS, LEGACY_TOKENS, legacyExperienceId } from "./lib/legacy-genesis.js";
 import { createArtist, createCatalog, createCollection, createEdition, createExperience, createRelease, createToken, EXPERIENCE_TYPES } from "./domain/models.js";
 
 // Static data for the Voidcaller site.
@@ -187,9 +187,9 @@ export const VOIDCALLER_CATALOG = createCatalog({
     editionId: voidcallerEdition.id,
     tokenId: track.tokenId,
     name: track.title,
-    // The token's own on-chain metadata (name + image). Its animation_url is
+    // The token's own on-chain metadata (name, description, image). Its animation_url is
     // deliberately not carried here.
-    metadata: { name: track.title, image: LEGACY_IPFS_MEDIA[track.tokenId]?.image || "" },
+    metadata: { name: track.title, description: LEGACY_TOKEN_DESCRIPTIONS[track.tokenId] || "", image: LEGACY_IPFS_MEDIA[track.tokenId]?.image || "" },
     experiences: [legacyExperienceId(track.tokenId)],
     media: { art: track.art, previewSrc: track.previewSrc },
     song: { title: track.title, duration: track.time, trackNumber: track.n, experienceId: legacyExperienceId(track.tokenId) },

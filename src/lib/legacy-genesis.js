@@ -34,6 +34,15 @@ export const LEGACY_IPFS_MEDIA = Object.freeze({
 // Same public gateway the frontend uses (src/lib/web3.js ipfsToHttp).
 export const LEGACY_IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/";
 
+// Each token's on-chain metadata `description`, verbatim (uri(id) -> description), read from
+// LEGACY_METADATA_BASE on 2026-11-01. Empty where the token's metadata has none. Public by definition.
+export const LEGACY_TOKEN_DESCRIPTIONS = Object.freeze({
+  0: "Art by Wrathtank_avax",
+  1: "“The Hollow” was born from the anger of watching those in positions of influence or power, continue to take advantage.\nWatching as people were led away from their dreams. Watching as the world falls into disillusion.\n“The Hollow” stands to represent the ones who have watched for too long. The one’s who scream for change, we hear your cries.\nWatch the fall of false prophets; Embrace the Void.\n\nLYRICS:\n\nCan you believe this?\n\nHow many lives we’ve lost to their unholy ignorance.\n\nNow there’s only us\n\n(Stand up)\nRead between the lines\n\nCarry on.\nBreathe slow it’s cold as ice,\n\nEven when their eyes seem so inviting.\nSpeak true,\nno alibis,\nBe the change to make this never ending\nFear not what’s next to come.\nThere’s a page for every story’s last act.\nWe’re not the ones to rot,\nAfter all we’ve weathered leaves us breathless.\nHas Heaven left us?\n\nI’ve seen the fall of angels,\nDemons dance around us.\nCracks begin to show\nShatter\nLeft within your mind,\nHollow.\nCan you believe this?\n\nHow many lives we’ve lost to their unholy ignorance.\n\nNow there’s only us\n\n(Stand up)\nRead between the lines\n\nCarry on.\n\nThe words are echoing around in my head.\n\n“The problems’ handled, but there’s too many dead.”\nFathers and mothers.\n\nThe Devil’s eyes are watching you.\nIn violence, we found this.\nWith confidence we’re coming through.\nExcuse us, we can’t trust.\nThe leaders all collapse around us.\nSilence the mind just,\nOpen up your eyes and see the sun.\nThe mindless, claimed prophets,\n\nHold the knife they think will stop us.\nBarren, and senseless,\nAll hope is lost for those forgotten.\nBelieve it,\ngo seize it.\nThe future’s bright for those who see it\nSilence the mind just,\nOpen up your eyes and see the sun.\nI feel the rope wrap around my neck,\n\nWith every outcry there’s distraction instead.\nI can’t believe how many lives were wasted;\nBastards\nHow many families ripped apart;\n\n“forever after.”\nHas Heaven left us?\n\nI’ve seen the fall of angels,\nDemons dance around us.\nCracks begin to show\nShatter\nLeft within your mind,\nHollow.\n\nArt by Wrathtank_avax",
+  2: "Faced with insurmountable challenges.\nBridging the gap between where you are and where you want to be is daunting, to say the least.\nBelieve in your mission, breathe, take the leap, and \"Don't Look Down.\"\nArt by Wrathtank_avax",
+  3: "",
+});
+
 export function legacyMetadataUri(tokenId) {
   return `${LEGACY_METADATA_BASE}/${tokenId}`;
 }
