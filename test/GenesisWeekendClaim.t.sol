@@ -55,6 +55,8 @@ contract WeekendMockSale {
 
     constructor(address release_) { releases = release_; }
 
+    function setEnd(uint64 value) external { end = value; }
+
     function setSold(uint256 value) external { sold = value; }
 
     function sales(uint256) external view returns (uint256, uint256, uint256, uint256, uint64, uint64, bool, bool) {
@@ -104,8 +106,11 @@ contract GenesisWeekendClaimTest {
     address internal constant PRIOR_CLAIMANT = 0x6a86EfA012fEDA64b70112022487fEE22E67d2fb;
     address internal constant ADMIN = address(0xAD);
     address internal constant OUTSIDER = address(0xBAD);
-    uint256 internal constant CLOSE = 1_793_595_599; // 2026-11-02 04:59:59 UTC
     uint256 internal constant START = 1_793_500_000;
+    uint256 internal constant DAY = 86_400;
+    // The activation cutoff passed at deployment, and the close of a claim activated at START.
+    uint256 internal constant DEADLINE = START + 2 days;
+    uint256 internal constant CLOSE = START + DAY;
 
     WeekendMockRelease internal release;
     WeekendMockSale internal sale;
@@ -126,15 +131,15 @@ contract GenesisWeekendClaimTest {
         priorThree.setClaimed(PRIOR_CLAIMANT);
         sale.setSold(1);
         release.setMinted(5);
-        claim = new GenesisWeekendClaim(_config(ROOT, 4, CLOSE));
+        claim = new GenesisWeekendClaim(_config(ROOT, 4, DEADLINE));
         release.setIssuer(address(claim), true);
         release.setIssuer(address(sale), true);
     }
 
-    function _config(bytes32 root, uint256 baseline, uint256 close) internal view returns (GenesisWeekendClaim.Config memory cfg) {
+    function _config(bytes32 root, uint256 baseline, uint256 deadline) internal view returns (GenesisWeekendClaim.Config memory cfg) {
         cfg = GenesisWeekendClaim.Config({
             releaseContract: address(release), primarySale: address(sale), tokenId: 1, merkleRoot: root, eligibleWallets: 5,
-            snapshotCChainBlock: 999, snapshotGrottoBlock: 151_791, snapshotHash: keccak256("snapshot"), claimEnd: close,
+            snapshotCChainBlock: 999, snapshotGrottoBlock: 151_791, snapshotHash: keccak256("snapshot"), activationDeadline: deadline,
             baselineClaimedSupply: baseline, admin: ADMIN,
             priorClaims: [address(priorOne), address(priorTwo), address(priorThree)]
         });
@@ -192,7 +197,8 @@ contract GenesisWeekendClaimTest {
     function testDeploysPausedInactiveWithVerifiedBaseline() public view {
         require(!claim.active() && claim.paused() && claim.claimStart() == 0, "not paused by default");
         require(claim.claimedSupply() == 4 && claim.baselineClaimedSupply() == 4, "baseline");
-        require(claim.claimEnd() == CLOSE && claim.merkleRoot() == ROOT, "immutables");
+        require(claim.claimEnd() == 0 && claim.activationDeadline() == DEADLINE && claim.merkleRoot() == ROOT, "immutables");
+        require(claim.CLAIM_DURATION() == 86_400 && claim.MAX_ACTIVATION_DELAY() == 7 days, "timing constants");
         require(claim.publicSaleStart() == 1_793_019_600 && claim.publicSaleEnd() == 1_794_315_540 && claim.publicPriceWei() == 0.25 ether, "sale mirror");
         require(claim.allocation() == 0 && claim.publicAllocation() == 0 && claim.tokenId() == 1, "studio views");
         require(!claim.claimable(), "claimable before activation");
@@ -210,45 +216,119 @@ contract GenesisWeekendClaimTest {
         vm.expectPartialRevert(GenesisWeekendClaim.NotAdmin.selector);
         claim.activate();
         _activate();
-        require(claim.active() && !claim.paused() && claim.claimStart() == START, "activated");
+        require(claim.active() && !claim.paused() && claim.claimStart() == START && claim.claimEnd() == START + DAY, "activated");
         vm.prank(ADMIN);
         vm.expectRevert(GenesisWeekendClaim.AlreadyActive.selector);
         claim.activate();
     }
 
-    function testActivationAfterCloseReverts() public {
-        vm.warp(CLOSE);
+    function testActivationOpensExactly24HoursFromTheActivationBlock() public {
+        vm.warp(START + 3_600);
+        _activate();
+        require(claim.claimStart() == START + 3_600 && claim.claimEnd() == START + 3_600 + DAY, "window from activation");
+        vm.warp(START + 3_600 + DAY - 1);
+        require(claim.claimable(), "open one second before the close");
+        _claimAs(HOLDER_A, _proofA());
+        vm.warp(START + 3_600 + DAY);
+        require(!claim.claimable(), "closed at claimEnd");
+        vm.prank(HOLDER_B);
+        vm.expectPartialRevert(GenesisWeekendClaim.ClaimWindowClosed.selector);
+        claim.claim(_proofB());
+    }
+
+    function testActivationIsAllowedAtTheDeadlineAndRefusedAfterIt() public {
+        vm.warp(DEADLINE + 1);
+        vm.prank(ADMIN);
+        vm.expectPartialRevert(GenesisWeekendClaim.ActivationWindowClosed.selector);
+        claim.activate();
+        vm.warp(DEADLINE);
+        _activate();
+        require(claim.claimStart() == DEADLINE && claim.claimEnd() == DEADLINE + DAY, "activated at the deadline");
+    }
+
+    function testNoReactivationOrResetAfterCloseOrPause() public {
+        _activate();
+        vm.prank(ADMIN);
+        claim.pause();
+        vm.prank(ADMIN);
+        vm.expectRevert(GenesisWeekendClaim.AlreadyActive.selector);
+        claim.activate();
+        vm.warp(CLOSE + 1);
+        vm.prank(ADMIN);
+        vm.expectRevert(GenesisWeekendClaim.AlreadyActive.selector);
+        claim.activate();
         vm.prank(ADMIN);
         vm.expectPartialRevert(GenesisWeekendClaim.ClaimWindowClosed.selector);
+        claim.unpause();
+        require(claim.claimStart() == START && claim.claimEnd() == CLOSE && claim.paused(), "window unchanged");
+    }
+
+    function testPausingDoesNotExtendTheWindow() public {
+        _activate();
+        vm.prank(ADMIN);
+        claim.pause();
+        vm.warp(START + 20 hours);
+        vm.prank(ADMIN);
+        claim.unpause();
+        require(claim.claimEnd() == CLOSE, "pause must not move the close");
+        vm.warp(CLOSE);
+        vm.prank(HOLDER_A);
+        vm.expectPartialRevert(GenesisWeekendClaim.ClaimWindowClosed.selector);
+        claim.claim(_proofA());
+    }
+
+    function testActivationRefusedWhenTheWindowWouldOutlastTheLiveSale() public {
+        sale.setEnd(uint64(START + DAY - 1));
+        vm.prank(ADMIN);
+        vm.expectPartialRevert(GenesisWeekendClaim.ClaimWouldOutlastSale.selector);
+        claim.activate();
+        sale.setEnd(uint64(START + DAY));
+        _activate();
+        require(claim.claimEnd() == START + DAY, "a window ending exactly at the sale end is allowed");
+    }
+
+    function testActivationRefusedWhenSupplyIsUnaccounted() public {
+        release.setMinted(6);
+        vm.prank(ADMIN);
+        vm.expectPartialRevert(GenesisWeekendClaim.SupplyAccountingMismatch.selector);
         claim.activate();
     }
 
     function testRejectsWrongBaselineChainRootOrDeadline() public {
         vm.expectPartialRevert(GenesisWeekendClaim.InvalidBaseline.selector);
-        new GenesisWeekendClaim(_config(ROOT, 3, CLOSE));
+        new GenesisWeekendClaim(_config(ROOT, 3, DEADLINE));
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
-        new GenesisWeekendClaim(_config(bytes32(0), 4, CLOSE));
+        new GenesisWeekendClaim(_config(bytes32(0), 4, DEADLINE));
+        // The activation deadline must be in the future and at most MAX_ACTIVATION_DELAY away.
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
         new GenesisWeekendClaim(_config(ROOT, 4, START));
-        // The close is pinned to the owner-approved timestamp: one second later is refused.
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
-        new GenesisWeekendClaim(_config(ROOT, 4, CLOSE + 1));
+        new GenesisWeekendClaim(_config(ROOT, 4, START + 7 days + 1));
+        new GenesisWeekendClaim(_config(ROOT, 4, START + 7 days));
+        new GenesisWeekendClaim(_config(ROOT, 4, START + 1));
+        // The latest possible window must close no later than the paid sale.
+        sale.setEnd(uint64(DEADLINE + DAY - 1));
+        vm.expectPartialRevert(GenesisWeekendClaim.ClaimWouldOutlastSale.selector);
+        new GenesisWeekendClaim(_config(ROOT, 4, DEADLINE));
+        sale.setEnd(uint64(DEADLINE + DAY));
+        new GenesisWeekendClaim(_config(ROOT, 4, DEADLINE));
+        sale.setEnd(1_794_315_540);
         release.setMinted(6);
         vm.expectPartialRevert(GenesisWeekendClaim.InvalidBaseline.selector);
-        new GenesisWeekendClaim(_config(ROOT, 4, CLOSE));
+        new GenesisWeekendClaim(_config(ROOT, 4, DEADLINE));
         release.setMinted(5);
         vm.chainId(36463);
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
-        new GenesisWeekendClaim(_config(ROOT, 4, CLOSE));
+        new GenesisWeekendClaim(_config(ROOT, 4, DEADLINE));
     }
 
     function testRejectsDuplicateOrForeignPriorClaims() public {
-        GenesisWeekendClaim.Config memory cfg = _config(ROOT, 4, CLOSE);
+        GenesisWeekendClaim.Config memory cfg = _config(ROOT, 4, DEADLINE);
         cfg.priorClaims[1] = cfg.priorClaims[0];
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
         new GenesisWeekendClaim(cfg);
         WeekendMockPrior foreign = new WeekendMockPrior(address(sale), 4);
-        cfg = _config(ROOT, 4, CLOSE);
+        cfg = _config(ROOT, 4, DEADLINE);
         cfg.priorClaims[2] = address(foreign);
         vm.expectRevert(GenesisWeekendClaim.InvalidConfiguration.selector);
         new GenesisWeekendClaim(cfg);
@@ -380,7 +460,7 @@ contract GenesisWeekendClaimTest {
         // eligible contract wallet that re-enters claim() from the ERC-1155 mint callback.
         WeekendReceiver receiver = new WeekendReceiver();
         bytes32[] memory empty = new bytes32[](0);
-        GenesisWeekendClaim single = new GenesisWeekendClaim(_config(claim.leaf(address(receiver)), 4, CLOSE));
+        GenesisWeekendClaim single = new GenesisWeekendClaim(_config(claim.leaf(address(receiver)), 4, DEADLINE));
         release.setIssuer(address(single), true);
         release.setCallReceiver(true);
         vm.prank(ADMIN);
@@ -393,7 +473,7 @@ contract GenesisWeekendClaimTest {
 
     function testClaimsNeverExceedTheAllowlistSize() public {
         // An allowlist declared as two wallets admits at most two claims, even if the root proves more.
-        GenesisWeekendClaim.Config memory cfg = _config(ROOT, 4, CLOSE);
+        GenesisWeekendClaim.Config memory cfg = _config(ROOT, 4, DEADLINE);
         cfg.eligibleWallets = 2;
         GenesisWeekendClaim small = new GenesisWeekendClaim(cfg);
         release.setIssuer(address(small), true);

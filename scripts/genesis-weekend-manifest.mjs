@@ -20,7 +20,11 @@ export const FACTORY = "0xEa0c345cE84025b4e8462d145100dce1848254B4";
 export const PRIOR_CLAIMS = ["0x8512be04a4E54cd8551738165F9c05C3303187a0", "0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "0xd70dBA7fF6419481d62D4689bDf271ad441766b8"];
 // The two expired claims that still hold ISSUER_ROLE and are reviewed for revocation.
 export const REVOKE_TARGETS = ["0x7D1a068F532aD6c0f591d4Fb9F82fd5b97495363", "0xd70dBA7fF6419481d62D4689bDf271ad441766b8"];
-export const CLAIM_END = 1_793_595_599n;
+// Owner-proposed activation cutoff: 2026-11-04 04:59:59 UTC (Tue 2026-11-03 11:59:59 PM EST). It must equal
+// PLAN.activationDeadline in the signing page. activate() then opens exactly CLAIM_DURATION from its own block.
+export const ACTIVATION_DEADLINE = 1_793_768_399n;
+export const CLAIM_DURATION = 86_400n;
+export const MAX_ACTIVATION_DELAY = 7n * 86_400n;
 export const BASELINE = 4n;
 export const GAS_CEILINGS = Object.freeze({ deploy: 2_000_000n, revoke: 60_000n, grant: 80_000n, activate: 90_000n });
 const EXPLORER = "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api";
@@ -41,7 +45,7 @@ export function constructorConfig(snapshot) {
   return {
     releaseContract: RELEASE, primarySale: SALE, tokenId: 1n, merkleRoot: snapshot.merkleRoot, eligibleWallets: BigInt(snapshot.eligibleWallets),
     snapshotCChainBlock: BigInt(snapshot.cchain.block), snapshotGrottoBlock: BigInt(snapshot.grotto.block), snapshotHash: snapshot.snapshotHash,
-    claimEnd: CLAIM_END, baselineClaimedSupply: BASELINE, admin: ARTIST, priorClaims: PRIOR_CLAIMS,
+    activationDeadline: ACTIVATION_DEADLINE, baselineClaimedSupply: BASELINE, admin: ARTIST, priorClaims: PRIOR_CLAIMS,
   };
 }
 
@@ -112,7 +116,10 @@ export async function generateManifest({ provider = new JsonRpcProvider(RPC, CHA
   const [edition, saleState, historical] = await Promise.all([release.edition(1), sale.sales(1), recovery.claimedSupply()]);
   if (historical !== BASELINE) failures.push(`Historical claimed supply is ${historical}, not ${BASELINE}.`);
   if (edition.mintedSupply !== saleState[2] + historical) failures.push(`Supply invariant broken: minted ${edition.mintedSupply} != sold ${saleState[2]} + claimed ${historical}.`);
-  if (BigInt(block.timestamp) >= CLAIM_END) failures.push("The weekend close has already passed.");
+  // The constructor's own bounds, checked at the current block (the deploy block will be slightly later).
+  if (BigInt(block.timestamp) >= ACTIVATION_DEADLINE) failures.push("The activation deadline has already passed.");
+  if (ACTIVATION_DEADLINE > BigInt(block.timestamp) + MAX_ACTIVATION_DELAY) failures.push("The activation deadline is more than 7 days away.");
+  if (saleState[5] !== 0n && ACTIVATION_DEADLINE + CLAIM_DURATION > saleState[5]) failures.push(`A claim activated at the deadline would close after the paid sale ends (${saleState[5]}).`);
   for (const address of PRIOR_CLAIMS) {
     const end = await new Contract(address, ["function claimEnd() view returns (uint256)"], provider).claimEnd();
     if (BigInt(block.timestamp) < end) failures.push(`Prior claim ${address} is still open (claimEnd ${end}).`);
@@ -168,7 +175,8 @@ export async function generateManifest({ provider = new JsonRpcProvider(RPC, CHA
     grant: { to: RELEASE, function: "grantRole(bytes32,address)", role: roles.issuerRole, gasCeiling: GAS_CEILINGS.grant.toString(), simulatedGasForPredictedAddress: grantGas },
     activate: { function: "activate()", selector: id("activate()").slice(0, 10), gasCeiling: GAS_CEILINGS.activate.toString() },
     expectedAfterDeploy: {
-      active: false, paused: true, claimStart: "0", claimedSupply: BASELINE.toString(), admin: ARTIST, claimEnd: CLAIM_END.toString(),
+      active: false, paused: true, claimStart: "0", claimEnd: "0", claimedSupply: BASELINE.toString(), admin: ARTIST,
+      activationDeadline: ACTIVATION_DEADLINE.toString(), CLAIM_DURATION: CLAIM_DURATION.toString(),
       merkleRoot: snapshot.merkleRoot, snapshotHash: snapshot.snapshotHash, eligibleWallets: String(snapshot.eligibleWallets),
       snapshotCChainBlock: String(snapshot.cchain.block), snapshotGrottoBlock: String(snapshot.grotto.block), baselineClaimedSupply: BASELINE.toString(),
       releaseContract: RELEASE, primarySale: SALE, tokenId: "1", priorClaimOne: PRIOR_CLAIMS[0], priorClaimTwo: PRIOR_CLAIMS[1], priorClaimThree: PRIOR_CLAIMS[2],

@@ -24,7 +24,7 @@ const PROOF = [`0x${"aa".repeat(32)}`, `0x${"bb".repeat(32)}`];
 
 const weekend = (overrides = {}) => ({
   enabled: true, mode: "weekend-merkle", destinationChainId: 43113, releaseContract: RELEASE, primarySale: SALE, claimContract: CLAIM, tokenId: "1",
-  allocation: "0", publicAllocation: "0", claimStart: String(NOW - 600), claimEnd: String(NOW + 3600), active: true, paused: false,
+  allocation: "0", publicAllocation: "0", claimStart: String(NOW - 600), claimEnd: String(NOW + 3600), activationDeadline: String(NOW + 86_400), claimDuration: "86400", active: true, paused: false,
   publicSaleStart: "1793019600", publicSaleEnd: String(NOW + 9 * 86_400), publicPriceWei: "250000000000000000",
   snapshotCChainBlock: "99060000", snapshotGrottoBlock: "151791", eligibility: "snapshot", ...overrides,
 });
@@ -85,7 +85,7 @@ describe("Genesis weekend claim page", () => {
     const button = await screen.findByRole("button", { name: "CLAIM FREE" });
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ paused: true }));
     fireEvent.click(button);
-    expect(await screen.findByText(/weekend claim is paused/)).toBeTruthy();
+    expect(await screen.findByText(/Genesis claim is paused/)).toBeTruthy();
     expect(executeWeekendClaim).not.toHaveBeenCalled();
   });
 
@@ -115,14 +115,16 @@ describe("Genesis weekend claim page", () => {
   });
 
   it("offers nothing to claim before activation or while paused", async () => {
-    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0" }));
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0" }));
     renderEditionClaim();
-    expect(await screen.findByText(/weekend claim has not opened/)).toBeTruthy();
+    expect(await screen.findByText(/Genesis claim has not opened/)).toBeTruthy();
+    expect(screen.queryByTestId("weekend-claim-countdown")).toBeNull();
+    expect(screen.queryByRole("button", { name: "CLAIM FREE" })).toBeNull();
     expect(checkGenesisEligibility).not.toHaveBeenCalled();
     cleanup();
     fetchGenesisClaimConfig.mockResolvedValue(weekend({ paused: true }));
     renderEditionClaim();
-    expect(await screen.findByText(/weekend claim is paused/)).toBeTruthy();
+    expect(await screen.findByText(/Genesis claim is paused/)).toBeTruthy();
   });
 
   it("shows the claim closed after claimEnd while the paid mint stays open", async () => {
@@ -140,6 +142,38 @@ describe("Genesis weekend claim page", () => {
     cleanup();
     renderEditionClaim({ connected: false });
     expect(await screen.findByText(/Connect a wallet to verify Genesis ownership/)).toBeTruthy();
+  });
+
+  it("counts down to the contract's claimEnd, not to anything computed in the browser", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW - 82_800), claimEnd: String(NOW + 3600) }));
+    readGenesisClaimed.mockResolvedValue(false);
+    checkGenesisEligibility.mockResolvedValue({ eligible: true, wallet: WALLET, sources: ["c-chain"], proof: PROOF });
+    renderEditionClaim();
+    const countdown = await screen.findByTestId("weekend-claim-countdown");
+    // One hour left of the on-chain window (claimStart + 24h = claimEnd), whatever the claim's start.
+    expect(countdown.textContent).toMatch(/Genesis claim closes in/);
+    expect(countdown.textContent).toMatch(/0 hours and 59 minutes left to claim|1 hours and 0 minutes left to claim/);
+    expect(countdown.querySelector("time").getAttribute("datetime")).toBe(new Date((NOW + 3600) * 1000).toISOString());
+  });
+
+  it("stops offering the claim when the on-chain close is reached while the page is open", async () => {
+    const closesAt = Math.floor(Date.now() / 1000) + 2;
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimEnd: String(closesAt) }));
+    readGenesisClaimed.mockResolvedValue(false);
+    checkGenesisEligibility.mockResolvedValue({ eligible: true, wallet: WALLET, sources: ["c-chain"], proof: PROOF });
+    renderEditionClaim();
+    expect(await screen.findByRole("button", { name: "CLAIM FREE" })).toBeTruthy();
+    expect(await screen.findByText(/The 24-hour Genesis claim window has closed/, {}, { timeout: 4000 })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "CLAIM FREE" })).toBeNull());
+    expect(await screen.findByText(/The Genesis claim has closed. The public mint is open/)).toBeTruthy();
+    expect(executeWeekendClaim).not.toHaveBeenCalled();
+  });
+
+  it("treats a claim never activated before its deadline as closed, not as upcoming", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", activationDeadline: String(NOW - 1) }));
+    renderEditionClaim();
+    expect(await screen.findByText(/The Genesis claim has closed. The public mint is open/)).toBeTruthy();
+    expect(screen.queryByTestId("weekend-claim-countdown")).toBeNull();
   });
 
   it("explains the dual-chain snapshot on the landing page without the old countdown", async () => {

@@ -13,8 +13,9 @@ import { snapshotHashFor, WEEKEND_RULE } from "./genesis-weekend-snapshot.js";
 
 export const WEEKEND_MODE = "weekend-merkle";
 export const WEEKEND_CONFIG_CACHE_MS = 30_000;
-// GenesisWeekendClaim.WEEKEND_CLAIM_END: 2026-11-02 04:59:59 UTC.
-export const WEEKEND_CLAIM_END = 1_793_595_599n;
+// GenesisWeekendClaim.CLAIM_DURATION: activate() opens exactly 24 hours. The window itself (claimStart, claimEnd)
+// exists only on-chain, set once at activation; this API never computes or extends it.
+export const WEEKEND_CLAIM_DURATION = 86_400n;
 const GENESIS_CONTRACT = "0xD1B4367dd9f235f9ee61878019d66E31511E98eE";
 
 const CLAIM_ABI = [
@@ -28,6 +29,8 @@ const CLAIM_ABI = [
   "function snapshotGrottoBlock() view returns (uint256)",
   "function claimEnd() view returns (uint256)",
   "function claimStart() view returns (uint256)",
+  "function activationDeadline() view returns (uint256)",
+  "function CLAIM_DURATION() view returns (uint256)",
   "function baselineClaimedSupply() view returns (uint256)",
   "function claimedSupply() view returns (uint256)",
   "function active() view returns (bool)",
@@ -138,18 +141,28 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
     publicAllocation: "0",
   });
 
+  // Once the contract is active its claimEnd can never change, so a close observed on-chain is final.
+  let observedClose = null;
+
   async function readBindings() {
     const network = await rpc.getNetwork();
     const [claimRelease, claimSale, claimToken, root, hash, eligibleWallets, cBlock, gBlock, claimEnd, claimStart, baseline, claimedSupply, active, paused,
-      publicSaleStart, publicPriceWei, rule, genesis, priorOne, priorTwo, priorThree] = await Promise.all([
+      publicSaleStart, publicPriceWei, rule, genesis, priorOne, priorTwo, priorThree, activationDeadline, duration] = await Promise.all([
       claim.releaseContract(), claim.primarySale(), claim.tokenId(), claim.merkleRoot(), claim.snapshotHash(), claim.eligibleWallets(), claim.snapshotCChainBlock(),
       claim.snapshotGrottoBlock(), claim.claimEnd(), claim.claimStart(), claim.baselineClaimedSupply(), claim.claimedSupply(), claim.active(), claim.paused(),
       claim.publicSaleStart(), claim.publicPriceWei(), claim.ELIGIBILITY_RULE(), claim.GENESIS_CONTRACT(),
-      claim.priorClaimOne(), claim.priorClaimTwo(), claim.priorClaimThree(),
+      claim.priorClaimOne(), claim.priorClaimTwo(), claim.priorClaimThree(), claim.activationDeadline(), claim.CLAIM_DURATION(),
     ]);
     const [edition, saleData, issuerRole] = await Promise.all([release.edition(config.tokenId), sale.sales(config.tokenId), release.ISSUER_ROLE()]);
     const claimIsIssuer = await release.hasRole(issuerRole, config.claimContract);
-    const claimsOpen = BigInt(clock()) < BigInt(claimEnd);
+    const now = BigInt(clock());
+    // Before activation claimStart and claimEnd are 0 and the claim stays paused; after it, the window is exactly
+    // CLAIM_DURATION from the activation block. Anything else is not the reviewed contract.
+    const lifecycleValid = BigInt(duration) === WEEKEND_CLAIM_DURATION && BigInt(activationDeadline) > 0n && (active
+      ? BigInt(claimStart) > 0n && BigInt(claimStart) <= BigInt(activationDeadline) && BigInt(claimEnd) === BigInt(claimStart) + WEEKEND_CLAIM_DURATION
+      : BigInt(claimStart) === 0n && BigInt(claimEnd) === 0n && Boolean(paused));
+    // Claims can still happen while the window is open, or before activation while activation is still allowed.
+    const claimsOpen = active ? now < BigInt(claimEnd) : now <= BigInt(activationDeadline);
     const sold = BigInt(saleData.sold ?? saleData[2]);
     const minted = BigInt(edition.mintedSupply ?? edition[4]);
     const mismatch = Number(network.chainId) !== config.destinationChainId
@@ -159,17 +172,20 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
       || rule !== WEEKEND_RULE || getAddress(genesis) !== GENESIS_CONTRACT
       || [priorOne, priorTwo, priorThree].some((address, i) => getAddress(address) !== config.priorClaims[i])
       || BigInt(baseline) !== config.historicalClaimedSupply
-      || BigInt(claimEnd) !== WEEKEND_CLAIM_END
+      || !lifecycleValid
       // The production supply invariant: every minted copy is a paid sale or a counted Genesis claim.
       || minted !== sold + BigInt(claimedSupply)
       || !(saleData.configured ?? saleData[7])
-      // While claims can still be made the contract must be able to mint; after claimEnd its role may be revoked.
+      // While claims can still be made the contract must be able to mint; after the close its role may be revoked.
       || (claimsOpen && !claimIsIssuer);
     if (mismatch) throw new ApiError(503, "CLAIM_BINDING_MISMATCH", "The configured claim contract, release, supply, or chain does not match the authorized target.");
+    if (active) observedClose = BigInt(claimEnd);
     const publicConfig = Object.freeze({
       ...baseConfig,
       claimStart: BigInt(claimStart).toString(),
       claimEnd: BigInt(claimEnd).toString(),
+      activationDeadline: BigInt(activationDeadline).toString(),
+      claimDuration: WEEKEND_CLAIM_DURATION.toString(),
       active: Boolean(active),
       paused: Boolean(paused),
       claimedSupply: BigInt(claimedSupply).toString(),
@@ -177,14 +193,14 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
       publicSaleEnd: BigInt(saleData.endTime ?? saleData[5]).toString(),
       publicPriceWei: BigInt(publicPriceWei).toString(),
     });
-    return { saleEndTime: BigInt(saleData.endTime ?? saleData[5]), publicConfig, claimEnd: BigInt(claimEnd) };
+    return { saleEndTime: BigInt(saleData.endTime ?? saleData[5]), publicConfig, claimEnd: BigInt(claimEnd), claimsOpen };
   }
 
   let cached = null;
   let cachedAt = -Infinity;
   let inflight = null;
-  async function verifyConfigBindings() {
-    if (cached && monotonicNow() - cachedAt < WEEKEND_CONFIG_CACHE_MS) return cached;
+  async function verifyConfigBindings({ fresh = false } = {}) {
+    if (!fresh && cached && monotonicNow() - cachedAt < WEEKEND_CONFIG_CACHE_MS) return cached;
     if (!inflight) {
       inflight = readBindings()
         .then((verified) => { cached = verified; cachedAt = monotonicNow(); return verified; })
@@ -201,9 +217,15 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
   async function checkEligibility(walletInput) {
     if (!isAddress(String(walletInput || ""))) throw new ApiError(400, "INVALID_WALLET", "A valid wallet address is required.");
     const wallet = getAddress(walletInput);
-    // The close is fixed in the contract, so a closed window answers before any chain read can fail.
-    if (BigInt(clock()) >= WEEKEND_CLAIM_END) throw new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
-    const verified = await verifyConfigBindings();
+    // A close already observed on-chain is final, so it answers before any chain read can fail.
+    const windowClosed = () => new ApiError(409, "CLAIM_WINDOW_CLOSED", "The Genesis claim window has closed.");
+    if (observedClose !== null && BigInt(clock()) >= observedClose) throw windowClosed();
+    let verified = await verifyConfigBindings();
+    // Re-evaluated now, not from the cached read: closed once the window ends, or if activation was never allowed in time.
+    // A cached "inactive" past the deadline may predate a last-moment activation, so that case re-reads the chain.
+    if (!verified.publicConfig.active && BigInt(clock()) > BigInt(verified.publicConfig.activationDeadline)) verified = await verifyConfigBindings({ fresh: true });
+    const { active, claimEnd, activationDeadline } = verified.publicConfig;
+    if (active ? BigInt(clock()) >= BigInt(claimEnd) : BigInt(clock()) > BigInt(activationDeadline)) throw windowClosed();
     let claimed;
     try {
       claimed = await claim.hasClaimedAnywhere(wallet);

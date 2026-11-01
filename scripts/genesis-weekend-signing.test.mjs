@@ -27,7 +27,9 @@ describe("committed signing manifest", () => {
     expect(String(manifest.snapshot.cchainBlock)).toBe(String(snapshot.cchain.block));
     expect(String(manifest.snapshot.grottoBlock)).toBe(String(snapshot.grotto.block));
     expect(buildWeekendTree(snapshot.eligible.map((entry) => entry.wallet)).root).toBe(manifest.constructorArgs.merkleRoot);
-    expect(manifest.constructorArgs.claimEnd).toBe("1793595599");
+    expect(manifest.constructorArgs.activationDeadline).toBe("1793768399");
+    expect(manifest.constructorArgs).not.toHaveProperty("claimEnd");
+    expect(manifest.expectedAfterDeploy).toMatchObject({ claimStart: "0", claimEnd: "0", activationDeadline: "1793768399", CLAIM_DURATION: "86400" });
     expect(manifest.constructorArgs.baselineClaimedSupply).toBe("4");
   });
 
@@ -53,7 +55,7 @@ describe("manifest tampering is rejected", () => {
   const cases = {
     "wrong chain": (m) => { m.chainId = 43113; },
     "wrong signer": (m) => { m.signer = "0x0000000000000000000000000000000000000001"; },
-    "changed close": (m) => { m.constructorArgs.claimEnd = "1793595600"; },
+    "changed activation deadline": (m) => { m.constructorArgs.activationDeadline = "1793768400"; },
     "changed baseline": (m) => { m.constructorArgs.baselineClaimedSupply = "5"; },
     "changed admin": (m) => { m.constructorArgs.admin = "0x0000000000000000000000000000000000000001"; },
     "changed root": (m) => { m.constructorArgs.merkleRoot = `0x${"11".repeat(32)}`; },
@@ -150,7 +152,7 @@ describe("signing page safety rules", () => {
   });
 
   it("gates activation behind the separate authorization phrase", () => {
-    expect(page).toContain('"ACTIVATE WEEKEND CLAIM"');
+    expect(page).toContain('"ACTIVATE 24-HOUR CLAIM"');
     expect(page).toContain('$("activateAuthorized").checked');
   });
 });

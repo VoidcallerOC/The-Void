@@ -14,7 +14,10 @@ const GROTTO_ONLY = getAddress("0x626b1AeAdB9Fc0b465B40aDE4F4bBF0C01C9Db40");
 const CLAIMANT = getAddress("0x6a86EfA012fEDA64b70112022487fEE22E67d2fb");
 const STRANGER = getAddress("0x00000000000000000000000000000000000000ff");
 const NOW = 1_793_500_000;
-const CLOSE = 1_793_595_599;
+// The live window in these fixtures: activated 60 seconds ago, so it closes exactly 24 hours after that.
+const ACTIVATED = NOW - 60;
+const CLOSE = ACTIVATED + 86_400;
+const DEADLINE = NOW + 2 * 86_400;
 const ISSUER_ROLE = id("ISSUER_ROLE");
 
 function snapshotText() {
@@ -45,7 +48,7 @@ const claimIface = new Interface([
   "function active() view returns (bool)", "function paused() view returns (bool)", "function publicSaleStart() view returns (uint256)",
   "function publicPriceWei() view returns (uint256)", "function ELIGIBILITY_RULE() view returns (bytes32)", "function GENESIS_CONTRACT() view returns (address)",
   "function priorClaimOne() view returns (address)", "function priorClaimTwo() view returns (address)", "function priorClaimThree() view returns (address)",
-  "function hasClaimedAnywhere(address) view returns (bool)",
+  "function hasClaimedAnywhere(address) view returns (bool)", "function activationDeadline() view returns (uint256)", "function CLAIM_DURATION() view returns (uint256)",
 ]);
 const releaseIface = new Interface([
   "function edition(uint256 tokenId) view returns ((bytes32 releaseId,bytes32 editionId,address artist,uint256 maxSupply,uint256 mintedSupply,string metadataUri,bool exists))",
@@ -58,7 +61,7 @@ function chain(loaded, drift = {}) {
   const values = {
     releaseContract: RELEASE, primarySale: SALE, tokenId: 1n, merkleRoot: loaded.snapshot.merkleRoot, snapshotHash: loaded.snapshot.snapshotHash,
     eligibleWallets: BigInt(loaded.snapshot.eligibleWallets), snapshotCChainBlock: 99_060_000n, snapshotGrottoBlock: 151_791n, claimEnd: BigInt(CLOSE),
-    claimStart: BigInt(NOW - 60), baselineClaimedSupply: 1n, claimedSupply: 1n, active: true, paused: false, publicSaleStart: 1_793_019_600n,
+    claimStart: BigInt(ACTIVATED), activationDeadline: BigInt(DEADLINE), CLAIM_DURATION: 86_400n, baselineClaimedSupply: 1n, claimedSupply: 1n, active: true, paused: false, publicSaleStart: 1_793_019_600n,
     publicPriceWei: 250_000_000_000_000_000n, ELIGIBILITY_RULE: WEEKEND_RULE, GENESIS_CONTRACT: "0xD1B4367dd9f235f9ee61878019d66E31511E98eE",
     priorClaimOne: PRIORS[0], priorClaimTwo: PRIORS[1], priorClaimThree: PRIORS[2], ...drift.claim,
   };
@@ -71,7 +74,8 @@ function chain(loaded, drift = {}) {
       if (getAddress(to) === CLAIM) {
         const fn = claimIface.parseTransaction({ data });
         if (fn.name === "hasClaimedAnywhere") return claimIface.encodeFunctionResult(fn.name, [claimed.has(fn.args[0].toLowerCase())]);
-        return claimIface.encodeFunctionResult(fn.name, [values[fn.name]]);
+        // drift.live is read on every call, so a test can change the chain between reads.
+        return claimIface.encodeFunctionResult(fn.name, [{ ...values, ...drift.live }[fn.name]]);
       }
       if (getAddress(to) === RELEASE) {
         const fn = releaseIface.parseTransaction({ data });
@@ -112,7 +116,16 @@ describe("weekend snapshot loading", () => {
 describe("weekend claim config binding", () => {
   it("publishes the verified live state, including the live paid-sale end", async () => {
     const verified = await service().instance.verifyConfigBindings();
-    expect(verified.publicConfig).toMatchObject({ mode: "weekend-merkle", claimContract: CLAIM, active: true, paused: false, claimEnd: String(CLOSE), claimStart: String(NOW - 60), publicSaleEnd: "1794315540", claimedSupply: "1", allocation: "0", publicAllocation: "0" });
+    expect(verified.publicConfig).toMatchObject({ mode: "weekend-merkle", claimContract: CLAIM, active: true, paused: false, claimEnd: String(CLOSE), claimStart: String(ACTIVATED), activationDeadline: String(DEADLINE), claimDuration: "86400", publicSaleEnd: "1794315540", claimedSupply: "1", allocation: "0", publicAllocation: "0" });
+  });
+
+  it("publishes an inactive claim with no window yet, and requires ISSUER_ROLE while activation is still allowed", async () => {
+    const inactive = { claim: { active: false, paused: true, claimStart: 0n, claimEnd: 0n } };
+    const verified = await service(inactive).instance.verifyConfigBindings();
+    expect(verified.publicConfig).toMatchObject({ active: false, paused: true, claimStart: "0", claimEnd: "0", activationDeadline: String(DEADLINE) });
+    await expect(service({ ...inactive, issuer: false }).instance.verifyConfigBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
+    // Never activated and past the deadline: the role may already be revoked.
+    await expect(service({ ...inactive, issuer: false }, { now: DEADLINE + 1 }).instance.verifyConfigBindings()).resolves.toBeTruthy();
   });
 
   it.each([
@@ -125,7 +138,13 @@ describe("weekend claim config binding", () => {
     ["a different eligibility rule", { claim: { ELIGIBILITY_RULE: id("x") } }],
     ["no ISSUER_ROLE while claims can be made", { issuer: false }],
     ["the wrong chain", { chainId: 43113n }],
-    ["a close other than the owner-approved 1793595599", { claim: { claimEnd: BigInt(CLOSE + 3600) } }],
+    ["a window longer than 24 hours", { claim: { claimEnd: BigInt(CLOSE + 3600) } }],
+    ["a window shorter than 24 hours", { claim: { claimEnd: BigInt(CLOSE - 1) } }],
+    ["a duration other than 86400", { claim: { CLAIM_DURATION: 172_800n } }],
+    ["an activation after the activation deadline", { claim: { claimStart: BigInt(DEADLINE + 1), claimEnd: BigInt(DEADLINE + 1 + 86_400) } }],
+    ["an inactive claim with a window", { claim: { active: false, paused: true, claimStart: 0n, claimEnd: BigInt(CLOSE) } }],
+    ["an inactive claim that is not paused", { claim: { active: false, paused: false, claimStart: 0n, claimEnd: 0n } }],
+    ["no activation deadline", { claim: { activationDeadline: 0n } }],
   ])("fails closed with 503 on %s", async (_label, drift) => {
     await expect(service(drift).instance.verifyConfigBindings()).rejects.toMatchObject({ status: 503, code: "CLAIM_BINDING_MISMATCH" });
   });
@@ -182,11 +201,40 @@ describe("weekend claim eligibility", () => {
     await expect(instance.checkEligibility(STRANGER)).resolves.toMatchObject({ eligible: false, reason: "NOT_IN_SNAPSHOT" });
   });
 
-  it("returns 409 CLAIM_WINDOW_CLOSED at and after claimEnd, even when chain reads fail, and 400 for a bad wallet", async () => {
+  it("returns 409 CLAIM_WINDOW_CLOSED at and after the on-chain claimEnd, and 400 for a bad wallet", async () => {
+    await expect(service({}, { now: CLOSE - 1 }).instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ eligible: true });
     await expect(service({}, { now: CLOSE }).instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
-    // A broken binding after the close still answers CLAIM_WINDOW_CLOSED, not 503.
-    await expect(service({ minted: 99n }, { now: CLOSE + 10 }).instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
     await expect(service().instance.checkEligibility("0x123")).rejects.toMatchObject({ status: 400, code: "INVALID_WALLET" });
+  });
+
+  it("once a close has been read on-chain, answers CLAIM_WINDOW_CLOSED after it even when the chain later reads fail", async () => {
+    let now = NOW;
+    const loaded = config();
+    const drift = {};
+    const instance = createGenesisWeekendClaimService({ config: loaded, provider: chain(loaded, drift), clock: () => now, monotonicNow: () => now * 1000, logger: { warn: vi.fn() } });
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ eligible: true });
+    drift.minted = 99n;
+    now = CLOSE + 10;
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+  });
+
+  it("before activation returns the proof with active false, and closes if the deadline passes without activation", async () => {
+    const inactive = { claim: { active: false, paused: true, claimStart: 0n, claimEnd: 0n } };
+    await expect(service(inactive).instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ eligible: true, active: false, paused: true });
+    await expect(service(inactive, { now: DEADLINE }).instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ eligible: true, active: false });
+    await expect(service(inactive, { now: DEADLINE + 1 }).instance.checkEligibility(CCHAIN_HOLDER)).rejects.toMatchObject({ status: 409, code: "CLAIM_WINDOW_CLOSED" });
+  });
+
+  it("re-reads the chain instead of trusting a cached inactive state past the deadline, so a last-moment activation is honoured", async () => {
+    let now = DEADLINE - 5;
+    const loaded = config();
+    const drift = { live: { active: false, paused: true, claimStart: 0n, claimEnd: 0n } };
+    const instance = createGenesisWeekendClaimService({ config: loaded, provider: chain(loaded, drift), clock: () => now, monotonicNow: () => 0, logger: { warn: vi.fn() } });
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ active: false });
+    // Activated at the deadline; the cached read (monotonic clock frozen) still says inactive.
+    drift.live = { active: true, paused: false, claimStart: BigInt(DEADLINE), claimEnd: BigInt(DEADLINE + 86_400) };
+    now = DEADLINE + 1;
+    await expect(instance.checkEligibility(CCHAIN_HOLDER)).resolves.toMatchObject({ eligible: true, active: true });
   });
 
   it("issues no signed vouchers: the voucher routes return 409 CLAIM_WINDOW_CLOSED", () => {
