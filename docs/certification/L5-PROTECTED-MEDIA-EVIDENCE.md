@@ -13,8 +13,8 @@ Nothing here was signed, sent or changed. All evidence below is from read-only d
 ## 1. Where the "completed protected-media journey" comes from
 
 No document in this repository records a completed protected-media journey:
-- [`SYSTEM-CHAIN-CERTIFICATION.md`](./SYSTEM-CHAIN-CERTIFICATION.md) A6 and [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](./RELEASE-CERTIFICATION-TARGET-DECISION.md) L5 say NOT STARTED;
-- [`THE-VOID-SUMMIT-CERTIFICATION.md`](./THE-VOID-SUMMIT-CERTIFICATION.md) says PARTIAL.
+- [`SYSTEM-CHAIN-CERTIFICATION.md`](./SYSTEM-CHAIN-CERTIFICATION.md) A6 and [`RELEASE-CERTIFICATION-TARGET-DECISION.md`](../contracts/RELEASE-CERTIFICATION-TARGET-DECISION.md) L5 say NOT STARTED;
+- [`THE-VOID-SUMMIT-CERTIFICATION.md`](../archive/summit/THE-VOID-SUMMIT-CERTIFICATION.md) says PARTIAL.
 
 The production database (`experience_grants`, `media_authorizations`, `audit_events`) does hold real grant and stream records from **2026-10-03/04**. They are all on **legacy shared contracts**, never on a factory clone. Any report of a completed journey can only rest on these records. They prove part of L5, on the wrong contracts.
 

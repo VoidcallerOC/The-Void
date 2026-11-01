@@ -3,7 +3,7 @@
 **Probed at:** `2026-10-08T18:33:22.446Z` (initial) / re-checked with corrected ABIs in the same session  
 **RPC:** `https://api.avax-test.network/ext/bc/C/rpc`  
 **Chain tip at probe:** block `59194272`, chain ID `43113`  
-**Authority:** [`CHAIN-AUTHORITY.md`](./CHAIN-AUTHORITY.md)  
+**Authority:** [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md)  
 **Repro:** `node scripts/fuji-chain-authority-probe.mjs`
 
 ## Verdict

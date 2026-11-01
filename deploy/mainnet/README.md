@@ -67,7 +67,7 @@ nonce-0 address on another chain. The code scopes that Fuji address to chain 431
    must be corrected first.
 2. **[APPROVAL] Review and merge the code PR(s).** The Fuji site redeploys with no behaviour change.
 3. **Owner: resolve the existing gates.**
-   - The deployer-authority note in `DEPLOYER-AUTHORITY-ROTATION-PLAN.md` asks for a re-review before
+   - The deployer-authority note in `docs/contracts/DEPLOYER-AUTHORITY-ROTATION-PLAN.md` asks for a re-review before
      mainnet use of `DEPLOYER_PRIVATE_KEY`. Both V2 contracts are ownerless, so the deployer keeps no
      authority after deploying.
    - The review decision record for the royalty contracts (Cursor CONDITIONAL PASS, scoped exception

@@ -276,20 +276,20 @@ The recommended stack preserves the current repository and adds a small producti
 
 ## References
 
-[1]: README.md "Voidcaller repository README and known production limitation"
-[2]: docs/PHASE-7-FINAL-PLATFORM.md "Phase 7 final platform foundation and production handoff"
-[3]: src/lib/experience-service.js "Experience, media grant, audit, and redemption adapter contracts"
-[4]: src/lib/media-auth.js "Media challenge and short-lived authorization grant contract"
-[5]: src/lib/marketplace.js "Marketplace client encoding, state, and receipt verification"
-[6]: src/lib/web3.js "Wallet RPC, ownership reads, chain configuration, and receipt polling"
-[7]: contracts/MusicMarketplace.sol "ERC-1155 marketplace contract source"
-[8]: vercel.json "Vercel SPA rewrite and static cache configuration"
-[9]: .github/workflows/ci.yml "Existing lint, test, and build workflow"
-[10]: package.json "Existing Vite, test, lint, and build scripts"
-[11]: src/components/PurchasePanel.jsx "Client purchase flow and local ownership refresh"
-[12]: src/components/ListingPanel.jsx "Client listing and approval flow"
-[13]: src/lib/collection.js "Client ownership normalization and experience access resolution"
-[14]: src/lib/WalletContext.jsx "Wallet discovery, account lifecycle, and ownership refresh"
+[1]: ../README.md "Voidcaller repository README and known production limitation"
+[2]: PHASE-7-FINAL-PLATFORM.md "Phase 7 final platform foundation and production handoff"
+[3]: ../src/lib/experience-service.js "Experience, media grant, audit, and redemption adapter contracts"
+[4]: ../src/lib/media-auth.js "Media challenge and short-lived authorization grant contract"
+[5]: ../src/lib/marketplace.js "Marketplace client encoding, state, and receipt verification"
+[6]: ../src/lib/web3.js "Wallet RPC, ownership reads, chain configuration, and receipt polling"
+[7]: ../contracts/MusicMarketplace.sol "ERC-1155 marketplace contract source"
+[8]: ../vercel.json "Vercel SPA rewrite and static cache configuration"
+[9]: ../.github/workflows/ci.yml "Existing lint, test, and build workflow"
+[10]: ../package.json "Existing Vite, test, lint, and build scripts"
+[11]: ../src/components/PurchasePanel.jsx "Client purchase flow and local ownership refresh"
+[12]: ../src/components/ListingPanel.jsx "Client listing and approval flow"
+[13]: ../src/lib/collection.js "Client ownership normalization and experience access resolution"
+[14]: ../src/lib/WalletContext.jsx "Wallet discovery, account lifecycle, and ownership refresh"
 
 ## Verification performed
 
