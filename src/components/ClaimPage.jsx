@@ -283,9 +283,17 @@ function GenesisClaimLanding({ catalog }) {
             )}
             <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phaseMessage(phase, target)}</p>
             {/* While the claim is open, claim right here; no separate release page to open first. */}
-            {match
-              ? phase === GENESIS_CLAIM_PHASES.GENESIS && <ReleaseClaim editionId={match.id} catalog={catalog} embedded />
-              : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
+            {match && phase === GENESIS_CLAIM_PHASES.GENESIS && <ReleaseClaim editionId={match.id} catalog={catalog} embedded />}
+            {/* Free claim over, paid mint still open: the mint is the only action left. */}
+            {match && phase === GENESIS_CLAIM_PHASES.PUBLIC && (
+              <div className="vc-claim-action" data-testid="landing-mint">
+                <Link to={`/edition/${match.id}`} style={primaryBtn}>MINT · {avax(target.publicPriceWei)}</Link>
+                <Link to={`/edition/${match.id}`} style={ghostBtn}>View release</Link>
+              </div>
+            )}
+            {!match && <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}
+            {/* Grotto holders claim on the destination chain: say so next to the claim controls, not below the details. */}
+            {isWeekendTarget(target) && <GrottoHolderNotice chainId={target.destinationChainId} />}
             <div className="vc-claim-supporting">
               <Eyebrow red>Verified claim target</Eyebrow>
               <InfoRow label="Network">{claimNetworkLabel(target.destinationChainId)} · {target.destinationChainId}</InfoRow>
@@ -294,7 +302,6 @@ function GenesisClaimLanding({ catalog }) {
               <InfoRow label="Claim contract" mono>{target.claimContract}</InfoRow>
               <ClaimSchedule target={target} />
             </div>
-            {isWeekendTarget(target) && <GrottoHolderNotice chainId={target.destinationChainId} />}
           </>
         )}
       </div>

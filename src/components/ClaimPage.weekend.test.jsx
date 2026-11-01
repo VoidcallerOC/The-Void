@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WalletCtx } from "../lib/wallet-context.js";
@@ -78,7 +78,52 @@ describe("Genesis weekend claim page", () => {
     renderLanding();
     const embedded = await screen.findByTestId("embedded-claim");
     expect(embedded.textContent).toMatch(/Claim status/);
+    const scope = within(embedded);
+    expect(scope.getByRole("button", { name: /connect/i })).toBeTruthy();
+    expect(scope.getByRole("button", { name: /claim/i })).toBeTruthy();
+    expect(await scope.findByRole("link", { name: /MINT · 0\.25 AVAX/ })).toBeTruthy();
+    expect(scope.getByRole("link", { name: /View release/i })).toBeTruthy();
     expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it.each([
+    ["paused while active", { paused: true }],
+    ["after the window closed, paid mint still open", { claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600) }],
+    ["after the window closed and the paid mint ended", { claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600), publicSaleEnd: String(NOW - 60) }],
+    ["never activated before the deadline", { active: false, paused: true, claimStart: "0", claimEnd: "0", activationDeadline: String(NOW - 600) }],
+  ])("shows no claim controls on the landing when %s", async (_label, overrides) => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend(overrides));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/Verified claim target/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+    expect(screen.queryByText("OPEN THE RELEASE CLAIM")).toBeNull();
+  });
+
+  it("shows no claim controls when the claim target fails to load", async () => {
+    fetchGenesisClaimConfig.mockRejectedValue(new Error("Claim service is unavailable."));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/No claim target is configured and verified/);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+  });
+
+  it("keeps the paid mint and release reachable from the landing after the free claim closes", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600) }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    const mint = within(await screen.findByTestId("landing-mint"));
+    expect(mint.getByRole("link", { name: /MINT · 0\.25 AVAX/ }).getAttribute("href")).toBe(`/edition/${EDITION_ID}`);
+    expect(mint.getByRole("link", { name: /View release/i }).getAttribute("href")).toBe(`/edition/${EDITION_ID}`);
+    expect(screen.queryByTestId("embedded-claim")).toBeNull();
+  });
+
+  it("offers no mint on the landing once the paid mint has ended too", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimStart: String(NOW - 90_000), claimEnd: String(NOW - 3600), publicSaleEnd: String(NOW - 60) }));
+    catalogState.catalog = catalog();
+    renderLanding();
+    await screen.findByText(/Minting is closed/);
+    expect(screen.queryByTestId("landing-mint")).toBeNull();
   });
 
   it("shows no claim controls on the landing before the claim is activated", async () => {
