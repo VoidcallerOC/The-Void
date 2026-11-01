@@ -189,6 +189,8 @@ export function createGenesisWeekendClaimService({ config, provider = null, cloc
       active: Boolean(active),
       paused: Boolean(paused),
       claimedSupply: BigInt(claimedSupply).toString(),
+      // Claims carried over from the earlier Genesis claim contracts; claimedSupply - baseline is this window's count.
+      baselineClaimedSupply: BigInt(baseline).toString(),
       publicSaleStart: BigInt(publicSaleStart).toString(),
       publicSaleEnd: BigInt(saleData.endTime ?? saleData[5]).toString(),
       publicPriceWei: BigInt(publicPriceWei).toString(),

@@ -8,7 +8,7 @@ export const NOT_FOUND_TITLE = `Not found · ${SITE}`;
 const STATIC_TITLES = Object.freeze({
   "/discover": "Discover",
   "/marketplace": "Marketplace",
-  "/claim": "Genesis claim",
+  "/claim": "Forgive & Forget",
   "/bridge": "Bridge",
   "/artists": "Artists",
   "/verify": "Become verified",

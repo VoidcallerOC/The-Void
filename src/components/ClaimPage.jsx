@@ -101,6 +101,8 @@ function nowSeconds() {
 }
 
 const WEEKEND_INACTIVE_REFRESH_MS = 60_000;
+// The server re-reads the claim contract at most every 30s, so polling faster would not show new claims sooner.
+const CLAIM_COUNT_REFRESH_MS = 30_000;
 // Keep re-reading a little past the deadline, so a page open across a last-moment activation still picks it up.
 const WEEKEND_DEADLINE_GRACE_SECONDS = 300;
 
@@ -120,6 +122,48 @@ function useInactiveWeekendRefresh(target, onTarget) {
     // onTarget is a state setter wrapper; only the waiting state should restart the timer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waiting]);
+}
+
+/** While the claim window is open, re-read the server-verified target so the claim counter stays current. */
+function useOpenClaimRefresh(open, onTarget) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const timer = setInterval(() => {
+      fetchGenesisClaimConfig().then(onTarget).catch(() => {});
+    }, CLAIM_COUNT_REFRESH_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+}
+
+/**
+ * Claims made through this claim contract, as the contract's own claimedSupply reports it (via the server's verified
+ * read). claimedSupply starts at the baseline carried over from earlier claim contracts, so this window's count is
+ * claimedSupply - baseline; the all-time total is shown underneath. Renders nothing if the target has no count.
+ */
+export function ClaimCounter({ target }) {
+  if (target?.claimedSupply === undefined || target?.claimedSupply === null) return null;
+  let total;
+  let baseline;
+  try {
+    total = BigInt(target.claimedSupply);
+    baseline = BigInt(target.baselineClaimedSupply ?? 0);
+  } catch {
+    return null;
+  }
+  const thisWindow = total >= baseline ? total - baseline : 0n;
+  return (
+    <div className="vc-countdown" data-testid="claim-counter">
+      <Eyebrow red>Claims so far</Eyebrow>
+      <div className="vc-countdown-grid">
+        <div className="vc-countdown-unit">
+          <span className="vc-countdown-value">{thisWindow.toString()}</span>
+          <span className="vc-countdown-label">claimed</span>
+        </div>
+      </div>
+      {baseline > 0n && <p className="vc-countdown-target">{total.toString()} Genesis claims all time, including {baseline.toString()} from earlier claims</p>}
+    </div>
+  );
 }
 
 /**
@@ -207,12 +251,13 @@ function GenesisClaimLanding({ catalog }) {
   const phase = target ? genesisClaimPhase(target, nowSeconds()) : null;
   // The countdown is display only; once the verified target reports an open or closed phase it gives way.
   const showCountdown = !phase || (phase === GENESIS_CLAIM_PHASES.UPCOMING && !isWeekendTarget(target));
+  useOpenClaimRefresh(phase === GENESIS_CLAIM_PHASES.GENESIS, (next) => setState({ status: "ready", target: next }));
   return (
     <section className="vc-claim-page" style={shell}>
       <header className="vc-claim-header">
         <div>
           <Eyebrow red>† Claim · Genesis holders</Eyebrow>
-          <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Genesis claim</h1>
+          <h1 className="vc-h1" style={{ margin: "16px 0 0" }}>Forgive &amp; Forget</h1>
         </div>
         <StateMark state={state.status === "ready" && phase === GENESIS_CLAIM_PHASES.GENESIS ? CLAIM_PHASES.ELIGIBLE : CLAIM_PHASES.CLAIM_UNAVAILABLE} />
       </header>
@@ -227,7 +272,15 @@ function GenesisClaimLanding({ catalog }) {
         {state.status === "unavailable" && <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>The Genesis claim is not open. No claim target is configured and verified, so nothing can be claimed here yet.</p>}
         {state.status === "ready" && (
           <>
-            {isWeekendTarget(target) && target.active === true && <WeekendClaimCountdown claimEnd={target.claimEnd} onClosed={() => setClockTick((tick) => tick + 1)} />}
+            {isWeekendTarget(target) && target.active === true && (
+              <div className="vc-claim-hero">
+                <div>
+                  <WeekendClaimCountdown claimEnd={target.claimEnd} onClosed={() => setClockTick((tick) => tick + 1)} />
+                  <ClaimCounter target={target} />
+                </div>
+                <img className="vc-claim-emblem" src="/assets/voidcaller-primary-dark-1024.png" width="851" height="1024" alt="Voidcaller emblem" />
+              </div>
+            )}
             <p className="vc-body vc-body-muted" style={{ maxWidth: 620 }}>{phaseMessage(phase, target)}</p>
             <div className="vc-claim-action">
               {match ? <Link to={`/claim/${match.id}`} style={primaryBtn}>OPEN THE RELEASE CLAIM</Link> : <p className="vc-claim-warning">The release for this claim is not in the catalog yet.</p>}

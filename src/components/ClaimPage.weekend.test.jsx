@@ -63,6 +63,22 @@ function renderLanding() {
 afterEach(() => { cleanup(); vi.clearAllMocks(); catalogState.catalog = { artists: [], releases: [], editions: [], experiences: [] }; });
 
 describe("Genesis weekend claim page", () => {
+  it("titles the landing Forgive & Forget and counts this window's claims apart from the carried-over baseline", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ claimedSupply: "12", baselineClaimedSupply: "5" }));
+    renderLanding();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Forgive & Forget");
+    const counter = await screen.findByTestId("claim-counter");
+    expect(counter.querySelector(".vc-countdown-value").textContent).toBe("7");
+    expect(counter.textContent).toMatch(/12 Genesis claims all time, including 5 from earlier claims/);
+  });
+
+  it("shows no claim counter before the claim is activated", async () => {
+    fetchGenesisClaimConfig.mockResolvedValue(weekend({ active: false, paused: true, claimStart: "0", claimEnd: "0", claimedSupply: "5", baselineClaimedSupply: "5" }));
+    renderLanding();
+    await screen.findByText(/has not opened/);
+    expect(screen.queryByTestId("claim-counter")).toBeNull();
+  });
+
   it("lets a Grotto-only holder claim on C-Chain with its proof, without a voucher", async () => {
     fetchGenesisClaimConfig.mockResolvedValue(weekend());
     readGenesisClaimed.mockResolvedValue(false);
