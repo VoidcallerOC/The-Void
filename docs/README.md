@@ -115,7 +115,8 @@ Deployment transaction records stay in [`deployments/`](../deployments/) and app
 | [`SUPABASE-RENDER-CONSOLIDATION-AUDIT-2026-10-23.md`](SUPABASE-RENDER-CONSOLIDATION-AUDIT-2026-10-23.md) | Supabase → Render consolidation audit |
 | [`THE-VOID-DATABASE-RLS-INVESTIGATION.md`](THE-VOID-DATABASE-RLS-INVESTIGATION.md) | Database connectivity and RLS investigation |
 | [`NAVIGATION-AUDIT-2026-10-19.md`](NAVIGATION-AUDIT-2026-10-19.md) | Navigation integrity audit |
-| [`../audit-reports/01-release-per-contract-implementation.md`](../audit-reports/01-release-per-contract-implementation.md) | Release-per-contract implementation audit |
+| [`audits/01-release-per-contract-implementation.md`](audits/01-release-per-contract-implementation.md) | Release-per-contract implementation audit |
+| [`audits/REPO-CLEANUP-PHASE-2-2026-11-02.md`](audits/REPO-CLEANUP-PHASE-2-2026-11-02.md) | Repository cleanup phase 2: inventory, removals, branch candidates |
 
 ## Product and feature design
 

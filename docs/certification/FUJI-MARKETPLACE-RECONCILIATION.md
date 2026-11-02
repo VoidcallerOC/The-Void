@@ -45,7 +45,7 @@
                        ┌───────────────────────────────────────────┐
   intended authority   │ VoidReleaseFactoryV2 0xa5Cb…3505 (Fuji)   │  registry: isRelease(clone)
   (repo design,        │   └─ clones VoidRelease1155V4 (pre-album) │
-   audit-reports/01)   └───────────────▲───────────────────────────┘
+   docs/audits/01)     └───────────────▲───────────────────────────┘
                                        │ immutable registry()
                        ┌───────────────┴───────────────────────────┐
                        │ ReleaseMarketplaceV3 0x42B7…a744          │  accepts only factory-registered clones
@@ -67,7 +67,7 @@
 | One marketplace or several? | **Frontend:** exactly one (`MARKETPLACE_CONFIG`; buys are pinned to it since #141). **API:** any marketplace with a DB `contracts` row of type `MARKETPLACE` (`server/api-service.js:336-337`). **Indexer:** whatever `INDEXER_CONTRACTS_JSON` lists. | Code |
 | Authoritative source per environment | **Fuji:** `deployments/release-per-contract-fuji.json` plus on-chain `registry()`. **Mainnet:** none. `config/mainnet-release.json` has no marketplace and `deployed: false`. | Files |
 
-**Design vs deployed behaviour.** `audit-reports/01-release-per-contract-implementation.md` defines V3 as the only resale path, with "no shared canonical-token exception". The deployed tooling still contains the legacy MusicMarketplace path (single canonical token `0x82b26…`), and a scheduled service could run it. That is the disagreement.
+**Design vs deployed behaviour.** `docs/audits/01-release-per-contract-implementation.md` defines V3 as the only resale path, with "no shared canonical-token exception". The deployed tooling still contains the legacy MusicMarketplace path (single canonical token `0x82b26…`), and a scheduled service could run it. That is the disagreement.
 
 ---
 

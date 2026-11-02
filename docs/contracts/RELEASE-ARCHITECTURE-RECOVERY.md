@@ -8,7 +8,7 @@ Evidence rules: [`CHAIN-AUTHORITY.md`](../../CHAIN-AUTHORITY.md). This session c
 
 | Source | What it establishes |
 |---|---|
-| `audit-reports/01-release-per-contract-implementation.md` | Every new release gets its own ERC-1155 clone, dedicated primary sale and provenance anchor. Canonical identity is `(chainId, release contract, tokenId)`. |
+| `docs/audits/01-release-per-contract-implementation.md` | Every new release gets its own ERC-1155 clone, dedicated primary sale and provenance anchor. Canonical identity is `(chainId, release contract, tokenId)`. |
 | `contracts/VoidRelease1155V4.sol` (PR #136, `f67a643`) | Album semantics on a release clone. `createAlbum` opts the clone in. `createAlbumTrack(..., bool single, uint64 mintEnd)` adds tracks: 13 tracks and 4 singles by default, more only through `approveExpandedRelease`. `closeAlbum` stops new tracks. Open editions use `maxSupply = 0` plus `mintEnd`. |
 | `server/studio-service.js:46-49`, `ArtistStudioPage.jsx` | Release types are **EP** (standalone) and **ALBUM**. A **single is a track inside an album, flagged on-chain with `isAlbumSingle`**. It is not a separate release type or contract. |
 | `README.md` "Release Model" | Lists Single / EP / Album. This **conflicts** with the code above. The code is newer (PR #136), so it is used here. **Decision needed:** keep "single = album track flag", or add a standalone SINGLE release type. |
