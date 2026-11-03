@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore, Suspense } from "react";
+import { MintBanner } from "./MintBanner.jsx";
+import { useFeaturedMint } from "../lib/featured-mint.js";
 import { Outlet, useLocation } from "react-router-dom";
 import { Grain, Scanlines } from "./Overlays.jsx";
 import { VoidStarfield } from "./VoidStarfield.jsx";
@@ -70,6 +72,16 @@ function LayoutShell() {
   const ownershipConfig = useMemo(() => buildMarketplaceOwnershipConfig(withOwnableDuplicates(catalog).editions), [catalog]);
   return (
     <WalletProvider collectionConfig={ownershipConfig}>
+      <SiteChrome catalog={catalog} />
+    </WalletProvider>
+  );
+}
+
+// The visible shell. While a release is minting, a site-wide mint banner sits above the header.
+function SiteChrome({ catalog }) {
+  const featured = useFeaturedMint();
+  return (
+    <>
       <ReviewerNotificationsProvider>
         <PreviewHostBridge />
         <ScrollToTop />
@@ -77,11 +89,12 @@ function LayoutShell() {
         {/* The whole shell is one isolated stacking context so the ambient
             starfield (z-index -1) sits above the black page ground and beneath
             every page, the nav, footer and player. */}
-        <div className="vc-starfield-host">
+        <div className={`vc-starfield-host${featured ? " vc-has-mint-banner" : ""}`}>
         <a className="vc-skip-link" href="#vc-main">Skip to content</a>
         <VoidStarfield />
         <Grain />
         <Scanlines />
+        {featured && <MintBanner featured={featured} />}
         <Nav />
         {/* Each route fills the viewport so short pages don't expose the footer
             on load — content centers vertically; taller pages just grow. */}
@@ -94,6 +107,6 @@ function LayoutShell() {
         <StickyPlayer />
         </div>
       </ReviewerNotificationsProvider>
-    </WalletProvider>
+    </>
   );
 }

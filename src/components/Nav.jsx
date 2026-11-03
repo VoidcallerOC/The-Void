@@ -82,7 +82,8 @@ export function Nav() {
     <nav
       style={{
         position: "fixed",
-        top: 0,
+        // Below the site-wide mint banner while one is shown.
+        top: featured ? "var(--vc-banner-h)" : 0,
         left: 0,
         right: 0,
         zIndex: 100,

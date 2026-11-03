@@ -259,3 +259,65 @@ button:disabled { cursor: not-allowed; }
   text-transform: uppercase;
   color: var(--vc-bone-dim);
 }
+
+/* ---------- Open mint: site-wide banner + home drop hero ----------- */
+:root { --vc-banner-h: 36px; }
+.vc-mint-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 101; height: var(--vc-banner-h);
+  display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 16px;
+  background: var(--vc-crimson); color: #fff; text-decoration: none;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+}
+.vc-mint-banner:hover, .vc-mint-banner:focus-visible { background: var(--vc-blood, #8a0a10); outline: none; }
+.vc-mint-banner-text { display: flex; gap: 12px; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-mint-banner-text > span::before { content: "·"; margin-right: 12px; opacity: .7; }
+.vc-mint-banner-cta { font-weight: 700; border: 1px solid rgba(255,255,255,.8); padding: 4px 10px; flex-shrink: 0; }
+.vc-mint-banner-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #fff; flex-shrink: 0; display: inline-block;
+  animation: vc-mint-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vc-mint-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .vc-mint-banner-dot { animation: none; } }
+.vc-has-mint-banner .vc-main { padding-top: var(--vc-banner-h); }
+
+.vc-mint-hero {
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: clamp(28px, 5vw, 72px); align-items: center;
+  max-width: 1360px; margin: 0 auto; width: 100%; min-height: calc(100vh - var(--vc-banner-h));
+  padding: 120px clamp(16px, 5vw, 64px) 80px; box-sizing: border-box;
+}
+.vc-mint-hero-kicker {
+  display: inline-flex; align-items: center; gap: 10px; margin: 0; padding: 8px 12px; background: var(--vc-crimson); color: #fff;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+}
+.vc-mint-hero-artist { margin: 22px 0 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--vc-crimson); }
+.vc-mint-hero-title { margin: 10px 0 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(56px, 9vw, 128px); line-height: .88; text-transform: uppercase; color: var(--vc-bone); }
+.vc-mint-hero-line { margin: 18px 0 0; color: var(--vc-bone-dim); font-size: 18px; line-height: 1.5; max-width: 520px; }
+.vc-mint-hero-facts { display: flex; flex-wrap: wrap; gap: 0; margin: 28px 0 0; border-top: 1px solid var(--vc-ash); border-bottom: 1px solid var(--vc-ash); }
+.vc-mint-hero-facts > div { padding: 14px 28px 14px 0; margin-right: 28px; border-right: 1px solid var(--vc-ash); }
+.vc-mint-hero-facts > div:last-child { border-right: 0; margin-right: 0; }
+.vc-mint-hero-facts dt { font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--vc-bone-dim); }
+.vc-mint-hero-facts dd { margin: 6px 0 0; font-family: var(--font-mono); font-size: 20px; color: var(--vc-bone); }
+.vc-mint-hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.vc-mint-hero-fine { margin: 14px 0 0; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--vc-bone-dim); }
+.vc-mint-hero-art { display: block; border: 1px solid var(--vc-ash); box-shadow: 0 0 0 1px rgba(184,7,16,.35), 0 30px 80px rgba(184,7,16,.18); }
+.vc-mint-hero-art img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
+
+@media (max-width: 900px) {
+  .vc-mint-hero { grid-template-columns: 1fr; padding-top: 96px; min-height: 0; gap: 24px; }
+  .vc-mint-hero-art { order: -1; max-width: 420px; }
+  .vc-mint-hero-actions > * { flex: 1 1 100%; }
+}
+@media (max-width: 560px) {
+  .vc-mint-banner { justify-content: space-between; letter-spacing: .1em; font-size: 10px; }
+  .vc-mint-banner-text > span:not(.vc-mint-banner-left) { display: none; }
+  /* On a phone the title, price and Mint button come first; the cover follows. */
+  .vc-mint-hero { padding-top: 88px; gap: 20px; }
+  .vc-mint-hero-art { order: 1; max-width: 100%; }
+  .vc-mint-hero-artist { margin-top: 16px; }
+  .vc-mint-hero-line { font-size: 16px; margin-top: 12px; }
+  .vc-mint-hero-facts { margin-top: 18px; }
+  .vc-mint-hero-facts > div { padding-top: 10px; padding-bottom: 10px; }
+  .vc-mint-hero-actions { margin-top: 18px; }
+  .vc-mint-hero-facts > div { padding-right: 16px; margin-right: 16px; }
+  .vc-mint-hero-facts dd { font-size: 16px; }
+}

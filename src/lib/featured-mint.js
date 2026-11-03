@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMarketplaceCatalogs } from "./catalog-source.js";
 import { collapsePublicCatalog } from "./summit-demo.js";
-import { collectableEditionGroups, editionPriceLabel } from "./marketplace-surface.js";
+import { collectableEditionGroups, editionPriceLabel, editionSaleAvailability } from "./marketplace-surface.js";
+import { artworkSources } from "./artwork.js";
 import { playableTrackFor, tokenView } from "./token-view.js";
 import { artworkFor } from "./marketplace-chrome.js";
 import { releaseBindingFor } from "./claim-state.js";
@@ -16,7 +17,12 @@ export function featuredMintItem(catalog) {
   const item = collectableEditionGroups(collapsePublicCatalog(catalog)).flatMap((group) => group.items)[0];
   if (!item) return null;
   const { edition, release, artist, primary } = item;
-  const preview = playableTrackFor(tokenView(catalog, { edition, release }).token, { artwork: artworkFor(edition, release) });
+  // Sized gateway URLs first, then the plain gateway and the public one, so a slow image falls back (the bare
+  // edition artwork URL rendered as a broken image in the player on production).
+  const artwork = artworkSources(artworkFor(edition, release), { width: 1200 });
+  const thumb = artworkSources(artworkFor(edition, release), { width: 240 })[0] || artwork[0] || "";
+  const preview = playableTrackFor(tokenView(catalog, { edition, release }).token, { artwork: thumb });
+  const endTime = Number(editionSaleAvailability(edition)?.endTime) || 0;
   return {
     edition,
     release,
@@ -25,6 +31,8 @@ export function featuredMintItem(catalog) {
     href: `/edition/${edition.id}`,
     price: editionPriceLabel(edition),
     saleLabel: primary?.saleLabel || "",
+    artwork,
+    endTime,
     preview: preview ? { ...preview, title: preview.title || release?.title || edition.title } : null,
   };
 }
@@ -32,6 +40,17 @@ export function featuredMintItem(catalog) {
 export function useFeaturedMint() {
   const catalog = useMarketplaceCatalogs();
   return useMemo(() => featuredMintItem(catalog), [catalog]);
+}
+
+/** Time left in the sale, coarse and human: "6 days left", "5 hours left", "Last hour". Empty without an end. */
+export function timeLeftLabel(endTime, nowMs = Date.now()) {
+  const seconds = Number(endTime) - Math.floor(nowMs / 1000);
+  if (!Number.isFinite(seconds) || Number(endTime) <= 0 || seconds <= 0) return "";
+  const days = Math.floor(seconds / 86400);
+  if (days >= 2) return `${days} days left`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 2) return `${hours} hours left`;
+  return hours === 1 ? "1 hour left" : "Last hour";
 }
 
 /** Button text for a mint call to action: "Mint Forgive & Forget · 0.25 AVAX". */
