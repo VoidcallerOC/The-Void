@@ -289,7 +289,9 @@ describe("X account linking", () => {
 });
 
 describe("X link is independent of the verification-DM credentials", () => {
-  const dmEnv = { X_API_KEY: "dm-consumer-key", X_API_SECRET: "dm-consumer-secret", X_ACCESS_TOKEN: "dm-access-token", X_ACCESS_TOKEN_SECRET: "dm-access-secret", X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "555" };
+  // Values long and distinctive enough never to occur by chance in the random OAuth state / PKCE values the
+  // flow puts in the URL (a short "555" matched them in ~1 of 20 runs).
+  const dmEnv = { X_API_KEY: "dm-consumer-key", X_API_SECRET: "dm-consumer-secret", X_ACCESS_TOKEN: "dm-access-token", X_ACCESS_TOKEN_SECRET: "dm-access-secret", X_DM_RECIPIENT_USERNAME: "TheVoidOC", X_DM_RECIPIENT_ID: "9182736450918273645" };
   const run = async (config) => {
     const { service, db, x } = setup({ config, now: () => new Date("2026-10-25T12:00:00Z") });
     const url = await begin(service);
