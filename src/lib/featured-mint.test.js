@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { baseCatalogs, mapPublishedCatalog, mergeCatalogs } from "./catalog-source.js";
-import { featuredMintItem, mintLabel } from "./featured-mint.js";
+import { featuredMintItem, mintLabel, timeLeftLabel } from "./featured-mint.js";
 
 const editionId = "edition-ecf27444-94b7-40d5-bace-5f061792f55e";
 function catalogWithCollectableEdition() {
@@ -22,5 +22,18 @@ describe("featured mint", () => {
     const featured = featuredMintItem(catalogWithCollectableEdition());
     expect(featured).toMatchObject({ title: "VOIDCALLER", href: `/edition/${editionId}` });
     expect(mintLabel(featured)).toBe("Mint VOIDCALLER · 0.01 AVAX");
+  });
+});
+
+describe("time left in the sale", () => {
+  const now = Date.UTC(2026, 10, 3, 12, 0, 0);
+  const at = (seconds) => Math.floor(now / 1000) + seconds;
+  it("reads in days, then hours, then the last hour, and is empty once over or unknown", () => {
+    expect(timeLeftLabel(at(6.5 * 86400), now)).toBe("6 days left");
+    expect(timeLeftLabel(at(30 * 3600), now)).toBe("30 hours left");
+    expect(timeLeftLabel(at(90 * 60), now)).toBe("1 hour left");
+    expect(timeLeftLabel(at(20 * 60), now)).toBe("Last hour");
+    expect(timeLeftLabel(at(-5), now)).toBe("");
+    expect(timeLeftLabel(0, now)).toBe("");
   });
 });

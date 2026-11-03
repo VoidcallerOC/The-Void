@@ -6,19 +6,14 @@ import { WordmarkGlitch } from "./Overlays.jsx";
 import { useAudio } from "../lib/audio.js";
 import { fetchSelfTitledEpVolume } from "../lib/marketplace-api.js";
 import { formatWeiAsAvax } from "../lib/marketplace-surface.js";
-import { mintLabel, useFeaturedMint } from "../lib/featured-mint.js";
-import { ghostBtn, primaryBtn } from "../lib/marketplace-chrome.js";
+import { useFeaturedMint } from "../lib/featured-mint.js";
+import { MintHero } from "./MintHero.jsx";
 
 // ---------------- Hero ----------------
 export function Hero() {
   const audio = useAudio();
   const featured = useFeaturedMint();
   const [volume, setVolume] = useState(null);
-  const hearFeatured = () => {
-    if (!featured?.preview) return;
-    audio.setQueue([featured.preview], `preview:${featured.edition.id}`, featured.title);
-    audio.play(0);
-  };
   const hearEP = () => {
     audio.setQueue(VC_DATA.firstEPTracks, "self-titled");
     audio.play(0);
@@ -48,6 +43,9 @@ export function Hero() {
   }, []);
 
   return (
+    <>
+    {/* While a release is minting, the first screen is that release; the archive hero follows below. */}
+    {featured && <MintHero featured={featured} />}
     <section
       id="top"
       className="vc-hero"
@@ -105,16 +103,6 @@ export function Hero() {
         <h1 style={{ margin: 0, padding: 0, border: 0, font: "inherit", color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
           <WordmarkGlitch />
         </h1>
-        {/* While a release is minting, say so first: on a phone this is the only part of the hero above the fold. */}
-        {featured && (
-          <div className="vc-hero-mint" data-testid="hero-mint" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Eyebrow red>Minting now{featured.saleLabel ? ` · ${featured.saleLabel}` : ""}</Eyebrow>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Link to={featured.href} style={primaryBtn}>{mintLabel(featured)}</Link>
-              {featured.preview && <button type="button" onClick={hearFeatured} style={{ ...ghostBtn, cursor: "pointer" }}>Hear {featured.title}</button>}
-            </div>
-          </div>
-        )}
         <div className="vc-home-platform">
           <img src="/brand/the-void/header-wordmark-dark.svg" alt="The Void" width="1627" height="435" />
           <span>Music-native platform · Underground archive</span>
@@ -147,7 +135,7 @@ export function Hero() {
         </p>
         <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
           <Btn kind="ghost" onClick={hearEP}>Hear the EP</Btn>
-          {!featured && <Link
+          <Link
             to="/marketplace"
             style={{
               fontFamily: "var(--font-body)",
@@ -165,7 +153,7 @@ export function Hero() {
             }}
           >
             Enter marketplace
-          </Link>}
+          </Link>
         </div>
         <div style={{ display: "flex", gap: 32, marginTop: 32, flexWrap: "wrap" }}>
           {VC_DATA.heroStats.map(([v, k]) => (
@@ -183,5 +171,6 @@ export function Hero() {
         </div>
       </div>
     </section>
+    </>
   );
 }
