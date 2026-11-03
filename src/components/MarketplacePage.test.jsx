@@ -100,27 +100,41 @@ afterEach(() => cleanup());
 describe("public marketplace inventory", () => {
   const listing = { id: "listing-1", listingId: "1", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "20000000000000000", status: "ACTIVE", authority: "INDEXED" };
 
-  it("renders no primary collecting catalog, and its empty state speaks of secondary listings only", async () => {
+  it("keeps the resale section free of the primary catalog; editions minting now get their own section above it", async () => {
     const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
 
-    expect(screen.getByRole("heading", { name: "Secondary collector listings" })).toBeTruthy();
+    const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
+    const minting = screen.getByTestId("marketplace-minting");
+    expect(within(minting).getByRole("heading", { name: "Mint from the artist" })).toBeTruthy();
+    expect(minting.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
+    // The minting section comes first, so a buyer reaches it before the resale list.
+    expect(minting.compareDocumentPosition(secondary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Official editions available to collect" })).toBeNull();
     expect(screen.queryByRole("region", { name: "The shelf" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Collect" })).toBeNull();
-    expect(container.querySelectorAll("[data-edition-id]")).toHaveLength(0);
-    expect(container.textContent).not.toMatch(/primary edition|official edition|The shelf|Pressings/i);
+    expect(within(secondary).queryByRole("link", { name: "Collect" })).toBeNull();
+    expect(secondary.querySelectorAll("[data-edition-id]")).toHaveLength(0);
+    expect(secondary.textContent).not.toMatch(/primary edition|official edition|The shelf|Pressings/i);
     expect(screen.getByText(/no secondary listings/i)).toBeTruthy();
     expect(screen.getByLabelText("Overall volume").textContent).toMatch(/Overall volume\s*0\.03 AVAX/i);
     expect(container.textContent).not.toMatch(/Recently listed|Add tracks|Open artist studio|From the artists/i);
   });
 
-  it("does not render a collectable edition just because it has no resale listing", async () => {
-    // The edition is collectable (Discover shows it) yet Marketplace stays empty.
+  it("shows a collectable edition with no resale listing only under Minting now, never as a resale offer", async () => {
+    // The edition is collectable (Discover shows it): it is offered from its primary sale, not as a listing.
     const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
-    expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(0);
-    expect(container.textContent).not.toContain("Full self-titled EP");
+    const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
+    expect(secondary.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(0);
+    expect(secondary.textContent).not.toContain("Full self-titled EP");
+    expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
+  });
+
+  it("shows no Minting now section when nothing is on primary sale", async () => {
+    catalogState.current = mergeCatalogs(baseCatalogs());
+    renderMarketplace();
+    await waitFor(() => expect(screen.getByText("No active listings")).toBeTruthy());
+    expect(screen.queryByTestId("marketplace-minting")).toBeNull();
   });
 
   it("shows an indexed offer once, with seller, price, exact token and edition link", async () => {
@@ -128,8 +142,8 @@ describe("public marketplace inventory", () => {
     const { container } = renderMarketplace();
     await waitFor(() => expect(screen.getByText("Seller · 0xaBd3…c174")).toBeTruthy());
 
-    expect(container.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
     const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
+    expect(secondary.querySelectorAll(`[data-edition-id="${realEditionId}"]`)).toHaveLength(1);
     expect(within(secondary).getByText("Available · 1 · 0.02 AVAX")).toBeTruthy();
     expect(within(secondary).getByText("Full self-titled EP")).toBeTruthy();
     expect(within(secondary).getAllByRole("link", { name: /^View token #/ })[0].getAttribute("href")).toBe(`/edition/${realEditionId}/token/${realTokenId}`);
@@ -226,7 +240,9 @@ describe("secondary listings are the only catalog on the page", () => {
     fetchListings.mockResolvedValueOnce([{ id: "l", listingId: "2", seller, chain: 43113, tokenContract: contractAddress, tokenId: realTokenId, amount: "1", price: "20000000000000000", status: "ACTIVE", authority: "INDEXED" }]);
     const { container } = renderMarketplace();
     await waitFor(() => expect(container.textContent).toContain("0.02 AVAX"));
-    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "Secondary collector listings" })).toHaveLength(1);
+    const secondary = screen.getByRole("heading", { name: "Secondary collector listings" }).closest("section");
+    expect(secondary.textContent).toContain("0.02 AVAX");
   });
 
   it("with no eligible listing only the secondary empty state shows", async () => {

@@ -1,5 +1,6 @@
 import { VC_DATA } from "../data.js";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useFeaturedMint } from "../lib/featured-mint.js";
 import { useAudio, fmt } from "../lib/audio.js";
 import { PlayerBtn, TrackArt } from "./Atoms.jsx";
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
@@ -85,6 +86,15 @@ function AudioDebugPanel({ audio }) {
 // ---------------- Bottom audio bar (sticky) ----------------
 export function StickyPlayer() {
   const audio = useAudio();
+  const featured = useFeaturedMint();
+  const featuredPreview = featured?.preview || null;
+  // Until a visitor picks something to play, the bar is cued to the preview of the release minting now
+  // (not a forthcoming record that cannot be collected). Never replaces a queue the visitor chose.
+  useEffect(() => {
+    if (audio.queue || !featuredPreview) return;
+    audio.setQueue([featuredPreview], `preview:${featured.edition.id}`, featured.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featuredPreview]);
   const queue = audio.queue || VC_DATA.tracklist;
   const cur = queue[audio.idx] || queue[0];
   const dur = audio.el?.duration || 0;
@@ -96,7 +106,7 @@ export function StickyPlayer() {
   const needsGesture = Boolean(audio.needsGesture);
   const playbackError = audio.lastError && audio.lastError.track === cur && audio.lastError.kind !== "gesture" ? audio.lastError.message : "";
   const t = audio.el?.currentTime || 0;
-  const total = dur ? fmt(dur) : cur.time;
+  const total = dur ? fmt(dur) : cur.time || "--:--";
   const frac = dur ? t / dur : 0;
   // Pick eyebrow label from queueId
   const label = audio.queueLabel || (audio.queueId === "self-titled" ? "I · VOIDCALLER (EP)" : "II · TUNNEL VISION");

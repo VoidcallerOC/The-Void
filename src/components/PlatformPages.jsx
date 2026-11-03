@@ -30,7 +30,7 @@ import { collectorDescription, experienceTrackTitle, playableTrackFor, tokenView
 import { UnlockedExperienceSelector } from "./UnlockedExperienceSelector.jsx";
 import { PlayTokenButton } from "./PlayTokenButton.jsx";
 import { PrimaryPlayButton } from "./PrimaryPlayButton.jsx";
-import { releaseBindingFor } from "../lib/claim-state.js";
+import { useClaimOpenFor } from "../lib/featured-mint.js";
 import { isReleasePerContractCandidate } from "../lib/secondary-listing.js";
 
 const card = { border: "1px solid var(--vc-ash)", background: "var(--vc-abyss)", padding: "24px" };
@@ -334,6 +334,7 @@ export function EditionPage() {
   // "List for sale" links here with #secondary-listing; scroll there once the edition (and its ListingPanel) renders.
   useHashScroll("secondary-listing", Boolean(result));
   const wallet = useWallet() || {};
+  const claimOpen = useClaimOpenFor(result?.edition || null);
   if (!result && catalog.publishedLoading) {
     return <section style={shell}><p style={{ color: "var(--vc-bone-dim)", fontFamily: "var(--font-mono)" }}>Loading edition…</p></section>;
   }
@@ -371,6 +372,8 @@ export function EditionPage() {
           <p className="vc-card-release"><Link to={`/release/${release.id}`} style={{ color: "inherit", textDecoration: "none" }}>{edition.title}</Link></p>
           {description && <p data-testid="collector-description" style={{ color: "var(--vc-bone-dim)", lineHeight: 1.7, whiteSpace: "pre-line" }}>{description}</p>}
           <p className="vc-card-meta">{editionTypeLabel(edition)} · {supplyLabel}{price ? ` · ${price}` : ""}</p>
+          {/* Collect sits right under the title and price, so on a phone it is reached before the listening and perks blocks. */}
+          <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
           <div style={{ margin: "18px 0" }}>
             <Eyebrow>Listen</Eyebrow>
             {holderSelector && <UnlockedExperienceSelector experiences={experiences} token={previewToken} collection={release.title} queuePrefix="holder" />}
@@ -390,14 +393,13 @@ export function EditionPage() {
             {(edition.includes || []).map((item) => <li key={item}>{item}</li>)}
           </ul>
           {supplyClosed && <p className="vc-card-meta" style={{ marginTop: 12 }}>No pressings remain. This object cannot be collected.</p>}
-          <CollectPanel edition={edition} release={release} artist={artist} experiences={experiences} catalog={catalog} variant="hero" />
           {secondary === MARKETPLACE_STATE.LIVE && releaseMarketplaceAsset && <PurchasePanel edition={edition} listingId={requestedListing} />}
           {isCertifiedFujiEdition(edition) && edition.tokenIds?.[0] !== undefined && (
             <div style={{ marginTop: 12 }}>
               <Link to={`/studio?release=${encodeURIComponent(release.id)}`} style={ghostBtn}>Artist: configure primary sale →</Link>
             </div>
           )}
-          {releaseBindingFor(edition).valid && (
+          {claimOpen && (
             <div style={{ marginTop: 12 }}>
               <Link to={`/claim/${edition.id}`} style={ghostBtn}>Open claim page</Link>
             </div>

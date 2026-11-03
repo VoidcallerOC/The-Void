@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eyebrow } from "./Atoms.jsx";
-import { EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
+import { EditionCard, EmptyRail, QuietStatus, SecondaryListingCard, SectionHead } from "./MarketplaceCards.jsx";
 import { fetchIndexedListings, fetchMarketplacePresentation, fetchMarketplaceVolume } from "../lib/marketplace-api.js";
 import { marketplaceHeroImage } from "../lib/marketplace-presentation.js";
 import { MarketplaceHeroEditor } from "./MarketplaceHeroEditor.jsx";
@@ -12,6 +12,7 @@ import { contentShell } from "../lib/marketplace-chrome.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
 import {
   MARKETPLACE_STATE,
+  collectableEditionGroups,
   editionOwnedByWallet,
   flattenMarketplaceEditions,
   hasPublicLifecycle,
@@ -107,6 +108,8 @@ export function MarketplacePage() {
     .map((item) => ({ item, listings: listingsForEdition(liveListings, item.edition) }))
     .filter((entry) => entry.listings.length > 0), [editions, liveListings]);
   const heroImage = marketplaceHeroImage(presentation);
+  // Editions on primary sale right now, so a buyer who lands here is not met with only an empty resale list.
+  const minting = useMemo(() => collectableEditionGroups(catalog).flatMap((group) => group.items), [catalog]);
 
   const secondarySection = (
     <section aria-labelledby="secondary-listings-heading">
@@ -138,9 +141,9 @@ export function MarketplacePage() {
         {heroImage && <div className="vc-market-hero-bg" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden />}
         {heroImage && <div className="vc-market-hero-shade" aria-hidden />}
         <div className="vc-market-hero-copy">
-          <Eyebrow red>† Secondary market</Eyebrow>
+          <Eyebrow red>{minting.length > 0 ? "† Mint · secondary market" : "† Secondary market"}</Eyebrow>
           <h1 className="vc-market-hero-title">Marketplace</h1>
-          <p className="vc-market-hero-lede">Buy from and sell to other holders. New editions to collect are on Discover.</p>
+          <p className="vc-market-hero-lede">{minting.length > 0 ? "Mint new releases from the artist, or buy from and sell to other holders." : "Buy from and sell to other holders. New editions to collect are on Discover."}</p>
           {volume && <div className="vc-market-volume" aria-label="Overall volume">
             <Eyebrow>Overall volume</Eyebrow>
             <strong>{formatWeiAsAvax(volume.overallVolumeWei) || "—"}</strong>
@@ -152,6 +155,16 @@ export function MarketplacePage() {
       </header>
 
       <div style={contentShell}>
+        {minting.length > 0 && (
+          <section aria-labelledby="minting-now-heading" data-testid="marketplace-minting" style={{ marginBottom: 48 }}>
+            <SectionHead id="minting-now-heading" eyebrow="I · Minting now" title="Mint from the artist">
+              Collect a new copy straight from the release's own sale, at the artist's price.
+            </SectionHead>
+            <div className="vc-market-grid">
+              {minting.map((item) => <EditionCard key={`mint-${item.edition.id}`} item={item} secondaryStatus={secondary} />)}
+            </div>
+          </section>
+        )}
         {secondarySection}
       </div>
     </section>

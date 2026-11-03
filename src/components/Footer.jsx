@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { VC_DATA } from "../data.js";
 import { Eyebrow } from "./Atoms.jsx";
+import { useFeaturedMint } from "../lib/featured-mint.js";
 
 const linkStyle = {
   fontFamily: "var(--font-body)",
@@ -42,6 +43,7 @@ function FooterLink({ label, href, to }) {
 
 // ---------------- Footer ----------------
 export function Footer() {
+  const featured = useFeaturedMint();
   return (
     <footer
       style={{
@@ -85,7 +87,7 @@ export function Footer() {
           ]],
           ["THE RELIC", [
             { label: "I · Voidcaller (EP)", to: "/release/voidcaller-self-titled" },
-            { label: "II · Forthcoming" },
+            featured ? { label: `II · ${featured.title}`, to: featured.href } : { label: "II · Forthcoming" },
           ]],
           ["THE CHOIR", VC_DATA.socials.map(s => ({ label: s.name, href: s.href }))],
           ["THE LEDGER", [{ label: "Snowtrace", href: `https://snowtrace.io/address/${VC_DATA.contract}` }]],
