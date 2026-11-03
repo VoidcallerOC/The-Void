@@ -203,6 +203,11 @@ button:disabled { cursor: not-allowed; }
   line-height: .95; text-transform: uppercase; margin: 0;
 }
 .vc-home-relic p { margin: 0; color: var(--vc-bone-dim); font-size: 14px; line-height: 1.55; }
+.vc-home-relic-minting {
+  justify-self: start; margin-top: 4px; padding: 6px 10px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  background: var(--vc-crimson); color: #fff;
+}
 
 /* ---------- Footer platform mark --------------------------------- */
 .vc-footer-platform { display: flex; align-items: center; gap: 14px; }

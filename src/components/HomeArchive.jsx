@@ -4,7 +4,7 @@ import { Eyebrow } from "./Atoms.jsx";
 import { useMarketplaceCatalogs } from "../lib/catalog-source.js";
 import { releaseCoverSources } from "../lib/release-cover.js";
 import { collapsePublicCatalog } from "../lib/summit-demo.js";
-import { marketplaceCatalog } from "../lib/marketplace-surface.js";
+import { editionIsCollectable, editionPriceLabel, marketplaceCatalog } from "../lib/marketplace-surface.js";
 import { ghostBtn } from "../lib/marketplace-chrome.js";
 
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
@@ -19,7 +19,8 @@ export function ReleaseCover({ sources, title }) {
 }
 
 // Homepage shelf: the catalog's real releases, presented as numbered objects in the archive.
-// Reads the same catalog as Discover; it states nothing about sale or ownership.
+// Reads the same catalog as Discover. A release with an edition minting now is marked as such and opens that
+// edition (where it is collected); every other card opens the release page.
 export function HomeArchive() {
   const catalog = useMarketplaceCatalogs();
   const records = marketplaceCatalog([collapsePublicCatalog(catalog)]);
@@ -38,8 +39,11 @@ export function HomeArchive() {
       </div>
       {records.length > 0 ? (
         <div className="vc-home-shelf">
-          {records.map((record, index) => (
-            <Link key={record.release.id} to={`/release/${record.release.id}`} className="vc-home-relic">
+          {records.map((record, index) => {
+            const minting = record.editions.find((item) => editionIsCollectable(item.edition, item.primary));
+            const price = minting ? editionPriceLabel(minting.edition) : "";
+            return (
+            <Link key={record.release.id} to={minting ? `/edition/${minting.edition.id}` : `/release/${record.release.id}`} className="vc-home-relic">
               <figure>
                 <ReleaseCover key={record.release.id} sources={releaseCoverSources(record)} title={record.release.title} />
               </figure>
@@ -47,9 +51,11 @@ export function HomeArchive() {
                 <span className="vc-home-relic-index">Relic {ROMAN[index] || index + 1} · {record.artist?.name || "The Void"}</span>
                 <h3>{record.release.title}</h3>
                 {(record.release.subtitle || record.release.description) && <p>{record.release.subtitle || record.release.description}</p>}
+                {minting && <span className="vc-home-relic-minting" data-testid="home-relic-minting">Minting now{price ? ` · ${price}` : ""}</span>}
               </div>
             </Link>
-          ))}
+            );
+          })}
         </div>
       ) : catalog.publishedLoading ? (
         <p role="status" className="vc-card-meta">Loading the archive…</p>

@@ -6,6 +6,7 @@ import { WalletButton } from "./WalletButton.jsx";
 import { XAccountLink } from "./XAccountLink.jsx";
 import { BrandLogo } from "./BrandLogo.jsx";
 import { useReviewerNotifications } from "../lib/reviewer-notifications-context.js";
+import { useFeaturedMint } from "../lib/featured-mint.js";
 
 const LINKS = [
   ["DISCOVER", "/discover"],
@@ -39,6 +40,7 @@ function ReviewerBadge({ count }) {
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const notifications = useReviewerNotifications();
+  const featured = useFeaturedMint();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
   // Any route change closes the mobile menu: the logo, footer and in-page links, and browser
@@ -62,7 +64,8 @@ export function Nav() {
   }, []);
   const solid = scrolled || menuOpen;
   const links = [
-    ...LINKS,
+    // While a release is minting, MINT takes CLAIM's place and opens that release's edition page.
+    ...LINKS.map((link) => (featured && link[1] === "/claim" ? ["MINT", featured.href] : link)),
     ...(VOID_LIVE ? [["COVENANT", "/covenant"]] : []),
     // Only an authorized artist-verification reviewer wallet sees this.
     ...(notifications.reviewer ? [[REVIEWER_NAV_LABEL, REVIEWER_NAV_PATH]] : []),
